@@ -48,6 +48,12 @@ export class MeResponseDto {
 
   @ApiProperty({
     description:
+      'True cuando la cuenta se creó por invitación y aún debe reemplazar la contraseña temporal',
+  })
+  readonly mustChangePassword!: boolean;
+
+  @ApiProperty({
+    description:
       'Códigos de roles activos. Solo informativo; la UI no debe ramificar por rol.',
     type: [String],
     example: ['INTERNAL_CONTROL_DIRECTOR'],
@@ -111,6 +117,7 @@ export class MeResponseDto {
       email: person?.email ?? '',
       status: user.status,
       mfaEnabled: user.mfaEnabled,
+      mustChangePassword: user.mustChangePassword === true,
       roles,
       scopes: scopes.map((scope): TokenScopeResponseDto => ({
         type: scope.type,

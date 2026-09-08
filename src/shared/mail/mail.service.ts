@@ -15,10 +15,16 @@ export class MailService {
     await Promise.resolve();
   }
 
-  async sendUserActivation(email: string, token: string): Promise<void> {
+  async sendUserInvitation(
+    email: string,
+    username: string,
+    temporaryPassword: string,
+  ): Promise<void> {
     const publicUrl = this.config.getOrThrow('appPublicUrl', { infer: true });
-    const activationUrl = `${publicUrl}/auth/reset-password?token=${token}`;
-    this.logger.log(`user-activation to=${email} url=${activationUrl}`);
+    const loginUrl = `${publicUrl}/auth/login`;
+    this.logger.log(
+      `user-invitation to=${email} username=${username} loginUrl=${loginUrl} temporaryPassword=${temporaryPassword}`,
+    );
     await Promise.resolve();
   }
 }

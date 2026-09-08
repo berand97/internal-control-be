@@ -13,6 +13,7 @@ export interface AuthenticatedUser {
   readonly username: string;
   readonly roles: ReadonlyArray<string>;
   readonly scopes: ReadonlyArray<TokenScope>;
+  readonly mustChangePassword?: boolean;
 }
 
 export const isTokenScopeType = (value: unknown): value is TokenScopeType =>

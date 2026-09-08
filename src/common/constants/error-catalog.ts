@@ -118,6 +118,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El enlace de restablecimiento es inválido o expiró',
   },
+  [ErrorCode.PasswordChangeRequired]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Debes actualizar tu contraseña temporal antes de continuar',
+  },
   [ErrorCode.RoleNotFound]: {
     httpStatus: 404,
     action: 'CANCEL',

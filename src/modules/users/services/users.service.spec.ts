@@ -2,13 +2,13 @@ import { QueryFailedError } from 'typeorm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
+import { PASSWORD_POLICY_REGEX } from '../../../common/validation/password.constants.js';
 import { AppUser } from '../../auth/entities/app-user.entity.js';
 import { Person } from '../../auth/entities/person.entity.js';
 import { Role } from '../../auth/entities/role.entity.js';
 import { UserRole } from '../../auth/entities/user-role.entity.js';
 import { UserStatus } from '../../auth/enums/user-status.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
-import type { PasswordResetTokensRepository } from '../../auth/repositories/password-reset-tokens.repository.interface.js';
 import type { RefreshTokenFamiliesRepository } from '../../auth/repositories/refresh-token-families.repository.interface.js';
 import type { PermissionsService } from '../../roles/services/permissions.service.js';
 import type { ActiveLoansPort } from '../ports/active-loans.port.js';
@@ -40,6 +40,7 @@ const buildUser = (id: string): AppUser => {
   user.username = 'ana.ruiz';
   user.status = UserStatus.Active;
   user.mfaEnabled = false;
+  user.mustChangePassword = false;
   return user;
 };
 
@@ -58,10 +59,9 @@ describe('UsersService', () => {
   let usersRepository: UsersRepository;
   let auditLogsRepository: AuditLogsRepository;
   let refreshTokenFamiliesRepository: RefreshTokenFamiliesRepository;
-  let passwordResetTokensRepository: PasswordResetTokensRepository;
   let activeLoans: ActiveLoansPort;
   let hashService: { hash: ReturnType<typeof vi.fn> };
-  let mailService: { sendUserActivation: ReturnType<typeof vi.fn> };
+  let mailService: { sendUserInvitation: ReturnType<typeof vi.fn> };
   let permissionsService: Pick<PermissionsService, 'invalidate'>;
   let service: UsersService;
 
@@ -76,6 +76,7 @@ describe('UsersService', () => {
       insertUser: vi.fn(),
       updatePerson: vi.fn(),
       updateStatus: vi.fn(),
+      updateInvitationCredentials: vi.fn(),
       findActiveRoles: vi.fn().mockResolvedValue([]),
       findUserRoleById: vi.fn(),
       findActiveRole: vi.fn(),
@@ -93,23 +94,16 @@ describe('UsersService', () => {
       revoke: vi.fn(),
       revokeAllForUser: vi.fn().mockResolvedValue(1),
     };
-    passwordResetTokensRepository = {
-      insert: vi.fn().mockResolvedValue(undefined),
-      findValidByHash: vi.fn(),
-      markUsed: vi.fn(),
-      invalidateUnusedForUser: vi.fn(),
-    };
     activeLoans = {
       countActiveByResponsibleUserId: vi.fn().mockResolvedValue(0),
     };
     hashService = { hash: vi.fn().mockResolvedValue('hashed') };
-    mailService = { sendUserActivation: vi.fn().mockResolvedValue(undefined) };
+    mailService = { sendUserInvitation: vi.fn().mockResolvedValue(undefined) };
     permissionsService = { invalidate: vi.fn() };
     service = new UsersService(
       usersRepository,
       auditLogsRepository,
       refreshTokenFamiliesRepository,
-      passwordResetTokensRepository,
       activeLoans,
       hashService as never,
       mailService as never,
@@ -184,9 +178,11 @@ describe('UsersService', () => {
     ).rejects.toMatchObject({ code: ErrorCode.CannotDelegateRoleNotHeld });
   });
 
-  it('crea usuario pendiente de activación y envía correo', async () => {
+  it('crea usuario pendiente, usa el correo como usuario y envía invitación', async () => {
     const created = buildUser('user-new');
     created.status = UserStatus.PendingActivation;
+    created.mustChangePassword = true;
+    created.username = 'ana.ruiz@unac.edu.co';
     vi.mocked(usersRepository.insertPerson).mockResolvedValue(created.person!);
     vi.mocked(usersRepository.insertUser).mockResolvedValue(created);
     const result = await service.create(
@@ -200,8 +196,47 @@ describe('UsersService', () => {
       actor,
     );
     expect(result.status).toBe(UserStatus.PendingActivation);
-    expect(mailService.sendUserActivation).toHaveBeenCalled();
-    expect(passwordResetTokensRepository.insert).toHaveBeenCalled();
+    expect(result.username).toBe('ana.ruiz@unac.edu.co');
+    expect(result.mustChangePassword).toBe(true);
+    expect(usersRepository.insertUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        username: 'ana.ruiz@unac.edu.co',
+        status: UserStatus.PendingActivation,
+        mustChangePassword: true,
+      }),
+    );
+    expect(mailService.sendUserInvitation).toHaveBeenCalledWith(
+      'ana.ruiz@unac.edu.co',
+      'ana.ruiz@unac.edu.co',
+      expect.stringMatching(PASSWORD_POLICY_REGEX),
+    );
+  });
+
+  it('reenvía invitación y rota la contraseña temporal', async () => {
+    const pending = buildUser('user-1');
+    pending.status = UserStatus.PendingActivation;
+    pending.mustChangePassword = true;
+    vi.mocked(usersRepository.findByIdWithPerson).mockResolvedValue(pending);
+    await service.resendInvitation('user-1', actor);
+    expect(usersRepository.updateInvitationCredentials).toHaveBeenCalledWith(
+      'user-1',
+      'hashed',
+    );
+    expect(refreshTokenFamiliesRepository.revokeAllForUser).toHaveBeenCalled();
+    expect(mailService.sendUserInvitation).toHaveBeenCalledWith(
+      'ana.ruiz@unac.edu.co',
+      'ana.ruiz',
+      expect.stringMatching(PASSWORD_POLICY_REGEX),
+    );
+  });
+
+  it('rechaza reenviar invitación a un usuario ya activo', async () => {
+    vi.mocked(usersRepository.findByIdWithPerson).mockResolvedValue(
+      buildUser('user-1'),
+    );
+    await expect(
+      service.resendInvitation('user-1', actor),
+    ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
   });
 
   it('rechaza username duplicado', async () => {

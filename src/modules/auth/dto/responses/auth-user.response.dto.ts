@@ -8,9 +8,15 @@ export class AuthUserResponseDto {
   readonly username!: string;
 
   @ApiProperty({
-    type: [String],
     description: 'Códigos de roles activos',
+    type: [String],
     example: ['INTERNAL_CONTROL_DIRECTOR', 'AUDITOR'],
   })
   readonly roles!: ReadonlyArray<string>;
+
+  @ApiProperty({
+    description:
+      'Si es true, el frontend debe mostrar el formulario de actualización de contraseña y no continuar al resto de la plataforma',
+  })
+  readonly mustChangePassword!: boolean;
 }

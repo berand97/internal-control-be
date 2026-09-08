@@ -32,6 +32,7 @@ export class LoginResponseDto {
       id: user.id,
       username: user.username,
       roles,
+      mustChangePassword: user.mustChangePassword === true,
     };
     return { accessToken, expiresIn, user: authUser };
   }

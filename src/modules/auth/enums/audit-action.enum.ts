@@ -15,6 +15,7 @@ export enum AuditAction {
   RolePermsSet = 'ROLE_PERMS_SET',
   SodCreated = 'SOD_CREATED',
   UserCreated = 'USER_CREATED',
+  UserInvited = 'USER_INVITED',
   UserUpdated = 'USER_UPDATED',
   UserDeactivated = 'USER_DEACTIVATED',
   UserReactivated = 'USER_REACTIVATED',

@@ -143,7 +143,7 @@ export class AuthService {
     const roleCodes = await this.authUsersRepository.findActiveRoleCodes(
       user.id,
     );
-    if (requiresMfaEnrollment(roleCodes)) {
+    if (!user.mustChangePassword && requiresMfaEnrollment(roleCodes)) {
       return {
         response: MfaSetupRequiredResponseDto.from(
           this.tokenService.signMfaSetupToken(user.id, user.username),
@@ -254,13 +254,7 @@ export class AuthService {
       this.authUsersRepository.findActiveRoleCodes(user.id),
       this.authUsersRepository.findActiveScopes(user.id),
     ]);
-    const authenticatedUser: AuthenticatedUser = {
-      id: user.id,
-      personId: user.personId,
-      username: user.username,
-      roles,
-      scopes,
-    };
+    const authenticatedUser = this.toAuthenticatedUser(user, roles, scopes);
 
     const accessToken = this.tokenService.signAccessToken(authenticatedUser);
     const rotatedRefreshToken = this.tokenService.signRefreshToken(
@@ -460,10 +454,14 @@ export class AuthService {
     if (!matches) {
       throw new ApiException(ErrorCode.InvalidCredentials);
     }
+    if (dto.currentPassword === dto.newPassword) {
+      throw new ApiException(ErrorCode.PasswordPolicyViolation);
+    }
 
     const passwordHash = await this.hashService.hash(dto.newPassword);
     const now = new Date();
     await this.authUsersRepository.updatePassword(user.id, passwordHash);
+    await this.authUsersRepository.activateAfterPasswordReset(user.id);
     await this.refreshTokenFamiliesRepository.revokeAllForUser(user.id, now);
     await this.recordAudit(
       AuditAction.PasswordChanged,
@@ -483,13 +481,7 @@ export class AuthService {
       this.authUsersRepository.findActiveRoleCodes(user.id),
       this.authUsersRepository.findActiveScopes(user.id),
     ]);
-    const authenticatedUser: AuthenticatedUser = {
-      id: user.id,
-      personId: user.personId,
-      username: user.username,
-      roles,
-      scopes,
-    };
+    const authenticatedUser = this.toAuthenticatedUser(user, roles, scopes);
 
     const familyId = randomUUID();
     const jti = randomUUID();
@@ -552,6 +544,21 @@ export class AuthService {
     return this.authUsersRepository.findByUsernameWithPerson(identifier);
   }
 
+  private toAuthenticatedUser(
+    user: AppUser,
+    roles: ReadonlyArray<string>,
+    scopes: AuthenticatedUser['scopes'],
+  ): AuthenticatedUser {
+    return {
+      id: user.id,
+      personId: user.personId,
+      username: user.username,
+      roles,
+      scopes,
+      mustChangePassword: user.mustChangePassword === true,
+    };
+  }
+
   private createPasswordResetToken(): {
     readonly token: string;
     readonly tokenHash: string;
@@ -564,9 +571,12 @@ export class AuthService {
     if (user.status === UserStatus.Suspended) {
       throw new ApiException(ErrorCode.UserSuspended);
     }
+    if (user.status === UserStatus.Inactive) {
+      throw new ApiException(ErrorCode.UserInactive);
+    }
     if (
-      user.status === UserStatus.Inactive ||
-      user.status === UserStatus.PendingActivation
+      user.status === UserStatus.PendingActivation &&
+      !user.mustChangePassword
     ) {
       throw new ApiException(ErrorCode.UserInactive);
     }

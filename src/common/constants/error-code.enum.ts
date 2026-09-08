@@ -22,6 +22,7 @@ export enum ErrorCode {
   PersonDocumentAlreadyExists = 'PERSON_DOCUMENT_ALREADY_EXISTS',
   PersonEmailAlreadyExists = 'PERSON_EMAIL_ALREADY_EXISTS',
   PasswordResetInvalid = 'PASSWORD_RESET_INVALID',
+  PasswordChangeRequired = 'PASSWORD_CHANGE_REQUIRED',
 
   RoleNotFound = 'ROLE_NOT_FOUND',
   RoleNotAssignable = 'ROLE_NOT_ASSIGNABLE',

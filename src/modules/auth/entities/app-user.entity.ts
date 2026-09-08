@@ -37,6 +37,9 @@ export class AppUser {
   @Column({ name: 'last_login_at', type: 'timestamptz', nullable: true })
   lastLoginAt!: Date | null;
 
+  @Column({ name: 'must_change_password', type: 'boolean', default: false })
+  mustChangePassword!: boolean;
+
   @Column({ name: 'mfa_enabled', type: 'boolean' })
   mfaEnabled!: boolean;
 

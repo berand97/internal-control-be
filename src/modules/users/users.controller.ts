@@ -76,13 +76,38 @@ export class UsersController {
 
   @Post()
   @RequirePermission('user:manage:global')
-  @ApiOperation({ summary: 'Crear usuario y enviar activación' })
+  @ApiOperation({
+    summary: 'Crear usuario e invitarlo por correo',
+    description:
+      'Crea la persona y la cuenta en PENDING_ACTIVATION, genera una contraseña temporal y envía la invitación. El usuario de acceso es el correo institucional. No se devuelve la contraseña en la respuesta.',
+  })
   @ApiResponse({ status: 201, schema: envelopedSchema(UserDetailResponseDto) })
   create(
     @Body() dto: CreateUserDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
     return this.usersService.create(dto, user);
+  }
+
+  @Post(':id/resend-invitation')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('user:manage:global')
+  @ApiOperation({
+    summary: 'Reenviar invitación con una nueva contraseña temporal',
+    description:
+      'Sólo para cuentas pendientes de activación o que aún deben cambiar la contraseña temporal. Revoca sesiones previas.',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: { $ref: getSchemaPath(ApiSuccessEnvelope) },
+  })
+  @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
+  @ApiResponse({ status: 406, schema: errorEnvelopeSchema() })
+  resendInvitation(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<null> {
+    return this.usersService.resendInvitation(id, user);
   }
 
   @Patch(':id')

@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter.js';
 import { FeatureGuard } from './common/guards/feature.guard.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
+import { MustChangePasswordGuard } from './common/guards/must-change-password.guard.js';
 import { FeatureCircuitInterceptor } from './common/interceptors/feature-circuit.interceptor.js';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor.js';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -78,6 +79,7 @@ const nestObserveImports =
     AppService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: MustChangePasswordGuard },
     { provide: APP_GUARD, useClass: FeatureGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_INTERCEPTOR, useClass: FeatureCircuitInterceptor },

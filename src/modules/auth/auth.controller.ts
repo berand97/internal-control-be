@@ -20,6 +20,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import { AllowWhileMustChangePassword } from '../../common/decorators/allow-while-must-change-password.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
 import { Public } from '../../common/decorators/public.decorator.js';
 import { RefreshTokenCookie } from '../../common/decorators/refresh-token-cookie.decorator.js';
@@ -82,7 +83,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Iniciar sesión',
     description:
-      'Valida credenciales contra app_user (Argon2id). Sin MFA retorna el access token en el body y el refresh token en cookie HttpOnly. Con MFA activo retorna un token de desafío válido sólo para POST /auth/mfa/verify.',
+      'Valida credenciales contra app_user (Argon2id). Sin MFA retorna el access token en el body y el refresh token en cookie HttpOnly. Si la cuenta fue invitada, user.mustChangePassword=true y el cliente debe forzar el cambio de contraseña. Con MFA activo retorna un token de desafío válido sólo para POST /auth/mfa/verify.',
   })
   @ApiResponse({
     status: 200,
@@ -272,6 +273,7 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
+  @AllowWhileMustChangePassword()
   @ApiOperation({
     summary: 'Cerrar sesión',
     description:
@@ -303,6 +305,7 @@ export class AuthController {
 
   @Get('me')
   @ApiBearerAuth()
+  @AllowWhileMustChangePassword()
   @ApiOperation({
     summary: 'Perfil del usuario autenticado',
     description:
@@ -394,10 +397,11 @@ export class AuthController {
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
+  @AllowWhileMustChangePassword()
   @ApiOperation({
     summary: 'Cambiar contraseña del usuario autenticado',
     description:
-      'Verifica la contraseña actual, aplica la política y revoca todas las familias de refresh.',
+      'Verifica la contraseña actual (o la temporal de la invitación), aplica la política, activa la cuenta si estaba pendiente e invalida todas las sesiones. El cliente debe volver a iniciar sesión.',
   })
   @ApiResponse({
     status: 200,

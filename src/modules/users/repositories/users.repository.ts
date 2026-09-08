@@ -126,6 +126,16 @@ export class TypeOrmUsersRepository implements UsersRepository {
     await this.users.update({ id: userId }, { status });
   }
 
+  async updateInvitationCredentials(
+    userId: string,
+    passwordHash: string,
+  ): Promise<void> {
+    await this.users.update(
+      { id: userId },
+      { passwordHash, mustChangePassword: true },
+    );
+  }
+
   findActiveRoles(userId: string): Promise<ReadonlyArray<UserRole>> {
     return this.userRoles.find({
       where: { userId, revokedAt: IsNull() },

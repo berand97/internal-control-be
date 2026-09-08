@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import {
@@ -11,14 +10,13 @@ import {
   type PaginatedResult,
 } from '../../../common/types/paginated-result.type.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
+import { generateTemporaryPassword } from '../../../shared/crypto/generate-temporary-password.js';
 import { HashService } from '../../../shared/crypto/hash.service.js';
 import { MailService } from '../../../shared/mail/mail.service.js';
 import { UserStatus } from '../../auth/enums/user-status.enum.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
-import type { PasswordResetTokensRepository } from '../../auth/repositories/password-reset-tokens.repository.interface.js';
 import type { RefreshTokenFamiliesRepository } from '../../auth/repositories/refresh-token-families.repository.interface.js';
-import { hashPasswordResetToken } from '../../auth/services/auth.service.js';
 import type { CostCentersRepository } from '../../cost-centers/repositories/cost-centers.repository.interface.js';
 import type { OrganizationalUnitsRepository } from '../../organizational-units/repositories/organizational-units.repository.interface.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
@@ -37,7 +35,6 @@ import {
 import type { UsersRepository } from '../repositories/users.repository.interface.js';
 
 const USER_ENTITY_TYPE = 'USER';
-const ACTIVATION_TTL_MS = 48 * 60 * 60 * 1000;
 
 @Injectable()
 export class UsersService {
@@ -48,8 +45,6 @@ export class UsersService {
     private readonly auditLogsRepository: AuditLogsRepository,
     @Inject('RefreshTokenFamiliesRepository')
     private readonly refreshTokenFamiliesRepository: RefreshTokenFamiliesRepository,
-    @Inject('PasswordResetTokensRepository')
-    private readonly passwordResetTokensRepository: PasswordResetTokensRepository,
     @Inject(ACTIVE_LOANS_PORT)
     private readonly activeLoans: ActiveLoansPort,
     private readonly hashService: HashService,
@@ -91,7 +86,7 @@ export class UsersService {
     dto: CreateUserDto,
     actor: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
-    const username = dto.username ?? dto.email.split('@')[0] ?? dto.email;
+    const username = dto.username ?? dto.email;
     const existingUsername = await this.usersRepository.findByUsername(username);
     if (existingUsername) {
       throw new ApiException(ErrorCode.UsernameAlreadyExists);
@@ -110,9 +105,8 @@ export class UsersService {
       throw new ApiException(ErrorCode.PersonEmailAlreadyExists);
     }
 
-    const passwordHash = await this.hashService.hash(
-      randomBytes(24).toString('base64url'),
-    );
+    const temporaryPassword = generateTemporaryPassword();
+    const passwordHash = await this.hashService.hash(temporaryPassword);
 
     try {
       const person = await this.usersRepository.insertPerson({
@@ -129,17 +123,15 @@ export class UsersService {
         username,
         passwordHash,
         status: UserStatus.PendingActivation,
+        mustChangePassword: true,
       });
       user.person = person;
 
-      const token = randomBytes(32).toString('hex');
-      const now = new Date();
-      await this.passwordResetTokensRepository.insert({
-        userId: user.id,
-        tokenHash: hashPasswordResetToken(token),
-        expiresAt: new Date(now.getTime() + ACTIVATION_TTL_MS),
-      });
-      await this.mailService.sendUserActivation(dto.email, token);
+      await this.mailService.sendUserInvitation(
+        dto.email,
+        username,
+        temporaryPassword,
+      );
       await this.auditLogsRepository.record({
         action: AuditAction.UserCreated,
         entityType: USER_ENTITY_TYPE,
@@ -147,7 +139,7 @@ export class UsersService {
         performedBy: actor.id,
         ipAddress: null,
         userAgent: null,
-        changes: { username, email: dto.email },
+        changes: { username, email: dto.email, invitation: true },
       });
       return UserDetailResponseDto.fromDetail(user, []);
     } catch (error) {
@@ -156,6 +148,51 @@ export class UsersService {
       }
       throw error;
     }
+  }
+
+  async resendInvitation(id: string, actor: AuthenticatedUser): Promise<null> {
+    const user = await this.requireUser(id);
+    if (user.status === UserStatus.Suspended) {
+      throw new ApiException(ErrorCode.UserSuspended);
+    }
+    if (user.status === UserStatus.Inactive) {
+      throw new ApiException(ErrorCode.UserInactive);
+    }
+    if (
+      user.status === UserStatus.Active &&
+      user.mustChangePassword !== true
+    ) {
+      throw new ApiException(ErrorCode.InvalidState);
+    }
+
+    const email = user.person?.email;
+    if (!email) {
+      throw new ApiException(ErrorCode.ResourceNotFound);
+    }
+
+    const temporaryPassword = generateTemporaryPassword();
+    const passwordHash = await this.hashService.hash(temporaryPassword);
+    await this.usersRepository.updateInvitationCredentials(user.id, passwordHash);
+    await this.refreshTokenFamiliesRepository.revokeAllForUser(
+      user.id,
+      new Date(),
+    );
+    this.permissionsService.invalidate(user.id);
+    await this.mailService.sendUserInvitation(
+      email,
+      user.username,
+      temporaryPassword,
+    );
+    await this.auditLogsRepository.record({
+      action: AuditAction.UserInvited,
+      entityType: USER_ENTITY_TYPE,
+      entityId: user.id,
+      performedBy: actor.id,
+      ipAddress: null,
+      userAgent: null,
+      changes: { email, username: user.username },
+    });
+    return null;
   }
 
   async update(

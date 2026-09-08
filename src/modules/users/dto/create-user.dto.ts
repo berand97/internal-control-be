@@ -56,8 +56,9 @@ export class CreateUserDto {
   readonly positionTitle?: string;
 
   @ApiPropertyOptional({
-    description: 'Si se omite, se toma la parte local del correo',
-    example: 'juliana.perez',
+    description:
+      'Si se omite, el usuario de acceso es el correo institucional',
+    example: 'juliana.perez@unac.edu.co',
     maxLength: 255,
   })
   @IsOptional()

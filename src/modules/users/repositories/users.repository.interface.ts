@@ -19,6 +19,7 @@ export interface CreateAppUserRecord {
   readonly username: string;
   readonly passwordHash: string;
   readonly status: UserStatus;
+  readonly mustChangePassword: boolean;
 }
 
 export interface UpdatePersonRecord {
@@ -65,6 +66,10 @@ export interface UsersRepository {
   insertUser(record: CreateAppUserRecord): Promise<AppUser>;
   updatePerson(personId: string, record: UpdatePersonRecord): Promise<void>;
   updateStatus(userId: string, status: UserStatus): Promise<void>;
+  updateInvitationCredentials(
+    userId: string,
+    passwordHash: string,
+  ): Promise<void>;
   findActiveRoles(userId: string): Promise<ReadonlyArray<UserRole>>;
   findUserRoleById(id: string): Promise<UserRole | null>;
   findActiveRole(id: string): Promise<Role | null>;

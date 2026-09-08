@@ -23,6 +23,12 @@ export class UserListItemResponseDto {
   @ApiProperty()
   readonly mfaEnabled!: boolean;
 
+  @ApiProperty({
+    description:
+      'True si el usuario debe cambiar la contraseña temporal de la invitación',
+  })
+  readonly mustChangePassword!: boolean;
+
   static from(user: AppUser): UserListItemResponseDto {
     const person = user.person;
     return {
@@ -33,6 +39,7 @@ export class UserListItemResponseDto {
       email: person?.email ?? '',
       status: user.status,
       mfaEnabled: user.mfaEnabled,
+      mustChangePassword: user.mustChangePassword === true,
     };
   }
 }

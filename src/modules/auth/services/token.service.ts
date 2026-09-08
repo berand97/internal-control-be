@@ -46,6 +46,7 @@ export class TokenService {
         username: user.username,
         roles: user.roles,
         scopes: user.scopes,
+        mustChangePassword: user.mustChangePassword === true,
       },
       jwtConfig.accessSecret,
       {

@@ -33,6 +33,7 @@ const buildUser = (overrides: Partial<AppUser> = {}): AppUser => {
   user.status = UserStatus.Active;
   user.mfaEnabled = false;
   user.mfaSecret = null;
+  user.mustChangePassword = false;
   Object.assign(user, overrides);
   return user;
 };
@@ -242,6 +243,49 @@ describe('AuthService', () => {
       );
       expect(outcome.response).toMatchObject({ requiresMfaSetup: true });
     });
+
+    it('permite login con contraseña temporal si la cuenta está pendiente', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser({
+          status: UserStatus.PendingActivation,
+          mustChangePassword: true,
+        }),
+      );
+      const outcome = await service.login(
+        { username: 'juliana.perez', password: 'T3mporal-Segura!' },
+        context,
+      );
+      expect(outcome.refreshToken).toBe('refresh');
+      expect(outcome.response).toMatchObject({
+        user: { mustChangePassword: true },
+      });
+    });
+
+    it('bloquea login pendiente sin invitación de contraseña temporal', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser({ status: UserStatus.PendingActivation }),
+      );
+      await expect(
+        service.login({ username: 'juliana.perez', password: 'x' }, context),
+      ).rejects.toMatchObject({ code: ErrorCode.UserInactive });
+    });
+
+    it('pospone el setup MFA hasta después del cambio de contraseña temporal', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser({ mustChangePassword: true }),
+      );
+      vi.mocked(authUsersRepository.findActiveRoleCodes).mockResolvedValue([
+        'SUPER_ADMIN',
+      ]);
+      const outcome = await service.login(
+        { username: 'admin', password: 'T3mporal-Segura!' },
+        context,
+      );
+      expect(outcome.refreshToken).toBe('refresh');
+      expect(outcome.response).toMatchObject({
+        user: { mustChangePassword: true },
+      });
+    });
   });
 
   describe('beginMfaSetup', () => {
@@ -383,6 +427,49 @@ describe('AuthService', () => {
     it('revoca todas las familias del usuario', async () => {
       await service.logout(actor, context);
       expect(refreshTokenFamiliesRepository.revokeAllForUser).toHaveBeenCalled();
+    });
+  });
+
+  describe('changePassword', () => {
+    it('activa la cuenta pendiente y limpia el flag de cambio forzado', async () => {
+      vi.mocked(authUsersRepository.findByIdWithPerson).mockResolvedValue(
+        buildUser({
+          status: UserStatus.PendingActivation,
+          mustChangePassword: true,
+        }),
+      );
+      await service.changePassword(
+        actor,
+        {
+          currentPassword: 'T3mporal-Segura!',
+          newPassword: 'Nueva-Clave-2026!',
+        },
+        context,
+      );
+      expect(authUsersRepository.updatePassword).toHaveBeenCalledWith(
+        'user-1',
+        'new-hash',
+      );
+      expect(authUsersRepository.activateAfterPasswordReset).toHaveBeenCalledWith(
+        'user-1',
+      );
+      expect(refreshTokenFamiliesRepository.revokeAllForUser).toHaveBeenCalled();
+    });
+
+    it('rechaza reutilizar la contraseña temporal', async () => {
+      vi.mocked(authUsersRepository.findByIdWithPerson).mockResolvedValue(
+        buildUser({ mustChangePassword: true }),
+      );
+      await expect(
+        service.changePassword(
+          actor,
+          {
+            currentPassword: 'T3mporal-Segura!',
+            newPassword: 'T3mporal-Segura!',
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.PasswordPolicyViolation });
     });
   });
 });

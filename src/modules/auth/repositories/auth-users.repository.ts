@@ -90,13 +90,16 @@ export class TypeOrmAuthUsersRepository implements AuthUsersRepository {
   }
 
   async updatePassword(userId: string, passwordHash: string): Promise<void> {
-    await this.users.update({ id: userId }, { passwordHash });
+    await this.users.update(
+      { id: userId },
+      { passwordHash, mustChangePassword: false },
+    );
   }
 
   async activateAfterPasswordReset(userId: string): Promise<void> {
     await this.users.update(
       { id: userId, status: UserStatus.PendingActivation },
-      { status: UserStatus.Active },
+      { status: UserStatus.Active, mustChangePassword: false },
     );
   }
 
