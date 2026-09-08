@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "name": "control-interno-be",
+  "type": "collection",
+  "ignore": ["node_modules", ".git"]
+}

@@ -1,0 +1,5 @@
+external_code,name,organizational_unit_code,accepts_assets
+1100,Rectoría,REC,true
+4100,Control Interno,DCI,true
+4330,Talento Humano,DTH,true
+4200,Financiera,DFIN,true

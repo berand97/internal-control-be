@@ -1,0 +1,21 @@
+meta {
+  name: mfa verify
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/auth/mfa/verify
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{mfaChallengeToken}}
+}
+
+body:json {
+  {
+    "code": "123456"
+  }
+}

@@ -1,0 +1,16 @@
+export enum MovementType {
+  Registration = 'REGISTRATION',
+  Assignment = 'ASSIGNMENT',
+  Loan = 'LOAN',
+  Return = 'RETURN',
+  Transfer = 'TRANSFER',
+  Relocation = 'RELOCATION',
+  MaintenanceIn = 'MAINTENANCE_IN',
+  MaintenanceOut = 'MAINTENANCE_OUT',
+  PhysicalVerification = 'PHYSICAL_VERIFICATION',
+  ConditionChange = 'CONDITION_CHANGE',
+  WriteOff = 'WRITE_OFF',
+  Reactivation = 'REACTIVATION',
+  QrRotation = 'QR_ROTATION',
+  Correction = 'CORRECTION',
+}

@@ -1,0 +1,21 @@
+meta {
+  name: report not found
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/inventories/{{inventoryId}}/report-not-found
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "assetId": "{{assetId}}"
+  }
+}

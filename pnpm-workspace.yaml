@@ -1,0 +1,7 @@
+allowBuilds:
+  '@scarf/scarf': false
+  argon2: true
+  protobufjs: false
+onlyBuiltDependencies:
+  - argon2
+  - '@scarf/scarf'

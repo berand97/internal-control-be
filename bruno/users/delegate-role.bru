@@ -1,0 +1,23 @@
+meta {
+  name: delegate role
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/users/{{userId}}/roles/{{userRoleId}}/delegate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "toUserId": "{{toUserId}}",
+    "validUntil": "2027-03-01T00:00:00.000Z",
+    "reason": "Vacaciones"
+  }
+}

@@ -1,0 +1,23 @@
+meta {
+  name: patch google
+  type: http
+  seq: 2
+}
+
+patch {
+  url: {{baseUrl}}/storage/settings
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "driver": "google_drive",
+    "googleClientId": "{{googleClientId}}",
+    "googleClientSecret": "{{googleClientSecret}}"
+  }
+}

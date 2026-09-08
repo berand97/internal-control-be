@@ -1,0 +1,15 @@
+meta {
+  name: deliver
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/loans/{{loanId}}/deliver
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

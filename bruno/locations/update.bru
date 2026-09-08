@@ -1,0 +1,21 @@
+meta {
+  name: update
+  type: http
+  seq: 5
+}
+
+patch {
+  url: {{baseUrl}}/buildings/{{buildingId}}/locations/{{locationId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "name": "Oficina 205 — Control Interno"
+  }
+}

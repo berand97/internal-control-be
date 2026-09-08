@@ -1,0 +1,15 @@
+meta {
+  name: catalog
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/document-templates/catalog
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

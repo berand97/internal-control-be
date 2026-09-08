@@ -1,0 +1,14 @@
+meta {
+  name: list by building
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/buildings/{{buildingId}}/locations
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

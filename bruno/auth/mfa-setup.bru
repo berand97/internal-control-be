@@ -1,0 +1,14 @@
+meta {
+  name: mfa setup
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/auth/mfa/setup
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{mfaSetupToken}}
+}

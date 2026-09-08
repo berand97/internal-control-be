@@ -1,0 +1,24 @@
+meta {
+  name: create
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/cost-centers
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "externalCode": "4500",
+    "name": "Bienestar Universitario",
+    "organizationalUnitId": "{{orgUnitId}}",
+    "acceptsAssets": true
+  }
+}

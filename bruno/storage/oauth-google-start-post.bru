@@ -1,0 +1,22 @@
+meta {
+  name: oauth google start with credentials
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/storage/oauth/google/start
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "googleClientId": "{{googleClientId}}",
+    "googleClientSecret": "{{googleClientSecret}}"
+  }
+}

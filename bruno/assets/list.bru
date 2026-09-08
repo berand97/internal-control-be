@@ -1,0 +1,14 @@
+meta {
+  name: list
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/assets?q=portatil&page=1&pageSize=20
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

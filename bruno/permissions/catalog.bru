@@ -1,0 +1,14 @@
+meta {
+  name: catalog
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/permissions/catalog
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

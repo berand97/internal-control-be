@@ -1,0 +1,26 @@
+meta {
+  name: create
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/campus
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "code": "MED",
+    "name": "Campus Medellín",
+    "address": "Carrera 84 No. 33AA-1",
+    "city": "Medellín",
+    "department": "Antioquia",
+    "country": "Colombia"
+  }
+}

@@ -1,0 +1,39 @@
+meta {
+  name: create
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/assets
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "description": "Portátil Dell Latitude 5540",
+    "categoryId": "{{categoryId}}",
+    "costCenterId": "{{costCenterId}}",
+    "locationId": "{{locationId}}",
+    "acquisitionTypeId": "{{acquisitionTypeId}}",
+    "acquisitionDate": "2026-03-15",
+    "acquisitionPrice": 2500000,
+    "serialNumber": "SN-UNAC-001",
+    "customValues": {
+      "procesador": "Intel Core i7",
+      "ramGB": 16,
+      "hostname": "PORT-DCI-01",
+      "sistemaOperativo": "Windows",
+      "tamanoPantallaPulgadas": 14
+    }
+  }
+}
+
+docs {
+  categoryId = PORTATILES. costCenterId = 4100. Campos dinámicos según GET /categories/:id/effective-fields.
+}

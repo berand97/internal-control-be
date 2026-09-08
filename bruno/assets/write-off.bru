@@ -1,0 +1,23 @@
+meta {
+  name: write off
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/assets/{{assetId}}/write-off
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "reason": "Obsolescencia tecnológica",
+    "documentReference": "ACTA-BAJA-2026-001",
+    "writtenOffAt": "2026-11-21"
+  }
+}

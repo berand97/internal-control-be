@@ -1,0 +1,14 @@
+meta {
+  name: search
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/locations?campusId={{campusId}}&buildingId={{buildingId}}&type=OFFICE&q=205
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

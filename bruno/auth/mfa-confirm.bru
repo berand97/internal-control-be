@@ -1,0 +1,21 @@
+meta {
+  name: mfa confirm
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/auth/mfa/confirm
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{mfaSetupToken}}
+}
+
+body:json {
+  {
+    "code": "123456"
+  }
+}

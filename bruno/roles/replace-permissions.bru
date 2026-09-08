@@ -1,0 +1,21 @@
+meta {
+  name: replace permissions
+  type: http
+  seq: 8
+}
+
+put {
+  url: {{baseUrl}}/roles/{{roleId}}/permissions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "permissionIds": ["{{permissionId}}"]
+  }
+}

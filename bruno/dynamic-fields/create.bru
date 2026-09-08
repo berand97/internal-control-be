@@ -1,0 +1,25 @@
+meta {
+  name: create
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/categories/{{categoryId}}/dynamic-fields
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "code": "procesador",
+    "label": "Procesador",
+    "type": "STRING",
+    "isRequired": true,
+    "orderIndex": 10
+  }
+}

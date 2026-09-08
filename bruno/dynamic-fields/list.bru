@@ -1,0 +1,14 @@
+meta {
+  name: list
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/categories/{{categoryId}}/dynamic-fields
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

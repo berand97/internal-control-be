@@ -1,0 +1,14 @@
+meta {
+  name: refresh
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/auth/refresh
+  auth: none
+}
+
+docs {
+  Usa la cookie HttpOnly refresh_token. Sin cookie: 401 TOKEN_EXPIRED.
+}

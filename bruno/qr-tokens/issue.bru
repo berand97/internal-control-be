@@ -1,0 +1,14 @@
+meta {
+  name: issue qr
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/assets/{{assetId}}/qr?format=png&size=300
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

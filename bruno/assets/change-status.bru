@@ -1,0 +1,22 @@
+meta {
+  name: change status
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/assets/{{assetId}}/change-status
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "operationalStatus": "IN_MAINTENANCE",
+    "reason": "Cambio de disco"
+  }
+}

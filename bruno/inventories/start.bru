@@ -1,0 +1,15 @@
+meta {
+  name: start
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/inventories/{{inventoryId}}/start
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

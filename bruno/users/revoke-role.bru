@@ -1,0 +1,14 @@
+meta {
+  name: revoke role
+  type: http
+  seq: 8
+}
+
+delete {
+  url: {{baseUrl}}/users/{{userId}}/roles/{{userRoleId}}
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

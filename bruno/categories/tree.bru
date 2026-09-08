@@ -1,0 +1,14 @@
+meta {
+  name: tree
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/categories/tree
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

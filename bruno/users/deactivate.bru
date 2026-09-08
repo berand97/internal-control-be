@@ -1,0 +1,14 @@
+meta {
+  name: deactivate
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/users/{{userId}}/deactivate
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

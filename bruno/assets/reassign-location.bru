@@ -1,0 +1,22 @@
+meta {
+  name: reassign location
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/assets/{{assetId}}/reassign-location
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "locationId": "{{locationId}}",
+    "reason": "Mudanza a oficina Control Interno"
+  }
+}

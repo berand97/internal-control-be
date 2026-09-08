@@ -1,0 +1,24 @@
+meta {
+  name: create
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/buildings/{{buildingId}}/locations
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "code": "A-205",
+    "name": "Oficina 205",
+    "type": "OFFICE",
+    "floor": 2
+  }
+}

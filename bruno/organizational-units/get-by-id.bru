@@ -1,0 +1,14 @@
+meta {
+  name: get by id
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/organizational-units/{{orgUnitId}}
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

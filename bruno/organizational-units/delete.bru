@@ -1,0 +1,14 @@
+meta {
+  name: delete
+  type: http
+  seq: 8
+}
+
+delete {
+  url: {{baseUrl}}/organizational-units/{{orgUnitId}}
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

@@ -1,0 +1,14 @@
+meta {
+  name: list
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/cost-centers?q=4330&isActive=true
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

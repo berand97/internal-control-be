@@ -1,0 +1,14 @@
+meta {
+  name: remove permission
+  type: http
+  seq: 7
+}
+
+delete {
+  url: {{baseUrl}}/roles/{{roleId}}/permissions/{{permissionId}}
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

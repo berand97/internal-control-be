@@ -1,0 +1,14 @@
+meta {
+  name: delete
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{baseUrl}}/buildings/{{buildingId}}/locations/{{locationId}}
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

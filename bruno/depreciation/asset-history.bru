@@ -1,0 +1,15 @@
+meta {
+  name: asset history
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/assets/{{assetId}}/depreciation-history
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

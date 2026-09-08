@@ -1,0 +1,18 @@
+meta {
+  name: deprecate
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/categories/{{categoryId}}/dynamic-fields/{{dynamicFieldId}}/deprecate
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Deja de usarse en activos nuevos. Preserva valores históricos.
+}

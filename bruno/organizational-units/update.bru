@@ -1,0 +1,26 @@
+meta {
+  name: update
+  type: http
+  seq: 7
+}
+
+patch {
+  url: {{baseUrl}}/organizational-units/{{orgUnitId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "name": "Departamento de Comunicaciones y Prensa",
+    "parentId": "{{orgUnitParentId}}"
+  }
+}
+
+docs {
+  parentId mueve la unidad a otra dependencia (y su subárbol). null la deja como raíz. Omitir parentId si solo se edita el nombre.
+}

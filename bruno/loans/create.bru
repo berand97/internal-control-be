@@ -1,0 +1,25 @@
+meta {
+  name: create
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/loans
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "assets": ["{{assetId}}"],
+    "targetCostCenterId": "{{targetCostCenterId}}",
+    "expectedReturnDate": "2026-12-31",
+    "justification": "Préstamo temporal para el proyecto de inventario",
+    "contactPerson": "{{contactPersonId}}"
+  }
+}

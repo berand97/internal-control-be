@@ -1,0 +1,14 @@
+meta {
+  name: reactivate
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/users/{{userId}}/reactivate
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

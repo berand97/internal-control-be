@@ -1,0 +1,22 @@
+meta {
+  name: assign role
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/users/{{userId}}/roles
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "roleId": "{{roleId}}",
+    "scopeType": "GLOBAL"
+  }
+}

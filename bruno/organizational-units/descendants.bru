@@ -1,0 +1,14 @@
+meta {
+  name: descendants
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/organizational-units/{{orgUnitId}}/descendants
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

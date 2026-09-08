@@ -1,0 +1,18 @@
+meta {
+  name: effective fields
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/categories/{{categoryId}}/effective-fields
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Usar el id de PORTATILES para ver herencia de COMPUTADORES + tamanoPantallaPulgadas.
+}

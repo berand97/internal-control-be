@@ -1,0 +1,21 @@
+meta {
+  name: close
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/inventories/{{inventoryId}}/close
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "allowUnverified": false
+  }
+}

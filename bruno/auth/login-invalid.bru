@@ -1,0 +1,22 @@
+meta {
+  name: login invalid
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "username": "nadie",
+    "password": "incorrecta"
+  }
+}
+
+docs {
+  401 INVALID_CREDENTIALS. No filtra si el usuario existe.
+}

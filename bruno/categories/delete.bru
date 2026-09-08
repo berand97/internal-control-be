@@ -1,0 +1,18 @@
+meta {
+  name: delete
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{baseUrl}}/categories/{{categoryId}}
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Soft delete (isActive=false). Falla si tiene subcategorías activas o activos asociados.
+}

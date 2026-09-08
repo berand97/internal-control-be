@@ -1,0 +1,32 @@
+meta {
+  name: create
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/categories
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "code": "TABLETS",
+    "name": "Tablets",
+    "description": "Tablets institucionales",
+    "parentId": "{{parentCategoryId}}",
+    "depreciationYears": 4,
+    "depreciationMethod": "STRAIGHT_LINE",
+    "requiresSerialNumber": true,
+    "requiresPhoto": true
+  }
+}
+
+docs {
+  parentCategoryId = id de COMPUTADORES. Cambiar depreciationYears no recalcula depreciaciones ya registradas.
+}

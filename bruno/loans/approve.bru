@@ -1,0 +1,15 @@
+meta {
+  name: approve
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/loans/{{loanId}}/approve
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

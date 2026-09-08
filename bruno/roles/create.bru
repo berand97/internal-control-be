@@ -1,0 +1,24 @@
+meta {
+  name: create
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/roles
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "code": "ASSET_COORDINATOR",
+    "name": "Coordinador de activos",
+    "description": "Coordina el inventario de su unidad",
+    "isAssignable": true
+  }
+}

@@ -1,0 +1,25 @@
+meta {
+  name: create
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/users
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "documentType": "CC",
+    "documentNumber": "1234567890",
+    "firstName": "Juliana",
+    "lastName": "Pérez",
+    "email": "juliana.perez@unac.edu.co"
+  }
+}

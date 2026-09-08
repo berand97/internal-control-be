@@ -1,0 +1,22 @@
+meta {
+  name: calculate
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/depreciation/calculate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "year": 2026,
+    "month": 1
+  }
+}

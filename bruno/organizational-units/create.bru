@@ -1,0 +1,24 @@
+meta {
+  name: create
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/organizational-units
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "code": "DCOM",
+    "name": "Departamento de Comunicaciones",
+    "type": "DEPARTMENT",
+    "parentId": "{{orgUnitParentId}}"
+  }
+}

@@ -1,0 +1,27 @@
+meta {
+  name: update
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/categories/{{categoryId}}/dynamic-fields/{{dynamicFieldId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "label": "Procesador (CPU)",
+    "isRequired": true,
+    "orderIndex": 15
+  }
+}
+
+docs {
+  El tipo es inmutable. Enviar type distinto a STRING produce DYNAMIC_FIELD_TYPE_IMMUTABLE.
+}

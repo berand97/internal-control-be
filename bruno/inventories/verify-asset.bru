@@ -1,0 +1,23 @@
+meta {
+  name: verify asset
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/inventories/{{inventoryId}}/verify-asset
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "assetId": "{{assetId}}",
+    "condition": "GOOD",
+    "locationId": "{{locationId}}"
+  }
+}

@@ -1,0 +1,14 @@
+meta {
+  name: delete
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{baseUrl}}/campus/{{campusId}}
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
