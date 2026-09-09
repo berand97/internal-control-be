@@ -56,6 +56,7 @@ export class TypeOrmRolesRepository implements RolesRepository {
       name: record.name,
       description: record.description,
       parentRoleId: record.parentRoleId,
+      superiorRoleId: record.superiorRoleId,
       hierarchyLevel: record.hierarchyLevel,
       isSystem: record.isSystem,
       isAssignable: record.isAssignable,
@@ -77,6 +78,35 @@ export class TypeOrmRolesRepository implements RolesRepository {
 
   listPermissions(): Promise<ReadonlyArray<Permission>> {
     return this.permissions.find({ order: { module: 'ASC', code: 'ASC' } });
+  }
+
+  insertPermission(record: {
+    readonly code: string;
+    readonly module: string;
+    readonly resourceType: string;
+    readonly resourceLabel: string;
+    readonly action: string;
+    readonly scopeLevel: Permission['scopeLevel'];
+    readonly description: string | null;
+    readonly isSystem: boolean;
+  }): Promise<Permission> {
+    return this.permissions.save(this.permissions.create(record));
+  }
+
+  async updatePermission(
+    id: string,
+    record: { readonly description?: string | null },
+  ): Promise<void> {
+    await this.permissions.update({ id }, record);
+  }
+
+  async deletePermission(id: string): Promise<boolean> {
+    const result = await this.permissions.delete({ id });
+    return (result.affected ?? 0) > 0;
+  }
+
+  countPermissionAssignments(permissionId: string): Promise<number> {
+    return this.rolePermissions.count({ where: { permissionId } });
   }
 
   findPermissionsByIds(

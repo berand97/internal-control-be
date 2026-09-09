@@ -12,6 +12,10 @@ import {
   AssignPermissionsDto,
   ReplacePermissionsDto,
 } from '../dto/assign-permissions.dto.js';
+import {
+  CreatePermissionDto,
+  UpdatePermissionDto,
+} from '../dto/create-permission.dto.js';
 import { CreateRoleDto } from '../dto/create-role.dto.js';
 import { CreateSodRuleDto } from '../dto/create-sod-rule.dto.js';
 import { UpdateRoleDto } from '../dto/update-role.dto.js';
@@ -19,12 +23,16 @@ import {
   groupPermissionsCatalog,
   type PermissionCatalogModuleDto,
 } from '../dto/responses/permission-catalog.response.dto.js';
+import { NavigationCatalogItemResponseDto } from '../dto/responses/navigation-catalog-item.response.dto.js';
 import { PermissionResponseDto } from '../dto/responses/permission.response.dto.js';
 import { RoleDetailResponseDto } from '../dto/responses/role-detail.response.dto.js';
 import { RoleResponseDto } from '../dto/responses/role.response.dto.js';
 import { SodRuleResponseDto } from '../dto/responses/sod-rule.response.dto.js';
 import type { RolesRepository } from '../repositories/roles.repository.interface.js';
+import { NavigationService } from '../../navigation/services/navigation.service.js';
 import { PermissionsService } from './permissions.service.js';
+import { descendantRoleIds } from './role-hierarchy.js';
+import { RolePrivilegePolicy } from './role-privilege.policy.js';
 
 const ROLE_ENTITY_TYPE = 'ROLE';
 
@@ -36,6 +44,8 @@ export class RolesService {
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
     private readonly permissionsService: PermissionsService,
+    private readonly navigationService: NavigationService,
+    private readonly privilege: RolePrivilegePolicy,
   ) {}
 
   async list(): Promise<ReadonlyArray<RoleResponseDto>> {
@@ -45,16 +55,18 @@ export class RolesService {
 
   async getById(id: string): Promise<RoleDetailResponseDto> {
     const role = await this.requireRole(id);
-    const [permissions, children, sodRules] = await Promise.all([
+    const [permissions, children, sodRules, catalog] = await Promise.all([
       this.rolesRepository.findPermissionsForRole(role.id),
       this.rolesRepository.findChildren(role.id),
       this.rolesRepository.findSodForRole(role.id),
+      this.navigationService.listActiveDefinitions(),
     ]);
     return RoleDetailResponseDto.fromDetail(
       role,
       permissions,
       children,
       sodRules,
+      catalog,
     );
   }
 
@@ -65,16 +77,27 @@ export class RolesService {
     const parent = dto.parentRoleId
       ? await this.requireRole(dto.parentRoleId)
       : null;
+    if (dto.superiorRoleId !== undefined) {
+      this.privilege.assertCanReorganize(actor);
+    }
+    const superior = dto.superiorRoleId
+      ? await this.requireRole(dto.superiorRoleId)
+      : await this.rolesRepository.findActiveByCode('SUPER_ADMIN');
+    const hierarchyLevel = superior
+      ? superior.hierarchyLevel + 1
+      : (await this.privilege.actorRank(actor)) + 1;
+    await this.privilege.assertCanCreateLevel(actor, hierarchyLevel);
     try {
-      const permissionIds = await this.requirePermissionIds(
-        dto.permissionIds ?? [],
-      );
+      const permissions = await this.requirePermissions(dto.permissionIds ?? []);
+      await this.privilege.assertCanGrant(actor, permissions);
+      const permissionIds = permissions.map((permission) => permission.id);
       const role = await this.rolesRepository.insert({
         code: dto.code,
         name: dto.name,
         description: dto.description ?? null,
         parentRoleId: parent?.id ?? null,
-        hierarchyLevel: parent ? parent.hierarchyLevel + 1 : 0,
+        superiorRoleId: superior?.id ?? null,
+        hierarchyLevel,
         isSystem: false,
         isAssignable: dto.isAssignable ?? true,
         maxConcurrentUsers: dto.maxConcurrentUsers ?? null,
@@ -113,19 +136,52 @@ export class RolesService {
     actor: AuthenticatedUser,
   ): Promise<RoleResponseDto> {
     const role = await this.requireRole(id);
-    if (role.isSystem && dto.name !== undefined && dto.name !== role.name) {
-      throw new ApiException(ErrorCode.RoleSystemImmutable);
+    const reorganizing =
+      dto.parentRoleId !== undefined || dto.superiorRoleId !== undefined;
+    if (reorganizing) {
+      this.privilege.assertCanReorganize(actor);
+      if (role.code === 'SUPER_ADMIN') {
+        throw new ApiException(ErrorCode.RoleSystemImmutable);
+      }
     }
 
-    let hierarchyLevel = role.hierarchyLevel;
     let parentRoleId = role.parentRoleId;
     if (dto.parentRoleId !== undefined) {
       if (dto.parentRoleId === role.id) {
         throw new ApiException(ErrorCode.InvalidState);
       }
-      const parent = await this.requireRole(dto.parentRoleId);
-      parentRoleId = parent.id;
-      hierarchyLevel = parent.hierarchyLevel + 1;
+      if (dto.parentRoleId === null) {
+        parentRoleId = null;
+      } else {
+        const parent = await this.requireRole(dto.parentRoleId);
+        parentRoleId = parent.id;
+      }
+    }
+
+    let superiorRoleId = role.superiorRoleId;
+    let hierarchyLevel = role.hierarchyLevel;
+    let descendantLevels: ReadonlyArray<{ id: string; hierarchyLevel: number }> =
+      [];
+    if (dto.superiorRoleId !== undefined) {
+      if (dto.superiorRoleId === role.id) {
+        throw new ApiException(ErrorCode.InvalidState);
+      }
+      const all = await this.rolesRepository.findAllActive();
+      if (descendantRoleIds(role.id, all).has(dto.superiorRoleId)) {
+        throw new ApiException(ErrorCode.InvalidState);
+      }
+      const superior = await this.requireRole(dto.superiorRoleId);
+      superiorRoleId = superior.id;
+      hierarchyLevel = superior.hierarchyLevel + 1;
+      const delta = hierarchyLevel - role.hierarchyLevel;
+      if (delta !== 0) {
+        descendantLevels = [...descendantRoleIds(role.id, all)].flatMap((id) => {
+          const child = all.find((item) => item.id === id);
+          return child === undefined
+            ? []
+            : [{ id, hierarchyLevel: child.hierarchyLevel + delta }];
+        });
+      }
     }
 
     try {
@@ -134,10 +190,16 @@ export class RolesService {
         ...(dto.description !== undefined
           ? { description: dto.description }
           : {}),
-        ...(dto.parentRoleId !== undefined
-          ? { parentRoleId, hierarchyLevel }
+        ...(dto.parentRoleId !== undefined ? { parentRoleId } : {}),
+        ...(dto.superiorRoleId !== undefined
+          ? { superiorRoleId, hierarchyLevel }
           : {}),
       });
+      for (const child of descendantLevels) {
+        await this.rolesRepository.update(child.id, {
+          hierarchyLevel: child.hierarchyLevel,
+        });
+      }
     } catch (error) {
       if (isRoleHierarchyCycle(error)) {
         throw new ApiException(ErrorCode.InvalidState);
@@ -161,6 +223,7 @@ export class RolesService {
 
   async remove(id: string, actor: AuthenticatedUser): Promise<null> {
     const role = await this.requireRole(id);
+    await this.privilege.assertCanAdminister(actor, role);
     if (role.isSystem) {
       throw new ApiException(ErrorCode.RoleSystemImmutable);
     }
@@ -193,13 +256,91 @@ export class RolesService {
     return groupPermissionsCatalog(permissions);
   }
 
+  async createPermission(
+    dto: CreatePermissionDto,
+  ): Promise<PermissionResponseDto> {
+    const scope = dto.scopeLevel.toLowerCase();
+    const code = `${dto.resourceType}:${dto.action}:${scope}`;
+    const existing = await this.rolesRepository.listPermissions();
+    const sibling = existing.find((item) => item.resourceType === dto.resourceType);
+    const resourceLabel = dto.resourceLabel?.trim() || sibling?.resourceLabel;
+    if (resourceLabel === undefined || resourceLabel.length === 0) {
+      throw new ApiException(ErrorCode.ValidationFailed);
+    }
+    try {
+      const permission = await this.rolesRepository.insertPermission({
+        code,
+        module: dto.module,
+        resourceType: dto.resourceType,
+        resourceLabel,
+        action: dto.action,
+        scopeLevel: dto.scopeLevel,
+        description: dto.description ?? null,
+        isSystem: false,
+      });
+      return PermissionResponseDto.from(permission);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ApiException(ErrorCode.PermissionCodeAlreadyExists);
+      }
+      throw error;
+    }
+  }
+
+  async updatePermission(
+    id: string,
+    dto: UpdatePermissionDto,
+  ): Promise<PermissionResponseDto> {
+    const [permission] = await this.rolesRepository.findPermissionsByIds([id]);
+    if (!permission) {
+      throw new ApiException(ErrorCode.ResourceNotFound);
+    }
+    if (dto.description !== undefined) {
+      await this.rolesRepository.updatePermission(id, {
+        description: dto.description,
+      });
+      permission.description = dto.description;
+    }
+    return PermissionResponseDto.from(permission);
+  }
+
+  async deletePermission(id: string): Promise<null> {
+    const [permission] = await this.rolesRepository.findPermissionsByIds([id]);
+    if (!permission) {
+      throw new ApiException(ErrorCode.ResourceNotFound);
+    }
+    if (permission.isSystem) {
+      throw new ApiException(ErrorCode.PermissionSystemImmutable);
+    }
+    const assigned =
+      await this.rolesRepository.countPermissionAssignments(id);
+    if (assigned > 0) {
+      throw new ApiException(ErrorCode.PermissionInUse);
+    }
+    const removed = await this.rolesRepository.deletePermission(id);
+    if (!removed) {
+      throw new ApiException(ErrorCode.ResourceNotFound);
+    }
+    return null;
+  }
+
+  async listNavigationCatalog(): Promise<
+    ReadonlyArray<NavigationCatalogItemResponseDto>
+  > {
+    const catalog = await this.navigationService.listActiveDefinitions();
+    return catalog.map(NavigationCatalogItemResponseDto.from);
+  }
+
   async assignPermissions(
     roleId: string,
     dto: AssignPermissionsDto,
     actor: AuthenticatedUser,
   ): Promise<RoleDetailResponseDto> {
     const role = await this.requireRole(roleId);
-    const permissionIds = await this.requirePermissionIds(dto.permissionIds);
+    await this.privilege.assertCanAdminister(actor, role);
+    const permissions = await this.requirePermissions(dto.permissionIds);
+    await this.privilege.assertCanGrant(actor, permissions);
+    const permissionIds = permissions.map((permission) => permission.id);
     for (const permissionId of permissionIds) {
       await this.rolesRepository.assignPermission(
         role.id,
@@ -226,7 +367,13 @@ export class RolesService {
     actor: AuthenticatedUser,
   ): Promise<RoleDetailResponseDto> {
     const role = await this.requireRole(roleId);
-    const permissionIds = await this.requirePermissionIds(dto.permissionIds);
+    await this.privilege.assertCanAdminister(actor, role);
+    const permissions = await this.requirePermissions(dto.permissionIds);
+    const current = await this.rolesRepository.findPermissionsForRole(role.id);
+    const currentIds = new Set(current.map((permission) => permission.id));
+    const added = permissions.filter((permission) => !currentIds.has(permission.id));
+    await this.privilege.assertCanGrant(actor, added);
+    const permissionIds = permissions.map((permission) => permission.id);
     await this.rolesRepository.replacePermissions(
       role.id,
       permissionIds,
@@ -251,6 +398,7 @@ export class RolesService {
     actor: AuthenticatedUser,
   ): Promise<null> {
     const role = await this.requireRole(roleId);
+    await this.privilege.assertCanAdminister(actor, role);
     const removed = await this.rolesRepository.removePermission(
       role.id,
       permissionId,
@@ -313,19 +461,19 @@ export class RolesService {
     return role;
   }
 
-  private async requirePermissionIds(
+  private async requirePermissions(
     ids: ReadonlyArray<string>,
-  ): Promise<ReadonlyArray<string>> {
+  ): Promise<ReadonlyArray<{ readonly id: string; readonly code: string }>> {
     const uniqueIds = [...new Set(ids)];
     if (uniqueIds.length === 0) {
-      return uniqueIds;
+      return [];
     }
     const permissions =
       await this.rolesRepository.findPermissionsByIds(uniqueIds);
     if (permissions.length !== uniqueIds.length) {
       throw new ApiException(ErrorCode.ResourceNotFound);
     }
-    return uniqueIds;
+    return permissions;
   }
 
   private async invalidateAssignees(roleId: string): Promise<void> {

@@ -1,10 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEmail,
-  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
 } from 'class-validator';
@@ -13,19 +13,7 @@ import {
   INSTITUTIONAL_EMAIL_REGEX,
 } from '../../../common/validation/password.constants.js';
 
-const DOCUMENT_TYPES = ['CC', 'CE', 'TI', 'PAS'] as const;
-
 export class CreateUserDto {
-  @ApiProperty({ enum: DOCUMENT_TYPES, example: 'CC' })
-  @IsIn(DOCUMENT_TYPES)
-  readonly documentType!: (typeof DOCUMENT_TYPES)[number];
-
-  @ApiProperty({ example: '1234567890', maxLength: 30 })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(30)
-  readonly documentNumber!: string;
-
   @ApiProperty({ example: 'Juliana', maxLength: 100 })
   @IsString()
   @IsNotEmpty()
@@ -65,4 +53,29 @@ export class CreateUserDto {
   @IsString()
   @MaxLength(255)
   readonly username?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Departamento. Obligatorio si no se envía centro de costo. Si ambos van, el centro debe pertenecer a esta unidad.',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  readonly organizationalUnitId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Centro de costo. Si se omite el departamento, se toma el de este centro.',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  readonly costCenterId?: string;
+
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Rol con el que se invita al usuario',
+  })
+  @IsUUID('4')
+  readonly roleId!: string;
 }

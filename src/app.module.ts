@@ -11,6 +11,7 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor.
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppConfigModule } from './config/config.module.js';
 import { DatabaseModule } from './database/database.module.js';
+import { MailModule } from './shared/mail/mail.module.js';
 import { StorageModule } from './shared/storage/storage.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { BuildingsModule } from './modules/buildings/buildings.module.js';
@@ -28,6 +29,7 @@ import { InventoriesModule } from './modules/inventories/inventories.module.js';
 import { DepreciationModule } from './modules/depreciation/depreciation.module.js';
 import { LocationsModule } from './modules/locations/locations.module.js';
 import { OrganizationalUnitsModule } from './modules/organizational-units/organizational-units.module.js';
+import { NavigationModule } from './modules/navigation/navigation.module.js';
 import { RolesModule } from './modules/roles/roles.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { PermissionsGuard } from './common/guards/permissions.guard.js';
@@ -55,9 +57,11 @@ const nestObserveImports =
     FeaturesModule,
     ScheduleModule.forRoot(),
     StorageModule,
+    MailModule,
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     AuthModule,
     RolesModule,
+    NavigationModule,
     UsersModule,
     CampusModule,
     BuildingsModule,

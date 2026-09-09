@@ -1,15 +1,17 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { CostCenter } from '../../cost-centers/entities/cost-center.entity.js';
+import { OrganizationalUnit } from '../../organizational-units/entities/organizational-unit.entity.js';
 
 @Entity('person')
 export class Person {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ name: 'document_type', type: 'varchar', length: 10 })
-  documentType!: string;
+  @Column({ name: 'document_type', type: 'varchar', length: 10, nullable: true })
+  documentType!: string | null;
 
-  @Column({ name: 'document_number', type: 'varchar', length: 30 })
-  documentNumber!: string;
+  @Column({ name: 'document_number', type: 'varchar', length: 30, nullable: true })
+  documentNumber!: string | null;
 
   @Column({ name: 'first_name', type: 'varchar', length: 100 })
   firstName!: string;
@@ -30,6 +32,20 @@ export class Person {
     nullable: true,
   })
   positionTitle!: string | null;
+
+  @Column({ name: 'organizational_unit_id', type: 'uuid', nullable: true })
+  organizationalUnitId!: string | null;
+
+  @ManyToOne(() => OrganizationalUnit, { nullable: true })
+  @JoinColumn({ name: 'organizational_unit_id' })
+  organizationalUnit?: OrganizationalUnit | null;
+
+  @Column({ name: 'cost_center_id', type: 'uuid', nullable: true })
+  costCenterId!: string | null;
+
+  @ManyToOne(() => CostCenter, { nullable: true })
+  @JoinColumn({ name: 'cost_center_id' })
+  costCenter?: CostCenter | null;
 
   @Column({ name: 'is_active', type: 'boolean' })
   isActive!: boolean;

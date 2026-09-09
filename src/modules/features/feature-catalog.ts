@@ -33,8 +33,8 @@ export const FEATURE_CATALOG: ReadonlyArray<FeatureDefinition> = [
     code: 'roles',
     label: 'Roles y permisos',
     core: true,
-    resourceTypes: ['role'],
-    pathPrefixes: ['/roles', '/permissions'],
+    resourceTypes: ['role', 'navigation'],
+    pathPrefixes: ['/roles', '/permissions', '/navigation'],
   },
   {
     code: 'users',
@@ -154,6 +154,13 @@ export const FEATURE_CATALOG: ReadonlyArray<FeatureDefinition> = [
     core: false,
     resourceTypes: ['storage'],
     pathPrefixes: ['/storage'],
+  },
+  {
+    code: 'mail',
+    label: 'Correo',
+    core: false,
+    resourceTypes: ['mail'],
+    pathPrefixes: ['/mail'],
   },
 ];
 

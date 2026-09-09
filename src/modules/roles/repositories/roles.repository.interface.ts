@@ -8,6 +8,7 @@ export interface CreateRoleRecord {
   readonly name: string;
   readonly description: string | null;
   readonly parentRoleId: string | null;
+  readonly superiorRoleId: string | null;
   readonly hierarchyLevel: number;
   readonly isSystem: boolean;
   readonly isAssignable: boolean;
@@ -18,6 +19,7 @@ export interface UpdateRoleRecord {
   readonly name?: string;
   readonly description?: string | null;
   readonly parentRoleId?: string | null;
+  readonly superiorRoleId?: string | null;
   readonly hierarchyLevel?: number;
 }
 
@@ -30,6 +32,22 @@ export interface RolesRepository {
   update(id: string, record: UpdateRoleRecord): Promise<void>;
   softDelete(id: string, at: Date): Promise<void>;
   listPermissions(): Promise<ReadonlyArray<Permission>>;
+  insertPermission(record: {
+    readonly code: string;
+    readonly module: string;
+    readonly resourceType: string;
+    readonly resourceLabel: string;
+    readonly action: string;
+    readonly scopeLevel: Permission['scopeLevel'];
+    readonly description: string | null;
+    readonly isSystem: boolean;
+  }): Promise<Permission>;
+  updatePermission(
+    id: string,
+    record: { readonly description?: string | null },
+  ): Promise<void>;
+  deletePermission(id: string): Promise<boolean>;
+  countPermissionAssignments(permissionId: string): Promise<number>;
   findPermissionsByIds(
     ids: ReadonlyArray<string>,
   ): Promise<ReadonlyArray<Permission>>;

@@ -38,6 +38,11 @@ export class CreateRoleDto {
   @IsUUID('4')
   readonly parentRoleId?: string;
 
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID('4')
+  readonly superiorRoleId?: string;
+
   @ApiPropertyOptional({ default: true })
   @IsOptional()
   @IsBoolean()

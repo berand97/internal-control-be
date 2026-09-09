@@ -29,6 +29,7 @@ import type { RefreshTokenPayload } from '../types/token-payloads.type.js';
 import { MfaService } from './mfa.service.js';
 import { TokenService } from './token.service.js';
 import { FeatureFlagsService } from '../../features/services/feature-flags.service.js';
+import { NavigationService } from '../../navigation/services/navigation.service.js';
 
 export interface AuthRequestContext {
   readonly ipAddress: string | null;
@@ -86,6 +87,7 @@ export class AuthService {
     private readonly mfaService: MfaService,
     private readonly mailService: MailService,
     private readonly featureFlags: FeatureFlagsService,
+    private readonly navigationService: NavigationService,
   ) {}
 
   async login(
@@ -299,11 +301,12 @@ export class AuthService {
       throw new ApiException(ErrorCode.Unauthorized);
     }
 
-    const [roles, scopes, lastLogins, granted] = await Promise.all([
+    const [roles, scopes, lastLogins, granted, catalog] = await Promise.all([
       this.authUsersRepository.findActiveRoleCodes(user.id),
       this.authUsersRepository.findActiveScopes(user.id),
       this.auditLogsRepository.findLastLogins(user.id, LAST_LOGINS_LIMIT),
       this.authUsersRepository.findEffectivePermissions(user.id),
+      this.navigationService.listActiveDefinitions(),
     ]);
 
     return MeResponseDto.from(
@@ -313,6 +316,7 @@ export class AuthService {
       lastLogins,
       granted,
       this.featureFlags.list(),
+      catalog,
     );
   }
 

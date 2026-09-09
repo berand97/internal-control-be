@@ -18,7 +18,9 @@ export const OpenApiTag = {
   Depreciation: 'Depreciación',
   DocumentTemplates: 'Plantillas Word',
   Storage: 'Almacenamiento',
+  Mail: 'Correo',
   Features: 'Módulos',
+  Navigation: 'Menús',
   Health: 'Salud',
 } as const;
 
@@ -57,10 +59,16 @@ export const OPENAPI_TAG_META: ReadonlyArray<{
   },
   { name: OpenApiTag.DocumentTemplates, description: 'Plantillas Word y generación de actas' },
   { name: OpenApiTag.Storage, description: 'Proveedores de archivos: proyecto, S3, Drive, OneDrive' },
+  { name: OpenApiTag.Mail, description: 'SMTP y envío de invitaciones' },
   {
     name: OpenApiTag.Features,
     description:
       'Feature flags y apagado de módulos. El frontend oculta lo que venga con enabled=false.',
+  },
+  {
+    name: OpenApiTag.Navigation,
+    description:
+      'Catálogo administrable de menús. La visibilidad por usuario se deriva de permisos.',
   },
   { name: OpenApiTag.Health, description: 'Disponibilidad del API' },
 ];
@@ -105,10 +113,10 @@ export const OPENAPI_TAG_GROUPS: ReadonlyArray<{
   },
   {
     name: 'Documentos y almacenamiento',
-    tags: [OpenApiTag.DocumentTemplates, OpenApiTag.Storage],
+    tags: [OpenApiTag.DocumentTemplates, OpenApiTag.Storage, OpenApiTag.Mail],
   },
   {
     name: 'Sistema',
-    tags: [OpenApiTag.Features, OpenApiTag.Health],
+    tags: [OpenApiTag.Features, OpenApiTag.Navigation, OpenApiTag.Health],
   },
 ];

@@ -1,4 +1,5 @@
-import { NAVIGATION_REGISTRY } from './navigation.registry.js';
+import { actionSatisfies } from './action-satisfies.js';
+import type { NavigationDefinition } from './navigation.registry.js';
 import type {
   GrantedPermission,
   NavigationItem,
@@ -13,6 +14,7 @@ export interface AccessProfile {
 
 export const buildAccessProfile = (
   granted: ReadonlyArray<GrantedPermission>,
+  catalog: ReadonlyArray<NavigationDefinition> = [],
 ): AccessProfile => {
   const byResource = new Map<
     string,
@@ -43,12 +45,13 @@ export const buildAccessProfile = (
     }))
     .sort((left, right) => left.resource.localeCompare(right.resource));
 
-  const can = (resource: string, action: string): boolean =>
-    byResource.get(resource)?.actions.has(action) ?? false;
+  const can = (resource: string, action: string): boolean => {
+    const granted = byResource.get(resource);
+    return granted ? actionSatisfies(granted.actions, action) : false;
+  };
 
-  const navigation = NAVIGATION_REGISTRY.filter((item) =>
-    can(item.resource, item.requiredAction),
-  )
+  const navigation = catalog
+    .filter((item) => can(item.resource, item.requiredAction))
     .sort((left, right) => left.sortOrder - right.sortOrder)
     .map((item) => ({
       module: item.module,

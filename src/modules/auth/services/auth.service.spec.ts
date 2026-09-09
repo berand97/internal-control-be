@@ -160,6 +160,19 @@ describe('AuthService', () => {
       mfaService as MfaService,
       mailService as never,
       featureFlags as FeatureFlagsService,
+      {
+        listActiveDefinitions: vi.fn().mockResolvedValue([
+          {
+            module: 'ASSET',
+            moduleLabel: 'Activos',
+            resource: 'asset',
+            path: '/assets',
+            label: 'Activos',
+            requiredAction: 'read',
+            sortOrder: 70,
+          },
+        ]),
+      } as never,
     );
   });
 

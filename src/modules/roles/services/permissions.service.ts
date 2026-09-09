@@ -26,7 +26,12 @@ export class PermissionsService {
       if (permission.permissionCode !== permissionCode) {
         return false;
       }
-      if (permission.userScopeType === 'GLOBAL') {
+      // El alcance de adscripción (depto/centro) no anula un permiso :global
+      // del rol. Sin esto, un director adscrito no puede listar tomas físicas.
+      if (
+        permission.permissionCode.endsWith(':global') ||
+        permission.userScopeType === 'GLOBAL'
+      ) {
         return true;
       }
       if (!scope) {

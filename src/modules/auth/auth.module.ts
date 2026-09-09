@@ -3,6 +3,7 @@ import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CryptoModule } from '../../shared/crypto/crypto.module.js';
 import { MailModule } from '../../shared/mail/mail.module.js';
+import { NavigationModule } from '../navigation/navigation.module.js';
 import { AuthController } from './auth.controller.js';
 import { AppUser } from './entities/app-user.entity.js';
 import { AuditLog } from './entities/audit-log.entity.js';
@@ -26,6 +27,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
     PassportModule.register({ session: false }),
     CryptoModule,
     MailModule,
+    NavigationModule,
     TypeOrmModule.forFeature([
       Person,
       AppUser,
@@ -56,6 +58,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
   ],
   exports: [
     AuthService,
+    'AuthUsersRepository',
     'RefreshTokenFamiliesRepository',
     'AuditLogsRepository',
     'PasswordResetTokensRepository',

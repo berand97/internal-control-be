@@ -14,6 +14,9 @@ export class PermissionResponseDto {
   @ApiProperty()
   readonly resourceType!: string;
 
+  @ApiProperty({ example: 'Activos' })
+  readonly resourceLabel!: string;
+
   @ApiProperty()
   readonly action!: string;
 
@@ -23,15 +26,20 @@ export class PermissionResponseDto {
   @ApiProperty({ nullable: true })
   readonly description!: string | null;
 
+  @ApiProperty()
+  readonly isSystem!: boolean;
+
   static from(permission: Permission): PermissionResponseDto {
     return {
       id: permission.id,
       code: permission.code,
       module: permission.module,
       resourceType: permission.resourceType,
+      resourceLabel: permission.resourceLabel,
       action: permission.action,
       scopeLevel: permission.scopeLevel,
       description: permission.description,
+      isSystem: permission.isSystem === true,
     };
   }
 }

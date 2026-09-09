@@ -18,6 +18,8 @@ import { AssetImportBatch } from '../modules/assets/entities/asset-import-batch.
 import { AssetMovement } from '../modules/assets/entities/asset-movement.entity.js';
 import { AssetPhoto } from '../modules/assets/entities/asset-photo.entity.js';
 import { QrTokenRotationLog } from '../modules/qr-tokens/entities/qr-token-rotation-log.entity.js';
+import { EmailTemplate } from '../shared/mail/entities/email-template.entity.js';
+import { MailSettings } from '../shared/mail/entities/mail-settings.entity.js';
 import { StorageSettings } from '../shared/storage/entities/storage-settings.entity.js';
 import { DocumentTemplate, GeneratedDocument } from '../modules/document-templates/entities/document-template.entity.js';
 import { MovementVerificationLog } from '../modules/movements/entities/movement-verification-log.entity.js';
@@ -46,6 +48,20 @@ import { Phase4Assets1767225607000 } from './migrations/1767225607000-phase4-ass
 import { Phase5MovementsLoans1767225608000 } from './migrations/1767225608000-phase5-movements-loans.js';
 import { Phase6InventoriesDepreciation1767225609000 } from './migrations/1767225609000-phase6-inventories-depreciation.js';
 import { FeatureFlags1767225610000 } from './migrations/1767225610000-feature-flags.js';
+import { UserInvitationTempPassword1767225611000 } from './migrations/1767225611000-user-invitation-temp-password.js';
+import { AlignUserManageCapabilityAction1767225612000 } from './migrations/1767225612000-align-user-manage-capability-action.js';
+import { RestoreRoleScopedNavigation1767225613000 } from './migrations/1767225613000-restore-role-scoped-navigation.js';
+import { AdministrableNavigationAndPermissions1767225614000 } from './migrations/1767225614000-administrable-navigation-and-permissions.js';
+import { PermissionResourceLabelsEs1767225615000 } from './migrations/1767225615000-permission-resource-labels-es.js';
+import { RolePrivilegeHierarchyLevels1767225616000 } from './migrations/1767225616000-role-privilege-hierarchy-levels.js';
+import { RoleSuperiorHierarchy1767225617000 } from './migrations/1767225617000-role-superior-hierarchy.js';
+import { PersonAffiliationAndMailSettings1767225618000 } from './migrations/1767225618000-person-affiliation-and-mail-settings.js';
+import { EmailTemplates1767225619000 } from './migrations/1767225619000-email-templates.js';
+import { MailSettingsEncryptedText1767225620000 } from './migrations/1767225620000-mail-settings-encrypted-text.js';
+import { PersonDocumentOptional1767225621000 } from './migrations/1767225621000-person-document-optional.js';
+import { InvitationRoleToken1767225622000 } from './migrations/1767225622000-invitation-role-token.js';
+import { RevokeDirectorStorage1767225623000 } from './migrations/1767225623000-revoke-director-storage.js';
+import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
 import { PhysicalInventoryScope } from '../modules/inventories/entities/physical-inventory-scope.entity.js';
@@ -85,6 +101,8 @@ const dataSource = new DataSource({
     AssetImportBatch,
     QrTokenRotationLog,
     StorageSettings,
+    MailSettings,
+    EmailTemplate,
     DocumentTemplate,
     GeneratedDocument,
     MovementVerificationLog,
@@ -97,6 +115,7 @@ const dataSource = new DataSource({
     PhysicalInventoryScope,
     AssetDepreciation,
     FeatureFlag,
+    NavigationItemEntity,
   ],
   migrations: [
     InitialSchema1767225600000,
@@ -110,6 +129,19 @@ const dataSource = new DataSource({
     Phase5MovementsLoans1767225608000,
     Phase6InventoriesDepreciation1767225609000,
     FeatureFlags1767225610000,
+    UserInvitationTempPassword1767225611000,
+    AlignUserManageCapabilityAction1767225612000,
+    RestoreRoleScopedNavigation1767225613000,
+    AdministrableNavigationAndPermissions1767225614000,
+    PermissionResourceLabelsEs1767225615000,
+    RolePrivilegeHierarchyLevels1767225616000,
+    RoleSuperiorHierarchy1767225617000,
+    PersonAffiliationAndMailSettings1767225618000,
+    EmailTemplates1767225619000,
+    MailSettingsEncryptedText1767225620000,
+    PersonDocumentOptional1767225621000,
+    InvitationRoleToken1767225622000,
+    RevokeDirectorStorage1767225623000,
   ],
 });
 

@@ -153,6 +153,36 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Los roles de sistema no permiten cambiar código ni nombre',
   },
+  [ErrorCode.RolePrivilegeEscalation]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'No puedes administrar un rol igual o superior al tuyo',
+  },
+  [ErrorCode.PermissionNotHeld]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Solo puedes conceder permisos que ya tienes',
+  },
+  [ErrorCode.PermissionCodeAlreadyExists]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'Ya existe un permiso con ese código o combinación recurso/acción/alcance',
+  },
+  [ErrorCode.PermissionInUse]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'El permiso está asignado a un rol; quítalo antes de eliminarlo',
+  },
+  [ErrorCode.PermissionSystemImmutable]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'Los permisos de sistema no se eliminan; se administran desde el rol',
+  },
+  [ErrorCode.NavigationPathAlreadyExists]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'Ya existe un menú con esa ruta',
+  },
   [ErrorCode.SodViolation]: {
     httpStatus: 406,
     action: 'CANCEL',
@@ -167,6 +197,26 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     httpStatus: 406,
     action: 'CANCEL',
     message: 'No puedes delegar un rol que no posees',
+  },
+  [ErrorCode.PersonAffiliationRequired]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El usuario debe adscribirse a un departamento o a un centro de costo',
+  },
+  [ErrorCode.CostCenterOrgUnitMismatch]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El centro de costo no pertenece a ese departamento',
+  },
+  [ErrorCode.MailNotConfigured]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'Configure el SMTP en Correo antes de enviar invitaciones',
+  },
+  [ErrorCode.MailSendFailed]: {
+    httpStatus: 424,
+    action: 'RETRY',
+    message: 'No se pudo enviar el correo; revisa la configuración SMTP',
   },
   [ErrorCode.HasActiveLoans]: {
     httpStatus: 406,

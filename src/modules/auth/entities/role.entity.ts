@@ -17,6 +17,9 @@ export class Role {
   @Column({ name: 'parent_role_id', type: 'uuid', nullable: true })
   parentRoleId!: string | null;
 
+  @Column({ name: 'superior_role_id', type: 'uuid', nullable: true })
+  superiorRoleId!: string | null;
+
   @Column({ name: 'hierarchy_level', type: 'smallint' })
   hierarchyLevel!: number;
 

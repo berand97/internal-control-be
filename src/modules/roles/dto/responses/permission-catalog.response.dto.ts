@@ -6,6 +6,9 @@ export class PermissionCatalogResourceDto {
   @ApiProperty()
   readonly resourceType!: string;
 
+  @ApiProperty({ example: 'Activos' })
+  readonly resourceLabel!: string;
+
   @ApiProperty({ type: [PermissionResponseDto] })
   readonly permissions!: ReadonlyArray<PermissionResponseDto>;
 }
@@ -38,6 +41,7 @@ export const groupPermissionsCatalog = (
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([resourceType, items]) => ({
           resourceType,
+          resourceLabel: items[0]?.resourceLabel ?? resourceType,
           permissions: items
             .map(PermissionResponseDto.from)
             .sort((left, right) => left.code.localeCompare(right.code)),

@@ -5,13 +5,15 @@ import type { UserRole } from '../../auth/entities/user-role.entity.js';
 import type { UserStatus } from '../../auth/enums/user-status.enum.js';
 
 export interface CreatePersonRecord {
-  readonly documentType: string;
-  readonly documentNumber: string;
+  readonly documentType: string | null;
+  readonly documentNumber: string | null;
   readonly firstName: string;
   readonly lastName: string;
   readonly email: string;
   readonly phone: string | null;
   readonly positionTitle: string | null;
+  readonly organizationalUnitId: string | null;
+  readonly costCenterId: string | null;
 }
 
 export interface CreateAppUserRecord {
@@ -27,6 +29,8 @@ export interface UpdatePersonRecord {
   readonly lastName?: string;
   readonly phone?: string | null;
   readonly positionTitle?: string | null;
+  readonly organizationalUnitId?: string | null;
+  readonly costCenterId?: string | null;
 }
 
 export interface ListUsersQuery {

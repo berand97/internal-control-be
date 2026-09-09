@@ -84,6 +84,7 @@ export interface AppConfig {
   readonly cors: CorsConfig;
   readonly storage: StorageConfig;
   readonly movementSigningSecret: string;
+  readonly settingsEncryptionKey: string;
   readonly features: FeaturesConfig;
 }
 
@@ -254,6 +255,10 @@ const configuration = (): AppConfig => ({
   },
   movementSigningSecret: readString(
     'MOVEMENT_SIGNING_SECRET',
+    readRequiredString('JWT_ACCESS_SECRET'),
+  ),
+  settingsEncryptionKey: readString(
+    'SETTINGS_ENCRYPTION_KEY',
     readRequiredString('JWT_ACCESS_SECRET'),
   ),
   features: {

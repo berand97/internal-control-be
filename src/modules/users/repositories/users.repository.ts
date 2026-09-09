@@ -29,7 +29,10 @@ export class TypeOrmUsersRepository implements UsersRepository {
   ) {}
 
   findByIdWithPerson(id: string): Promise<AppUser | null> {
-    return this.users.findOne({ where: { id }, relations: { person: true } });
+    return this.users.findOne({
+      where: { id },
+      relations: { person: { organizationalUnit: true, costCenter: true } },
+    });
   }
 
   findByUsername(username: string): Promise<AppUser | null> {
@@ -53,7 +56,9 @@ export class TypeOrmUsersRepository implements UsersRepository {
   }> {
     const builder = this.users
       .createQueryBuilder('u')
-      .innerJoinAndSelect('u.person', 'p');
+      .innerJoinAndSelect('u.person', 'p')
+      .leftJoinAndSelect('p.organizationalUnit', 'ou')
+      .leftJoinAndSelect('p.costCenter', 'cc');
 
     if (query.status) {
       builder.andWhere('u.status = :status', { status: query.status });
@@ -71,12 +76,15 @@ export class TypeOrmUsersRepository implements UsersRepository {
     }
     if (query.costCenterId) {
       builder.andWhere(
-        `EXISTS (
-          SELECT 1 FROM user_role ur
-          WHERE ur.user_id = u.id
-            AND ur.scope_type = 'COST_CENTER'
-            AND ur.scope_id = :costCenterId
-            AND ur.revoked_at IS NULL
+        `(
+          p.cost_center_id = :costCenterId
+          OR EXISTS (
+            SELECT 1 FROM user_role ur
+            WHERE ur.user_id = u.id
+              AND ur.scope_type = 'COST_CENTER'
+              AND ur.scope_id = :costCenterId
+              AND ur.revoked_at IS NULL
+          )
         )`,
         { costCenterId: query.costCenterId },
       );

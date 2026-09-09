@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsUUID, MaxLength, ValidateIf } from 'class-validator';
 
 export class UpdateRoleDto {
   @ApiPropertyOptional({ maxLength: 100 })
@@ -15,6 +15,12 @@ export class UpdateRoleDto {
 
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsUUID('4')
-  readonly parentRoleId?: string;
+  readonly parentRoleId?: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID('4')
+  readonly superiorRoleId?: string;
 }

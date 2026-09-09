@@ -36,6 +36,32 @@ describe('PermissionsService', () => {
     ).resolves.toBe(true);
   });
 
+  it('permite permiso :global aunque la adscripción sea de unidad', async () => {
+    vi.mocked(repository.findEffectivePermissions).mockResolvedValue([
+      {
+        permissionCode: 'inventory:read:global',
+        userScopeType: 'ORG_UNIT',
+        userScopeId: 'ou-ingenieria',
+      },
+    ]);
+    await expect(
+      service.userHasPermission('user-1', 'inventory:read:global'),
+    ).resolves.toBe(true);
+  });
+
+  it('permite permiso :global aunque la adscripción sea de centro de costo', async () => {
+    vi.mocked(repository.findEffectivePermissions).mockResolvedValue([
+      {
+        permissionCode: 'inventory:read:global',
+        userScopeType: 'COST_CENTER',
+        userScopeId: 'cc-1',
+      },
+    ]);
+    await expect(
+      service.userHasPermission('user-1', 'inventory:read:global'),
+    ).resolves.toBe(true);
+  });
+
   it('permite permiso de unidad con scope coincidente', async () => {
     await expect(
       service.userHasPermission('user-1', 'asset:update:org_unit', {

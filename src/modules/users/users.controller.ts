@@ -35,6 +35,7 @@ import { CreateUserDto } from './dto/create-user.dto.js';
 import { DelegateUserRoleDto } from './dto/delegate-user-role.dto.js';
 import { QueryUsersDto } from './dto/query-users.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
+import { UserAffiliationOptionsResponseDto } from './dto/responses/user-affiliation-options.response.dto.js';
 import { UserDetailResponseDto } from './dto/responses/user-detail.response.dto.js';
 import { UserRoleResponseDto } from './dto/responses/user-role.response.dto.js';
 import { UsersPageResponseDto } from './dto/responses/users-page.response.dto.js';
@@ -48,6 +49,7 @@ import { UsersService } from './services/users.service.js';
   UserDetailResponseDto,
   UsersPageResponseDto,
   UserRoleResponseDto,
+  UserAffiliationOptionsResponseDto,
 )
 @Feature('users')
 @Controller('users')
@@ -61,6 +63,21 @@ export class UsersController {
   async list(@Query() query: QueryUsersDto): Promise<UsersPageResponseDto> {
     const result = await this.usersService.list(query);
     return UsersPageResponseDto.from(result);
+  }
+
+  @Get('affiliation-options')
+  @RequirePermission('user:manage:global')
+  @ApiOperation({
+    summary: 'Departamentos, centros y roles asignables para crear un usuario',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: envelopedSchema(UserAffiliationOptionsResponseDto),
+  })
+  affiliationOptions(
+    @CurrentUser() actor: AuthenticatedUser,
+  ): Promise<UserAffiliationOptionsResponseDto> {
+    return this.usersService.affiliationOptions(actor);
   }
 
   @Get(':id')

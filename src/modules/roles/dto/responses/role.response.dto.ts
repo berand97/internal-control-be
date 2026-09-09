@@ -17,6 +17,9 @@ export class RoleResponseDto {
   @ApiProperty({ format: 'uuid', nullable: true })
   readonly parentRoleId!: string | null;
 
+  @ApiProperty({ format: 'uuid', nullable: true })
+  readonly superiorRoleId!: string | null;
+
   @ApiProperty()
   readonly hierarchyLevel!: number;
 
@@ -36,6 +39,7 @@ export class RoleResponseDto {
       name: role.name,
       description: role.description,
       parentRoleId: role.parentRoleId,
+      superiorRoleId: role.superiorRoleId,
       hierarchyLevel: role.hierarchyLevel,
       isSystem: role.isSystem,
       isAssignable: role.isAssignable,

@@ -63,6 +63,8 @@ describe('UsersService', () => {
   let hashService: { hash: ReturnType<typeof vi.fn> };
   let mailService: { sendUserInvitation: ReturnType<typeof vi.fn> };
   let permissionsService: Pick<PermissionsService, 'invalidate'>;
+  let authUsersRepository: { findEffectivePermissions: ReturnType<typeof vi.fn> };
+  let privilege: { assertCanAdminister: ReturnType<typeof vi.fn> };
   let service: UsersService;
 
   beforeEach(() => {
@@ -79,8 +81,20 @@ describe('UsersService', () => {
       updateInvitationCredentials: vi.fn(),
       findActiveRoles: vi.fn().mockResolvedValue([]),
       findUserRoleById: vi.fn(),
-      findActiveRole: vi.fn(),
-      insertUserRole: vi.fn(),
+      findActiveRole: vi.fn().mockResolvedValue(buildRole()),
+      insertUserRole: vi.fn(async (record) => {
+        const assignment = new UserRole();
+        assignment.id = 'ur-new';
+        assignment.userId = record.userId;
+        assignment.roleId = record.roleId;
+        assignment.scopeType = record.scopeType;
+        assignment.scopeId = record.scopeId;
+        assignment.validFrom = record.validFrom;
+        assignment.validUntil = record.validUntil;
+        assignment.isDelegated = false;
+        assignment.delegatedFromUserId = null;
+        return assignment;
+      }),
       revokeUserRole: vi.fn(),
     };
     auditLogsRepository = {
@@ -98,10 +112,18 @@ describe('UsersService', () => {
       countActiveByResponsibleUserId: vi.fn().mockResolvedValue(0),
     };
     hashService = { hash: vi.fn().mockResolvedValue('hashed') };
-    mailService = { sendUserInvitation: vi.fn().mockResolvedValue(undefined) };
+    mailService = { sendUserInvitation: vi.fn().mockResolvedValue(true) };
     permissionsService = { invalidate: vi.fn() };
+    authUsersRepository = {
+      findEffectivePermissions: vi.fn().mockResolvedValue([]),
+    };
+    privilege = {
+      assertCanAdminister: vi.fn().mockResolvedValue(undefined),
+      listAssignableFor: vi.fn().mockResolvedValue([]),
+    };
     service = new UsersService(
       usersRepository,
+      authUsersRepository as never,
       auditLogsRepository,
       refreshTokenFamiliesRepository,
       activeLoans,
@@ -110,10 +132,18 @@ describe('UsersService', () => {
       permissionsService as PermissionsService,
       {
         findActiveById: vi.fn().mockResolvedValue({ id: 'ou-1' }),
+        findAll: vi.fn().mockResolvedValue([]),
       } as never,
       {
-        findActiveById: vi.fn().mockResolvedValue({ id: 'cc-1' }),
+        findActiveById: vi
+          .fn()
+          .mockResolvedValue({ id: 'cc-1', organizationalUnitId: 'ou-1' }),
+        findAll: vi.fn().mockResolvedValue([]),
       } as never,
+      {
+        listActiveDefinitions: vi.fn().mockResolvedValue([]),
+      } as never,
+      privilege as never,
     );
   });
 
@@ -183,15 +213,16 @@ describe('UsersService', () => {
     created.status = UserStatus.PendingActivation;
     created.mustChangePassword = true;
     created.username = 'ana.ruiz@unac.edu.co';
+    created.person!.organizationalUnitId = 'ou-1';
     vi.mocked(usersRepository.insertPerson).mockResolvedValue(created.person!);
     vi.mocked(usersRepository.insertUser).mockResolvedValue(created);
     const result = await service.create(
       {
-        documentType: 'CC',
-        documentNumber: '123',
         firstName: 'Ana',
         lastName: 'Ruiz',
         email: 'ana.ruiz@unac.edu.co',
+        organizationalUnitId: 'ou-1',
+        roleId: 'role-viewer',
       },
       actor,
     );
@@ -205,11 +236,61 @@ describe('UsersService', () => {
         mustChangePassword: true,
       }),
     );
+    expect(usersRepository.insertUserRole).toHaveBeenCalledWith(
+      expect.objectContaining({
+        roleId: 'role-viewer',
+        scopeType: 'ORG_UNIT',
+        scopeId: 'ou-1',
+      }),
+    );
     expect(mailService.sendUserInvitation).toHaveBeenCalledWith(
       'ana.ruiz@unac.edu.co',
       'ana.ruiz@unac.edu.co',
       expect.stringMatching(PASSWORD_POLICY_REGEX),
+      expect.objectContaining({
+        roleName: 'Consulta',
+        fullName: 'Ana Ruiz',
+      }),
     );
+    expect(usersRepository.insertPerson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentType: null,
+        documentNumber: null,
+        organizationalUnitId: 'ou-1',
+        costCenterId: null,
+      }),
+    );
+    expect(result.invitationSent).toBe(true);
+  });
+
+  it('exige departamento o centro de costo al crear', async () => {
+    await expect(
+      service.create(
+        {
+          firstName: 'Ana',
+          lastName: 'Ruiz',
+          email: 'ana.ruiz@unac.edu.co',
+          roleId: 'role-viewer',
+        },
+        actor,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.PersonAffiliationRequired });
+  });
+
+  it('rechaza un centro de costo de otro departamento', async () => {
+    await expect(
+      service.create(
+        {
+          firstName: 'Ana',
+          lastName: 'Ruiz',
+          email: 'ana.ruiz@unac.edu.co',
+          organizationalUnitId: 'ou-2',
+          costCenterId: 'cc-1',
+          roleId: 'role-viewer',
+        },
+        actor,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.CostCenterOrgUnitMismatch });
   });
 
   it('reenvía invitación y rota la contraseña temporal', async () => {
@@ -227,6 +308,7 @@ describe('UsersService', () => {
       'ana.ruiz@unac.edu.co',
       'ana.ruiz',
       expect.stringMatching(PASSWORD_POLICY_REGEX),
+      expect.objectContaining({ fullName: 'Ana Ruiz' }),
     );
   });
 
@@ -246,12 +328,11 @@ describe('UsersService', () => {
     await expect(
       service.create(
         {
-          documentType: 'CC',
-          documentNumber: '123',
           firstName: 'Ana',
           lastName: 'Ruiz',
           email: 'ana.ruiz@unac.edu.co',
           username: 'ana.ruiz',
+          roleId: 'role-viewer',
         },
         actor,
       ),
@@ -282,7 +363,26 @@ describe('UsersService', () => {
       actor,
     );
     expect(result.roleCode).toBe('VIEWER');
+    expect(privilege.assertCanAdminister).toHaveBeenCalled();
     expect(permissionsService.invalidate).toHaveBeenCalledWith('user-1');
+  });
+
+  it('no asigna un rol igual o superior al del actor', async () => {
+    const role = buildRole();
+    role.code = 'SUPER_ADMIN';
+    vi.mocked(usersRepository.findByIdWithPerson).mockResolvedValue(
+      buildUser('user-1'),
+    );
+    vi.mocked(usersRepository.findActiveRole).mockResolvedValue(role);
+    privilege.assertCanAdminister.mockRejectedValue(
+      Object.assign(new Error('escalation'), {
+        code: ErrorCode.RolePrivilegeEscalation,
+      }),
+    );
+    await expect(
+      service.assignRole('user-1', { roleId: role.id }, actor),
+    ).rejects.toMatchObject({ code: ErrorCode.RolePrivilegeEscalation });
+    expect(usersRepository.insertUserRole).not.toHaveBeenCalled();
   });
 
   it('rechaza asignación que viola SoD', async () => {

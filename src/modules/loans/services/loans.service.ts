@@ -325,9 +325,10 @@ export class LoansService {
         'destino.nombre': destination?.name ?? '',
         'solicitante.nombre': personName(requester),
         'receptor.nombre': personName(contact),
-        'receptor.documento': contact
-          ? `${contact.documentType} ${contact.documentNumber}`
-          : '',
+        'receptor.documento':
+          contact?.documentType && contact.documentNumber
+            ? `${contact.documentType} ${contact.documentNumber}`
+            : '',
         'aprobador.nombre': actor.username,
       },
     });

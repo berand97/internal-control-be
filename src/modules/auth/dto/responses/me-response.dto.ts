@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { applyFeatureFlags } from '../../../../common/authorization/apply-feature-flags.js';
 import { buildAccessProfile } from '../../../../common/authorization/build-access-profile.js';
 import type { GrantedPermission } from '../../../../common/authorization/granted-permission.type.js';
+import type { NavigationDefinition } from '../../../../common/authorization/navigation.registry.js';
 import type { TokenScope } from '../../../../common/types/authenticated-user.type.js';
 import type { FeatureSnapshot } from '../../../features/feature-catalog.js';
 import { FeatureResponseDto } from '../../../features/dto/feature.response.dto.js';
@@ -106,9 +107,13 @@ export class MeResponseDto {
     lastLogins: ReadonlyArray<AuditLog>,
     granted: ReadonlyArray<GrantedPermission>,
     features: ReadonlyArray<FeatureSnapshot>,
+    catalog: ReadonlyArray<NavigationDefinition>,
   ): MeResponseDto {
     const person = user.person;
-    const access = applyFeatureFlags(buildAccessProfile(granted), features);
+    const access = applyFeatureFlags(
+      buildAccessProfile(granted, catalog),
+      features,
+    );
     return {
       id: user.id,
       username: user.username,

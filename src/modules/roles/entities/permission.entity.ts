@@ -15,6 +15,9 @@ export class Permission {
   @Column({ name: 'resource_type', type: 'varchar', length: 50 })
   resourceType!: string;
 
+  @Column({ name: 'resource_label', type: 'varchar', length: 80 })
+  resourceLabel!: string;
+
   @Column({ name: 'action', type: 'varchar', length: 30 })
   action!: string;
 
@@ -28,4 +31,7 @@ export class Permission {
 
   @Column({ name: 'description', type: 'text', nullable: true })
   description!: string | null;
+
+  @Column({ name: 'is_system', type: 'boolean' })
+  isSystem!: boolean;
 }

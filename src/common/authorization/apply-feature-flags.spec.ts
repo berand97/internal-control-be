@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildAccessProfile } from './build-access-profile.js';
 import { applyFeatureFlags } from './apply-feature-flags.js';
+import { DEFAULT_NAVIGATION_ITEMS } from './navigation.defaults.js';
 
 const granted = [
   {
@@ -29,7 +30,9 @@ const snapshot = (
 
 describe('applyFeatureFlags', () => {
   it('oculta navegación y capabilities del módulo apagado', () => {
-    const profile = applyFeatureFlags(buildAccessProfile([...granted]), [
+    const profile = applyFeatureFlags(
+      buildAccessProfile([...granted], DEFAULT_NAVIGATION_ITEMS),
+      [
       snapshot(false, ['loan']),
       snapshot(true, ['asset']),
     ]);
@@ -43,7 +46,7 @@ describe('applyFeatureFlags', () => {
   });
 
   it('no altera el perfil si todos los módulos están activos', () => {
-    const original = buildAccessProfile([...granted]);
+    const original = buildAccessProfile([...granted], DEFAULT_NAVIGATION_ITEMS);
     const profile = applyFeatureFlags(original, [
       snapshot(true, ['loan']),
       snapshot(true, ['asset']),
