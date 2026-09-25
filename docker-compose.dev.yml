@@ -20,5 +20,16 @@ services:
       timeout: 3s
       retries: 10
 
+  # Misma imagen que producción (docker-compose.yml). GOTENBERG_URL=http://localhost:3100
+  gotenberg:
+    image: gotenberg/gotenberg:8.37.0-libreoffice@sha256:f1d5a60e9ddcfa9b0788ec6ef80b43520ec2a8e9f59d9e2cf965b7416cb09ad1
+    ports:
+      - "127.0.0.1:3100:3000"
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--fail", "http://localhost:3000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   postgres_data:
