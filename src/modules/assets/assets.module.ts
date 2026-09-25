@@ -9,6 +9,8 @@ import { DynamicFieldsModule } from '../dynamic-fields/dynamic-fields.module.js'
 import { Location } from '../locations/entities/location.entity.js';
 import { LocationsModule } from '../locations/locations.module.js';
 import { MovementsModule } from '../movements/movements.module.js';
+import { RolesModule } from '../roles/roles.module.js';
+import { AssetReadScopeGuard } from './asset-read-scope.guard.js';
 import { AssetsController } from './assets.controller.js';
 import { AcquisitionType } from './entities/acquisition-type.entity.js';
 import { AssetCustomValue } from './entities/asset-custom-value.entity.js';
@@ -30,6 +32,7 @@ import { AssetsService } from './services/assets.service.js';
     LocationsModule,
     DynamicFieldsModule,
     MovementsModule,
+    RolesModule,
     TypeOrmModule.forFeature([
       Asset,
       AssetCustomValue,
@@ -48,6 +51,7 @@ import { AssetsService } from './services/assets.service.js';
     AssetsService,
     AssetTimelineService,
     AssetStateService,
+    AssetReadScopeGuard,
     { provide: 'AssetsRepository', useClass: TypeOrmAssetsRepository },
   ],
   exports: ['AssetsRepository', AssetsService, AssetStateService],

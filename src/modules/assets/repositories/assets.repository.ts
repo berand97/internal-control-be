@@ -56,6 +56,13 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
     filters: AssetSearchFilters,
   ): Promise<{ items: ReadonlyArray<Asset>; total: number }> {
     const qb = this.assets.createQueryBuilder('asset');
+    // Alcance de lectura en el WHERE: total y paginación salen del conjunto filtrado.
+    if (filters.scopeCostCenterIds) {
+      qb.andWhere(
+        'asset.current_cost_center_id = ANY(CAST(:scopeCostCenterIds AS uuid[]))',
+        { scopeCostCenterIds: filters.scopeCostCenterIds },
+      );
+    }
     if (filters.q) {
       qb.andWhere(
         `asset.id IN (
@@ -119,8 +126,21 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
     return { items, total };
   }
 
-  findById(id: string): Promise<Asset | null> {
-    return this.assets.findOne({ where: { id } });
+  findById(
+    id: string,
+    scopeCostCenterIds: ReadonlyArray<string> | null = null,
+  ): Promise<Asset | null> {
+    if (!scopeCostCenterIds) {
+      return this.assets.findOne({ where: { id } });
+    }
+    return this.assets
+      .createQueryBuilder('asset')
+      .where('asset.id = :id', { id })
+      .andWhere(
+        'asset.current_cost_center_id = ANY(CAST(:scopeCostCenterIds AS uuid[]))',
+        { scopeCostCenterIds },
+      )
+      .getOne();
   }
 
   findByInternalCode(code: string): Promise<Asset | null> {

@@ -6,6 +6,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import type { QueryAssetsDto } from '../../src/modules/assets/dto/query-assets.dto.js';
 import { AssetsModule } from '../../src/modules/assets/assets.module.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
+import { GLOBAL_COST_CENTER_SCOPE } from '../../src/modules/roles/services/cost-center-scope.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { bootModules, createActor } from './helpers.js';
@@ -92,10 +93,10 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
   it('encuentra un activo por su código heredado, parcial y sin distinguir mayúsculas', async () => {
     const id = await assetIdOf(900001);
     for (const q of ['PLACA-77123', 'placa-771', '77123']) {
-      const page = await assets.list(query({ q }));
+      const page = await assets.list(query({ q }), GLOBAL_COST_CENTER_SCOPE);
       expect(page.items.map((item) => item.id)).toEqual([id]);
     }
-    const [found] = (await assets.list(query({ q: '77123' }))).items;
+    const [found] = (await assets.list(query({ q: '77123' }), GLOBAL_COST_CENTER_SCOPE)).items;
     expect(found?.internalCode).toBe('XLS-900001');
     expect(found?.identifiers.find((item) => item.type === 'LEGACY_CODE')).toMatchObject({
       value: 'PLACA-77123',
@@ -111,10 +112,10 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
       `INSERT INTO asset_identifier (asset_id, identifier_type, value, origin) VALUES ($1, 'VISIBLE_CODE', 'UNAC-004500-7', 'GENERATED')`,
       [id],
     );
-    const page = await assets.list(query({ q: 'unac-0045' }));
+    const page = await assets.list(query({ q: 'unac-0045' }), GLOBAL_COST_CENTER_SCOPE);
     expect(page.items.map((item) => item.id)).toEqual([id]);
     expect(page.items[0]?.identifiers.map((item) => item.type).sort()).toEqual(['OPAQUE_ID', 'VISIBLE_CODE']);
-    const detail = await assets.getById(id);
+    const detail = await assets.getById(id, GLOBAL_COST_CENTER_SCOPE);
     expect(detail.identifiers.find((item) => item.type === 'VISIBLE_CODE')?.value).toBe('UNAC-004500-7');
   });
 
@@ -124,14 +125,14 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
       `SELECT value FROM asset_identifier WHERE asset_id = $1 AND identifier_type = 'OPAQUE_ID'`,
       [id],
     )) as Array<{ value: string }>;
-    expect((await assets.list(query({ q: opaque?.value ?? '' }))).total).toBe(0);
-    const wildcard = await assets.list(query({ q: '100%_' }));
+    expect((await assets.list(query({ q: opaque?.value ?? '' }), GLOBAL_COST_CENTER_SCOPE)).total).toBe(0);
+    const wildcard = await assets.list(query({ q: '100%_' }), GLOBAL_COST_CENTER_SCOPE);
     expect(wildcard.items.map((item) => item.internalCode)).toEqual(['XLS-900005']);
-    expect((await assets.list(query({ q: '%' }))).total).toBe(1);
+    expect((await assets.list(query({ q: '%' }), GLOBAL_COST_CENTER_SCOPE)).total).toBe(1);
   });
 
   it('marca un activo TEMP y filtra por bandera con el conteo correcto', async () => {
-    const temp = await assets.getById(await assetIdOf(900002));
+    const temp = await assets.getById(await assetIdOf(900002), GLOBAL_COST_CENTER_SCOPE);
     expect(temp.dataQualityFlags).toContain('BARCODE_TEMP');
     expect(temp.identifiers.find((item) => item.type === 'LEGACY_CODE')?.value).toBe('TEMP');
 
@@ -139,13 +140,13 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
       id: string;
     }>;
     const costCenterId = center[0]?.id ?? '';
-    const byFlag = (dataQualityFlags: string[]) => assets.list(query({ costCenterId, dataQualityFlags }));
+    const byFlag = (dataQualityFlags: string[]) => assets.list(query({ costCenterId, dataQualityFlags }), GLOBAL_COST_CENTER_SCOPE);
     expect((await byFlag(['BARCODE_TEMP'])).total).toBe(2);
     expect((await byFlag(['BARCODE_EMPTY'])).items.map((item) => item.internalCode)).toEqual(['XLS-900004']);
     expect((await byFlag(['BARCODE_TEMP', 'ACQUISITION_DATE_MISSING'])).items.map((item) => item.internalCode)).toEqual([
       'XLS-900003',
     ]);
-    expect((await assets.list(query({ costCenterId }))).total).toBe(5);
+    expect((await assets.list(query({ costCenterId }), GLOBAL_COST_CENTER_SCOPE)).total).toBe(5);
   });
 
   const realData = process.env['REAL_DATA_TESTS'] === 'true' && existsSync(REAL_ASSETS) && existsSync(REAL_COST_CENTERS);
@@ -161,7 +162,7 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
         ['BARCODE_TEMP', 'ACQUISITION_DATE_MISSING'],
       ];
       const totals = async () =>
-        Promise.all(flags.map(async (dataQualityFlags) => (await assets.list(query({ dataQualityFlags }))).total));
+        Promise.all(flags.map(async (dataQualityFlags) => (await assets.list(query({ dataQualityFlags }), GLOBAL_COST_CENTER_SCOPE)).total));
       const before = await totals();
 
       const centers = await imports.upload(readFileSync(REAL_COST_CENTERS), 'centros de costo.xlsx', actor.id);
@@ -194,7 +195,7 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
          WHERE i.identifier_type = 'LEGACY_CODE' AND i.value = '08252'`,
       )) as Array<{ value: string; asset_id: string }>;
       expect(legacy.length).toBeGreaterThan(0);
-      const found = (await assets.list(query({ q: '08252' }))).items.map((item) => item.id);
+      const found = (await assets.list(query({ q: '08252' }), GLOBAL_COST_CENTER_SCOPE)).items.map((item) => item.id);
       expect(found).toEqual(expect.arrayContaining(legacy.map((row) => row.asset_id)));
     }, 600_000);
   });
