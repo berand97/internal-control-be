@@ -35,6 +35,8 @@ export interface AssetChange {
   readonly alsoWrite?: (manager: EntityManager, current: Asset) => Promise<void>;
 }
 
+const PHYSICAL_CONDITION_UNKNOWN = 'PHYSICAL_CONDITION_UNKNOWN';
+
 @Injectable()
 export class AssetStateService {
   constructor(
@@ -66,12 +68,22 @@ export class AssetStateService {
     }
     change.guard?.(current);
 
+    const verifiesCondition =
+      change.patch.physicalCondition !== undefined &&
+      change.patch.physicalCondition !== null &&
+      current.dataQualityFlags.includes(PHYSICAL_CONDITION_UNKNOWN);
+    const patch = verifiesCondition
+      ? {
+          ...change.patch,
+          dataQualityFlags: current.dataQualityFlags.filter((flag) => flag !== PHYSICAL_CONDITION_UNKNOWN),
+        }
+      : change.patch;
     await this.assetsRepository.update(
       current.id,
-      { ...change.patch, updatedBy: change.actorId },
+      { ...patch, updatedBy: change.actorId },
       manager,
     );
-    const next = { ...current, ...definedOnly(change.patch) };
+    const next = { ...current, ...definedOnly(patch) };
 
     if (change.movement) {
       const from = change.movement.initial ? null : current;

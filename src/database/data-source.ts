@@ -71,6 +71,7 @@ import { AssetSearchIndexes1767225629000 } from './migrations/1767225629000-asse
 import { DocumentAssetLink1767225630000 } from './migrations/1767225630000-document-asset-link.js';
 import { InternalSignature1767225631000 } from './migrations/1767225631000-internal-signature.js';
 import { SignatureReassignment1767225632000 } from './migrations/1767225632000-signature-reassignment.js';
+import { AssetConditionUnverified1767225633000 } from './migrations/1767225633000-asset-condition-unverified.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -162,6 +163,7 @@ const dataSource = new DataSource({
     DocumentAssetLink1767225630000,
     InternalSignature1767225631000,
     SignatureReassignment1767225632000,
+    AssetConditionUnverified1767225633000,
   ],
 });
 

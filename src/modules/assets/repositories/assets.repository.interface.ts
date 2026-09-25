@@ -29,7 +29,7 @@ export interface CreateAssetRecord {
   readonly acquisitionPrice: string;
   readonly currency: string;
   readonly operationalStatus: OperationalStatus;
-  readonly physicalCondition: PhysicalCondition;
+  readonly physicalCondition: PhysicalCondition | null;
   readonly costCenterId: string;
   readonly locationId: string | null;
   readonly responsibleId: string | null;
@@ -49,7 +49,8 @@ export interface UpdateAssetRecord {
   readonly locationId?: string | null;
   readonly costCenterId?: string;
   readonly responsibleId?: string | null;
-  readonly physicalCondition?: PhysicalCondition;
+  readonly physicalCondition?: PhysicalCondition | null;
+  readonly dataQualityFlags?: string[];
   readonly operationalStatus?: OperationalStatus;
   readonly notes?: string | null;
   readonly insurancePolicyNumber?: string | null;

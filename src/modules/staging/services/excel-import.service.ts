@@ -597,7 +597,7 @@ export class ExcelImportService {
          SELECT 'XLS-' || src.legacy_id, left(src.barcode, 50), left(src.serial, 100), left(src.description, 500),
            left(src.model, 150), (SELECT id FROM asset_category WHERE code = $1),
            (SELECT id FROM acquisition_type WHERE code = $2), src.purchase_date,
-           left(src.document, 100), coalesce(src.price, 0), 'COP', 'IN_USE', 'GOOD',
+           left(src.document, 100), coalesce(src.price, 0), 'COP', 'IN_USE', NULL,
            src.cost_center_id, 'STRAIGHT_LINE', src.useful_life, 0, src.notes, $3, $3,
            array_remove(ARRAY[
              CASE WHEN upper(src.barcode) = 'TEMP' THEN 'BARCODE_TEMP' END,

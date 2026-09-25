@@ -151,8 +151,8 @@ export class AssetResponseDto {
   @ApiProperty({ enum: OperationalStatus })
   readonly operationalStatus!: OperationalStatus;
 
-  @ApiProperty({ enum: PhysicalCondition })
-  readonly physicalCondition!: PhysicalCondition;
+  @ApiProperty({ enum: PhysicalCondition, nullable: true, description: 'null: nadie ha verificado el estado físico' })
+  readonly physicalCondition!: PhysicalCondition | null;
 
   @ApiProperty({ enum: DepreciationMethod })
   readonly depreciationMethod!: DepreciationMethod;

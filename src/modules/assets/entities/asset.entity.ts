@@ -60,8 +60,9 @@ export class Asset {
     type: 'enum',
     enum: PhysicalCondition,
     enumName: 'asset_physical_condition',
+    nullable: true,
   })
-  physicalCondition!: PhysicalCondition;
+  physicalCondition!: PhysicalCondition | null;
 
   @Column({ name: 'current_cost_center_id', type: 'uuid' })
   costCenterId!: string;
