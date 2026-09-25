@@ -76,6 +76,8 @@ export interface AssetSearchFilters {
   readonly acquiredTo?: string;
   readonly hasBarcode?: boolean;
   readonly dataQualityFlags?: ReadonlyArray<string>;
+  /** Alcance de lectura: null = todos; arreglo = solo activos de esos centros. */
+  readonly scopeCostCenterIds: ReadonlyArray<string> | null;
   readonly page: number;
   readonly pageSize: number;
   readonly sortBy: string;
@@ -129,7 +131,11 @@ export interface AssetsRepository {
   findPage(
     filters: AssetSearchFilters,
   ): Promise<{ items: ReadonlyArray<Asset>; total: number }>;
-  findById(id: string): Promise<Asset | null>;
+  /** Con scopeCostCenterIds, un activo fuera de esos centros se trata como inexistente. */
+  findById(
+    id: string,
+    scopeCostCenterIds?: ReadonlyArray<string> | null,
+  ): Promise<Asset | null>;
   findByInternalCode(code: string): Promise<Asset | null>;
   insert(record: CreateAssetRecord, manager?: EntityManager): Promise<Asset>;
   update(

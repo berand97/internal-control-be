@@ -4,6 +4,10 @@ import type {
   EffectivePermission,
   PermissionScope,
 } from '../types/effective-permission.type.js';
+import {
+  type CostCenterScope,
+  resolveCostCenterScope,
+} from './cost-center-scope.js';
 import { PermissionsCache } from './permissions-cache.service.js';
 
 const CACHE_TTL_SECONDS = 60;
@@ -45,6 +49,23 @@ export class PermissionsService {
       }
       return permission.userScopeId === scope.id;
     });
+  }
+
+  /**
+   * Centros de costo sobre los que el usuario puede usar `scopedCode`, o
+   * GLOBAL si tiene `globalCode`. Genérico por código de permiso: lo usan la
+   * lectura de activos y lo reutilizará la aprobación de préstamos.
+   */
+  async costCenterScope(
+    userId: string,
+    globalCode: string,
+    scopedCode: string,
+  ): Promise<CostCenterScope> {
+    return resolveCostCenterScope(
+      await this.getEffectivePermissions(userId),
+      globalCode,
+      scopedCode,
+    );
   }
 
   async getEffectivePermissions(

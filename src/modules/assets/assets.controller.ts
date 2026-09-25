@@ -10,6 +10,7 @@ import {
   Post,
   Query,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -35,6 +36,12 @@ import {
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
+import type { ReadableCostCenterScope } from '../roles/services/cost-center-scope.js';
+import {
+  AssetReadCatalog,
+  AssetReadScope,
+  AssetReadScopeGuard,
+} from './asset-read-scope.guard.js';
 import { BulkCreateAssetsDto } from './dto/bulk-create-assets.dto.js';
 import { ChangeAssetStatusDto } from './dto/change-asset-status.dto.js';
 import { CommitAssetImportDto } from './dto/commit-asset-import.dto.js';
@@ -56,6 +63,61 @@ import { WriteOffAssetDto } from './dto/write-off-asset.dto.js';
 import { ImportMode } from './enums/import-mode.enum.js';
 import { AssetTimelineService } from './services/asset-timeline.service.js';
 import { AssetsService } from './services/assets.service.js';
+
+const READ_SCOPE_DESCRIPTION =
+  'Requiere asset:read:global (todos los activos) o asset:read:org_unit (solo activos cuyo centro de costo actual está en las asignaciones de rol vigentes del usuario con alcance COST_CENTER).';
+
+const READ_FORBIDDEN_RESPONSE = {
+  status: 403,
+  description:
+    'INSUFFICIENT_PERMISSIONS: no tiene asset:read:global ni asset:read:org_unit. SCOPE_NO_COST_CENTER: tiene asset:read:org_unit pero ninguna asignación vigente con alcance COST_CENTER. SCOPE_ORG_UNIT_UNRESOLVED: tiene asset:read:org_unit solo por asignaciones con alcance ORG_UNIT, que aún no dan centros de costo. Las dos últimas traen action CONTACT_SUPPORT.',
+  content: {
+    'application/json': {
+      schema: errorEnvelopeSchema(),
+      examples: {
+        sinCentro: {
+          value: {
+            type: 'ERROR',
+            action: 'CONTACT_SUPPORT',
+            error: {
+              code: 'SCOPE_NO_COST_CENTER',
+              message:
+                'Tu rol solo da acceso a los centros de costo que tengas asignados y no tienes ninguno. Pide a Control Interno que te asigne el rol sobre tu centro de costo.',
+            },
+          },
+        },
+        unidadSinResolver: {
+          value: {
+            type: 'ERROR',
+            action: 'CONTACT_SUPPORT',
+            error: {
+              code: 'SCOPE_ORG_UNIT_UNRESOLVED',
+              message:
+                'Tu rol está asignado a una unidad organizacional, pero aún no está definido qué centros de costo cubre una unidad, así que no da acceso. Pide a Control Interno que te asigne el rol sobre un centro de costo.',
+            },
+          },
+        },
+        sinPermiso: {
+          value: {
+            type: 'ERROR',
+            action: 'CANCEL',
+            error: {
+              code: 'INSUFFICIENT_PERMISSIONS',
+              message: 'Requiere permiso asset:read:global o asset:read:org_unit',
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const NOT_FOUND_RESPONSE = {
+  status: 404,
+  description:
+    'RESOURCE_NOT_FOUND: el activo no existe o está fuera del alcance del usuario (respuesta idéntica en ambos casos).',
+  schema: errorEnvelopeSchema(),
+};
 
 export interface CsvUpload {
   readonly originalname: string;
@@ -83,53 +145,77 @@ export class AssetsController {
   ) {}
 
   @Get('acquisition-types')
-  @RequirePermission('asset:read:global')
-  @ApiOperation({ summary: 'Catálogo de tipos de adquisición' })
+  @UseGuards(AssetReadScopeGuard)
+  @AssetReadCatalog()
+  @ApiOperation({
+    summary: 'Catálogo de tipos de adquisición',
+    description:
+      'Catálogo sin datos de activos: basta asset:read:global o asset:read:org_unit, aunque el usuario no alcance ningún centro de costo.',
+  })
   @ApiResponse({
     status: 200,
     schema: envelopedSchema(AcquisitionTypeResponseDto),
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'INSUFFICIENT_PERMISSIONS: no tiene asset:read:global ni asset:read:org_unit.',
+    schema: errorEnvelopeSchema(),
   })
   acquisitionTypes(): Promise<ReadonlyArray<AcquisitionTypeResponseDto>> {
     return this.assetsService.listAcquisitionTypes();
   }
 
   @Get()
-  @RequirePermission('asset:read:global')
-  @ApiOperation({ summary: 'Listar activos' })
+  @UseGuards(AssetReadScopeGuard)
+  @ApiOperation({
+    summary: 'Listar activos',
+    description: `${READ_SCOPE_DESCRIPTION} El alcance se aplica en la consulta: total, hasNext y la paginación son del conjunto visible. Filtrar por un costCenterId fuera de alcance devuelve una lista vacía.`,
+  })
   @ApiResponse({ status: 200, schema: envelopedSchema(AssetListResponseDto) })
-  list(@Query() query: QueryAssetsDto): Promise<AssetListResponseDto> {
-    return this.assetsService.list(query);
+  @ApiResponse(READ_FORBIDDEN_RESPONSE)
+  list(
+    @Query() query: QueryAssetsDto,
+    @AssetReadScope() scope: ReadableCostCenterScope,
+  ): Promise<AssetListResponseDto> {
+    return this.assetsService.list(query, scope);
   }
 
   @Get(':id/timeline')
-  @RequirePermission('asset:read:global')
+  @UseGuards(AssetReadScopeGuard)
   @ApiOperation({
     summary: 'Historia del activo',
-    description:
-      'Compra, movimientos, documentos generados, fotos y tomas físicas en orden cronológico. Cada evento trae documentId cuando tiene documento, descargable en GET /documents/:id/pdf.',
+    description: `Compra, movimientos, documentos generados, fotos y tomas físicas en orden cronológico. Cada evento trae documentId cuando tiene documento, descargable en GET /documents/:id/pdf. ${READ_SCOPE_DESCRIPTION}`,
   })
   @ApiResponse({ status: 200, schema: envelopedSchema(AssetTimelineResponseDto) })
-  @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
+  @ApiResponse(READ_FORBIDDEN_RESPONSE)
+  @ApiResponse(NOT_FOUND_RESPONSE)
   timeline(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Query() query: QueryTimelineDto,
+    @AssetReadScope() scope: ReadableCostCenterScope,
   ): Promise<AssetTimelineResponseDto> {
-    return this.timelineService.timeline(id, {
-      page: query.page,
-      pageSize: query.pageSize,
-      order: query.order,
-    });
+    return this.timelineService.timeline(
+      id,
+      {
+        page: query.page,
+        pageSize: query.pageSize,
+        order: query.order,
+      },
+      scope,
+    );
   }
 
   @Get(':id')
-  @RequirePermission('asset:read:global')
-  @ApiOperation({ summary: 'Detalle de activo' })
+  @UseGuards(AssetReadScopeGuard)
+  @ApiOperation({ summary: 'Detalle de activo', description: READ_SCOPE_DESCRIPTION })
   @ApiResponse({ status: 200, schema: envelopedSchema(AssetResponseDto) })
-  @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
+  @ApiResponse(READ_FORBIDDEN_RESPONSE)
+  @ApiResponse(NOT_FOUND_RESPONSE)
   getById(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @AssetReadScope() scope: ReadableCostCenterScope,
   ): Promise<AssetResponseDto> {
-    return this.assetsService.getById(id);
+    return this.assetsService.getById(id, scope);
   }
 
   @Post()
