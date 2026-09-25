@@ -105,6 +105,7 @@ export enum ErrorCode {
   SignatureSignerUnassigned = 'SIGNATURE_SIGNER_UNASSIGNED',
   SignatureMfaRequired = 'SIGNATURE_MFA_REQUIRED',
   SignatureSessionInvalid = 'SIGNATURE_SESSION_INVALID',
+  SignatureReassignAfterSigning = 'SIGNATURE_REASSIGN_AFTER_SIGNING',
 
   InventoryScopeOverlap = 'INVENTORY_SCOPE_OVERLAP',
   InventoryUnverifiedExceedsThreshold = 'INVENTORY_UNVERIFIED_EXCEEDS',

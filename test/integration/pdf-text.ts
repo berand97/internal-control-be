@@ -43,3 +43,31 @@ export const sampleLeftovers = (text: string, sample: Sample, options: { readonl
   }
   return found;
 };
+
+export class DocxTextPdfConverter {
+  async toPdf(docx: Buffer): Promise<Buffer> {
+    const { default: PizZip } = await import('pizzip');
+    const { PDFDocument, StandardFonts } = await import('pdf-lib');
+    const zip = new PizZip(docx);
+    const lines = ['word/header1.xml', 'word/document.xml']
+      .flatMap((name) => [...(zip.file(name)?.asText() ?? '').matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)])
+      .map((paragraph) => [...paragraph[0].matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((run) => run[1]).join(''))
+      .map((line) => line.replace(/[^\x20-\x7E\xA0-\xFF]/g, '?'))
+      .filter((line) => line.trim() !== '');
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    let page = pdf.addPage([612, 792]);
+    let y = 760;
+    for (const line of lines) {
+      for (let start = 0; start < line.length; start += 110) {
+        if (y < 40) {
+          page = pdf.addPage([612, 792]);
+          y = 760;
+        }
+        page.drawText(line.slice(start, start + 110), { x: 30, y, size: 8, font });
+        y -= 11;
+      }
+    }
+    return Buffer.from(await pdf.save());
+  }
+}

@@ -13,7 +13,6 @@ import type {
   SignatureCapture,
   SignatureProvider,
   SignatureRejection,
-  SignerReassignment,
   SignatureRequest,
   SignatureStatus,
   SignerStatus,
@@ -218,20 +217,41 @@ export class InternalSignatureProvider implements SignatureProvider {
     });
   }
 
-  async reassign(externalReference: string, signer: SignerReassignment, manager: EntityManager): Promise<void> {
+  async reissue(externalReference: string, input: SignatureRequest, manager: EntityManager): Promise<void> {
     const envelope = await this.envelope(manager, externalReference, true);
-    if (envelope.status !== 'PENDING') {
-      throw new ApiException(ErrorCode.InvalidState, 'La solicitud de firma ya está cerrada');
+    const current = await this.signers(manager, envelope.id);
+    if (envelope.status !== 'PENDING' || current.some((signer) => signer.status !== 'PENDING')) {
+      throw new ApiException(ErrorCode.SignatureReassignAfterSigning);
     }
-    const updated = (await manager.query(
-      `WITH updated AS (
-         UPDATE signature_envelope_signer SET person_id = $3, name = $4, document_number = $5
-         WHERE envelope_id = $1 AND sign_order = $2 AND status = 'PENDING' RETURNING sign_order
-       ) SELECT sign_order FROM updated`,
-      [envelope.id, signer.order, signer.personId, signer.name, signer.documentNumber],
-    )) as Array<{ sign_order: number }>;
-    if (updated.length === 0) {
-      throw new ApiException(ErrorCode.InvalidState, `El firmante ${signer.order} no está pendiente`);
+    const originalSha256 = sha256(input.pdf);
+    if (originalSha256 !== input.pdfSha256) {
+      throw new ApiException(ErrorCode.DocumentTampered, 'El PDF recibido no coincide con el hash del documento');
+    }
+    const signers = [...input.signers].sort((a, b) => a.order - b.order);
+    const prepared = await prepareForSignature(input.pdf, {
+      title: input.title ?? `${input.formatKey} ${input.documentNumber}`,
+      verifyUrl: this.verificationUrl(envelope.verification_code),
+      verificationCode: envelope.verification_code,
+      originalSha256,
+      slots: signers.map((signer) => ({ order: signer.order, label: signer.roleLabel ?? signer.role })),
+    });
+    const stored = await this.storage.put({
+      key: `signatures/${input.documentId}/${envelope.verification_code}/v0-${originalSha256.slice(0, 12)}.pdf`,
+      body: prepared,
+      contentType: 'application/pdf',
+    });
+    await manager.query(
+      `UPDATE signature_envelope SET original_pdf_sha256 = $2, prepared_pdf_sha256 = $3, current_pdf_driver = $4,
+         current_pdf_key = $5, current_pdf_sha256 = $3
+       WHERE id = $1`,
+      [envelope.id, originalSha256, stored.checksumSha256, stored.driver, stored.key],
+    );
+    for (const signer of signers) {
+      await manager.query(
+        `UPDATE signature_envelope_signer SET person_id = $3, name = $4, document_number = $5, role_label = $6
+         WHERE envelope_id = $1 AND sign_order = $2`,
+        [envelope.id, signer.order, signer.personId, signer.name, signer.documentNumber, signer.roleLabel ?? null],
+      );
     }
   }
 

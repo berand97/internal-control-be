@@ -280,7 +280,12 @@ describe.runIf(Boolean(process.env['GOTENBERG_URL']))('Motor de documentos con G
         actor.id,
       );
       const document = await engine.generate(
-        { formatKey: 'OCI-01-55', costCenterId: await scalar<string>(dataSource, `SELECT id FROM cost_center WHERE external_code = '4330'`) },
+        {
+          formatKey: 'OCI-01-55',
+          costCenterId: await scalar<string>(dataSource, `SELECT id FROM cost_center WHERE external_code = '4330'`),
+          responsiblePersonId: actor.personId,
+          signers: { AUDITA: actor.personId },
+        },
         actor.id,
       );
       const pdf = await engine.download(document.id, 'pdf', actor.id);

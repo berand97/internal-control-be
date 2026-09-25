@@ -18,7 +18,7 @@ import {
   periodFor,
 } from '../domain/document-formats.js';
 import { PDF_CONVERTER, type PdfConverter } from '../pdf/pdf-converter.js';
-import { SIGNATURE_PROVIDER, type SignatureProvider } from '../signature/signature-provider.js';
+import { SIGNATURE_PROVIDER, type SignatureProvider, type SignatureRequest } from '../signature/signature-provider.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -65,6 +65,26 @@ interface TemplateRow {
   effective_date: string;
   storage_driver: StorageDriver;
   storage_key: string;
+}
+
+interface ActParty {
+  nombre: string;
+  documento: string;
+  cargo: string;
+}
+
+interface ActSigner extends ActParty {
+  orden: number;
+  rol: string;
+  etiqueta: string;
+  personId: string | null;
+}
+
+interface ActContext {
+  firmantes: ActSigner[];
+  responsable: ActParty;
+  auditor: ActParty;
+  [key: string]: unknown;
 }
 
 interface SlotRow {
@@ -302,11 +322,25 @@ export class DocumentEngineService {
       return;
     }
     const pdf = await this.storage.getFrom(document.pdf_driver, document.pdf_key);
-    const signers = (await this.dataSource.query(
+    const { externalReference } = await this.signatures.request(
+      await this.signatureRequestFor(this.dataSource.manager, document, pdf),
+    );
+    await this.dataSource.query(
+      'UPDATE document SET signature_provider = $2, signature_reference = $3 WHERE id = $1',
+      [documentId, this.signatures.name, externalReference],
+    );
+  }
+
+  private async signatureRequestFor(
+    manager: EntityManager,
+    document: { readonly id: string; readonly number: string; readonly format_key: string },
+    pdf: Buffer,
+  ): Promise<SignatureRequest> {
+    const signers = (await manager.query(
       `SELECT s.sign_order, s.role, s.signer_person_id, s.signer_name, s.signer_document, p.email
        FROM document_signature s LEFT JOIN person p ON p.id = s.signer_person_id
        WHERE s.document_id = $1 ORDER BY s.sign_order`,
-      [documentId],
+      [document.id],
     )) as Array<{
       sign_order: number;
       role: string;
@@ -316,8 +350,8 @@ export class DocumentEngineService {
       email: string | null;
     }>;
     const format = this.requireFormat(document.format_key);
-    const { externalReference } = await this.signatures.request({
-      documentId,
+    return {
+      documentId: document.id,
       documentNumber: document.number,
       formatKey: document.format_key,
       title: `${format.sgcCode} · ${format.name} · ${document.number}`,
@@ -332,11 +366,7 @@ export class DocumentEngineService {
         documentNumber: signer.signer_document,
         email: signer.email,
       })),
-    });
-    await this.dataSource.query(
-      'UPDATE document SET signature_provider = $2, signature_reference = $3 WHERE id = $1',
-      [documentId, this.signatures.name, externalReference],
-    );
+    };
   }
 
   async syncSignatures(documentId: string) {
@@ -447,21 +477,34 @@ export class DocumentEngineService {
       throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la persona indicada');
     }
     await this.dataSource.transaction(async (manager) => {
-      const [locked] = (await manager.query('SELECT status, signature_reference FROM document WHERE id = $1 FOR UPDATE', [
-        documentId,
-      ])) as Array<{ status: string; signature_reference: string | null }>;
+      const [locked] = (await manager.query(
+        `SELECT id, number, period, format_key, status, data, template_version_id, pdf_hash, signature_reference
+         FROM document WHERE id = $1 FOR UPDATE`,
+        [documentId],
+      )) as Array<{
+        id: string;
+        number: string;
+        period: string;
+        format_key: string;
+        status: string;
+        data: ActContext;
+        template_version_id: string;
+        pdf_hash: string;
+        signature_reference: string | null;
+      }>;
       if (locked?.status !== 'PENDING_SIGNATURE') {
         throw new ApiException(ErrorCode.InvalidState, 'El documento no está pendiente de firma');
       }
-      const [slot] = (await manager.query(
-        'SELECT role, signer_person_id, status FROM document_signature WHERE document_id = $1 AND sign_order = $2 FOR UPDATE',
-        [documentId, order],
-      )) as Array<{ role: string; signer_person_id: string | null; status: string }>;
+      const slots = (await manager.query(
+        'SELECT sign_order, role, signer_person_id, status FROM document_signature WHERE document_id = $1 ORDER BY sign_order FOR UPDATE',
+        [documentId],
+      )) as Array<{ sign_order: number; role: string; signer_person_id: string | null; status: string }>;
+      const slot = slots.find((item) => item.sign_order === order);
       if (!slot) {
         throw new ApiException(ErrorCode.ResourceNotFound, `El documento no tiene el firmante ${order}`);
       }
-      if (slot.status !== 'PENDING') {
-        throw new ApiException(ErrorCode.InvalidState, `El firmante ${order} ya no está pendiente`);
+      if (slots.some((item) => item.status !== 'PENDING')) {
+        throw new ApiException(ErrorCode.SignatureReassignAfterSigning);
       }
       if (slot.signer_person_id === personId) {
         throw new ApiException(ErrorCode.ValidationFailed, 'La persona ya está asignada a ese turno');
@@ -471,10 +514,11 @@ export class DocumentEngineService {
          WHERE document_id = $1 AND sign_order = $2`,
         [documentId, order, personId, personName(person) || null, person.document_number],
       );
+      const reissued = await this.rerender(manager, locked, format, order, person);
       await manager.query(
         `INSERT INTO document_signature_reassignment (document_id, sign_order, role, from_person_id, to_person_id, reason,
-           reassigned_by, session_id, ip_address, user_agent)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+           reassigned_by, session_id, ip_address, user_agent, previous_pdf_hash, new_pdf_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           documentId,
           order,
@@ -486,20 +530,85 @@ export class DocumentEngineService {
           actor.sessionId ?? null,
           context.ipAddress,
           context.userAgent,
+          locked.pdf_hash,
+          reissued.pdfHash,
         ],
       );
       if (locked.signature_reference) {
-        if (!this.signatures.reassign) {
-          throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no permite reasignar firmantes`);
+        if (!this.signatures.reissue) {
+          throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no permite reemitir el acta`);
         }
-        await this.signatures.reassign(
+        await this.signatures.reissue(
           locked.signature_reference,
-          { order, personId, name: personName(person) || null, documentNumber: person.document_number },
+          await this.signatureRequestFor(manager, locked, reissued.pdf),
           manager,
         );
       }
     });
     return this.detail(documentId, actor);
+  }
+
+  private async rerender(
+    manager: EntityManager,
+    document: {
+      readonly id: string;
+      readonly number: string;
+      readonly period: string;
+      readonly format_key: string;
+      readonly data: ActContext;
+      readonly template_version_id: string;
+    },
+    format: DocumentFormat,
+    order: number,
+    person: PersonRow,
+  ): Promise<{ readonly pdf: Buffer; readonly pdfHash: string }> {
+    const spec = format.signers.find((item) => item.order === order);
+    const signer = {
+      nombre: personName(person),
+      documento: person.document_number ?? '',
+      cargo: person.position_title ?? spec?.label ?? '',
+    };
+    const firmantes = document.data.firmantes.map((item) =>
+      item.orden === order ? { ...item, personId: person.id, ...signer } : item,
+    );
+    const auditor = firmantes.find((item) => item.rol === 'AUDITA' || item.rol === 'CONTROL_INTERNO');
+    const data: ActContext = {
+      ...document.data,
+      firmantes,
+      ...(spec?.source === 'RESPONSIBLE' ? { responsable: signer } : {}),
+      auditor: auditor ? { nombre: auditor.nombre, documento: auditor.documento, cargo: auditor.cargo } : document.data.auditor,
+    };
+    const [template] = (await manager.query(
+      'SELECT storage_driver, storage_key FROM document_template_version WHERE id = $1',
+      [document.template_version_id],
+    )) as Array<{ storage_driver: StorageDriver; storage_key: string }>;
+    if (!template) {
+      throw new ApiException(ErrorCode.TemplateNotActive, 'No se encontró la versión de plantilla del acta');
+    }
+    const [revisions] = (await manager.query(
+      'SELECT count(*)::int AS total FROM document_signature_reassignment WHERE document_id = $1',
+      [document.id],
+    )) as Array<{ total: number }>;
+    const docx = renderDocx(await this.storage.getFrom(template.storage_driver, template.storage_key), data);
+    const pdf = await this.pdf.toPdf(docx, `${format.key}-${document.number}.docx`);
+    const base = `documents/${format.key}/${document.period || 'unico'}/${document.number}-r${(revisions?.total ?? 0) + 1}`;
+    const storedDocx = await this.storage.put({ key: `${base}.docx`, body: docx, contentType: DOCX_MIME });
+    const storedPdf = await this.storage.put({ key: `${base}.pdf`, body: pdf, contentType: 'application/pdf' });
+    await manager.query(
+      `UPDATE document SET data = $2, docx_driver = $3, docx_key = $4, docx_hash = $5, pdf_driver = $6, pdf_key = $7, pdf_hash = $8
+       WHERE id = $1`,
+      [
+        document.id,
+        JSON.stringify(data),
+        storedDocx.driver,
+        storedDocx.key,
+        storedDocx.checksumSha256,
+        storedPdf.driver,
+        storedPdf.key,
+        storedPdf.checksumSha256,
+      ],
+    );
+    return { pdf, pdfHash: storedPdf.checksumSha256 };
   }
 
   private async viewerState(
@@ -644,7 +753,8 @@ export class DocumentEngineService {
       `SELECT r.sign_order AS "order", r.role, r.from_person_id AS "fromPersonId", r.to_person_id AS "toPersonId",
               nullif(trim(concat_ws(' ', pf.first_name, pf.last_name)), '') AS "fromName",
               nullif(trim(concat_ws(' ', pt.first_name, pt.last_name)), '') AS "toName",
-              r.reason, r.reassigned_by AS "reassignedBy", r.reassigned_at AS "reassignedAt"
+              r.reason, r.reassigned_by AS "reassignedBy", r.reassigned_at AS "reassignedAt",
+              r.previous_pdf_hash AS "previousPdfSha256", r.new_pdf_hash AS "newPdfSha256"
        FROM document_signature_reassignment r
        LEFT JOIN person pf ON pf.id = r.from_person_id
        JOIN person pt ON pt.id = r.to_person_id
@@ -788,6 +898,13 @@ export class DocumentEngineService {
         cargo: person?.position_title ?? spec.label,
       };
     });
+    const unassigned = signers.filter((signer) => !signer.personId).map((signer) => signer.etiqueta);
+    if (unassigned.length > 0) {
+      throw new ApiException(
+        ErrorCode.ValidationFailed,
+        `El acta nombra a sus firmantes: falta asignar ${unassigned.join(', ')}`,
+      );
+    }
     const auditor = signers.find((signer) => signer.rol === 'AUDITA' || signer.rol === 'CONTROL_INTERNO');
 
     return {

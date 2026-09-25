@@ -509,6 +509,12 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'REAUTH',
     message: 'La sesión ya no está vigente; inicie sesión de nuevo para firmar',
   },
+  [ErrorCode.SignatureReassignAfterSigning]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message:
+      'El acta ya tiene firmas: cambiar un firmante alteraría lo que otros firmaron. Rechace el acta y genere una nueva',
+  },
   [ErrorCode.InventoryScopeOverlap]: {
     httpStatus: 406,
     action: 'CANCEL',

@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { PDFDocument } from 'pdf-lib';
 import QRCode from 'qrcode';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
@@ -12,20 +11,13 @@ import { applyTrustProxy } from '../../src/common/http/trust-proxy.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
+import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { createActor, scalar, useSharedStorage } from './helpers.js';
+import { DocxTextPdfConverter, pdfText, squash } from './pdf-text.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 const FORMAT = 'OCI-17-90-BAJA';
-
-class BlankPdfConverter implements PdfConverter {
-  async toPdf(): Promise<Buffer> {
-    const pdf = await PDFDocument.create();
-    pdf.addPage([612, 792]);
-    return Buffer.from(await pdf.save());
-  }
-}
 
 interface Person {
   userId: string;
@@ -42,6 +34,7 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
   let responsible: Person;
   let auditor: Person;
   let stranger: Person;
+  let replacement: Person;
   let rubric: string;
 
   const http = () => request(app.getHttpServer());
@@ -106,7 +99,7 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PDF_CONVERTER)
-      .useValue(new BlankPdfConverter())
+      .useValue(new DocxTextPdfConverter())
       .compile();
     app = moduleRef.createNestApplication<NestExpressApplication>();
     applyTrustProxy(app, app.get(ConfigService<AppConfig, true>).getOrThrow('trustProxy', { infer: true }));
@@ -130,6 +123,7 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     responsible = await person('Responsable', true);
     auditor = await person('Auditora', true);
     stranger = await person('Ajeno', true);
+    replacement = await person('Reemplazo', true);
     rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica', { width: 120 })).toString('base64')}`;
     await engine.uploadTemplate(
       FORMAT,
@@ -145,14 +139,22 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
 
   it('cada situación devuelve su propio código, con el mismo HTTP 403', async () => {
     const assigned = await generate(true);
-    const unassigned = await generate(false);
+    await expect(generate(false)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    const unassigned = await generate(true);
+    await dataSource.query(
+      `UPDATE document_signature SET signer_person_id = NULL, signer_name = NULL WHERE document_id = $1 AND sign_order = 2`,
+      [unassigned.id],
+    );
+    await dataSource.query(
+      `UPDATE signature_envelope_signer SET person_id = NULL WHERE sign_order = 2
+       AND envelope_id = (SELECT id FROM signature_envelope WHERE document_id = $1)`,
+      [unassigned.id],
+    );
 
     const notDesignated = await sign(assigned.id, 1, stranger);
     expect([notDesignated.status, notDesignated.body.error.code]).toEqual([403, 'SIGNATURE_NOT_DESIGNATED_SIGNER']);
 
     await sign(assigned.id, 1, responsible).expect(200);
-    const beforeTurn = await sign(unassigned.id, 2, auditor);
-    expect([beforeTurn.status, beforeTurn.body.error.code]).toEqual([403, 'SIGNATURE_SIGNER_UNASSIGNED']);
     await sign(unassigned.id, 1, responsible).expect(200);
     const unassignedTurn = await sign(unassigned.id, 2, auditor);
     expect([unassignedTurn.status, unassignedTurn.body.error.code]).toEqual([403, 'SIGNATURE_SIGNER_UNASSIGNED']);
@@ -199,30 +201,31 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     expect(done.viewer).toMatchObject({ isCurrentSigner: false, canSign: false, nextOrder: null });
   });
 
-  it('reasignar un turno sin persona queda como evidencia y deja avanzar el documento', async () => {
-    const document = await generate(false);
-    await sign(document.id, 1, responsible).expect(200);
-    expect((await detail(document.id, director)).currentTurn).toMatchObject({ order: 2, personId: null, assigned: false });
-    const notYetSigner = await http().get(`/api/v1/documents/${document.id}`).set('Authorization', `Bearer ${auditor.token}`);
-    expect(notYetSigner.status).toBe(403);
+  it('reasignar antes de la primera firma reemite el acta y el PDF final nombra a quien firmó', async () => {
+    const document = await generate(true);
+    const envelopeBefore = (await dataSource.query('SELECT verification_code, current_pdf_sha256 FROM signature_envelope WHERE document_id = $1', [document.id])) as Array<{ verification_code: string; current_pdf_sha256: string }>;
+    const pdfBefore = await scalar<string>(dataSource, 'SELECT pdf_hash FROM document WHERE id = $1', [document.id]);
+    const originalText = squash(await pdfText((await engine.download(document.id, 'pdf', director.userId)).body));
+    expect(originalText).toContain('Auditora Turnos');
 
-    const denied = await reassign(document.id, 2, stranger, auditor.personId);
+    const denied = await reassign(document.id, 2, stranger, replacement.personId);
     expect([denied.status, denied.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
-    const signedTurn = await reassign(document.id, 1, director, auditor.personId);
-    expect(signedTurn.body.error.code).toBe('INVALID_STATE');
 
-    const reassigned = await reassign(document.id, 2, director, auditor.personId);
+    const reassigned = await reassign(document.id, 2, director, replacement.personId);
     expect(reassigned.status).toBe(200);
-    expect(reassigned.body.data.currentTurn).toMatchObject({ order: 2, personId: auditor.personId, assigned: true });
+    expect(reassigned.body.data.number).toBe(document.number);
+    expect(reassigned.body.data.currentTurn).toMatchObject({ order: 1, personId: responsible.personId });
     expect(reassigned.body.data.reassignments).toEqual([
       expect.objectContaining({
         order: 2,
         role: 'AUDITA',
-        fromPersonId: null,
-        toPersonId: auditor.personId,
-        toName: 'Auditora Turnos',
+        fromPersonId: auditor.personId,
+        toPersonId: replacement.personId,
+        toName: 'Reemplazo Turnos',
         reason: 'La auditora designada está en vacaciones',
         reassignedBy: director.userId,
+        previousPdfSha256: pdfBefore,
+        newPdfSha256: expect.not.stringMatching(pdfBefore),
       }),
     ]);
     const [evidence] = (await dataSource.query(
@@ -230,14 +233,24 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
       [document.id],
     )) as Array<{ session_id: string; ip: string }>;
     expect(evidence).toEqual({ session_id: director.sessionId, ip: '203.0.113.61' });
-    const same = await reassign(document.id, 2, director, auditor.personId);
-    expect(same.body.error.code).toBe('VALIDATION_FAILED');
+    const envelopeAfter = (await dataSource.query('SELECT verification_code, current_pdf_sha256 FROM signature_envelope WHERE document_id = $1', [document.id])) as Array<{ verification_code: string; current_pdf_sha256: string }>;
+    expect(envelopeAfter[0]?.verification_code).toBe(envelopeBefore[0]?.verification_code);
+    expect(envelopeAfter[0]?.current_pdf_sha256).not.toBe(envelopeBefore[0]?.current_pdf_sha256);
 
-    const finished = (await sign(document.id, 2, auditor).expect(200)).body.data;
+    const oldAuditor = await sign(document.id, 2, auditor);
+    expect(oldAuditor.body.error.code).toBe('SIGNATURE_NOT_DESIGNATED_SIGNER');
+    await sign(document.id, 1, responsible).expect(200);
+    const late = await reassign(document.id, 2, director, auditor.personId);
+    expect([late.status, late.body.error.code]).toEqual([409, 'SIGNATURE_REASSIGN_AFTER_SIGNING']);
+
+    const finished = (await sign(document.id, 2, replacement).expect(200)).body.data;
     expect(finished.status).toBe('SIGNED');
-    const code = await scalar<string>(dataSource, 'SELECT verification_code FROM signature_envelope WHERE document_id = $1', [document.id]);
+    const finalText = squash(await pdfText((await engine.download(document.id, 'pdf', director.userId)).body));
+    expect(finalText).toContain('Reemplazo Turnos');
+    expect(finalText).not.toContain('Auditora Turnos');
+    const code = envelopeAfter[0]?.verification_code ?? '';
     const attestation = (await http().get(`/api/v1/public/signatures/${code}`)).body.data;
     expect(attestation).toMatchObject({ status: 'COMPLETED', integrity: 'INTACT' });
-    expect(attestation.signers.map((item: { name: string }) => item.name)).toEqual(['Responsable Turnos', 'Auditora Turnos']);
+    expect(attestation.signers.map((item: { name: string }) => item.name)).toEqual(['Responsable Turnos', 'Reemplazo Turnos']);
   });
 });
