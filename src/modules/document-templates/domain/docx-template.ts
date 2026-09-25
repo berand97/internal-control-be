@@ -35,12 +35,41 @@ export const renderDocx = (
   try {
     const zip = new PizZip(buffer);
     const document = new Docxtemplater(zip, {
+      delimiters: { start: '{{', end: '}}' },
       paragraphLoop: true,
       linebreaks: true,
+      nullGetter: () => '',
+      parser: dottedPathParser,
     });
     document.render(nestContext(context));
     return Buffer.from(document.getZip().generate({ type: 'nodebuffer' }));
-  } catch {
-    throw new ApiException(ErrorCode.TemplateInvalidDocx);
+  } catch (error) {
+    throw new ApiException(ErrorCode.TemplateInvalidDocx, templateErrorMessage(error));
   }
+};
+
+const dottedPathParser = (tag: string) => ({
+  get: (scope: unknown): unknown =>
+    tag === '.'
+      ? scope
+      : tag
+          .trim()
+          .split('.')
+          .reduce<unknown>(
+            (value, key) =>
+              typeof value === 'object' && value !== null
+                ? (value as Record<string, unknown>)[key]
+                : undefined,
+            scope,
+          ),
+});
+
+const templateErrorMessage = (error: unknown): string | undefined => {
+  const nested = (error as { properties?: { errors?: Array<{ properties?: { explanation?: string } }> } })
+    .properties?.errors;
+  const explanations = nested?.map((item) => item.properties?.explanation).filter(Boolean);
+  if (explanations && explanations.length > 0) {
+    return `Plantilla inválida: ${explanations.slice(0, 3).join('; ')}`;
+  }
+  return error instanceof Error ? `Plantilla inválida: ${error.message}` : undefined;
 };

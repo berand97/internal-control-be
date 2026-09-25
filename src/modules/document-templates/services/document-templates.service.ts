@@ -161,7 +161,10 @@ export class DocumentTemplatesService {
       where: { documentType: input.documentType, isActive: true },
     });
     if (!template) {
-      return null;
+      throw new ApiException(
+        ErrorCode.TemplateNotActive,
+        `No hay plantilla activa para ${input.documentType}`,
+      );
     }
     const source = await this.storageService.get(template.storageKey);
     const saved = await this.generated.manager.transaction(async (manager) => {
