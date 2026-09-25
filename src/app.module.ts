@@ -29,6 +29,8 @@ import { InventoriesModule } from './modules/inventories/inventories.module.js';
 import { DepreciationModule } from './modules/depreciation/depreciation.module.js';
 import { StagingModule } from './modules/staging/staging.module.js';
 import { DocumentsModule } from './modules/documents/documents.module.js';
+import { HandoversModule } from './modules/handovers/handovers.module.js';
+import { PersonsModule } from './modules/persons/persons.module.js';
 import { LocationsModule } from './modules/locations/locations.module.js';
 import { OrganizationalUnitsModule } from './modules/organizational-units/organizational-units.module.js';
 import { NavigationModule } from './modules/navigation/navigation.module.js';
@@ -81,6 +83,8 @@ const nestObserveImports =
     DepreciationModule,
     StagingModule,
     DocumentsModule,
+    HandoversModule,
+    PersonsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -106,6 +106,9 @@ export enum ErrorCode {
   SignatureMfaRequired = 'SIGNATURE_MFA_REQUIRED',
   SignatureSessionInvalid = 'SIGNATURE_SESSION_INVALID',
   SignatureReassignAfterSigning = 'SIGNATURE_REASSIGN_AFTER_SIGNING',
+  HandoverAssetInOpenHandover = 'HANDOVER_ASSET_IN_OPEN_HANDOVER',
+  HandoverCostCenterMismatch = 'HANDOVER_COST_CENTER_MISMATCH',
+  HandoverAssetNotDeliverable = 'HANDOVER_ASSET_NOT_DELIVERABLE',
 
   InventoryScopeOverlap = 'INVENTORY_SCOPE_OVERLAP',
   InventoryUnverifiedExceedsThreshold = 'INVENTORY_UNVERIFIED_EXCEEDS',
