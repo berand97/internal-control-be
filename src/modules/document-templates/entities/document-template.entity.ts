@@ -54,6 +54,9 @@ export class GeneratedDocument {
   @Column({ name: 'act_number', type: 'varchar', length: 40 })
   actNumber!: string;
 
+  @Column({ name: 'storage_driver', type: 'varchar', length: 20, nullable: true })
+  storageDriver!: string | null;
+
   @Column({ name: 'entity_type', type: 'varchar', length: 40 })
   entityType!: string;
 

@@ -63,3 +63,5 @@ storage/attachments/
 # Dumps de base de datos: traen hashes y secretos MFA. Nunca al repo.
 db/
 *.dump
+storage/documents/
+storage/document-templates/

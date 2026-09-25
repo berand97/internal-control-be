@@ -86,6 +86,14 @@ export interface AppConfig {
   readonly movementSigningSecret: string;
   readonly settingsEncryptionKey: string;
   readonly features: FeaturesConfig;
+  readonly documents: DocumentsConfig;
+}
+
+export type DocumentNumberingPolicy = 'continue' | 'restart';
+
+export interface DocumentsConfig {
+  readonly gotenbergUrl: string | null;
+  readonly numberingPolicy: DocumentNumberingPolicy;
 }
 
 const DURATION_PATTERN = /^(\d+)([smhd])?$/;
@@ -189,6 +197,14 @@ const readS3Provider = (): S3Provider => {
   throw new Error(`STORAGE_S3_PROVIDER inválido: ${raw}`);
 };
 
+const readNumberingPolicy = (): DocumentNumberingPolicy => {
+  const raw = readString('DOCUMENT_NUMBERING_POLICY', 'continue');
+  if (raw === 'continue' || raw === 'restart') {
+    return raw;
+  }
+  throw new Error(`DOCUMENT_NUMBERING_POLICY inválido: ${raw}`);
+};
+
 const configuration = (): AppConfig => ({
   port: readNumber('PORT', 3000),
   appPublicUrl: readString('APP_PUBLIC_URL', 'http://localhost:4200'),
@@ -264,6 +280,10 @@ const configuration = (): AppConfig => ({
   features: {
     circuitThreshold: readNumber('FEATURE_CIRCUIT_THRESHOLD', 5),
     overrides: readFeatureOverrides(),
+  },
+  documents: {
+    gotenbergUrl: readString('GOTENBERG_URL', '') || null,
+    numberingPolicy: readNumberingPolicy(),
   },
 });
 

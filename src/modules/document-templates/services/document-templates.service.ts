@@ -185,6 +185,7 @@ export class DocumentTemplatesService {
           documentType: input.documentType,
           templateId: template.id,
           storageKey: stored.key,
+          storageDriver: stored.driver,
           fileHash: stored.checksumSha256,
           actNumber,
           entityType: input.entityType,

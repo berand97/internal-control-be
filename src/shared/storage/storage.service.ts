@@ -64,6 +64,10 @@ export class StorageService {
     return (await this.resolveAdapter()).get(key);
   }
 
+  async getFrom(driver: StorageDriver, key: string): Promise<Buffer> {
+    return (await this.resolveAdapter(driver)).get(key);
+  }
+
   async delete(key: string): Promise<void> {
     return (await this.resolveAdapter()).delete(key);
   }
@@ -370,8 +374,9 @@ export class StorageService {
     return payload.refresh_token;
   }
 
-  private async resolveAdapter(): Promise<StoragePort> {
-    const resolved = await this.resolvedConfig();
+  private async resolveAdapter(driver?: StorageDriver): Promise<StoragePort> {
+    const configured = await this.resolvedConfig();
+    const resolved = driver ? { ...configured, driver } : configured;
     if (resolved.driver === 'project') {
       return new ProjectStorageAdapter(
         path.resolve(resolved.projectPath),
