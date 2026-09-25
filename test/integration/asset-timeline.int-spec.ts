@@ -13,6 +13,7 @@ import { MovementType } from '../../src/modules/assets/enums/movement-type.enum.
 import { OperationalStatus } from '../../src/modules/assets/enums/operational-status.enum.js';
 import { AssetStateService } from '../../src/modules/assets/services/asset-state.service.js';
 import { AssetTimelineService } from '../../src/modules/assets/services/asset-timeline.service.js';
+import { GLOBAL_COST_CENTER_SCOPE } from '../../src/modules/roles/services/cost-center-scope.js';
 import { DocumentsModule } from '../../src/modules/documents/documents.module.js';
 import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
@@ -151,7 +152,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
       movement: { type: MovementType.MaintenanceIn, reason: 'Calibración', documentReference: null },
     });
 
-    const page = await timeline.timeline(assetId, { page: 1, pageSize: 50, order: 'asc' });
+    const page = await timeline.timeline(assetId, { page: 1, pageSize: 50, order: 'asc' }, GLOBAL_COST_CENTER_SCOPE);
     expect(page.total).toBe(5);
     expect(page.items.map((item) => [item.kind, item.type])).toEqual([
       ['ASSET', 'ACQUISITION'],
@@ -184,10 +185,10 @@ describe('Historia del activo (PostgreSQL real)', () => {
       expect(file.body.subarray(0, 5).toString()).toBe('%PDF-');
     }
 
-    const newestFirst = await timeline.timeline(assetId, { page: 1, pageSize: 2, order: 'desc' });
+    const newestFirst = await timeline.timeline(assetId, { page: 1, pageSize: 2, order: 'desc' }, GLOBAL_COST_CENTER_SCOPE);
     expect(newestFirst).toMatchObject({ total: 5, hasNext: true });
     expect(newestFirst.items.map((item) => item.type)).toEqual(['MAINTENANCE_IN', 'OCI-17-90-INFORME']);
-    const second = await timeline.timeline(assetId, { page: 2, pageSize: 2, order: 'desc' });
+    const second = await timeline.timeline(assetId, { page: 2, pageSize: 2, order: 'desc' }, GLOBAL_COST_CENTER_SCOPE);
     expect(second.items.map((item) => item.type)).toEqual(['TRANSFER', 'REGISTRATION']);
   });
 
@@ -239,7 +240,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
     const idOf = (legacy: number) =>
       scalar<string>(dataSource, 'SELECT asset_id FROM asset_import_origin WHERE legacy_asset_id = $1', [String(legacy)]);
 
-    const dated = await timeline.timeline(await idOf(910001), { page: 1, pageSize: 50, order: 'asc' });
+    const dated = await timeline.timeline(await idOf(910001), { page: 1, pageSize: 50, order: 'asc' }, GLOBAL_COST_CENTER_SCOPE);
     expect(dated.items.map((item) => [item.kind, item.type, item.datePrecision, item.occurredAt.slice(0, 10)])).toEqual([
       ['ASSET', 'ACQUISITION', 'DAY', '2018-02-03'],
       ['MOVEMENT', 'REGISTRATION', 'DAY', '2018-02-03'],
@@ -250,7 +251,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
       actor: { userId: director.id },
     });
 
-    const undated = await timeline.timeline(await idOf(910002), { page: 1, pageSize: 50, order: 'asc' });
+    const undated = await timeline.timeline(await idOf(910002), { page: 1, pageSize: 50, order: 'asc' }, GLOBAL_COST_CENTER_SCOPE);
     expect(undated.total).toBe(1);
     expect(undated.items[0]).toMatchObject({
       kind: 'MOVEMENT',
@@ -262,7 +263,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
 
   it('responde 404 para un activo que no existe', async () => {
     await expect(
-      timeline.timeline('00000000-0000-4000-8000-000000000000', { page: 1, pageSize: 10, order: 'asc' }),
+      timeline.timeline('00000000-0000-4000-8000-000000000000', { page: 1, pageSize: 10, order: 'asc' }, GLOBAL_COST_CENTER_SCOPE),
     ).rejects.toMatchObject({ code: 'RESOURCE_NOT_FOUND' });
   });
 });

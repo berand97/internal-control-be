@@ -115,4 +115,7 @@ export enum ErrorCode {
   ModuleUnavailable = 'MODULE_UNAVAILABLE',
   FeatureUnknown = 'FEATURE_UNKNOWN',
   FeatureNotToggleable = 'FEATURE_NOT_TOGGLEABLE',
+
+  ScopeNoCostCenter = 'SCOPE_NO_COST_CENTER',
+  ScopeOrgUnitUnresolved = 'SCOPE_ORG_UNIT_UNRESOLVED',
 }

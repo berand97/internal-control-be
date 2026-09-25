@@ -8,6 +8,10 @@ import {
   postgresMessage,
 } from '../../../common/exceptions/postgres-error.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
+import {
+  costCenterFilter,
+  type ReadableCostCenterScope,
+} from '../../roles/services/cost-center-scope.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import type { CategoriesRepository } from '../../categories/repositories/categories.repository.interface.js';
@@ -86,10 +90,14 @@ export class AssetsService {
     }));
   }
 
-  async list(query: QueryAssetsDto): Promise<AssetListResponseDto> {
+  async list(
+    query: QueryAssetsDto,
+    scope: ReadableCostCenterScope,
+  ): Promise<AssetListResponseDto> {
     const page = query.page;
     const pageSize = query.pageSize;
     const { items, total } = await this.assetsRepository.findPage({
+      scopeCostCenterIds: costCenterFilter(scope),
       page,
       pageSize,
       sortBy: query.sortBy ?? 'createdAt',
@@ -120,8 +128,18 @@ export class AssetsService {
     };
   }
 
-  async getById(id: string): Promise<AssetResponseDto> {
-    const asset = await this.requireAsset(id);
+  /** Fuera de alcance responde igual que inexistente: 404 RESOURCE_NOT_FOUND. */
+  async getById(
+    id: string,
+    scope: ReadableCostCenterScope,
+  ): Promise<AssetResponseDto> {
+    const asset = await this.assetsRepository.findById(
+      id,
+      costCenterFilter(scope),
+    );
+    if (!asset) {
+      throw new ApiException(ErrorCode.ResourceNotFound);
+    }
     return this.toDetail(asset);
   }
 

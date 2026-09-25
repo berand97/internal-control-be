@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { AssetsModule } from '../../src/modules/assets/assets.module.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
+import { GLOBAL_COST_CENTER_SCOPE } from '../../src/modules/roles/services/cost-center-scope.js';
 import { DepreciationModule } from '../../src/modules/depreciation/depreciation.module.js';
 import { MonthlyDepreciationJob } from '../../src/modules/depreciation/jobs/monthly-depreciation.job.js';
 import { DepreciationService } from '../../src/modules/depreciation/services/depreciation.service.js';
@@ -61,7 +62,7 @@ describe('Depreciación apagada y activos sin fecha (PostgreSQL real)', () => {
        RETURNING id`,
       [actor.id],
     );
-    const asset = await moduleRef.get(AssetsService).getById(assetId);
+    const asset = await moduleRef.get(AssetsService).getById(assetId, GLOBAL_COST_CENTER_SCOPE);
     expect(asset.acquisitionDate).toBeNull();
   });
 });
