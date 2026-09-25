@@ -14,6 +14,7 @@ export interface AuthenticatedUser {
   readonly roles: ReadonlyArray<string>;
   readonly scopes: ReadonlyArray<TokenScope>;
   readonly mustChangePassword?: boolean;
+  readonly sessionId?: string | null;
 }
 
 export const isTokenScopeType = (value: unknown): value is TokenScopeType =>

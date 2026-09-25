@@ -258,7 +258,10 @@ export class AuthService {
     ]);
     const authenticatedUser = this.toAuthenticatedUser(user, roles, scopes);
 
-    const accessToken = this.tokenService.signAccessToken(authenticatedUser);
+    const accessToken = this.tokenService.signAccessToken({
+      ...authenticatedUser,
+      sessionId: family.id,
+    });
     const rotatedRefreshToken = this.tokenService.signRefreshToken(
       user.id,
       family.id,
@@ -504,7 +507,10 @@ export class AuthService {
       expiresAt,
     });
 
-    const accessToken = this.tokenService.signAccessToken(authenticatedUser);
+    const accessToken = this.tokenService.signAccessToken({
+      ...authenticatedUser,
+      sessionId: familyId,
+    });
     await this.authUsersRepository.markLoggedIn(user.id, now);
     await this.recordAudit(AuditAction.Login, user.id, user.id, context, {
       familyId,

@@ -47,6 +47,7 @@ export class TokenService {
         roles: user.roles,
         scopes: user.scopes,
         mustChangePassword: user.mustChangePassword === true,
+        ...(user.sessionId ? { sid: user.sessionId } : {}),
       },
       jwtConfig.accessSecret,
       {

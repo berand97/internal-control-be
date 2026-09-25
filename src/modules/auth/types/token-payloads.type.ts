@@ -8,6 +8,7 @@ export interface AccessTokenPayload {
   readonly roles: ReadonlyArray<string>;
   readonly scopes: ReadonlyArray<TokenScope>;
   readonly mustChangePassword?: boolean;
+  readonly sid?: string;
   readonly type: 'access';
   readonly iat: number;
   readonly exp: number;
@@ -75,6 +76,7 @@ export const isAccessTokenPayload = (
   isTokenScopeArray(value.scopes) &&
   (!('mustChangePassword' in value) ||
     typeof value.mustChangePassword === 'boolean') &&
+  (!('sid' in value) || typeof value.sid === 'string') &&
   'type' in value &&
   value.type === 'access';
 
