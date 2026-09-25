@@ -122,6 +122,9 @@ export class Asset {
   @Column({ name: 'insurance_policy_number', type: 'varchar', length: 80, nullable: true })
   insurancePolicyNumber!: string | null;
 
+  @Column({ name: 'data_quality_flags', type: 'varchar', length: 40, array: true })
+  dataQualityFlags!: string[];
+
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

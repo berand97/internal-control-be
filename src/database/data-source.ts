@@ -63,6 +63,7 @@ import { PersonDocumentOptional1767225621000 } from './migrations/1767225621000-
 import { InvitationRoleToken1767225622000 } from './migrations/1767225622000-invitation-role-token.js';
 import { RevokeDirectorStorage1767225623000 } from './migrations/1767225623000-revoke-director-storage.js';
 import { AssetIdentifier1767225624000 } from './migrations/1767225624000-asset-identifier.js';
+import { RelaxAssetConstraints1767225625000 } from './migrations/1767225625000-relax-asset-constraints.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -146,6 +147,7 @@ const dataSource = new DataSource({
     InvitationRoleToken1767225622000,
     RevokeDirectorStorage1767225623000,
     AssetIdentifier1767225624000,
+    RelaxAssetConstraints1767225625000,
   ],
 });
 

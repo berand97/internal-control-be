@@ -78,7 +78,7 @@ export class CategoriesService {
         depreciationMethod:
           dto.depreciationMethod ?? DepreciationMethod.StraightLine,
         requiresSerialNumber: dto.requiresSerialNumber ?? false,
-        requiresPhoto: dto.requiresPhoto ?? true,
+        requiresPhoto: dto.requiresPhoto ?? false,
         hierarchyPath: childPath(parent?.hierarchyPath ?? null, dto.code),
         isActive: dto.isActive ?? true,
       });
