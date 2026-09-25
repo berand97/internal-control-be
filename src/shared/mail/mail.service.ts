@@ -148,6 +148,39 @@ export class MailService {
     );
   }
 
+  /**
+   * Enlace de firma de un acta (plantilla SIGNATURE_LINK). false si el SMTP no está configurado; lanza
+   * MAIL_SEND_FAILED si el servidor rechaza el envío. El contexto trae el enlace: nunca va al log.
+   */
+  async sendSigningLink(
+    to: string,
+    context: {
+      readonly url: string;
+      readonly expiresAt: string;
+      readonly formatName: string;
+      readonly number: string;
+      readonly signerName: string;
+      readonly roleLabel: string;
+      readonly contact: string;
+    },
+  ): Promise<boolean> {
+    return this.sendTemplated(
+      'SIGNATURE_LINK',
+      to,
+      {
+        'firma.url': context.url,
+        'firma.vence': context.expiresAt,
+        'firma.rol': context.roleLabel,
+        'firmante.nombre': context.signerName,
+        'acta.formato': context.formatName,
+        'acta.numero': context.number,
+        contacto: context.contact,
+        'app.name': 'Control Interno UNAC',
+      },
+      `signature-link acta=${context.number}`,
+    );
+  }
+
   async sendTemplated(
     templateType: EmailTemplateType,
     to: string,

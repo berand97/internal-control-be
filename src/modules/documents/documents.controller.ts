@@ -303,12 +303,28 @@ export class DocumentsController {
     });
   }
 
+  @Post(':id/signatures/:order/signing-link')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Reenviar el enlace de firma por correo del turno actual',
+    description:
+      'Solo quien administra el proceso (permiso de generación del formato) y solo para el turno actual de una persona sin usuario activo. Invalida el enlace anterior (RESENT) y encola uno nuevo; el correo sale fuera de la transacción y su resultado se ve en signatures[].signingLink. Errores: SIGNATURE_LINK_NOT_APPLICABLE (no es el turno actual o la persona firma con sesión), SIGNATURE_NO_CHANNEL, SIGNATURE_NO_IDENTITY_CHECK, SIGNATURE_SIGNER_INACTIVE, SIGNATURE_SIGNER_UNASSIGNED.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(DocumentDetailResponseDto) })
+  resendSigningLink(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('order', ParseIntPipe) order: number,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.engine.resendSigningLink(id, order, actor);
+  }
+
   @Post(':id/signatures/:order')
   @HttpCode(200)
   @ApiOperation({
     summary: 'Firmar mi turno con la rúbrica dibujada',
     description:
-      'Solo la persona designada para ese turno, con MFA activo y sesión vigente. rubric es un PNG en data URL o base64. Se registra quién, cuándo, desde qué IP y bajo qué sesión, y el hash del PDF antes y después.',
+      'Solo la persona designada para ese turno, con sesión vigente; en los turnos de Control Interno (AUDITA, CONTROL_INTERNO) además con MFA activo (SIGNATURE_MFA_REQUIRED). rubric es un PNG en data URL o base64. Se registra quién, cuándo, desde qué IP, bajo qué sesión y con qué método (SESSION_MFA o SESSION), y el hash del PDF antes y después.',
   })
   @ApiOkResponse({ schema: envelopedSchema(DocumentDetailResponseDto) })
   sign(
