@@ -515,6 +515,21 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     message:
       'El acta ya tiene firmas: cambiar un firmante alteraría lo que otros firmaron. Rechace el acta y genere una nueva',
   },
+  [ErrorCode.HandoverAssetInOpenHandover]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El activo ya está en otra entrega abierta; espere a que su acta se firme o se rechace',
+  },
+  [ErrorCode.HandoverCostCenterMismatch]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'El activo pertenece a otro centro de costo: entregarlo en este centro sería un traslado (OCI-17-89)',
+  },
+  [ErrorCode.HandoverAssetNotDeliverable]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'El activo está dado de baja o en préstamo y no se puede entregar',
+  },
   [ErrorCode.InventoryScopeOverlap]: {
     httpStatus: 406,
     action: 'CANCEL',
