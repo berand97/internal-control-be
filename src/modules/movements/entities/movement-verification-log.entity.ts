@@ -15,5 +15,9 @@ export class MovementVerificationLog {
   failures!: number;
 
   @Column({ name: 'details', type: 'jsonb', nullable: true })
-  details!: ReadonlyArray<{ readonly assetId: string; readonly movementId: string }> | null;
+  details!: ReadonlyArray<{
+    readonly assetId: string;
+    readonly movementId: string | null;
+    readonly reason: string;
+  }> | null;
 }
