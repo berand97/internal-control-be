@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
+import { guardDatabaseUrl } from '../config/database-host-guard.js';
 import { AppUser } from '../modules/auth/entities/app-user.entity.js';
 import { AuditLog } from '../modules/auth/entities/audit-log.entity.js';
 import { PasswordResetToken } from '../modules/auth/entities/password-reset-token.entity.js';
@@ -82,11 +83,18 @@ import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-
 import { PhysicalInventoryScope } from '../modules/inventories/entities/physical-inventory-scope.entity.js';
 import { AssetDepreciation } from '../modules/depreciation/entities/asset-depreciation.entity.js';
 
+// El CLI de migraciones (y el de staging) no pasa por ConfigModule: misma guarda que la app.
+// Fuera de producción se niega a conectarse a un host no local salvo ALLOW_REMOTE_DATABASE=true.
+const databaseUrl = guardDatabaseUrl(
+  process.env['DATABASE_URL'] ??
+    'postgres://asset_admin:secret@localhost:5432/asset_management',
+  process.env,
+  (message) => console.warn(`[Database] ${message}`),
+);
+
 const dataSource = new DataSource({
   type: 'postgres',
-  url:
-    process.env['DATABASE_URL'] ??
-    'postgres://asset_admin:secret@localhost:5432/asset_management',
+  url: databaseUrl,
   logging: process.env['DATABASE_LOGGING'] === 'true',
   synchronize: false,
   entities: [

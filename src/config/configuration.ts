@@ -1,8 +1,11 @@
+import { Logger } from '@nestjs/common';
 import {
   DEFAULT_TRUST_PROXY,
   parseTrustProxy,
   type TrustProxySetting,
 } from '../common/http/trust-proxy.js';
+import { guardDatabaseUrl } from './database-host-guard.js';
+import { resolveGotenbergUrl } from './gotenberg-url.js';
 import { resolveSignatureVerifyUrl } from './signature-verify-url.js';
 
 export interface DatabaseConfig {
@@ -233,7 +236,10 @@ const configuration = (): AppConfig => ({
   apiDocsEnabled: readBoolean('API_DOCS_ENABLED', process.env['NODE_ENV'] !== 'production'),
   trustProxy: parseTrustProxy(readString('TRUST_PROXY', DEFAULT_TRUST_PROXY)),
   database: {
-    url: readRequiredString('DATABASE_URL'),
+    // Fuera de producción solo hosts locales (ver database-host-guard.ts).
+    url: guardDatabaseUrl(readRequiredString('DATABASE_URL'), process.env, (message) =>
+      new Logger('Database').warn(message),
+    ),
     logging: readBoolean('DATABASE_LOGGING', false),
   },
   jwt: {
@@ -305,10 +311,12 @@ const configuration = (): AppConfig => ({
     overrides: readFeatureOverrides(),
   },
   documents: {
-    gotenbergUrl: readString('GOTENBERG_URL', '') || null,
+    // SIGNATURE_VERIFY_URL se valida antes que GOTENBERG_URL: si faltan las dos en
+    // producción, el primer error es el de la URL que queda impresa en las actas.
+    signatureVerifyUrl: resolveSignatureVerifyUrl(process.env),
+    gotenbergUrl: resolveGotenbergUrl(process.env),
     numberingPolicy: readNumberingPolicy(),
     signatureProvider: readSignatureProvider(),
-    signatureVerifyUrl: resolveSignatureVerifyUrl(process.env),
   },
 });
 
