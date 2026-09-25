@@ -148,7 +148,9 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
     expect((await assets.list(query({ costCenterId }))).total).toBe(5);
   });
 
-  describe.runIf(existsSync(REAL_ASSETS) && existsSync(REAL_COST_CENTERS))('con los datos reales importados', () => {
+  const realData = process.env['REAL_DATA_TESTS'] === 'true' && existsSync(REAL_ASSETS) && existsSync(REAL_COST_CENTERS);
+
+  describe.runIf(realData)('con los datos reales importados (REAL_DATA_TESTS=true, en su propia corrida)', () => {
     it('el filtro por bandera cuadra con la conciliación de la carga real', async () => {
       const flags = [
         ['BARCODE_TEMP'],
