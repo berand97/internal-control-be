@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { type EntityManager, Repository } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
@@ -164,29 +164,33 @@ export class DocumentTemplatesService {
       return null;
     }
     const source = await this.storageService.get(template.storageKey);
-    const actNumber = await this.nextActNumber();
-    const rendered = renderDocx(source, {
-      ...input.context,
-      'acta.numero': actNumber,
-      'acta.fecha': new Date().toISOString().slice(0, 10),
+    const saved = await this.generated.manager.transaction(async (manager) => {
+      const actNumber = await this.nextActNumber(manager);
+      const rendered = renderDocx(source, {
+        ...input.context,
+        'acta.numero': actNumber,
+        'acta.fecha': new Date().toISOString().slice(0, 10),
+      });
+      const stored = await this.storageService.put({
+        key: `generated/${new Date().getFullYear()}/${input.documentType}/${actNumber}.docx`,
+        body: rendered,
+        contentType: DOCX_MIME,
+      });
+      const generated = manager.getRepository(GeneratedDocument);
+      return generated.save(
+        generated.create({
+          documentType: input.documentType,
+          templateId: template.id,
+          storageKey: stored.key,
+          fileHash: stored.checksumSha256,
+          actNumber,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          createdAt: new Date(),
+          createdBy: input.actorId,
+        }),
+      );
     });
-    const stored = await this.storageService.put({
-      key: `generated/${new Date().getFullYear()}/${input.documentType}/${actNumber}.docx`,
-      body: rendered,
-      contentType: DOCX_MIME,
-    });
-    const row = this.generated.create({
-      documentType: input.documentType,
-      templateId: template.id,
-      storageKey: stored.key,
-      fileHash: stored.checksumSha256,
-      actNumber,
-      entityType: input.entityType,
-      entityId: input.entityId,
-      createdAt: new Date(),
-      createdBy: input.actorId,
-    });
-    const saved = await this.generated.save(row);
     return {
       id: saved.id,
       actNumber: saved.actNumber,
@@ -196,27 +200,24 @@ export class DocumentTemplatesService {
     };
   }
 
-  private async nextActNumber(): Promise<string> {
+  private async nextActNumber(manager?: EntityManager): Promise<string> {
     const year = new Date().getFullYear();
-    const rows: unknown = await this.templates.query(
+    const rows = (await (manager ?? this.templates.manager).query(
       `
-      UPDATE code_sequence
-      SET current_value = current_value + 1, updated_at = NOW()
-      WHERE sequence_name = 'document_act'
-      RETURNING current_value, padding_length, prefix
+      WITH reserved AS (
+        UPDATE code_sequence
+        SET current_value = current_value + 1, updated_at = NOW()
+        WHERE sequence_name = 'document_act'
+        RETURNING current_value, padding_length, prefix
+      )
+      SELECT current_value, padding_length, prefix FROM reserved
       `,
-    );
-    const row =
-      Array.isArray(rows) && rows[0] && typeof rows[0] === 'object'
-        ? (rows[0] as {
-            current_value?: string | number;
-            padding_length?: number;
-            prefix?: string;
-          })
-        : null;
-    const value = Number(row?.current_value ?? 1);
-    const padding = Number(row?.padding_length ?? 4);
-    const prefix = row?.prefix ?? 'ACT-';
-    return `${prefix}${year}-${String(value).padStart(padding, '0')}`;
+    )) as Array<{ current_value: string; padding_length: number; prefix: string | null }>;
+    const row = rows[0];
+    if (!row) {
+      throw new Error("Falta la secuencia 'document_act' en code_sequence");
+    }
+    const value = String(Number(row.current_value)).padStart(row.padding_length, '0');
+    return `${row.prefix ?? 'ACT-'}${year}-${value}`;
   }
 }
