@@ -26,6 +26,10 @@ export class RefreshTokenFamily {
   @Column({ name: 'revoked_at', type: 'timestamptz', nullable: true })
   revokedAt!: Date | null;
 
+  /** Momento en que la sesión se abrió o se elevó con segundo factor; null = solo contraseña. */
+  @Column({ name: 'mfa_verified_at', type: 'timestamptz', nullable: true })
+  mfaVerifiedAt!: Date | null;
+
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

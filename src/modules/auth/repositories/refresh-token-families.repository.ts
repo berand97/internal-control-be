@@ -28,6 +28,7 @@ export class TypeOrmRefreshTokenFamiliesRepository implements RefreshTokenFamili
       currentJti: family.currentJti,
       expiresAt: family.expiresAt,
       revokedAt: null,
+      mfaVerifiedAt: family.mfaVerifiedAt ?? null,
     });
   }
 

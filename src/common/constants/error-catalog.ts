@@ -93,6 +93,41 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El código MFA es incorrecto',
   },
+  [ErrorCode.MfaVerificationFailed]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message:
+      'El código de verificación o de recuperación no es válido o ya fue usado',
+  },
+  [ErrorCode.MfaSessionRequired]: {
+    httpStatus: 403,
+    action: 'REAUTH',
+    message:
+      'Esta acción exige una sesión iniciada con verificación en dos pasos; cierre sesión e ingrese de nuevo con su código',
+  },
+  [ErrorCode.MfaRequiredByRole]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message:
+      'Su rol exige la verificación en dos pasos; no se puede desactivar',
+  },
+  [ErrorCode.MfaNotEnabled]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'La verificación en dos pasos no está activa en esta cuenta',
+  },
+  [ErrorCode.MfaEnrollmentNotStarted]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message:
+      'No hay un enrolamiento en curso o ya expiró; inicie el enrolamiento de nuevo',
+  },
+  [ErrorCode.MfaSelfResetForbidden]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message:
+      'No puede restablecer su propia verificación en dos pasos; pídalo a otro administrador',
+  },
   [ErrorCode.PasswordPolicyViolation]: {
     httpStatus: 400,
     action: 'CANCEL',

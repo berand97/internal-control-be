@@ -14,9 +14,11 @@ import { Role } from './entities/role.entity.js';
 import { UserRole } from './entities/user-role.entity.js';
 import { TypeOrmAuditLogsRepository } from './repositories/audit-logs.repository.js';
 import { TypeOrmAuthUsersRepository } from './repositories/auth-users.repository.js';
+import { TypeOrmMfaCredentialsRepository } from './repositories/mfa-credentials.repository.js';
 import { TypeOrmPasswordResetTokensRepository } from './repositories/password-reset-tokens.repository.js';
 import { TypeOrmRefreshTokenFamiliesRepository } from './repositories/refresh-token-families.repository.js';
 import { AuthService } from './services/auth.service.js';
+import { MfaAccountService } from './services/mfa-account.service.js';
 import { MfaService } from './services/mfa.service.js';
 import { RefreshCookieService } from './services/refresh-cookie.service.js';
 import { TokenService } from './services/token.service.js';
@@ -43,6 +45,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
     AuthService,
     TokenService,
     MfaService,
+    MfaAccountService,
     RefreshCookieService,
     JwtStrategy,
     { provide: 'AuthUsersRepository', useClass: TypeOrmAuthUsersRepository },
@@ -52,12 +55,17 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
     },
     { provide: 'AuditLogsRepository', useClass: TypeOrmAuditLogsRepository },
     {
+      provide: 'MfaCredentialsRepository',
+      useClass: TypeOrmMfaCredentialsRepository,
+    },
+    {
       provide: 'PasswordResetTokensRepository',
       useClass: TypeOrmPasswordResetTokensRepository,
     },
   ],
   exports: [
     AuthService,
+    MfaAccountService,
     'AuthUsersRepository',
     'RefreshTokenFamiliesRepository',
     'AuditLogsRepository',
