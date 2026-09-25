@@ -22,10 +22,16 @@ const unescapeXml = (text) =>
 
 const fold = (text) => text.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase();
 
+// Texto visible del párrafo con los runs unidos. Tabulaciones y saltos de línea
+// cuentan como espacio: separan en pantalla lo que está a cada lado.
 const paragraphsOf = (xml) =>
   [...xml.matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)].map((match) => ({
     xml: match[0],
-    text: unescapeXml([...match[0].matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((run) => run[1]).join('')),
+    text: unescapeXml(
+      [...match[0].replace(/<w:pPr>[\s\S]*?<\/w:pPr>/g, '').matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>|<w:(tab|br|cr)\b[^>]*\/>/g)]
+        .map((run) => (run[2] === undefined ? run[1] : run[2] === 'tab' ? '\t' : '\n'))
+        .join(''),
+    ),
   }));
 
 const invisibleRuns = (xml) =>
@@ -45,7 +51,24 @@ const invisibleRuns = (xml) =>
       );
     });
 
-export const findLeftovers = (docx, sample) => {
+// Campos que Word calcula al abrir el documento y que no llevan datos: la
+// numeración de páginas del pie. Cualquier otro campo (SAVEDATE, HYPERLINK,
+// MERGEFIELD, …) se recalcula o enlaza fuera de la plantilla.
+const ALLOWED_FIELDS = /^(PAGE|NUMPAGES)\b/;
+
+const fieldInstructions = (xml) => [
+  ...[...xml.matchAll(/<w:fldSimple\b[^>]*w:instr="([^"]*)"/g)].map((match) => unescapeXml(match[1]).trim()),
+  ...[...xml.matchAll(/<w:instrText(?: [^>]*)?>([^<]*)<\/w:instrText>/g)]
+    .map((match) => unescapeXml(match[1]).trim())
+    .filter((instr) => instr !== ''),
+];
+
+// Metadatos del paquete (autor, último editor, …). Solo se revisan si el
+// llamador lo pide: la plantilla OCI-01-55 versionada aún conserva el autor
+// del ejemplo en docProps/core.xml.
+const METADATA_PARTS = /^docProps\/(core|app|custom)\.xml$/;
+
+export const findLeftovers = (docx, sample, { metadata = false } = {}) => {
   const zip = new PizZip(docx);
   const problems = [];
   const names = Object.keys(zip.files).filter((name) => XML_PARTS.test(name));
@@ -89,6 +112,23 @@ export const findLeftovers = (docx, sample) => {
     if (/MERGEFIELD|<w:hyperlink\b/.test(xml)) {
       problems.push(`${name}: quedan campos de combinación o hipervínculos`);
     }
+    for (const instr of fieldInstructions(xml).filter((item) => !ALLOWED_FIELDS.test(item))) {
+      problems.push(`${name}: campo de Word que se recalcula o enlaza «${instr}»`);
+    }
+  }
+  const settings = zip.file('word/settings.xml');
+  if (settings && /<w:mailMerge>/.test(settings.asText())) {
+    problems.push('word/settings.xml: queda la combinación de correspondencia (ruta a la hoja de datos)');
+  }
+  if (metadata) {
+    for (const name of Object.keys(zip.files).filter((item) => METADATA_PARTS.test(item))) {
+      const folded = fold(unescapeXml(zip.file(name).asText().replace(/<[^>]+>/g, ' ')));
+      for (const value of sample.names) {
+        if (new RegExp(`\\b${fold(value)}\\b`).test(folded)) {
+          problems.push(`${name}: nombre del ejemplo "${value}" en los metadatos`);
+        }
+      }
+    }
   }
   for (const rels of Object.keys(zip.files).filter((name) => name.endsWith('.rels'))) {
     if (/TargetMode="External"/.test(zip.file(rels).asText())) {
@@ -106,8 +146,8 @@ export const removeInvisibleRuns = (xml) => {
   return result;
 };
 
-export const assertTemplateClean = (docx, sample) => {
-  const problems = findLeftovers(docx, sample);
+export const assertTemplateClean = (docx, sample, options) => {
+  const problems = findLeftovers(docx, sample, options);
   if (problems.length > 0) {
     throw new Error(`La plantilla aún contiene restos del ejemplo:\n - ${problems.join('\n - ')}`);
   }
