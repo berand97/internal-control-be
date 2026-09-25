@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import {
@@ -60,6 +61,7 @@ export class AssetsService {
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
     private readonly movementsService: MovementsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async listAcquisitionTypes(): Promise<
@@ -110,16 +112,20 @@ export class AssetsService {
     dto: CreateAssetDto,
     actor: AuthenticatedUser,
   ): Promise<AssetResponseDto> {
-    const asset = await this.persistNew(dto, actor);
-    await this.auditLogsRepository.record({
-      action: AuditAction.AssetCreated,
-      entityType: ENTITY_TYPE,
-      entityId: asset.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { internalCode: asset.internalCode },
-    });
+    const asset = await this.persistNew(dto, actor, (created, manager) =>
+      this.auditLogsRepository.record(
+        {
+          action: AuditAction.AssetCreated,
+          entityType: ENTITY_TYPE,
+          entityId: created.id,
+          performedBy: actor.id,
+          ipAddress: null,
+          userAgent: null,
+          changes: { internalCode: created.internalCode },
+        },
+        manager,
+      ),
+    );
     return this.toDetail(asset);
   }
 
@@ -484,6 +490,7 @@ export class AssetsService {
   private async persistNew(
     dto: CreateAssetDto,
     actor: AuthenticatedUser,
+    afterInsert?: (asset: Asset, manager: EntityManager) => Promise<void>,
   ): Promise<Asset> {
     const category = await this.requireCategory(dto.categoryId);
     await this.requireCostCenter(dto.costCenterId);
@@ -507,59 +514,64 @@ export class AssetsService {
     );
     const writes = this.buildCustomWrites(fields, dto.customValues ?? {});
     const year = new Date(dto.acquisitionDate).getFullYear();
-    const internalCode =
-      dto.internalCode ?? (await this.assetsRepository.nextInternalCode(year));
     try {
-      const asset = await this.assetsRepository.insert({
-        internalCode,
-        barcode: dto.barcode || null,
-        serialNumber: dto.serialNumber || null,
-        description: dto.description,
-        model: dto.model ?? null,
-        categoryId: dto.categoryId,
-        acquisitionTypeId: dto.acquisitionTypeId,
-        acquisitionDate: dto.acquisitionDate.slice(0, 10),
-        acquisitionDocument: dto.acquisitionDocument ?? null,
-        acquisitionPrice: String(dto.acquisitionPrice ?? 0),
-        currency: 'COP',
-        operationalStatus: OperationalStatus.InUse,
-        physicalCondition: dto.physicalCondition ?? PhysicalCondition.New,
-        costCenterId: dto.costCenterId,
-        locationId: dto.locationId ?? null,
-        responsibleId: dto.responsibleId ?? null,
-        depreciationMethod: category.depreciationMethod,
-        usefulLifeYears: category.depreciationYears,
-        salvageValue: '0',
-        notes: dto.notes ?? null,
-        createdBy: actor.id,
+      return await this.dataSource.transaction(async (manager) => {
+        const internalCode =
+          dto.internalCode ??
+          (await this.assetsRepository.nextInternalCode(year, manager));
+        const asset = await this.assetsRepository.insert({
+          internalCode,
+          barcode: dto.barcode || null,
+          serialNumber: dto.serialNumber || null,
+          description: dto.description,
+          model: dto.model ?? null,
+          categoryId: dto.categoryId,
+          acquisitionTypeId: dto.acquisitionTypeId,
+          acquisitionDate: dto.acquisitionDate.slice(0, 10),
+          acquisitionDocument: dto.acquisitionDocument ?? null,
+          acquisitionPrice: String(dto.acquisitionPrice ?? 0),
+          currency: 'COP',
+          operationalStatus: OperationalStatus.InUse,
+          physicalCondition: dto.physicalCondition ?? PhysicalCondition.New,
+          costCenterId: dto.costCenterId,
+          locationId: dto.locationId ?? null,
+          responsibleId: dto.responsibleId ?? null,
+          depreciationMethod: category.depreciationMethod,
+          usefulLifeYears: category.depreciationYears,
+          salvageValue: '0',
+          notes: dto.notes ?? null,
+          createdBy: actor.id,
+        }, manager);
+        await this.assetsRepository.replaceCustomValues(asset.id, writes, manager);
+        if (dto.photoUrl) {
+          await this.assetsRepository.insertPhoto(
+            asset.id,
+            dto.photoUrl,
+            actor.id,
+            manager,
+          );
+        }
+        await this.movementsService.record({
+          assetId: asset.id,
+          movementType: MovementType.Registration,
+          fromCostCenterId: null,
+          fromLocationId: null,
+          fromResponsibleId: null,
+          fromOperationalStatus: null,
+          fromPhysicalCondition: null,
+          toCostCenterId: asset.costCenterId,
+          toLocationId: asset.locationId,
+          toResponsibleId: asset.responsibleId,
+          toOperationalStatus: asset.operationalStatus,
+          toPhysicalCondition: asset.physicalCondition,
+          requestedBy: actor.id,
+          authorizedBy: actor.id,
+          reason: 'Alta de activo',
+          documentReference: dto.acquisitionDocument ?? null,
+        }, manager);
+        await afterInsert?.(asset, manager);
+        return asset;
       });
-      await this.assetsRepository.replaceCustomValues(asset.id, writes);
-      if (dto.photoUrl) {
-        await this.assetsRepository.insertPhoto(
-          asset.id,
-          dto.photoUrl,
-          actor.id,
-        );
-      }
-      await this.movementsService.record({
-        assetId: asset.id,
-        movementType: MovementType.Registration,
-        fromCostCenterId: null,
-        fromLocationId: null,
-        fromResponsibleId: null,
-        fromOperationalStatus: null,
-        fromPhysicalCondition: null,
-        toCostCenterId: asset.costCenterId,
-        toLocationId: asset.locationId,
-        toResponsibleId: asset.responsibleId,
-        toOperationalStatus: asset.operationalStatus,
-        toPhysicalCondition: asset.physicalCondition,
-        requestedBy: actor.id,
-        authorizedBy: actor.id,
-        reason: 'Alta de activo',
-        documentReference: dto.acquisitionDocument ?? null,
-      });
-      return asset;
     } catch (error) {
       this.rethrowUnique(error);
     }

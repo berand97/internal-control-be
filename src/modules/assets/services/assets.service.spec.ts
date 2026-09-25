@@ -1,3 +1,4 @@
+import type { DataSource } from 'typeorm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
@@ -223,6 +224,10 @@ describe('AssetsService', () => {
       dynamicFieldsService,
       auditLogsRepository,
       movementsService as MovementsService,
+      {
+        transaction: (work: (manager: unknown) => Promise<unknown>) =>
+          work({}),
+      } as unknown as DataSource,
     );
   });
 

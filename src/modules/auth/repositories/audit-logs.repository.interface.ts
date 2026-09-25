@@ -1,3 +1,4 @@
+import type { EntityManager } from 'typeorm';
 import type { AuditLog } from '../entities/audit-log.entity.js';
 import type { AuditAction } from '../enums/audit-action.enum.js';
 
@@ -12,7 +13,7 @@ export interface AuditEntry {
 }
 
 export interface AuditLogsRepository {
-  record(entry: AuditEntry): Promise<void>;
+  record(entry: AuditEntry, manager?: EntityManager): Promise<void>;
   findLastLogins(
     userId: string,
     limit: number,

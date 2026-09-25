@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { type EntityManager, Repository } from 'typeorm';
 import { AuditLog } from '../entities/audit-log.entity.js';
 import { AuditAction } from '../enums/audit-action.enum.js';
 import {
@@ -15,7 +15,7 @@ export class TypeOrmAuditLogsRepository implements AuditLogsRepository {
     private readonly auditLogs: Repository<AuditLog>,
   ) {}
 
-  async record(entry: AuditEntry): Promise<void> {
+  async record(entry: AuditEntry, manager?: EntityManager): Promise<void> {
     const auditLog = new AuditLog();
     auditLog.action = entry.action;
     auditLog.entityType = entry.entityType;
@@ -24,7 +24,7 @@ export class TypeOrmAuditLogsRepository implements AuditLogsRepository {
     auditLog.ipAddress = entry.ipAddress;
     auditLog.userAgent = entry.userAgent;
     auditLog.changes = entry.changes ?? null;
-    await this.auditLogs.save(auditLog);
+    await (manager?.getRepository(AuditLog) ?? this.auditLogs).save(auditLog);
   }
 
   findLastLogins(

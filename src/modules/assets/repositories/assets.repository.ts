@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, type EntityManager, Repository } from 'typeorm';
 import { AssetCategory } from '../../categories/entities/asset-category.entity.js';
 import { CostCenter } from '../../cost-centers/entities/cost-center.entity.js';
 import { AssetCategoryField } from '../../dynamic-fields/entities/asset-category-field.entity.js';
@@ -112,9 +112,10 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
     return this.assets.findOne({ where: { internalCode: code } });
   }
 
-  insert(record: CreateAssetRecord): Promise<Asset> {
+  insert(record: CreateAssetRecord, manager?: EntityManager): Promise<Asset> {
+    const assets = manager?.getRepository(Asset) ?? this.assets;
     const now = new Date();
-    const entity = this.assets.create({
+    const entity = assets.create({
       ...record,
       qrToken: null,
       qrTokenVersion: 1,
@@ -133,43 +134,54 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
       updatedAt: now,
       updatedBy: record.createdBy,
     });
-    return this.assets.save(entity);
+    return assets.save(entity);
   }
 
-  async update(id: string, record: UpdateAssetRecord): Promise<void> {
-    await this.assets.update({ id }, { ...record, updatedAt: new Date() });
+  async update(
+    id: string,
+    record: UpdateAssetRecord,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const assets = manager?.getRepository(Asset) ?? this.assets;
+    await assets.update({ id }, { ...record, updatedAt: new Date() });
   }
 
-  async nextInternalCode(year: number): Promise<string> {
-    const rows: unknown = await this.dataSource.query(
+
+  async nextInternalCode(year: number, manager?: EntityManager): Promise<string> {
+   const rows = (await (manager ?? this.dataSource.manager).query(
       `
-      UPDATE code_sequence
-      SET current_value = current_value + 1, updated_at = NOW()
-      WHERE sequence_name = 'asset_internal_code'
-      RETURNING current_value, padding_length
+      WITH reserved AS (
+        UPDATE code_sequence
+        SET current_value = current_value + 1, updated_at = NOW()
+        WHERE sequence_name = 'asset_internal_code'
+        RETURNING current_value, padding_length
+      )
+      SELECT current_value, padding_length FROM reserved
       `,
-    );
-    const row =
-      Array.isArray(rows) && rows[0] && typeof rows[0] === 'object'
-        ? (rows[0] as { current_value?: string | number; padding_length?: number })
-        : null;
-    const value = Number(row?.current_value ?? 0);
-    const padding = Number(row?.padding_length ?? 4);
-    return `A${year}-${String(value).padStart(padding, '0')}`;
+    )) as Array<{ current_value: string; padding_length: number }>;
+    const row = rows[0];
+    if (!row) {
+      throw new Error("Falta la secuencia 'asset_internal_code' en code_sequence");
+    }
+    const value = Number(row.current_value);
+    return `A${year}-${String(value).padStart(row.padding_length, '0')}`;
   }
 
   async replaceCustomValues(
     assetId: string,
     values: ReadonlyArray<CustomValueWrite>,
+    manager?: EntityManager,
   ): Promise<void> {
-    await this.customValues.delete({ assetId });
+    const customValues =
+      manager?.getRepository(AssetCustomValue) ?? this.customValues;
+    await customValues.delete({ assetId });
     if (values.length === 0) {
       return;
     }
     const now = new Date();
-    await this.customValues.save(
+    await customValues.save(
       values.map((value) =>
-        this.customValues.create({
+        customValues.create({
           assetId,
           fieldId: value.fieldId,
           ...value.columns,
@@ -251,15 +263,17 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
     assetId: string,
     fileUrl: string,
     uploadedBy: string,
+    manager?: EntityManager,
   ): Promise<void> {
-    const entity = this.photos.create({
+    const photos = manager?.getRepository(AssetPhoto) ?? this.photos;
+    const entity = photos.create({
       assetId,
       fileUrl,
       isPrimary: true,
       uploadedAt: new Date(),
       uploadedBy,
     });
-    await this.photos.save(entity);
+    await photos.save(entity);
   }
 
   findAcquisitionTypeById(id: string): Promise<AcquisitionType | null> {

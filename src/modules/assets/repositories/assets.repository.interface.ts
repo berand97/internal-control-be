@@ -1,3 +1,4 @@
+import type { EntityManager } from 'typeorm';
 import type { DepreciationMethod } from '../../categories/enums/depreciation-method.enum.js';
 import type { DynamicFieldType } from '../../dynamic-fields/enums/dynamic-field-type.enum.js';
 import type { AcquisitionType } from '../entities/acquisition-type.entity.js';
@@ -115,17 +116,30 @@ export interface AssetsRepository {
   ): Promise<{ items: ReadonlyArray<Asset>; total: number }>;
   findById(id: string): Promise<Asset | null>;
   findByInternalCode(code: string): Promise<Asset | null>;
-  insert(record: CreateAssetRecord): Promise<Asset>;
-  update(id: string, record: UpdateAssetRecord): Promise<void>;
-  nextInternalCode(year: number): Promise<string>;
-  replaceCustomValues(assetId: string, values: ReadonlyArray<CustomValueWrite>): Promise<void>;
+  insert(record: CreateAssetRecord, manager?: EntityManager): Promise<Asset>;
+  update(
+    id: string,
+    record: UpdateAssetRecord,
+    manager?: EntityManager,
+  ): Promise<void>;
+  nextInternalCode(year: number, manager?: EntityManager): Promise<string>;
+  replaceCustomValues(
+    assetId: string,
+    values: ReadonlyArray<CustomValueWrite>,
+    manager?: EntityManager,
+  ): Promise<void>;
   findCustomValues(assetId: string): Promise<ReadonlyArray<CustomValueWithField>>;
   insertMovement(record: CreateMovementRecord): Promise<AssetMovement>;
   findRecentMovements(
     assetId: string,
     limit: number,
   ): Promise<ReadonlyArray<AssetMovement>>;
-  insertPhoto(assetId: string, fileUrl: string, uploadedBy: string): Promise<void>;
+  insertPhoto(
+    assetId: string,
+    fileUrl: string,
+    uploadedBy: string,
+    manager?: EntityManager,
+  ): Promise<void>;
   findAcquisitionTypeById(id: string): Promise<AcquisitionType | null>;
   listAcquisitionTypes(): Promise<ReadonlyArray<AcquisitionType>>;
   findNamedCategory(id: string): Promise<NamedRef | null>;

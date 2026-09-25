@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { type EntityManager, Repository } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig } from '../../../config/configuration.js';
@@ -41,8 +41,13 @@ export class MovementsService {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
-  async record(input: RecordMovementInput): Promise<AssetMovement> {
-    const previous = await this.movements.findOne({
+  // Con manager, el movimiento entra en la transacción del llamador.
+  async record(
+    input: RecordMovementInput,
+    manager?: EntityManager,
+  ): Promise<AssetMovement> {
+    const movements = manager?.getRepository(AssetMovement) ?? this.movements;
+    const previous = await movements.findOne({
       where: { assetId: input.assetId },
       order: { executedAt: 'DESC', createdAt: 'DESC' },
     });
@@ -71,7 +76,7 @@ export class MovementsService {
       newValues,
       previousMovementId: previous?.id ?? '',
     });
-    const entity = this.movements.create({
+    const entity = movements.create({
       ...input,
       loanId: input.loanId ?? null,
       metadata: { ...(input.metadata ?? {}), signedAt: timestamp },
@@ -80,7 +85,7 @@ export class MovementsService {
       executedAt: now,
       createdAt: now,
     });
-    return this.movements.save(entity);
+    return movements.save(entity);
   }
 
   async list(query: MovementListQuery): Promise<{
