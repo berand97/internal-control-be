@@ -7,6 +7,7 @@ import { DocumentsController } from './documents.controller.js';
 import { DocumentRequestsJob } from './jobs/document-requests.job.js';
 import { GotenbergPdfConverter, PDF_CONVERTER } from './pdf/pdf-converter.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
+import { DocumentListService } from './services/document-list.service.js';
 import { InternalSignatureProvider } from './signature/internal-signature.provider.js';
 import { SIGNATURE_PROVIDER, StubSignatureProvider } from './signature/signature-provider.js';
 import { SignatureVerificationController } from './signature-verification.controller.js';
@@ -16,6 +17,7 @@ import { SignatureVerificationController } from './signature-verification.contro
   controllers: [DocumentsController, SignatureVerificationController],
   providers: [
     DocumentEngineService,
+    DocumentListService,
     DocumentRequestsJob,
     StubSignatureProvider,
     InternalSignatureProvider,

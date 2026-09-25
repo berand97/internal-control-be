@@ -9,13 +9,28 @@ import {
   ParseIntPipe,
   ParseUUIDPipe,
   Post,
+  Query,
   Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsArray, IsDateString, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 import type { Response } from 'express';
 import { ErrorCode } from '../../common/constants/error-code.enum.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
@@ -25,6 +40,7 @@ import { ApiException } from '../../common/exceptions/api.exception.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
+import { DOCUMENT_LIST_STATUSES, DocumentListService, type DocumentListStatus } from './services/document-list.service.js';
 
 export class GenerateDocumentDto {
   @IsString()
@@ -81,6 +97,37 @@ export class RejectSignatureDto {
   readonly reason!: string;
 }
 
+export class QueryDocumentsDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  readonly page: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  readonly pageSize: number = 20;
+
+  @IsOptional()
+  @IsString()
+  readonly formatKey?: string;
+
+  @IsOptional()
+  @IsIn(DOCUMENT_LIST_STATUSES)
+  readonly status?: DocumentListStatus;
+
+  @IsOptional()
+  @IsDateString()
+  readonly from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  readonly to?: string;
+}
+
 export class UploadTemplateDto {
   @IsString()
   readonly sgcVersion!: string;
@@ -100,7 +147,40 @@ interface DocxUpload {
 @Feature('document-templates')
 @Controller('documents')
 export class DocumentsController {
-  constructor(private readonly engine: DocumentEngineService) {}
+  constructor(
+    private readonly engine: DocumentEngineService,
+    private readonly documentList: DocumentListService,
+  ) {}
+
+  @Get()
+  @ApiOperation({
+    summary: 'Documentos generados y solicitudes pendientes o fallidas',
+    description:
+      'Solo los formatos que el usuario puede leer. Orden: más recientes primero, con id como desempate. Una solicitud FAILED trae su error y se reintenta con POST /documents/requests/:requestId/retry.',
+  })
+  list(@Query() query: QueryDocumentsDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.documentList.list(
+      {
+        page: query.page,
+        pageSize: query.pageSize,
+        ...(query.formatKey ? { formatKey: query.formatKey } : {}),
+        ...(query.status ? { status: query.status } : {}),
+        ...(query.from ? { from: query.from.slice(0, 10) } : {}),
+        ...(query.to ? { to: query.to.slice(0, 10) } : {}),
+      },
+      actor.id,
+    );
+  }
+
+  @Post('requests/:requestId/retry')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Reencolar una solicitud fallida',
+    description: 'Solo la devuelve al outbox (PENDING); el job la genera en su siguiente pasada. Requiere el permiso de generación del formato.',
+  })
+  retry(@Param('requestId', ParseUUIDPipe) requestId: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.documentList.retry(requestId, actor.id);
+  }
 
   @Get('formats')
   @RequirePermission('document_template:read:global')
