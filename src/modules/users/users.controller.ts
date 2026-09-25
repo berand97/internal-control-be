@@ -3,8 +3,10 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
+  Ip,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -34,11 +36,14 @@ import { AssignUserRoleDto } from './dto/assign-user-role.dto.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { DelegateUserRoleDto } from './dto/delegate-user-role.dto.js';
 import { QueryUsersDto } from './dto/query-users.dto.js';
+import { ResetUserMfaDto } from './dto/reset-user-mfa.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 import { UserAffiliationOptionsResponseDto } from './dto/responses/user-affiliation-options.response.dto.js';
 import { UserDetailResponseDto } from './dto/responses/user-detail.response.dto.js';
+import { UserMfaResetResponseDto } from './dto/responses/user-mfa-reset.response.dto.js';
 import { UserRoleResponseDto } from './dto/responses/user-role.response.dto.js';
 import { UsersPageResponseDto } from './dto/responses/users-page.response.dto.js';
+import { MfaAccountService } from '../auth/services/mfa-account.service.js';
 import { UsersService } from './services/users.service.js';
 
 @ApiTags(OpenApiTag.Users)
@@ -50,11 +55,15 @@ import { UsersService } from './services/users.service.js';
   UsersPageResponseDto,
   UserRoleResponseDto,
   UserAffiliationOptionsResponseDto,
+  UserMfaResetResponseDto,
 )
 @Feature('users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly mfaAccount: MfaAccountService,
+  ) {}
 
   @Get()
   @RequirePermission('user:read:global')
@@ -167,6 +176,48 @@ export class UsersController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<null> {
     return this.usersService.reactivate(id, user);
+  }
+
+  @Post(':id/mfa/reset')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('user:manage:global')
+  @ApiOperation({
+    summary: 'Restablecer el MFA de otro usuario (pérdida del dispositivo)',
+    description:
+      'Exige que quien lo hace tenga sesión con MFA y no sea el mismo usuario. Borra secreto, secreto pendiente y códigos de recuperación, revoca todas las sesiones del usuario afectado y lo obliga a enrolar MFA en su siguiente inicio de sesión (flujo mfaSetupToken de POST /auth/login), aunque su rol no lo exija. Queda en la bitácora quién, a quién, cuándo y el motivo (MFA_ADMIN_RESET), sin secretos.',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: envelopedSchema(UserMfaResetResponseDto),
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validación fallida: motivo ausente o corto (VALIDATION_FAILED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Sin permiso user:manage:global (INSUFFICIENT_PERMISSIONS), sesión sin MFA (MFA_SESSION_REQUIRED, action REAUTH) o intento sobre sí mismo (MFA_SELF_RESET_FORBIDDEN)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Usuario inexistente (RESOURCE_NOT_FOUND)',
+    schema: errorEnvelopeSchema(),
+  })
+  async resetMfa(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: ResetUserMfaDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
+  ): Promise<UserMfaResetResponseDto> {
+    const outcome = await this.mfaAccount.resetByAdmin(user, id, dto.reason, {
+      ipAddress,
+      userAgent: userAgent ?? null,
+    });
+    return { ...outcome, mfaEnrollmentRequired: true };
   }
 
   @Post(':id/roles')

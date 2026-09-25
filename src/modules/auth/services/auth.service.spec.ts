@@ -11,6 +11,7 @@ import type { AuthUsersRepository } from '../repositories/auth-users.repository.
 import type { PasswordResetTokensRepository } from '../repositories/password-reset-tokens.repository.interface.js';
 import type { RefreshTokenFamiliesRepository } from '../repositories/refresh-token-families.repository.interface.js';
 import { AuthService, requiresMfaEnrollment } from './auth.service.js';
+import type { MfaAccountService } from './mfa-account.service.js';
 import type { MfaService } from './mfa.service.js';
 import type { TokenService } from './token.service.js';
 import { FEATURE_CATALOG } from '../../features/feature-catalog.js';
@@ -34,6 +35,7 @@ const buildUser = (overrides: Partial<AppUser> = {}): AppUser => {
   user.mfaEnabled = false;
   user.mfaSecret = null;
   user.mustChangePassword = false;
+  user.mfaEnrollmentRequired = false;
   Object.assign(user, overrides);
   return user;
 };
@@ -71,6 +73,11 @@ describe('AuthService', () => {
   let mfaService: Pick<MfaService, 'verifyTotp' | 'createEnrollment'>;
   let mailService: { sendPasswordReset: ReturnType<typeof vi.fn> };
   let featureFlags: Pick<FeatureFlagsService, 'list'>;
+  let mfaAccount: {
+    status: ReturnType<typeof vi.fn>;
+    completeSetupEnrollment: ReturnType<typeof vi.fn>;
+    consumeForLogin: ReturnType<typeof vi.fn>;
+  };
   let service: AuthService;
 
   beforeEach(() => {
@@ -150,6 +157,15 @@ describe('AuthService', () => {
         })),
       ),
     };
+    mfaAccount = {
+      status: vi.fn().mockResolvedValue({
+        recoveryCodesRemaining: 0,
+        requiredByRole: false,
+        sessionVerified: false,
+      }),
+      completeSetupEnrollment: vi.fn().mockResolvedValue(['AAAA-BBBB-CCCC']),
+      consumeForLogin: vi.fn().mockResolvedValue(9),
+    };
     service = new AuthService(
       authUsersRepository,
       refreshTokenFamiliesRepository,
@@ -173,6 +189,7 @@ describe('AuthService', () => {
           },
         ]),
       } as never,
+      mfaAccount as unknown as MfaAccountService,
     );
   });
 
@@ -254,6 +271,18 @@ describe('AuthService', () => {
         { username: 'admin', password: 'C0ntraseña-Segura!' },
         context,
       );
+      expect(outcome.response).toMatchObject({ requiresMfaSetup: true });
+    });
+
+    it('fuerza setup MFA tras un reset administrativo aunque el rol no lo exija', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser({ mfaEnrollmentRequired: true }),
+      );
+      const outcome = await service.login(
+        { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+        context,
+      );
+      expect(outcome.refreshToken).toBeNull();
       expect(outcome.response).toMatchObject({ requiresMfaSetup: true });
     });
 
@@ -355,6 +384,46 @@ describe('AuthService', () => {
       await expect(
         service.verifyMfa({ code: '000000' }, 'Bearer challenge', context),
       ).rejects.toMatchObject({ code: ErrorCode.MfaCodeInvalid });
+    });
+  });
+
+  describe('verifyRecoveryCode', () => {
+    beforeEach(() => {
+      tokenService.verifyMfaChallengeToken.mockReturnValue({
+        sub: 'user-1',
+        username: 'juliana.perez',
+        type: 'mfa_challenge',
+      });
+      vi.mocked(authUsersRepository.findByIdWithPerson).mockResolvedValue(
+        buildUser({ mfaEnabled: true, mfaSecret: 's' }),
+      );
+    });
+
+    it('emite sesión marcada con MFA e informa los códigos restantes', async () => {
+      const outcome = await service.verifyRecoveryCode(
+        { recoveryCode: 'AAAA-BBBB-CCCC' },
+        'Bearer challenge',
+        context,
+      );
+      expect(outcome.refreshToken).toBe('refresh');
+      expect(outcome.response.recoveryCodesRemaining).toBe(9);
+      expect(refreshTokenFamiliesRepository.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ mfaVerifiedAt: expect.any(Date) }),
+      );
+    });
+
+    it('rechaza un código que no coincide sin escribir el código en la bitácora', async () => {
+      mfaAccount.consumeForLogin.mockResolvedValue(null);
+      await expect(
+        service.verifyRecoveryCode(
+          { recoveryCode: 'ZZZZ-ZZZZ-ZZZZ' },
+          'Bearer challenge',
+          context,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.MfaCodeInvalid });
+      expect(JSON.stringify(vi.mocked(auditLogsRepository.record).mock.calls)).not.toContain(
+        'ZZZZ',
+      );
     });
   });
 

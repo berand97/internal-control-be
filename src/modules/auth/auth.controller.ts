@@ -37,7 +37,9 @@ import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { MfaProofDto } from './dto/mfa-proof.dto.js';
 import { VerifyMfaDto } from './dto/verify-mfa.dto.js';
+import { VerifyRecoveryCodeDto } from './dto/verify-recovery-code.dto.js';
 import { FeatureResponseDto } from '../features/dto/feature.response.dto.js';
 import { LoginResponseDto } from './dto/responses/login-response.dto.js';
 import { MeResponseDto } from './dto/responses/me-response.dto.js';
@@ -45,9 +47,15 @@ import { NavigationItemResponseDto } from './dto/responses/navigation-item.respo
 import { ResourceCapabilityResponseDto } from './dto/responses/resource-capability.response.dto.js';
 import { MfaChallengeResponseDto } from './dto/responses/mfa-challenge-response.dto.js';
 import { MfaEnrollmentResponseDto } from './dto/responses/mfa-enrollment.response.dto.js';
+import { MfaDisabledResponseDto } from './dto/responses/mfa-disabled.response.dto.js';
+import { MfaPendingEnrollmentResponseDto } from './dto/responses/mfa-pending-enrollment.response.dto.js';
+import { MfaRecoveryCodesResponseDto } from './dto/responses/mfa-recovery-codes.response.dto.js';
+import { MfaSetupConfirmedResponseDto } from './dto/responses/mfa-setup-confirmed.response.dto.js';
 import { MfaSetupRequiredResponseDto } from './dto/responses/mfa-setup-required.response.dto.js';
+import { RecoveryLoginResponseDto } from './dto/responses/recovery-login-response.dto.js';
 import { RefreshResponseDto } from './dto/responses/refresh-response.dto.js';
 import { AuthService } from './services/auth.service.js';
+import { MfaAccountService } from './services/mfa-account.service.js';
 import { RefreshCookieService } from './services/refresh-cookie.service.js';
 
 const AUTH_THROTTLE = { default: { limit: 5, ttl: 900_000 } } as const;
@@ -62,6 +70,11 @@ const FORGOT_PASSWORD_THROTTLE = { default: { limit: 3, ttl: 3_600_000 } } as co
   MfaChallengeResponseDto,
   MfaSetupRequiredResponseDto,
   MfaEnrollmentResponseDto,
+  MfaDisabledResponseDto,
+  MfaPendingEnrollmentResponseDto,
+  MfaRecoveryCodesResponseDto,
+  MfaSetupConfirmedResponseDto,
+  RecoveryLoginResponseDto,
   RefreshResponseDto,
   MeResponseDto,
   NavigationItemResponseDto,
@@ -74,6 +87,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly refreshCookieService: RefreshCookieService,
+    private readonly mfaAccount: MfaAccountService,
   ) {}
 
   @Post('login')
@@ -182,6 +196,57 @@ export class AuthController {
     return outcome.response;
   }
 
+  @Post('mfa/recovery')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle(MFA_THROTTLE)
+  @ApiOperation({
+    summary: 'Iniciar sesión con un código de recuperación',
+    description:
+      'Alternativa a POST /auth/mfa/verify cuando no se tiene el dispositivo. Requiere Authorization: Bearer <mfaChallengeToken> y un código de recuperación de un solo uso, que queda consumido. La sesión cuenta como sesión con MFA.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Sesión iniciada; informa cuántos códigos quedan',
+    schema: envelopedSchema(RecoveryLoginResponseDto),
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validación fallida (VALIDATION_FAILED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 401,
+    description:
+      'Desafío ausente/inválido (MFA_REQUIRED) o código inexistente o ya usado (MFA_CODE_INVALID)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Cuenta suspendida o inactiva (USER_SUSPENDED, USER_INACTIVE)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Demasiados intentos (TOO_MANY_ATTEMPTS)',
+    schema: errorEnvelopeSchema(),
+  })
+  async verifyRecoveryCode(
+    @Body() dto: VerifyRecoveryCodeDto,
+    @Headers('authorization') authorization: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
+  ): Promise<RecoveryLoginResponseDto> {
+    const outcome = await this.authService.verifyRecoveryCode(
+      dto,
+      authorization,
+      { ipAddress, userAgent: userAgent ?? null },
+    );
+    this.refreshCookieService.attach(res, outcome.refreshToken);
+    return outcome.response;
+  }
+
   @Post('mfa/setup')
   @Public()
   @HttpCode(HttpStatus.OK)
@@ -209,17 +274,25 @@ export class AuthController {
   @ApiOperation({
     summary: 'Confirmar enrolamiento MFA y emitir sesión',
     description:
-      'Valida el código TOTP del secreto recién enrolado, activa MFA e inicia sesión.',
+      'Valida el código TOTP del secreto recién enrolado, activa MFA, genera 10 códigos de recuperación (se muestran solo en esta respuesta) e inicia sesión con MFA.',
   })
-  @ApiResponse({ status: 200, schema: envelopedSchema(LoginResponseDto) })
-  @ApiResponse({ status: 401, schema: errorEnvelopeSchema() })
+  @ApiResponse({
+    status: 200,
+    schema: envelopedSchema(MfaSetupConfirmedResponseDto),
+  })
+  @ApiResponse({
+    status: 401,
+    description:
+      'Token de setup ausente/inválido (MFA_REQUIRED) o código incorrecto (MFA_CODE_INVALID)',
+    schema: errorEnvelopeSchema(),
+  })
   async confirmMfaSetup(
     @Body() dto: VerifyMfaDto,
     @Headers('authorization') authorization: string | undefined,
     @Res({ passthrough: true }) res: Response,
     @Ip() ipAddress: string,
     @Headers('user-agent') userAgent: string | undefined,
-  ): Promise<LoginResponseDto> {
+  ): Promise<MfaSetupConfirmedResponseDto> {
     const outcome = await this.authService.confirmMfaSetup(
       dto,
       authorization,
@@ -323,6 +396,200 @@ export class AuthController {
   })
   async me(@CurrentUser() user: AuthenticatedUser): Promise<MeResponseDto> {
     return this.authService.me(user);
+  }
+
+  @Post('me/mfa/enrollment')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @Throttle(MFA_THROTTLE)
+  @ApiOperation({
+    summary: 'Iniciar enrolamiento o cambio de dispositivo MFA desde la sesión',
+    description:
+      'Genera un secreto TOTP pendiente (QR y URI otpauth) válido 15 minutos. Si la cuenta ya tiene MFA, exige code (TOTP del dispositivo actual) o recoveryCode (se consume). El secreto pendiente no reemplaza al vigente hasta POST /auth/me/mfa/enrollment/confirm; iniciar de nuevo descarta el pendiente anterior.',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: envelopedSchema(MfaPendingEnrollmentResponseDto),
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validación fallida (VALIDATION_FAILED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Token ausente o inválido (UNAUTHORIZED, TOKEN_EXPIRED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Con MFA activo: falta la prueba del factor actual o no es válida (MFA_VERIFICATION_FAILED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Demasiados intentos (TOO_MANY_ATTEMPTS)',
+    schema: errorEnvelopeSchema(),
+  })
+  startMfaEnrollment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MfaProofDto,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
+  ): Promise<MfaPendingEnrollmentResponseDto> {
+    return this.mfaAccount.startEnrollment(user, dto, {
+      ipAddress,
+      userAgent: userAgent ?? null,
+    });
+  }
+
+  @Post('me/mfa/enrollment/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @Throttle(MFA_THROTTLE)
+  @ApiOperation({
+    summary: 'Confirmar el enrolamiento MFA desde la sesión',
+    description:
+      'Valida un TOTP del secreto pendiente, lo convierte en el factor vigente, reemplaza los códigos de recuperación por 10 nuevos (se muestran solo en esta respuesta) y marca la sesión actual como sesión con MFA. Si era un cambio de dispositivo, revoca las demás sesiones del usuario.',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: envelopedSchema(MfaRecoveryCodesResponseDto),
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validación fallida (VALIDATION_FAILED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Token ausente o inválido (UNAUTHORIZED, TOKEN_EXPIRED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Código incorrecto (MFA_VERIFICATION_FAILED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'No hay enrolamiento en curso o expiró (MFA_ENROLLMENT_NOT_STARTED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Demasiados intentos (TOO_MANY_ATTEMPTS)',
+    schema: errorEnvelopeSchema(),
+  })
+  confirmMfaEnrollment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: VerifyMfaDto,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
+  ): Promise<MfaRecoveryCodesResponseDto> {
+    return this.mfaAccount.confirmEnrollment(user, dto, {
+      ipAddress,
+      userAgent: userAgent ?? null,
+    });
+  }
+
+  @Post('me/mfa/recovery-codes')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @Throttle(MFA_THROTTLE)
+  @ApiOperation({
+    summary: 'Regenerar los códigos de recuperación',
+    description:
+      'Exige una sesión con MFA. Invalida todos los códigos anteriores (usados o no) y devuelve 10 nuevos, que se muestran solo en esta respuesta.',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: envelopedSchema(MfaRecoveryCodesResponseDto),
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Token ausente o inválido (UNAUTHORIZED, TOKEN_EXPIRED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'La sesión no se abrió con segundo factor (MFA_SESSION_REQUIRED, action REAUTH)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'La cuenta no tiene MFA activo (MFA_NOT_ENABLED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Demasiados intentos (TOO_MANY_ATTEMPTS)',
+    schema: errorEnvelopeSchema(),
+  })
+  regenerateRecoveryCodes(
+    @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
+  ): Promise<MfaRecoveryCodesResponseDto> {
+    return this.mfaAccount.regenerateRecoveryCodes(user, {
+      ipAddress,
+      userAgent: userAgent ?? null,
+    });
+  }
+
+  @Post('me/mfa/disable')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @Throttle(MFA_THROTTLE)
+  @ApiOperation({
+    summary: 'Desactivar MFA',
+    description:
+      'Solo si ningún rol activo del usuario exige MFA (SUPER_ADMIN, INTERNAL_CONTROL_DIRECTOR). Exige code o recoveryCode. Borra secreto y códigos y revoca las demás sesiones. Sin MFA la sesión deja de contar como sesión con MFA, así que el usuario no podrá firmar actas que lo exijan.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'MFA desactivado',
+    schema: envelopedSchema(MfaDisabledResponseDto),
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validación fallida (VALIDATION_FAILED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Token ausente o inválido (UNAUTHORIZED, TOKEN_EXPIRED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Rol que exige MFA (MFA_REQUIRED_BY_ROLE) o prueba del factor inválida (MFA_VERIFICATION_FAILED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'La cuenta no tiene MFA activo (MFA_NOT_ENABLED)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Demasiados intentos (TOO_MANY_ATTEMPTS)',
+    schema: errorEnvelopeSchema(),
+  })
+  disableMfa(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MfaProofDto,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
+  ): Promise<MfaDisabledResponseDto> {
+    return this.mfaAccount.disable(user, dto, {
+      ipAddress,
+      userAgent: userAgent ?? null,
+    });
   }
 
   @Post('forgot-password')

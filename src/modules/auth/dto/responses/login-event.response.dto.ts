@@ -9,6 +9,7 @@ export class LoginEventResponseDto {
   readonly at!: string;
 
   @ApiProperty({
+    type: 'string',
     description: 'Dirección IP desde la que se inició sesión',
     nullable: true,
     example: '190.85.12.34',
