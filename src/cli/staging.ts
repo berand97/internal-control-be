@@ -5,7 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import { resolve } from 'node:path';
 import { AppConfigModule } from '../config/config.module.js';
 import { DatabaseModule } from '../database/database.module.js';
-import { writeDiagnosticReport } from '../modules/staging/report/write-diagnostic-report.js';
+import { writeIssuesCsv } from '../modules/staging/report/write-issues-csv.js';
 import { StagingDiagnosticsService } from '../modules/staging/services/staging-diagnostics.service.js';
 import { StagingLoaderService } from '../modules/staging/services/staging-loader.service.js';
 import { isStagingSourceKind, STAGING_SOURCE_KINDS } from '../modules/staging/staging-sources.js';
@@ -16,7 +16,7 @@ class StagingCliModule {}
 
 const USAGE = `Uso:
   node dist/cli/staging.js load <archivo.xlsx> --kind=${STAGING_SOURCE_KINDS.join('|')}
-  node dist/cli/staging.js diagnose --batch=<id> [--cost-centers=<id>] --out=<reporte.xlsx>`;
+  node dist/cli/staging.js diagnose --batch=<id> [--cost-centers=<id>] --out=<problemas.csv>`;
 
 const option = (name: string): string | undefined =>
   process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -53,7 +53,7 @@ const run = async (): Promise<void> => {
       const diagnosis = await context
         .get(StagingDiagnosticsService)
         .diagnoseAssetReport(batch, option('cost-centers') ?? null);
-      await writeDiagnosticReport(resolve(out), diagnosis);
+      await writeIssuesCsv(resolve(out), diagnosis.issues);
       for (const sheet of diagnosis.sheets) {
         console.log(`\n${sheet.sheet}`);
         console.table(

@@ -1,10 +1,10 @@
 import type { TestingModule } from '@nestjs/testing';
 import ExcelJS from 'exceljs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DataSource } from 'typeorm';
-import { writeDiagnosticReport } from '../../src/modules/staging/report/write-diagnostic-report.js';
+import { writeIssuesCsv } from '../../src/modules/staging/report/write-issues-csv.js';
 import { StagingDiagnosticsService } from '../../src/modules/staging/services/staging-diagnostics.service.js';
 import { StagingLoaderService } from '../../src/modules/staging/services/staging-loader.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
@@ -21,7 +21,7 @@ const HEADERS = [
   'MovPrecioCompra',
 ];
 
-type Row = [number, unknown, string, unknown, unknown, unknown, unknown, unknown];
+type Row = [number | null, unknown, string, unknown, unknown, unknown, unknown, unknown];
 
 const ASSET_ROWS: Record<number, Row> = {
   2: [1, 'A-001', 'Portátil', 'Latitude', null, '100', new Date('2019-05-10'), 3500000],
@@ -38,6 +38,8 @@ const ASSET_ROWS: Record<number, Row> = {
   14: [12, 'A-007', 'Centro inexistente', null, null, '9999', new Date('2021-03-03'), 100000],
   15: [13, 'A-008', 'Precio texto', null, null, '100', new Date('2021-03-03'), 'abc'],
   16: [14, 'A-009', 'Precio #N/A', null, null, '100', new Date('2021-03-03'), { formula: 'NA()', result: { error: '#N/A' } }],
+  17: [null, null, '', null, null, 'MovIdCentro', null, null],
+  18: [null, null, '', null, null, '100', 5, null],
 };
 
 const buildAssetReport = async (path: string): Promise<void> => {
@@ -111,7 +113,7 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
     const result = await loader.load(reportPath, 'ASSET_REPORT');
     expect(result.created).toBe(true);
     expect(result.sheets).toEqual([
-      { name: 'ACTIVOS', rows: 16 },
+      { name: 'ACTIVOS', rows: 18 },
       { name: 'ACTIVOS DADOS DE BAJA', rows: 2 },
       { name: 'Movimientos', rows: 3 },
     ]);
@@ -138,7 +140,7 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
     expect(second).toEqual({ ...first, created: false });
     expect(
       Number(await scalar<string>(dataSource, 'SELECT count(*) FROM staging_row WHERE batch_id = $1', [first.batchId])),
-    ).toBe(21);
+    ).toBe(23);
     expect(Number(await scalar<string>(dataSource, `SELECT count(*) FROM staging_batch WHERE source_kind = 'ASSET_REPORT'`))).toBe(1);
   });
 
@@ -150,7 +152,9 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
     const active = diagnosis.sheets.find((sheet) => sheet.sheet === 'ACTIVOS');
     const metric = (key: string) => active?.metrics.find((item) => item.key === key)?.value;
     expect({
+      rowsRead: metric('rows_read'),
       rows: metric('rows'),
+      withoutAssetId: metric('rows_without_asset_id'),
       temp: metric('barcode_temp'),
       duplicatedCodes: metric('barcode_duplicated_codes'),
       duplicatedRows: metric('barcode_duplicated_rows'),
@@ -165,7 +169,9 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
       serialEmpty: metric('serial_empty'),
       modelEmpty: metric('model_empty'),
     }).toEqual({
+      rowsRead: 17,
       rows: 14,
+      withoutAssetId: 2,
       temp: 2,
       duplicatedCodes: 1,
       duplicatedRows: 3,
@@ -202,6 +208,8 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
       { row_number: 14, issue_code: 'COST_CENTER_UNKNOWN' },
       { row_number: 15, issue_code: 'PRICE_NOT_A_NUMBER' },
       { row_number: 16, issue_code: 'PRICE_NOT_A_NUMBER' },
+      { row_number: 17, issue_code: 'ROW_WITHOUT_ASSET_ID' },
+      { row_number: 18, issue_code: 'ROW_WITHOUT_ASSET_ID' },
     ]);
 
     const again = await diagnostics.diagnoseAssetReport(report.batchId, centers.batchId);
@@ -210,11 +218,16 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
       Number(await scalar<string>(dataSource, 'SELECT count(*) FROM staging_issue WHERE batch_id = $1', [report.batchId])),
     ).toBe(diagnosis.issues.length);
 
-    const out = join(dir, 'reporte.xlsx');
-    await writeDiagnosticReport(out, diagnosis);
-    const written = new ExcelJS.Workbook();
-    await written.xlsx.readFile(out);
-    expect(written.worksheets.map((sheet) => sheet.name)).toEqual(['Resumen', 'Problemas por fila']);
-    expect(written.getWorksheet('Problemas por fila')?.rowCount).toBe(diagnosis.issues.length + 1);
+    const out = join(dir, 'problemas.csv');
+    await writeIssuesCsv(out, diagnosis.issues);
+    const csv = await readFile(out, 'utf8');
+    expect(
+      csv.startsWith('﻿Hoja;Fila;Columna;Problema;Valor encontrado;Detalle;Código\r\n'),
+    ).toBe(true);
+    const lines = csv.slice(1).trimEnd().split('\r\n');
+    expect(lines).toHaveLength(diagnosis.issues.length + 1);
+    expect(lines).toContain(
+      'ACTIVOS;11;MovFechaCompra;La fecha de compra no es una fecha;12/05/2019;Tipo de celda: string;PURCHASE_DATE_NOT_A_DATE',
+    );
   });
 });

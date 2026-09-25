@@ -31,6 +31,7 @@ export interface Issue {
 }
 
 export const ASSET_COLUMNS = {
+  assetId: ['MovIdActivo'],
   barcode: ['MovCodBarras'],
   serial: ['MovNumSerie'],
   model: ['MovModelo'],
@@ -118,15 +119,34 @@ export const diagnoseAssetSheet = (
   };
 
   const dataRows = sheet.rows.filter((row) => row.rowNumber > sheet.headerRow);
-  const nonEmpty = dataRows.filter((row) => Object.values(row.cells).some((value) => !isBlank(value)));
-  const lastDataRow = nonEmpty.at(-1)?.rowNumber ?? sheet.headerRow;
+  const withContent = dataRows.filter((row) =>
+    Object.values(row.cells).some((value) => !isBlank(value)),
+  );
+  const lastDataRow = withContent.at(-1)?.rowNumber ?? sheet.headerRow;
   const emptyRows = dataRows.filter(
-    (row) => row.rowNumber < lastDataRow && !Object.values(row.cells).some((value) => !isBlank(value)),
+    (row) =>
+      row.rowNumber < lastDataRow &&
+      !Object.values(row.cells).some((value) => !isBlank(value)),
   );
   const trailingEmpty = dataRows.filter((row) => row.rowNumber > lastDataRow).length;
   for (const row of emptyRows) {
     issue(row.rowNumber, null, 'EMPTY_ROW', null, 'Fila completamente vacía en medio de los datos');
   }
+  const withoutIdentity = letters.assetId
+    ? withContent.filter((row) => isBlank(cell(row, 'assetId')))
+    : [];
+  for (const row of withoutIdentity) {
+    issue(
+      row.rowNumber,
+      header('assetId'),
+      'ROW_WITHOUT_ASSET_ID',
+      null,
+      `Fila con datos pero sin ${header('assetId')}; no se cuenta como activo (columnas: ${Object.keys(row.cells).join(', ')})`,
+    );
+  }
+  const nonEmpty = letters.assetId
+    ? withContent.filter((row) => !isBlank(cell(row, 'assetId')))
+    : withContent;
   const total = nonEmpty.length;
 
   let temp = 0;
@@ -220,7 +240,27 @@ export const diagnoseAssetSheet = (
 
   const has = (key: AssetColumn, value: number) => (letters[key] ? value : null);
   const metrics: Metric[] = [
-    { key: 'rows', label: 'Filas con datos (activos)', value: total, base: null },
+    {
+      key: 'rows_read',
+      label: 'Filas leídas después del encabezado',
+      value: dataRows.length,
+      base: null,
+    },
+    {
+      key: 'rows',
+      label: 'Activos (filas con identidad)',
+      value: total,
+      base: null,
+      detail: letters.assetId
+        ? `Filas con ${header('assetId')}; todas las métricas siguientes se calculan sobre estas`
+        : `Sin columna ${header('assetId')}: se toman todas las filas con datos`,
+    },
+    {
+      key: 'rows_without_asset_id',
+      label: 'Filas con datos pero sin identidad',
+      value: letters.assetId ? withoutIdentity.length : null,
+      base: null,
+    },
     {
       key: 'barcode_temp',
       label: 'Código de barras TEMP',
