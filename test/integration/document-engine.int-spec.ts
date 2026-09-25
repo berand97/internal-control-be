@@ -1,8 +1,7 @@
 import type { Type } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import PizZip from 'pizzip';
 import { DataSource } from 'typeorm';
@@ -16,7 +15,7 @@ import { DocumentEngineService } from '../../src/modules/documents/services/docu
 import { SIGNATURE_PROVIDER, StubSignatureProvider } from '../../src/modules/documents/signature/signature-provider.js';
 import { FeaturesModule } from '../../src/modules/features/features.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
-import { createActor, scalar } from './helpers.js';
+import { createActor, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 
@@ -90,8 +89,7 @@ describe('Motor de documentos (PostgreSQL real)', () => {
     dataSource = moduleRef.get(DataSource);
     engine = moduleRef.get(DocumentEngineService);
     stub = moduleRef.get(StubSignatureProvider);
-    storageDir = await mkdtemp(join(tmpdir(), 'documents-it-'));
-    await dataSource.query('UPDATE storage_settings SET driver = $1, project_path = $2', ['project', storageDir]);
+    storageDir = await useSharedStorage(dataSource);
 
     director = await createActor(dataSource);
     await dataSource.query(
@@ -154,7 +152,6 @@ describe('Motor de documentos (PostgreSQL real)', () => {
 
   afterAll(async () => {
     await moduleRef.close();
-    await rm(storageDir, { recursive: true, force: true });
   });
 
   it('genera el OCI-01-55 real con datos del sistema, continúa el consecutivo y queda pendiente de firma', async () => {
@@ -269,9 +266,8 @@ describe.runIf(Boolean(process.env['GOTENBERG_URL']))('Motor de documentos con G
     const moduleRef = await boot(null);
     const dataSource = moduleRef.get(DataSource);
     const engine = moduleRef.get(DocumentEngineService);
-    const storageDir = await mkdtemp(join(tmpdir(), 'documents-pdf-'));
+    await useSharedStorage(dataSource);
     try {
-      await dataSource.query('UPDATE storage_settings SET driver = $1, project_path = $2', ['project', storageDir]);
       const actor = await createActor(dataSource);
       await dataSource.query(
         `INSERT INTO user_role (user_id, role_id, scope_type) SELECT $1, id, 'GLOBAL' FROM role WHERE code = 'INTERNAL_CONTROL_DIRECTOR'`,
@@ -292,7 +288,6 @@ describe.runIf(Boolean(process.env['GOTENBERG_URL']))('Motor de documentos con G
       expect(pdf.body.length).toBeGreaterThan(10_000);
     } finally {
       await moduleRef.close();
-      await rm(storageDir, { recursive: true, force: true });
     }
   });
 });

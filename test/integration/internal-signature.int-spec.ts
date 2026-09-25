@@ -1,8 +1,7 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
@@ -17,7 +16,7 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { GotenbergPdfConverter, PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { prepareForSignature, stampSignature } from '../../src/modules/documents/signature/pdf-stamp.js';
-import { createActor, scalar } from './helpers.js';
+import { createActor, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 const SECRET_DESCRIPTION = 'MICROSCOPIO CONFIDENCIAL XK-99';
@@ -137,8 +136,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     dataSource = app.get(DataSource);
     engine = app.get(DocumentEngineService);
     tokens = app.get(TokenService);
-    storageDir = await mkdtemp(join(tmpdir(), 'signature-it-'));
-    await dataSource.query('UPDATE storage_settings SET driver = $1, project_path = $2', ['project', storageDir]);
+    storageDir = await useSharedStorage(dataSource);
 
     const director = await createActor(dataSource);
     directorId = director.id;
@@ -178,7 +176,6 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
 
   afterAll(async () => {
     await app.close();
-    await rm(storageDir, { recursive: true, force: true });
   });
 
   it('firma un documento generado en el orden configurado y la página pública lo atestigua', async () => {

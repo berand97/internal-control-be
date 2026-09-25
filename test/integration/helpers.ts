@@ -2,6 +2,9 @@ import type { Type } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DataSource } from 'typeorm';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { AppConfigModule } from '../../src/config/config.module.js';
@@ -57,4 +60,12 @@ export const scalar = async <T>(
   const rows = (await dataSource.query(sql, [...params])) as Array<Record<string, T>>;
   const row = rows[0] ?? {};
   return Object.values(row)[0] as T;
+};
+
+export const SHARED_STORAGE_DIR = join(tmpdir(), 'control-interno-it-storage');
+
+export const useSharedStorage = async (dataSource: DataSource): Promise<string> => {
+  await mkdir(SHARED_STORAGE_DIR, { recursive: true });
+  await dataSource.query('UPDATE storage_settings SET driver = $1, project_path = $2', ['project', SHARED_STORAGE_DIR]);
+  return SHARED_STORAGE_DIR;
 };

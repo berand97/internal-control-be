@@ -2,9 +2,7 @@ import type { Type } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import ExcelJS from 'exceljs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { DataSource } from 'typeorm';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { AppConfigModule } from '../../src/config/config.module.js';
@@ -22,7 +20,7 @@ import { FeaturesModule } from '../../src/modules/features/features.module.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
-import { createActor, scalar } from './helpers.js';
+import { createActor, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 
@@ -39,7 +37,6 @@ describe('Historia del activo (PostgreSQL real)', () => {
   let engine: DocumentEngineService;
   let state: AssetStateService;
   let director: AuthenticatedUser;
-  let storageDir: string;
   let costCenters: { from: string; to: string };
   let personId: string;
 
@@ -64,8 +61,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
     timeline = moduleRef.get(AssetTimelineService);
     engine = moduleRef.get(DocumentEngineService);
     state = moduleRef.get(AssetStateService);
-    storageDir = await mkdtemp(join(tmpdir(), 'timeline-it-'));
-    await dataSource.query('UPDATE storage_settings SET driver = $1, project_path = $2', ['project', storageDir]);
+    await useSharedStorage(dataSource);
 
     director = await createActor(dataSource);
     await dataSource.query(
@@ -94,7 +90,6 @@ describe('Historia del activo (PostgreSQL real)', () => {
 
   afterAll(async () => {
     await moduleRef.close();
-    await rm(storageDir, { recursive: true, force: true });
   });
 
   const newAsset = async (): Promise<string> => {
