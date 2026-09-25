@@ -79,6 +79,7 @@ export interface SignatureProvider {
   reject?(externalReference: string, rejection: SignatureRejection): Promise<void>;
   reissue?(externalReference: string, input: SignatureRequest, manager: EntityManager): Promise<void>;
   attestation?(verificationCode: string): Promise<SignatureAttestation | null>;
+  verification?(externalReference: string): Promise<{ readonly code: string; readonly url: string } | null>;
 }
 
 @Injectable()

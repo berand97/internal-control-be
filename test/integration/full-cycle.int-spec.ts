@@ -234,8 +234,9 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       pdfLeftovers: sampleLeftovers(text, OCI_01_55_SAMPLE, { numbers: true }),
       docxLeftovers: docx.status === 200 ? findLeftovers(docx.body as Buffer, OCI_01_55_SAMPLE) : ['sin DOCX'],
     };
-    const [envelope] = (await dataSource.query('SELECT verification_code FROM signature_envelope WHERE document_id = $1', [state.documentId])) as Array<{ verification_code: string }>;
-    state.verificationCode = envelope?.verification_code;
+    const detail = await http().get(`/api/v1/documents/${state.documentId}`).set('Authorization', auth(state.director));
+    const envelope = detail.body.data?.verification as { code: string; url: string } | null | undefined;
+    state.verificationCode = envelope?.code;
     record('generación y PDF', generated.status === 201 && pdf.status === 200, {
       generate: generated.status,
       number: generated.body.data?.number,
@@ -244,12 +245,14 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       pdfStatus: pdf.status,
       pdfBytes: body?.length,
       pages,
-      signatureEnvelope: Boolean(envelope),
+      verification: envelope,
       content,
     });
     expect(generated.status).toBe(201);
     expect(body.subarray(0, 5).toString()).toBe('%PDF-');
-    expect(envelope).toBeDefined();
+    expect(envelope?.code).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(envelope?.url.endsWith(`/${envelope?.code}`)).toBe(true);
+    expect(content.assetRow).toBe('1 15796 01979 Sillas Interlocutoras/verdes 1 Sin verificar');
     expect(content.totalLine).toBe('Total, elementos entregados: 1');
     expect(content.pdfLeftovers).toEqual([]);
     expect(content.docxLeftovers).toEqual([]);

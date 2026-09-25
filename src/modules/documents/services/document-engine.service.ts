@@ -764,6 +764,10 @@ export class DocumentEngineService {
     return {
       currentTurn,
       viewer: actor ? await this.viewerState(document, format, slots, actor) : null,
+      verification:
+        document.signature_reference && this.signatures.verification
+          ? await this.signatures.verification(document.signature_reference)
+          : null,
       reassignments,
       id: document.id,
       formatKey: document.format_key,

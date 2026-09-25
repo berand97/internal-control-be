@@ -3,6 +3,7 @@ import {
   parseTrustProxy,
   type TrustProxySetting,
 } from '../common/http/trust-proxy.js';
+import { resolveSignatureVerifyUrl } from './signature-verify-url.js';
 
 export interface DatabaseConfig {
   readonly url: string;
@@ -307,10 +308,7 @@ const configuration = (): AppConfig => ({
     gotenbergUrl: readString('GOTENBERG_URL', '') || null,
     numberingPolicy: readNumberingPolicy(),
     signatureProvider: readSignatureProvider(),
-    signatureVerifyUrl: readString(
-      'SIGNATURE_VERIFY_URL',
-      `${readString('APP_PUBLIC_URL', 'http://localhost:4200')}/verificar-firma`,
-    ),
+    signatureVerifyUrl: resolveSignatureVerifyUrl(process.env),
   },
 });
 

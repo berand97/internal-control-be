@@ -255,6 +255,13 @@ export class InternalSignatureProvider implements SignatureProvider {
     }
   }
 
+  async verification(externalReference: string): Promise<{ readonly code: string; readonly url: string } | null> {
+    const [envelope] = (await this.dataSource.query('SELECT verification_code FROM signature_envelope WHERE id = $1', [
+      externalReference,
+    ])) as Array<{ verification_code: string }>;
+    return envelope ? { code: envelope.verification_code, url: this.verificationUrl(envelope.verification_code) } : null;
+  }
+
   async attestation(verificationCode: string): Promise<SignatureAttestation | null> {
     const [envelope] = (await this.dataSource.query('SELECT * FROM signature_envelope WHERE verification_code = $1', [
       verificationCode,
