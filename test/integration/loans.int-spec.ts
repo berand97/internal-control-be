@@ -686,11 +686,10 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         .expect(200);
       expectConforms('post', '/api/v1/loans/{id}/return', 200, started.body);
       expect(started.body.data.status).toBe('PENDING_RECEPTION');
-      const byAsset = new Map(
-        started.body.data.items.map((item: { assetId: string; returnCondition: string; returnedAt: string }) => [item.assetId, item]),
-      );
-      expect(byAsset.get(good)).toMatchObject({ returnCondition: 'GOOD', returnedAt: goodAt.toISOString() });
-      expect(byAsset.get(damaged)).toMatchObject({ returnCondition: 'DAMAGED', returnedAt: damagedAt.toISOString() });
+      const returnedItems: Array<{ assetId: string; returnCondition: string; returnedAt: string }> = started.body.data.items;
+      const byAsset = new Map(returnedItems.map((item) => [item.assetId, item]));
+      expect(byAsset.get(good ?? '')).toMatchObject({ returnCondition: 'GOOD', returnedAt: goodAt.toISOString() });
+      expect(byAsset.get(damaged ?? '')).toMatchObject({ returnCondition: 'DAMAGED', returnedAt: damagedAt.toISOString() });
       // Mientras no se recibe, siguen prestados.
       expect(await assetRow(good ?? '')).toMatchObject({ operational_status: 'ON_LOAN' });
 
@@ -699,7 +698,9 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       const data = received.body.data;
       // LOST cuenta como no devuelto: mapeo heredado sin cambios.
       expect(data.status).toBe('PARTIALLY_RETURNED');
-      const lostReturnedAt = new Date(byAsset.get(lost)?.returnedAt as string);
+      const lostItem = byAsset.get(lost ?? '');
+      expect(lostItem?.returnCondition).toBe('LOST');
+      const lostReturnedAt = new Date(lostItem?.returnedAt ?? '');
       expect(new Date(data.actualReturnDate).getTime()).toBe(Math.max(damagedAt.getTime(), lostReturnedAt.getTime()));
       expect(data.actualUsage).toEqual(usageBetween(bogotaDate(deliveredAt), bogotaDate(new Date(data.actualReturnDate))));
 
