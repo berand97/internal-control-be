@@ -3,6 +3,10 @@ import { DataSource } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { findFormat } from '../../documents/domain/document-formats.js';
+import {
+  costCenterFilter,
+  type ReadableCostCenterScope,
+} from '../../roles/services/cost-center-scope.js';
 import type {
   AssetTimelineEventDto,
   AssetTimelineResponseDto,
@@ -129,8 +133,13 @@ export class AssetTimelineService {
   async timeline(
     assetId: string,
     options: { readonly page: number; readonly pageSize: number; readonly order: 'asc' | 'desc' },
+    scope: ReadableCostCenterScope,
   ): Promise<AssetTimelineResponseDto> {
-    const [asset] = (await this.dataSource.query('SELECT id FROM asset WHERE id = $1', [assetId])) as Array<{
+    // Fuera de alcance responde igual que inexistente.
+    const [asset] = (await this.dataSource.query(
+      'SELECT id FROM asset WHERE id = $1 AND ($2::uuid[] IS NULL OR current_cost_center_id = ANY($2::uuid[]))',
+      [assetId, costCenterFilter(scope)],
+    )) as Array<{
       id: string;
     }>;
     if (!asset) {
