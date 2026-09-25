@@ -32,32 +32,44 @@ export interface SignerStatus {
   readonly evidence?: Record<string, unknown>;
 }
 
-export interface SignatureCapture {
+/** Evidencia de atribución según el camino de firma (ver domain/signing-channel.ts). */
+export type SignerEvidence =
+  | {
+      readonly method: 'SESSION_MFA' | 'SESSION';
+      readonly signerUserId: string;
+      readonly sessionId: string;
+    }
+  | {
+      readonly method: 'EMAIL_LINK';
+      readonly signingLinkId: string;
+      readonly linkEmail: string;
+      readonly linkSentAt: Date | null;
+      readonly identityConfirmedAt: Date;
+    };
+
+interface SignerActionBase {
   readonly order: number;
-  readonly signerUserId: string;
   readonly signerPersonId: string;
-  readonly sessionId: string;
-  readonly mfaEnabled: boolean;
   readonly ipAddress: string | null;
   readonly userAgent: string | null;
-  readonly rubricPng: Buffer;
 }
 
-export interface SignatureRejection {
-  readonly order: number;
-  readonly signerUserId: string;
-  readonly signerPersonId: string;
-  readonly sessionId: string;
-  readonly ipAddress: string | null;
-  readonly userAgent: string | null;
-  readonly reason: string;
-}
+export type SignatureCapture = SignerActionBase & SignerEvidence & { readonly rubricPng: Buffer };
+
+export type SignatureRejection = SignerActionBase & SignerEvidence & { readonly reason: string };
 
 export type AttestationIntegrity = 'INTACT' | 'ALTERED' | 'UNAVAILABLE';
 
+/**
+ * PENDING: faltan firmas. SIGNATURES_COLLECTED: están todas pero el acta aún no se cierra (el proceso que la originó
+ * todavía no la acepta; se reintenta). COMPLETED: acta firmada y cerrada. REJECTED: un firmante la rechazó.
+ * VOIDED: el proceso que la originó la anuló.
+ */
+export type AttestationStatus = 'PENDING' | 'SIGNATURES_COLLECTED' | 'COMPLETED' | 'REJECTED' | 'VOIDED';
+
 export interface SignatureAttestation {
   readonly reference: string;
-  readonly status: 'PENDING' | 'COMPLETED' | 'REJECTED';
+  readonly status: AttestationStatus;
   readonly integrity: AttestationIntegrity;
   readonly documentSha256: string;
   readonly signers: ReadonlyArray<{
@@ -66,6 +78,8 @@ export interface SignatureAttestation {
     readonly name: string | null;
     readonly status: SignatureStatus;
     readonly signedAt: string | null;
+    readonly method: 'SESSION_MFA' | 'SESSION' | 'EMAIL_LINK' | null;
+    readonly methodLabel: string | null;
   }>;
   readonly checkedAt: string;
 }
@@ -75,8 +89,13 @@ export interface SignatureProvider {
   request(input: SignatureRequest): Promise<{ readonly externalReference: string }>;
   status(externalReference: string): Promise<ReadonlyArray<SignerStatus>>;
   signedDocument?(externalReference: string): Promise<Buffer>;
-  capture?(externalReference: string, capture: SignatureCapture): Promise<void>;
-  reject?(externalReference: string, rejection: SignatureRejection): Promise<void>;
+  /** Con manager corre dentro de esa transacción (la que consume el enlace); sin él abre la suya. */
+  capture?(externalReference: string, capture: SignatureCapture, manager?: EntityManager): Promise<void>;
+  reject?(externalReference: string, rejection: SignatureRejection, manager?: EntityManager): Promise<void>;
+  /** Cierra el sobre sin admitir firmas nuevas (el proceso que originó el acta la anuló). */
+  void?(externalReference: string, manager: EntityManager): Promise<void>;
+  /** PDF vigente del sobre (con las firmas que lleva), verificado contra su hash. */
+  currentDocument?(externalReference: string): Promise<Buffer>;
   reissue?(externalReference: string, input: SignatureRequest, manager: EntityManager): Promise<void>;
   attestation?(verificationCode: string): Promise<SignatureAttestation | null>;
   verification?(externalReference: string): Promise<{ readonly code: string; readonly url: string } | null>;

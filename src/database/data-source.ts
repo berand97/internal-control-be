@@ -76,6 +76,7 @@ import { ReassignmentReissueHashes1767225634000 } from './migrations/17672256340
 import { DocumentLifecycle1767225635000 } from './migrations/1767225635000-document-lifecycle.js';
 import { AssetHandover1767225640000 } from './migrations/1767225640000-asset-handover.js';
 import { LoanDeliveryDocument1767225650000 } from './migrations/1767225650000-loan-delivery-document.js';
+import { SigningChannels1767225670000 } from './migrations/1767225670000-signing-channels.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -172,6 +173,7 @@ const dataSource = new DataSource({
     DocumentLifecycle1767225635000,
     AssetHandover1767225640000,
     LoanDeliveryDocument1767225650000,
+    SigningChannels1767225670000,
   ],
 });
 

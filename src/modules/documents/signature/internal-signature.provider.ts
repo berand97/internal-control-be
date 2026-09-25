@@ -6,15 +6,18 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig, StorageDriver } from '../../../config/configuration.js';
 import { StorageService } from '../../../shared/storage/storage.service.js';
+import { methodLabel, type SignatureMethod } from '../domain/signing-channel.js';
 import { isPng, prepareForSignature, stampSignature } from './pdf-stamp.js';
 import type {
   AttestationIntegrity,
+  AttestationStatus,
   SignatureAttestation,
   SignatureCapture,
   SignatureProvider,
   SignatureRejection,
   SignatureRequest,
   SignatureStatus,
+  SignerEvidence,
   SignerStatus,
 } from './signature-provider.js';
 
@@ -31,7 +34,7 @@ interface EnvelopeRow {
   current_pdf_driver: StorageDriver;
   current_pdf_key: string;
   current_pdf_sha256: string;
-  status: 'PENDING' | 'COMPLETED' | 'REJECTED';
+  status: 'PENDING' | 'COMPLETED' | 'REJECTED' | 'VOIDED';
 }
 
 interface SignerRow {
@@ -48,7 +51,33 @@ interface SignerRow {
   ip_address: string | null;
   session_id: string | null;
   mfa_enabled: boolean | null;
+  method: SignatureMethod | null;
+  signing_link_id: string | null;
 }
+
+/** Columnas de evidencia por método: sesión (usuario y sesión) o enlace (enlace, correo, envío, identidad). */
+const evidenceColumns = (evidence: SignerEvidence) =>
+  evidence.method === 'EMAIL_LINK'
+    ? {
+        method: evidence.method,
+        signerUserId: null,
+        sessionId: null,
+        mfaEnabled: null,
+        signingLinkId: evidence.signingLinkId,
+        linkEmail: evidence.linkEmail,
+        linkSentAt: evidence.linkSentAt,
+        identityConfirmedAt: evidence.identityConfirmedAt,
+      }
+    : {
+        method: evidence.method,
+        signerUserId: evidence.signerUserId,
+        sessionId: evidence.sessionId,
+        mfaEnabled: evidence.method === 'SESSION_MFA',
+        signingLinkId: null,
+        linkEmail: null,
+        linkSentAt: null,
+        identityConfirmedAt: null,
+      };
 
 @Injectable()
 export class InternalSignatureProvider implements SignatureProvider {
@@ -108,13 +137,15 @@ export class InternalSignatureProvider implements SignatureProvider {
       order: signer.sign_order,
       status: signer.status,
       ...(signer.signed_at ? { signedAt: signer.signed_at } : {}),
-      ...(signer.status === 'SIGNED'
+      ...(signer.status !== 'PENDING'
         ? {
             evidence: {
               provider: this.name,
+              method: signer.method,
               ipAddress: signer.ip_address,
               sessionId: signer.session_id,
               mfaEnabled: signer.mfa_enabled,
+              signingLinkId: signer.signing_link_id,
               pdfSha256Before: signer.pdf_sha256_before,
               pdfSha256After: signer.pdf_sha256_after,
             },
@@ -131,11 +162,15 @@ export class InternalSignatureProvider implements SignatureProvider {
     return this.currentPdf(envelope);
   }
 
-  async capture(externalReference: string, capture: SignatureCapture): Promise<void> {
+  async currentDocument(externalReference: string): Promise<Buffer> {
+    return this.currentPdf(await this.envelope(this.dataSource.manager, externalReference));
+  }
+
+  async capture(externalReference: string, capture: SignatureCapture, outer?: EntityManager): Promise<void> {
     if (!isPng(capture.rubricPng) || capture.rubricPng.length > MAX_RUBRIC_BYTES) {
       throw new ApiException(ErrorCode.ValidationFailed, 'La rúbrica debe ser una imagen PNG de máximo 64 KB');
     }
-    await this.dataSource.transaction(async (manager) => {
+    return this.within(outer, async (manager) => {
       const envelope = await this.envelope(manager, externalReference, true);
       const signer = await this.nextSigner(manager, envelope, capture.order, capture.signerPersonId);
       const current = await this.currentPdf(envelope);
@@ -154,31 +189,39 @@ export class InternalSignatureProvider implements SignatureProvider {
         documentNumber: signer.document_number,
         signedAt,
         ipAddress: capture.ipAddress,
+        methodLabel: methodLabel(capture.method) ?? capture.method,
       });
       const stored = await this.storage.put({
         key: `signatures/${envelope.document_id}/${envelope.verification_code}/v${capture.order}.pdf`,
         body: stamped,
         contentType: 'application/pdf',
       });
+      const evidence = evidenceColumns(capture);
       await manager.query(
         `UPDATE signature_envelope_signer SET status = 'SIGNED', signed_at = $3, signer_user_id = $4, session_id = $5,
            ip_address = $6, user_agent = $7, mfa_enabled = $8, rubric_driver = $9, rubric_key = $10, rubric_sha256 = $11,
-           pdf_sha256_before = $12, pdf_sha256_after = $13
+           pdf_sha256_before = $12, pdf_sha256_after = $13, method = $14, signing_link_id = $15, link_email = $16,
+           link_sent_at = $17, identity_confirmed_at = $18
          WHERE envelope_id = $1 AND sign_order = $2`,
         [
           envelope.id,
           capture.order,
           signedAt,
-          capture.signerUserId,
-          capture.sessionId,
+          evidence.signerUserId,
+          evidence.sessionId,
           capture.ipAddress,
           capture.userAgent,
-          capture.mfaEnabled,
+          evidence.mfaEnabled,
           rubric.driver,
           rubric.key,
           rubric.checksumSha256,
           envelope.current_pdf_sha256,
           stored.checksumSha256,
+          evidence.method,
+          evidence.signingLinkId,
+          evidence.linkEmail,
+          evidence.linkSentAt,
+          evidence.identityConfirmedAt,
         ],
       );
       const pending = signers.filter((item) => item.status !== 'SIGNED' && item.sign_order !== capture.order).length;
@@ -192,29 +235,45 @@ export class InternalSignatureProvider implements SignatureProvider {
     });
   }
 
-  async reject(externalReference: string, rejection: SignatureRejection): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
+  async reject(externalReference: string, rejection: SignatureRejection, outer?: EntityManager): Promise<void> {
+    return this.within(outer, async (manager) => {
       const envelope = await this.envelope(manager, externalReference, true);
       await this.nextSigner(manager, envelope, rejection.order, rejection.signerPersonId);
+      const evidence = evidenceColumns(rejection);
       await manager.query(
         `UPDATE signature_envelope_signer SET status = 'REJECTED', signed_at = NOW(), signer_user_id = $3, session_id = $4,
-           ip_address = $5, user_agent = $6, reject_reason = $7, pdf_sha256_before = $8
+           ip_address = $5, user_agent = $6, reject_reason = $7, pdf_sha256_before = $8, mfa_enabled = $9, method = $10,
+           signing_link_id = $11, link_email = $12, link_sent_at = $13, identity_confirmed_at = $14
          WHERE envelope_id = $1 AND sign_order = $2`,
         [
           envelope.id,
           rejection.order,
-          rejection.signerUserId,
-          rejection.sessionId,
+          evidence.signerUserId,
+          evidence.sessionId,
           rejection.ipAddress,
           rejection.userAgent,
           rejection.reason,
           envelope.current_pdf_sha256,
+          evidence.mfaEnabled,
+          evidence.method,
+          evidence.signingLinkId,
+          evidence.linkEmail,
+          evidence.linkSentAt,
+          evidence.identityConfirmedAt,
         ],
       );
       await manager.query(`UPDATE signature_envelope SET status = 'REJECTED', completed_at = NOW() WHERE id = $1`, [
         envelope.id,
       ]);
     });
+  }
+
+  async void(externalReference: string, manager: EntityManager): Promise<void> {
+    // Un sobre COMPLETED (todas las firmas, acta aún sin cerrar) conserva su estado: la atestación dice VOIDED por el acta.
+    await manager.query(
+      `UPDATE signature_envelope SET status = 'VOIDED', completed_at = NOW() WHERE id = $1 AND status = 'PENDING'`,
+      [externalReference],
+    );
   }
 
   async reissue(externalReference: string, input: SignatureRequest, manager: EntityManager): Promise<void> {
@@ -263,16 +322,18 @@ export class InternalSignatureProvider implements SignatureProvider {
   }
 
   async attestation(verificationCode: string): Promise<SignatureAttestation | null> {
-    const [envelope] = (await this.dataSource.query('SELECT * FROM signature_envelope WHERE verification_code = $1', [
-      verificationCode,
-    ])) as EnvelopeRow[];
+    const [envelope] = (await this.dataSource.query(
+      `SELECT e.*, d.status AS document_status FROM signature_envelope e JOIN document d ON d.id = e.document_id
+       WHERE e.verification_code = $1`,
+      [verificationCode],
+    )) as Array<EnvelopeRow & { document_status: string }>;
     if (!envelope) {
       return null;
     }
     const signers = await this.signers(this.dataSource.manager, envelope.id);
     return {
       reference: envelope.verification_code,
-      status: envelope.status,
+      status: this.attestationStatus(envelope.status, envelope.document_status),
       integrity: await this.integrity(envelope, signers),
       documentSha256: envelope.current_pdf_sha256,
       signers: signers.map((signer) => ({
@@ -281,9 +342,29 @@ export class InternalSignatureProvider implements SignatureProvider {
         name: signer.status === 'PENDING' ? null : signer.name,
         status: signer.status,
         signedAt: signer.signed_at ? new Date(signer.signed_at).toISOString() : null,
+        method: signer.status === 'PENDING' ? null : signer.method,
+        methodLabel: signer.status === 'PENDING' ? null : methodLabel(signer.method),
       })),
       checkedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * El estado público refleja el acta, no solo el sobre: con todas las firmas pero el acta todavía pendiente (su
+   * proceso falló al aceptarla) no dice COMPLETED sino SIGNATURES_COLLECTED; un acta anulada dice VOIDED.
+   */
+  private attestationStatus(envelope: EnvelopeRow['status'], document: string): AttestationStatus {
+    if (document === 'VOIDED' || envelope === 'VOIDED') {
+      return 'VOIDED';
+    }
+    if (envelope === 'COMPLETED') {
+      return document === 'SIGNED' ? 'COMPLETED' : 'SIGNATURES_COLLECTED';
+    }
+    return envelope;
+  }
+
+  private within(outer: EntityManager | undefined, work: (manager: EntityManager) => Promise<void>): Promise<void> {
+    return outer ? work(outer) : this.dataSource.transaction(work);
   }
 
   private async integrity(envelope: EnvelopeRow, signers: ReadonlyArray<SignerRow>): Promise<AttestationIntegrity> {
@@ -327,7 +408,7 @@ export class InternalSignatureProvider implements SignatureProvider {
   private signers(manager: EntityManager, envelopeId: string): Promise<SignerRow[]> {
     return manager.query(
       `SELECT sign_order, role, role_label, person_id, name, document_number, status, signed_at,
-         pdf_sha256_before, pdf_sha256_after, host(ip_address) AS ip_address, session_id, mfa_enabled
+         pdf_sha256_before, pdf_sha256_after, host(ip_address) AS ip_address, session_id, mfa_enabled, method, signing_link_id
        FROM signature_envelope_signer WHERE envelope_id = $1 ORDER BY sign_order`,
       [envelopeId],
     ) as Promise<SignerRow[]>;

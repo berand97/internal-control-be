@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../../config/configuration.js';
 import { AuthModule } from '../auth/auth.module.js';
+import { MailModule } from '../../shared/mail/mail.module.js';
 import { RolesModule } from '../roles/roles.module.js';
 import { DocumentsController } from './documents.controller.js';
 import { DocumentRequestsJob } from './jobs/document-requests.job.js';
@@ -9,17 +10,20 @@ import { DocumentLifecycleRegistry } from './lifecycle/document-lifecycle.regist
 import { GotenbergPdfConverter, PDF_CONVERTER } from './pdf/pdf-converter.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
 import { DocumentListService } from './services/document-list.service.js';
+import { SigningLinkService } from './services/signing-link.service.js';
+import { SigningLinkController } from './signing-link.controller.js';
 import { InternalSignatureProvider } from './signature/internal-signature.provider.js';
 import { SIGNATURE_PROVIDER, StubSignatureProvider } from './signature/signature-provider.js';
 import { SignatureVerificationController } from './signature-verification.controller.js';
 
 @Module({
-  imports: [AuthModule, RolesModule],
-  controllers: [DocumentsController, SignatureVerificationController],
+  imports: [AuthModule, RolesModule, MailModule],
+  controllers: [DocumentsController, SignatureVerificationController, SigningLinkController],
   providers: [
     DocumentEngineService,
     DocumentLifecycleRegistry,
     DocumentListService,
+    SigningLinkService,
     DocumentRequestsJob,
     StubSignatureProvider,
     InternalSignatureProvider,
