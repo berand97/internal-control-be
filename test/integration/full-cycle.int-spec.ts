@@ -7,6 +7,8 @@ import ExcelJS from 'exceljs';
 import { PDFDocument } from 'pdf-lib';
 import QRCode from 'qrcode';
 import request from 'supertest';
+import { findLeftovers, OCI_01_55_SAMPLE } from '../../scripts/formats/template-leftovers.mjs';
+import { pdfText, sampleLeftovers, squash } from './pdf-text.js';
 import { DataSource } from 'typeorm';
 
 const GOTENBERG = process.env['GOTENBERG_URL'];
@@ -134,7 +136,7 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       const token = tokens.signAccessToken({ id: userId, personId, username: `e2e.${tag}`, roles: role ? [role] : [], scopes: role ? [{ type: 'GLOBAL', id: null }] : [], mustChangePassword: false, sessionId });
       return { userId, personId, token };
     };
-    state.director = await user('Mónica', 'Directora E2E', '1000000901', 'INTERNAL_CONTROL_DIRECTOR');
+    state.director = await user('Carolina', 'Directora E2E', '1000000901', 'INTERNAL_CONTROL_DIRECTOR');
     state.auditor = state.director;
     state.responsible = await user('Laura', 'Responsable E2E', '1000000902', null);
   }, 300_000);
@@ -218,11 +220,20 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     });
     const body = pdf.body as Buffer;
     let pages: number | null = null;
+    let text = '';
     if (pdf.status === 200) {
       await writeFile(join(OUTPUT, '1-acta-generada.pdf'), body);
       await writeFile(join(OUTPUT, '1-acta-generada.docx'), docx.body as Buffer);
       pages = (await PDFDocument.load(body)).getPageCount();
+      text = squash(await pdfText(body));
+      await writeFile(join(OUTPUT, '1-acta-generada.txt'), text);
     }
+    const content = {
+      totalLine: text.match(/Total, elementos entregados: \S+/)?.[0] ?? null,
+      assetRow: text.match(/1 15796 01979 Sillas Interlocutoras\/verdes 1 \S+( \S+)?/)?.[0] ?? null,
+      pdfLeftovers: sampleLeftovers(text, OCI_01_55_SAMPLE, { numbers: true }),
+      docxLeftovers: docx.status === 200 ? findLeftovers(docx.body as Buffer, OCI_01_55_SAMPLE) : ['sin DOCX'],
+    };
     const [envelope] = (await dataSource.query('SELECT verification_code FROM signature_envelope WHERE document_id = $1', [state.documentId])) as Array<{ verification_code: string }>;
     state.verificationCode = envelope?.verification_code;
     record('generación y PDF', generated.status === 201 && pdf.status === 200, {
@@ -234,10 +245,14 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       pdfBytes: body?.length,
       pages,
       signatureEnvelope: Boolean(envelope),
+      content,
     });
     expect(generated.status).toBe(201);
     expect(body.subarray(0, 5).toString()).toBe('%PDF-');
     expect(envelope).toBeDefined();
+    expect(content.totalLine).toBe('Total, elementos entregados: 1');
+    expect(content.pdfLeftovers).toEqual([]);
+    expect(content.docxLeftovers).toEqual([]);
   });
 
   it('4. firman en el orden configurado, cada uno con su rúbrica', async () => {
@@ -264,9 +279,13 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       res.on('data', (chunk: Buffer) => chunks.push(chunk));
       res.on('end', () => done(null, Buffer.concat(chunks)));
     });
+    let signedText = '';
     if (signedPdf.status === 200) {
       await writeFile(join(OUTPUT, '2-acta-firmada.pdf'), signedPdf.body as Buffer);
+      signedText = squash(await pdfText(signedPdf.body as Buffer));
+      await writeFile(join(OUTPUT, '2-acta-firmada.txt'), signedText);
     }
+    const signedLeftovers = sampleLeftovers(signedText, OCI_01_55_SAMPLE, { numbers: false });
     const evidence = (await dataSource.query(
       `SELECT s.sign_order, s.name, host(s.ip_address) AS ip, s.session_id IS NOT NULL AS session, s.mfa_enabled, s.pdf_sha256_before, s.pdf_sha256_after
        FROM signature_envelope_signer s JOIN signature_envelope e ON e.id = s.envelope_id WHERE e.document_id = $1 ORDER BY s.sign_order`,
@@ -281,7 +300,9 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       signedFile: signedPdf.header['content-disposition'],
       signedPages: signedPdf.status === 200 ? (await PDFDocument.load(signedPdf.body as Buffer)).getPageCount() : null,
       evidence,
+      signedLeftovers,
     });
+    expect(signedLeftovers).toEqual([]);
     expect(early.body.error?.code).toBe('SIGNATURE_OUT_OF_ORDER');
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
@@ -293,7 +314,7 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     record('verificación pública', response.status === 200, { status: response.status, attestation: response.body.data });
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({ status: 'COMPLETED', integrity: 'INTACT' });
-    expect(response.body.data.signers.map((item: { name: string }) => item.name)).toEqual(['Laura Responsable E2E', 'Mónica Directora E2E']);
+    expect(response.body.data.signers.map((item: { name: string }) => item.name)).toEqual(['Laura Responsable E2E', 'Carolina Directora E2E']);
   });
 
   it('6. alterar el PDF almacenado hace que la verificación reporte ALTERED', async () => {
