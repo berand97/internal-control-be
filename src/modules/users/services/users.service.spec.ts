@@ -64,7 +64,10 @@ describe('UsersService', () => {
   let mailService: { sendUserInvitation: ReturnType<typeof vi.fn> };
   let permissionsService: Pick<PermissionsService, 'invalidate'>;
   let authUsersRepository: { findEffectivePermissions: ReturnType<typeof vi.fn> };
-  let privilege: { assertCanAdminister: ReturnType<typeof vi.fn> };
+  let privilege: {
+    assertCanAdminister: ReturnType<typeof vi.fn>;
+    listAssignableFor: ReturnType<typeof vi.fn>;
+  };
   let service: UsersService;
 
   beforeEach(() => {
