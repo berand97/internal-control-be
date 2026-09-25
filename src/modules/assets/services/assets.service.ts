@@ -104,9 +104,15 @@ export class AssetsService {
       ...(query.acquiredFrom ? { acquiredFrom: query.acquiredFrom } : {}),
       ...(query.acquiredTo ? { acquiredTo: query.acquiredTo } : {}),
       ...(query.hasBarcode !== undefined ? { hasBarcode: query.hasBarcode } : {}),
+      ...(query.dataQualityFlags?.length
+        ? { dataQualityFlags: query.dataQualityFlags }
+        : {}),
     });
+    const identifiers = await this.assetsRepository.findIdentifiers(
+      items.map((item) => item.id),
+    );
     return {
-      items: items.map((item) => AssetResponseDto.from(item)),
+      items: items.map((item) => AssetResponseDto.from(item, identifiers)),
       page,
       pageSize,
       total,
@@ -171,10 +177,13 @@ export class AssetsService {
         changes: { createdCount: created.length, errorCount: errors.length },
       });
     }
+    const createdIdentifiers = await this.assetsRepository.findIdentifiers(
+      created.map((item) => item.id),
+    );
     return {
       createdCount: created.length,
       errors,
-      items: created.map((item) => AssetResponseDto.from(item)),
+      items: created.map((item) => AssetResponseDto.from(item, createdIdentifiers)),
     };
   }
 
@@ -703,7 +712,7 @@ export class AssetsService {
   }
 
   private async toDetail(asset: Asset): Promise<AssetResponseDto> {
-    const [category, costCenter, location, custom, movements, loans] =
+    const [category, costCenter, location, custom, movements, loans, identifiers] =
       await Promise.all([
         this.assetsRepository.findNamedCategory(asset.categoryId),
         this.assetsRepository.findNamedCostCenter(asset.costCenterId),
@@ -713,8 +722,9 @@ export class AssetsService {
         this.assetsRepository.findCustomValues(asset.id),
         this.assetsRepository.findRecentMovements(asset.id, 10),
         this.assetsRepository.findActiveLoans(asset.id),
+        this.assetsRepository.findIdentifiers([asset.id]),
       ]);
-    return AssetResponseDto.from(asset, {
+    return AssetResponseDto.from(asset, identifiers, {
       ...(category ? { category } : {}),
       ...(costCenter ? { costCenter } : {}),
       location: location,

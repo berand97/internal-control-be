@@ -157,6 +157,7 @@ describe('AssetsService', () => {
       findAcquisitionTypeByCode: vi.fn(),
       countActiveLoans: vi.fn().mockResolvedValue(0),
       findActiveLoans: vi.fn().mockResolvedValue([]),
+      findIdentifiers: vi.fn().mockResolvedValue([]),
       countOpenInventories: vi.fn().mockResolvedValue(0),
       saveImportBatch: vi.fn(),
       findImportBatch: vi.fn(),

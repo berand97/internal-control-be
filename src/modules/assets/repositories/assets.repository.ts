@@ -24,6 +24,8 @@ import type {
   UpdateAssetRecord,
 } from './assets.repository.interface.js';
 
+const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
+
 const SORT_COLUMNS: Record<string, string> = {
   internalCode: 'asset.internal_code',
   description: 'asset.description',
@@ -56,9 +58,20 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
     const qb = this.assets.createQueryBuilder('asset');
     if (filters.q) {
       qb.andWhere(
-        '(asset.description ILIKE :q OR asset.internal_code ILIKE :q OR asset.serial_number ILIKE :q)',
-        { q: `%${filters.q}%` },
+        `asset.id IN (
+          SELECT s.id FROM asset s
+          WHERE s.description ILIKE :q OR s.internal_code ILIKE :q OR s.serial_number ILIKE :q
+          UNION
+          SELECT i.asset_id FROM asset_identifier i
+          WHERE i.identifier_type <> 'OPAQUE_ID' AND i.value ILIKE :q
+        )`,
+        { q: `%${escapeLike(filters.q.trim())}%` },
       );
+    }
+    if (filters.dataQualityFlags?.length) {
+      qb.andWhere('asset.data_quality_flags @> CAST(:flags AS varchar(40)[])', {
+        flags: filters.dataQualityFlags,
+      });
     }
     if (filters.categoryId) {
       qb.andWhere('asset.category_id = :categoryId', {
@@ -97,7 +110,7 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
       qb.andWhere('asset.barcode IS NULL');
     }
     const sortColumn = SORT_COLUMNS[filters.sortBy] ?? 'asset.created_at';
-    qb.orderBy(sortColumn, filters.sortOrder);
+    qb.orderBy(sortColumn, filters.sortOrder).addOrderBy('asset.id', filters.sortOrder);
     const total = await qb.getCount();
     const items = await qb
       .skip((filters.page - 1) * filters.pageSize)
@@ -274,6 +287,21 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
       createdAt: now,
     });
     return this.movements.save(entity);
+  }
+
+  findIdentifiers(
+    assetIds: ReadonlyArray<string>,
+  ): Promise<ReadonlyArray<AssetIdentifier>> {
+    if (assetIds.length === 0) {
+      return Promise.resolve([]);
+    }
+    return this.dataSource
+      .getRepository(AssetIdentifier)
+      .createQueryBuilder('identifier')
+      .where('identifier.asset_id IN (:...assetIds)', { assetIds })
+      .orderBy('identifier.valid_from', 'ASC')
+      .addOrderBy('identifier.created_at', 'ASC')
+      .getMany();
   }
 
   findRecentMovements(

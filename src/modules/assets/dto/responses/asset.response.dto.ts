@@ -1,7 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DynamicFieldType } from '../../../dynamic-fields/enums/dynamic-field-type.enum.js';
 import { DepreciationMethod } from '../../../categories/enums/depreciation-method.enum.js';
+import type { AssetIdentifier } from '../../entities/asset-identifier.entity.js';
 import type { Asset } from '../../entities/asset.entity.js';
+import { AssetIdentifierOrigin } from '../../enums/asset-identifier.enum.js';
+import { DATA_QUALITY_FLAGS } from '../../enums/data-quality-flag.enum.js';
 import { OperationalStatus } from '../../enums/operational-status.enum.js';
 import { PhysicalCondition } from '../../enums/physical-condition.enum.js';
 
@@ -55,6 +58,37 @@ export class AssetMovementResponseDto {
 
   @ApiProperty({ format: 'uuid', nullable: true })
   readonly toCostCenterId!: string | null;
+}
+
+export class AssetIdentifierResponseDto {
+  @ApiProperty({ example: 'LEGACY_CODE', description: 'LEGACY_CODE, VISIBLE_CODE, OPAQUE_ID o un tipo futuro' })
+  readonly type!: string;
+
+  @ApiProperty({ example: '08252' })
+  readonly value!: string;
+
+  @ApiProperty({ enum: AssetIdentifierOrigin })
+  readonly origin!: AssetIdentifierOrigin;
+
+  @ApiProperty({ format: 'date-time' })
+  readonly validFrom!: string;
+
+  @ApiProperty({ format: 'date-time', nullable: true })
+  readonly validTo!: string | null;
+
+  @ApiProperty()
+  readonly current!: boolean;
+
+  static from(identifier: AssetIdentifier): AssetIdentifierResponseDto {
+    return {
+      type: identifier.identifierType,
+      value: identifier.value,
+      origin: identifier.origin,
+      validFrom: identifier.validFrom.toISOString(),
+      validTo: identifier.validTo ? identifier.validTo.toISOString() : null,
+      current: identifier.validTo === null,
+    };
+  }
 }
 
 export class AssetNamedRefDto {
@@ -147,6 +181,12 @@ export class AssetResponseDto {
   @ApiPropertyOptional({ type: [AssetCustomValueResponseDto] })
   readonly customValues?: ReadonlyArray<AssetCustomValueResponseDto>;
 
+  @ApiProperty({ type: [AssetIdentifierResponseDto] })
+  readonly identifiers!: ReadonlyArray<AssetIdentifierResponseDto>;
+
+  @ApiProperty({ type: [String], enum: DATA_QUALITY_FLAGS })
+  readonly dataQualityFlags!: ReadonlyArray<string>;
+
   @ApiPropertyOptional({ type: [AssetMovementResponseDto] })
   readonly movements?: ReadonlyArray<AssetMovementResponseDto>;
 
@@ -155,6 +195,7 @@ export class AssetResponseDto {
 
   static from(
     asset: Asset,
+    identifiers: ReadonlyArray<AssetIdentifier>,
     extras?: {
       readonly category?: AssetNamedRefDto;
       readonly costCenter?: AssetNamedRefDto;
@@ -191,6 +232,10 @@ export class AssetResponseDto {
         ? String(asset.writtenOffAt).slice(0, 10)
         : null,
       qrTokenVersion: asset.qrTokenVersion,
+      identifiers: identifiers
+        .filter((identifier) => identifier.assetId === asset.id)
+        .map((identifier) => AssetIdentifierResponseDto.from(identifier)),
+      dataQualityFlags: asset.dataQualityFlags,
       ...(extras?.category ? { category: extras.category } : {}),
       ...(extras?.costCenter ? { costCenter: extras.costCenter } : {}),
       ...(extras && 'location' in extras ? { location: extras.location } : {}),

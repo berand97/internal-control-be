@@ -3,6 +3,7 @@ import type { DepreciationMethod } from '../../categories/enums/depreciation-met
 import type { DynamicFieldType } from '../../dynamic-fields/enums/dynamic-field-type.enum.js';
 import type { AcquisitionType } from '../entities/acquisition-type.entity.js';
 import type { AssetCustomValue } from '../entities/asset-custom-value.entity.js';
+import type { AssetIdentifier } from '../entities/asset-identifier.entity.js';
 import type { AssetImportBatch } from '../entities/asset-import-batch.entity.js';
 import type { AssetMovement } from '../entities/asset-movement.entity.js';
 import type { Asset } from '../entities/asset.entity.js';
@@ -73,6 +74,7 @@ export interface AssetSearchFilters {
   readonly acquiredFrom?: string;
   readonly acquiredTo?: string;
   readonly hasBarcode?: boolean;
+  readonly dataQualityFlags?: ReadonlyArray<string>;
   readonly page: number;
   readonly pageSize: number;
   readonly sortBy: string;
@@ -148,6 +150,9 @@ export interface AssetsRepository {
   ): Promise<void>;
   findCustomValues(assetId: string): Promise<ReadonlyArray<CustomValueWithField>>;
   insertMovement(record: CreateMovementRecord): Promise<AssetMovement>;
+  findIdentifiers(
+    assetIds: ReadonlyArray<string>,
+  ): Promise<ReadonlyArray<AssetIdentifier>>;
   findRecentMovements(
     assetId: string,
     limit: number,

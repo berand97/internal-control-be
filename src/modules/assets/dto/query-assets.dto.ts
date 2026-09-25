@@ -11,6 +11,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { DATA_QUALITY_FLAGS } from '../enums/data-quality-flag.enum.js';
 import {
   OPERATIONAL_STATUSES,
   OperationalStatus,
@@ -98,4 +99,19 @@ export class QueryAssetsDto {
   })
   @IsBoolean()
   readonly hasBarcode?: boolean;
+
+  @ApiPropertyOptional({
+    enum: DATA_QUALITY_FLAGS,
+    isArray: true,
+    description: 'Activos que tienen todas las banderas indicadas. Repetir el parámetro o separar por comas.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    (Array.isArray(value) ? value : [value])
+      .flatMap((item) => String(item).split(','))
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0),
+  )
+  @IsIn(DATA_QUALITY_FLAGS, { each: true })
+  readonly dataQualityFlags?: string[];
 }
