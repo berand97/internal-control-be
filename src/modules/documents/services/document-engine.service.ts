@@ -36,6 +36,7 @@ export interface DocumentRequestPayload {
   readonly costCenterId?: string;
   readonly responsiblePersonId?: string;
   readonly assetIds?: ReadonlyArray<string>;
+  readonly movementIds?: Record<string, string>;
   readonly signers?: Record<string, string>;
   readonly assetNotes?: Record<string, string>;
   readonly fields?: Record<string, string>;
@@ -253,6 +254,7 @@ export class DocumentEngineService {
       ],
     )) as Array<{ id: string }>;
     const documentId = row?.id ?? '';
+    await this.linkAssets(manager, documentId, payload);
     const signers = context.firmantes as Array<{
       orden: number;
       rol: string;
@@ -521,6 +523,33 @@ export class DocumentEngineService {
       totalElementos: ordered.length,
       campos: payload.fields ?? {},
     };
+  }
+
+  private async linkAssets(manager: EntityManager, documentId: string, payload: DocumentRequestPayload): Promise<void> {
+    const assetIds = [...new Set(payload.assetIds ?? [])];
+    const movementIds = payload.movementIds ?? {};
+    const foreign = Object.keys(movementIds).filter((assetId) => !assetIds.includes(assetId));
+    if (foreign.length > 0) {
+      throw new ApiException(ErrorCode.ValidationFailed, `Movimientos de activos que no están en el documento: ${foreign.join(', ')}`);
+    }
+    if (assetIds.length === 0) {
+      return;
+    }
+    const linked = (await manager.query(
+      `INSERT INTO document_asset (document_id, asset_id, movement_id)
+       SELECT $1, a.id, m.id
+       FROM unnest($2::uuid[]) AS a(id)
+       LEFT JOIN asset_movement m ON m.id = ($3::jsonb ->> a.id::text)::uuid AND m.asset_id = a.id
+       RETURNING asset_id, movement_id`,
+      [documentId, assetIds, JSON.stringify(movementIds)],
+    )) as Array<{ asset_id: string; movement_id: string | null }>;
+    const unmatched = linked.filter((item) => movementIds[item.asset_id] && !item.movement_id);
+    if (unmatched.length > 0) {
+      throw new ApiException(
+        ErrorCode.ValidationFailed,
+        `El movimiento indicado no pertenece al activo: ${unmatched.map((item) => item.asset_id).join(', ')}`,
+      );
+    }
   }
 
   private async documentRow(documentId: string) {

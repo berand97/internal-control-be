@@ -50,6 +50,10 @@ export class GenerateDocumentDto {
 
   @IsOptional()
   @IsObject()
+  readonly movementIds?: Record<string, string>;
+
+  @IsOptional()
+  @IsObject()
   readonly signers?: Record<string, string>;
 
   @IsOptional()
