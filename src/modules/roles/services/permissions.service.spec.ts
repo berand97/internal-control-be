@@ -25,6 +25,7 @@ describe('PermissionsService', () => {
   beforeEach(() => {
     repository = {
       findEffectivePermissions: vi.fn().mockResolvedValue(permissions),
+      findHeadedCostCenterIds: vi.fn().mockResolvedValue([]),
     };
     cache = new PermissionsCache();
     service = new PermissionsService(repository, cache);
@@ -110,5 +111,44 @@ describe('PermissionsService', () => {
       service.costCenterScope('user-1', 'loan:approve:global', 'loan:approve:org_unit'),
     ).resolves.toEqual({ kind: 'DENIED' });
     expect(repository.findEffectivePermissions).toHaveBeenCalledTimes(1);
+  });
+
+  it('un permiso :own pasa con asignación COST_CENTER aunque la petición no traiga centro', async () => {
+    vi.mocked(repository.findEffectivePermissions).mockResolvedValue([
+      { permissionCode: 'loan:request:own', userScopeType: 'COST_CENTER', userScopeId: 'cc-1' },
+      { permissionCode: 'asset:update:org_unit', userScopeType: 'COST_CENTER', userScopeId: 'cc-1' },
+    ]);
+    await expect(service.userHasPermission('user-1', 'loan:request:own')).resolves.toBe(true);
+    // No abre otros códigos: un permiso acotado sigue exigiendo el alcance de la petición.
+    await expect(service.userHasPermission('user-1', 'asset:update:org_unit')).resolves.toBe(false);
+    await expect(service.userHasPermission('user-1', 'loan:approve:org_unit')).resolves.toBe(false);
+  });
+
+  it('costCenterScope suma los centros que la persona dirige, solo si el rol da el permiso acotado', async () => {
+    vi.mocked(repository.findHeadedCostCenterIds).mockResolvedValue(['cc-9']);
+    vi.mocked(repository.findEffectivePermissions).mockResolvedValue([
+      { permissionCode: 'asset:read:org_unit', userScopeType: 'COST_CENTER', userScopeId: 'cc-1' },
+    ]);
+    await expect(
+      service.costCenterScope('user-1', 'asset:read:global', 'asset:read:org_unit'),
+    ).resolves.toEqual({ kind: 'COST_CENTERS', costCenterIds: ['cc-1', 'cc-9'] });
+    await expect(
+      service.costCenterScope('user-1', 'loan:approve:global', 'loan:approve:org_unit'),
+    ).resolves.toEqual({ kind: 'DENIED' });
+    await service.costCenterScope('user-1', 'asset:read:global', 'asset:read:org_unit');
+    expect(repository.findHeadedCostCenterIds).toHaveBeenCalledTimes(1);
+    service.invalidate('user-1');
+    await service.costCenterScope('user-1', 'asset:read:global', 'asset:read:org_unit');
+    expect(repository.findHeadedCostCenterIds).toHaveBeenCalledTimes(2);
+  });
+
+  it('una jefatura resuelve el alcance de quien tiene el rol acotado sin asignación COST_CENTER', async () => {
+    vi.mocked(repository.findHeadedCostCenterIds).mockResolvedValue(['cc-9']);
+    vi.mocked(repository.findEffectivePermissions).mockResolvedValue([
+      { permissionCode: 'asset:read:org_unit', userScopeType: 'GLOBAL', userScopeId: null },
+    ]);
+    await expect(
+      service.costCenterScope('user-1', 'asset:read:global', 'asset:read:org_unit'),
+    ).resolves.toEqual({ kind: 'COST_CENTERS', costCenterIds: ['cc-9'] });
   });
 });

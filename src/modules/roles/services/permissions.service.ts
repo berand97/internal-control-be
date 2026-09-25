@@ -30,6 +30,12 @@ export class PermissionsService {
       if (permission.permissionCode !== permissionCode) {
         return false;
       }
+      // Un permiso :own se decide por dueño (el guard y el servicio comparan el
+      // recurso con el usuario), no por el alcance de la asignación: un custodio
+      // con el rol acotado a su centro de costo también puede pedir préstamos.
+      if (permission.permissionCode.endsWith(':own')) {
+        return true;
+      }
       // El alcance de adscripción (depto/centro) no anula un permiso :global
       // del rol. Sin esto, un director adscrito no puede listar tomas físicas.
       if (
@@ -54,18 +60,38 @@ export class PermissionsService {
   /**
    * Centros de costo sobre los que el usuario puede usar `scopedCode`, o
    * GLOBAL si tiene `globalCode`. Genérico por código de permiso: lo usan la
-   * lectura de activos y lo reutilizará la aprobación de préstamos.
+   * lectura de activos y la aprobación de préstamos. Los centros son los de
+   * sus asignaciones COST_CENTER más los que su persona dirige hoy
+   * (cost_center_head); la jefatura solo cuenta si el rol da `scopedCode`.
    */
   async costCenterScope(
     userId: string,
     globalCode: string,
     scopedCode: string,
   ): Promise<CostCenterScope> {
+    const permissions = await this.getEffectivePermissions(userId);
+    const base = resolveCostCenterScope(permissions, globalCode, scopedCode);
+    if (base.kind === 'GLOBAL' || base.kind === 'DENIED') {
+      return base;
+    }
     return resolveCostCenterScope(
-      await this.getEffectivePermissions(userId),
+      permissions,
       globalCode,
       scopedCode,
+      await this.getHeadedCostCenterIds(userId),
     );
+  }
+
+  private async getHeadedCostCenterIds(
+    userId: string,
+  ): Promise<ReadonlyArray<string>> {
+    const cached = this.cache.getHeadedCostCenters(userId);
+    if (cached) {
+      return cached;
+    }
+    const fresh = await this.repository.findHeadedCostCenterIds(userId);
+    this.cache.setHeadedCostCenters(userId, fresh, CACHE_TTL_SECONDS);
+    return fresh;
   }
 
   async getEffectivePermissions(
