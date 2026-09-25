@@ -46,6 +46,26 @@ export class AppUser {
   @Column({ name: 'mfa_secret', type: 'text', nullable: true })
   mfaSecret!: string | null;
 
+  /** Secreto TOTP en enrolamiento; no se usa para verificar hasta confirmarse. */
+  @Column({
+    name: 'mfa_pending_secret',
+    type: 'text',
+    nullable: true,
+    select: false,
+  })
+  mfaPendingSecret?: string | null;
+
+  @Column({
+    name: 'mfa_pending_created_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  mfaPendingCreatedAt!: Date | null;
+
+  /** El siguiente login exige enrolar MFA aunque el rol no lo exija (reset administrativo). */
+  @Column({ name: 'mfa_enrollment_required', type: 'boolean', default: false })
+  mfaEnrollmentRequired!: boolean;
+
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 
