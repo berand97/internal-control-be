@@ -22,7 +22,8 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "type-check": "tsc --noEmit",
     "db:migrate": "nest build && typeorm migration:run -d ./dist/database/data-source.js",
-    "db:migrate:revert": "nest build && typeorm migration:revert -d ./dist/database/data-source.js"
+    "db:migrate:revert": "nest build && typeorm migration:revert -d ./dist/database/data-source.js",
+    "admin:create": "node dist/cli/create-admin.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1127.0",
