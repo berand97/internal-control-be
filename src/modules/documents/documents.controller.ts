@@ -15,7 +15,15 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiCreatedResponse,
+  ApiExtraModels,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -37,8 +45,20 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import { ApiException } from '../../common/exceptions/api.exception.js';
+import { envelopedSchema } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
+import {
+  DOCUMENT_RESPONSE_MODELS,
+  DocumentDetailResponseDto,
+  DocumentFormatResponseDto,
+  DocumentListItemDto,
+  DocumentListResponseDto,
+  envelopedArraySchema,
+  GeneratedDocumentResponseDto,
+  UploadedTemplateResponseDto,
+} from './dto/document.responses.js';
+import { DocumentLifecycleRegistry } from './lifecycle/document-lifecycle.registry.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
 import { DOCUMENT_LIST_STATUSES, DocumentListService, type DocumentListStatus } from './services/document-list.service.js';
 
@@ -154,12 +174,14 @@ interface DocxUpload {
 
 @ApiTags(OpenApiTag.DocumentTemplates)
 @ApiBearerAuth()
+@ApiExtraModels(...DOCUMENT_RESPONSE_MODELS)
 @Feature('document-templates')
 @Controller('documents')
 export class DocumentsController {
   constructor(
     private readonly engine: DocumentEngineService,
     private readonly documentList: DocumentListService,
+    private readonly lifecycle: DocumentLifecycleRegistry,
   ) {}
 
   @Get()
@@ -168,6 +190,7 @@ export class DocumentsController {
     description:
       'Solo los formatos que el usuario puede leer. Orden: más recientes primero, con id como desempate. Una solicitud FAILED trae su error y se reintenta con POST /documents/requests/:requestId/retry.',
   })
+  @ApiOkResponse({ schema: envelopedSchema(DocumentListResponseDto) })
   list(@Query() query: QueryDocumentsDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.documentList.list(
       {
@@ -188,6 +211,7 @@ export class DocumentsController {
     summary: 'Reencolar una solicitud fallida',
     description: 'Solo la devuelve al outbox (PENDING); el job la genera en su siguiente pasada. Requiere el permiso de generación del formato.',
   })
+  @ApiOkResponse({ schema: envelopedSchema(DocumentListItemDto) })
   retry(@Param('requestId', ParseUUIDPipe) requestId: string, @CurrentUser() actor: AuthenticatedUser) {
     return this.documentList.retry(requestId, actor.id);
   }
@@ -195,6 +219,7 @@ export class DocumentsController {
   @Get('formats')
   @RequirePermission('document_template:read:global')
   @ApiOperation({ summary: 'Formatos SGC configurados, plantilla vigente y último consecutivo' })
+  @ApiOkResponse({ schema: envelopedArraySchema(DocumentFormatResponseDto) })
   formats() {
     return this.engine.formats();
   }
@@ -204,6 +229,7 @@ export class DocumentsController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Subir una versión de plantilla DOCX con su versión SGC y fecha de vigencia' })
+  @ApiCreatedResponse({ schema: envelopedSchema(UploadedTemplateResponseDto) })
   uploadTemplate(
     @Param('formatKey') formatKey: string,
     @UploadedFile() file: DocxUpload | undefined,
@@ -217,8 +243,16 @@ export class DocumentsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Generar un documento (DOCX y PDF) que queda pendiente de firma' })
+  @ApiOperation({
+    summary: 'Generar un documento (DOCX y PDF) que queda pendiente de firma',
+    description:
+      'Un entityType con proceso registrado (DocumentLifecycleRegistry) está reservado a ese proceso: su acta solo la genera el proceso, nunca este endpoint.',
+  })
+  @ApiCreatedResponse({ schema: envelopedSchema(GeneratedDocumentResponseDto) })
   generate(@Body() dto: GenerateDocumentDto, @CurrentUser() actor: AuthenticatedUser) {
+    if (this.lifecycle.has(dto.entityType)) {
+      throw new ApiException(ErrorCode.ValidationFailed, `El acta de ${dto.entityType} la genera su propio proceso`);
+    }
     return this.engine.generate(dto, actor.id);
   }
 
@@ -228,13 +262,19 @@ export class DocumentsController {
     description:
       'currentTurn dice de quién es el turno. viewer dice si el usuario firma en este documento, si es su turno, si puede firmar ya (canSign) y, si no, el código de error que recibiría (blockedBy). reassignments es la bitácora de reasignaciones.',
   })
+  @ApiOkResponse({ schema: envelopedSchema(DocumentDetailResponseDto) })
   detail(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
     return this.engine.detail(id, actor);
   }
 
   @Post(':id/signatures/sync')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Consultar al proveedor de firma y actualizar el estado' })
+  @ApiOperation({
+    summary: 'Consultar al proveedor de firma y actualizar el estado',
+    description:
+      'Si el acta tiene todas las firmas (o una rechazada) y el proceso que la originó falló al aplicar sus efectos (lifecycleError), reintenta la transición.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(DocumentDetailResponseDto) })
   async sync(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
     await this.engine.detail(id, actor);
     await this.engine.syncSignatures(id);
@@ -248,6 +288,7 @@ export class DocumentsController {
     description:
       'Solo quien administra el proceso (permiso de generación del formato). Queda como evidencia: quién, cuándo, desde dónde, de quién a quién y por qué.',
   })
+  @ApiOkResponse({ schema: envelopedSchema(DocumentDetailResponseDto) })
   reassign(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('order', ParseIntPipe) order: number,
@@ -269,6 +310,7 @@ export class DocumentsController {
     description:
       'Solo la persona designada para ese turno, con MFA activo y sesión vigente. rubric es un PNG en data URL o base64. Se registra quién, cuándo, desde qué IP y bajo qué sesión, y el hash del PDF antes y después.',
   })
+  @ApiOkResponse({ schema: envelopedSchema(DocumentDetailResponseDto) })
   sign(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('order', ParseIntPipe) order: number,
@@ -284,6 +326,7 @@ export class DocumentsController {
   @Post(':id/signatures/:order/reject')
   @HttpCode(200)
   @ApiOperation({ summary: 'Rechazar la firma de mi turno, con motivo' })
+  @ApiOkResponse({ schema: envelopedSchema(DocumentDetailResponseDto) })
   reject(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('order', ParseIntPipe) order: number,
