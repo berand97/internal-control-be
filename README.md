@@ -31,33 +31,6 @@
 $ pnpm install
 ```
 
-## Usuario administrador inicial
-
-Una base nueva no trae usuarios. Después de aplicar las migraciones, crea el
-administrador inicial (rol `SUPER_ADMIN`, alcance `GLOBAL`) con:
-
-```bash
-pnpm build
-ADMIN_PASSWORD='<contraseña>' pnpm admin:create -- \
-  --username=admin --email=admin@unac.edu.co \
-  --first-name=Nombre --last-name=Apellido
-```
-
-En Docker: `docker compose exec -e ADMIN_PASSWORD='<contraseña>' api node dist/cli/create-admin.js --username=...`
-
-- Cada argumento tiene su variable equivalente: `ADMIN_USERNAME`, `ADMIN_PASSWORD`,
-  `ADMIN_EMAIL`, `ADMIN_FIRST_NAME`, `ADMIN_LAST_NAME`. Pasa la contraseña por
-  variable, no por argumento, para que no quede en el historial de la shell.
-- La contraseña debe cumplir la política del sistema (12+ caracteres, mayúscula,
-  minúscula, número y símbolo) y el correo debe ser `@unac.edu.co`.
-- Si el usuario ya existe, el comando no cambia nada y termina sin error.
-- El hash usa el mismo `HashService` (argon2id) del módulo de auth, con los
-  parámetros `ARGON2_*`; necesita las mismas variables de entorno que la API.
-- `SUPER_ADMIN` exige enrolar MFA (TOTP) en el primer login y **no tiene permisos
-  operativos** (activos, centros de costo, etc.): su trabajo es crear los usuarios
-  de operación, como `INTERNAL_CONTROL_DIRECTOR`. Crear usuarios requiere SMTP
-  configurado, porque la contraseña temporal se envía por correo.
-
 ## Compile and run the project
 
 ```bash
