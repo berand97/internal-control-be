@@ -10,11 +10,10 @@ import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import type { AppConfig } from '../../../config/configuration.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
-import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import type { AssetsRepository } from '../../assets/repositories/assets.repository.interface.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
-import { MovementsService } from '../../movements/services/movements.service.js';
+import { AssetStateService } from '../../assets/services/asset-state.service.js';
 import { QrTokenRotationLog } from '../entities/qr-token-rotation-log.entity.js';
 import type {
   QrHistoryItemDto,
@@ -50,10 +49,8 @@ export class QrTokensService {
     private readonly assetsRepository: AssetsRepository,
     @InjectRepository(QrTokenRotationLog)
     private readonly rotations: Repository<QrTokenRotationLog>,
-    @Inject('AuditLogsRepository')
-    private readonly auditLogsRepository: AuditLogsRepository,
     private readonly config: ConfigService<AppConfig, true>,
-    private readonly movementsService: MovementsService,
+    private readonly assetState: AssetStateService,
   ) {}
 
   async issue(
@@ -75,49 +72,40 @@ export class QrTokensService {
       tokenVersion: version,
       jti,
     });
-    await this.assetsRepository.update(asset.id, {
-      qrToken: token,
-      qrTokenVersion: version,
-      qrSignedAt: new Date(),
-      qrSignedBy: actor.id,
-      updatedBy: actor.id,
-    });
-    await this.rotations.save(
-      this.rotations.create({
-        assetId: asset.id,
-        tokenVersion: version,
-        jti,
-        action: 'ISSUED',
-        performedBy: actor.id,
-        createdAt: new Date(),
-      }),
-    );
-    await this.auditLogsRepository.record({
-      action: AuditAction.QrIssued,
-      entityType: 'ASSET',
-      entityId: asset.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { tokenVersion: version },
-    });
-    await this.movementsService.record({
+    const signedAt = new Date();
+    await this.assetState.apply({
       assetId: asset.id,
-      movementType: MovementType.QrRotation,
-      fromCostCenterId: asset.costCenterId,
-      fromLocationId: asset.locationId,
-      fromResponsibleId: asset.responsibleId,
-      fromOperationalStatus: asset.operationalStatus,
-      fromPhysicalCondition: asset.physicalCondition,
-      toCostCenterId: asset.costCenterId,
-      toLocationId: asset.locationId,
-      toResponsibleId: asset.responsibleId,
-      toOperationalStatus: asset.operationalStatus,
-      toPhysicalCondition: asset.physicalCondition,
-      requestedBy: actor.id,
-      authorizedBy: actor.id,
-      reason: 'Rotación de QR',
-      documentReference: null,
+      actorId: actor.id,
+      patch: {
+        qrToken: token,
+        qrTokenVersion: version,
+        qrSignedAt: signedAt,
+        qrSignedBy: actor.id,
+      },
+      guard: (current) => {
+        if (current.operationalStatus === OperationalStatus.WrittenOff) {
+          throw new ApiException(ErrorCode.QrAssetWrittenOff);
+        }
+      },
+      movement: {
+        type: MovementType.QrRotation,
+        reason: 'Rotación de QR',
+        documentReference: null,
+      },
+      audit: { action: AuditAction.QrIssued, changes: { tokenVersion: version } },
+      alsoWrite: async (manager) => {
+        const rotations = manager.getRepository(QrTokenRotationLog);
+        await rotations.save(
+          rotations.create({
+            assetId: asset.id,
+            tokenVersion: version,
+            jti,
+            action: 'ISSUED',
+            performedBy: actor.id,
+            createdAt: signedAt,
+          }),
+        );
+      },
     });
     return this.toTokenResponse(token, version, new Date(), withPng, size);
   }
@@ -146,31 +134,29 @@ export class QrTokensService {
       throw new ApiException(ErrorCode.ResourceNotFound);
     }
     const nextVersion = asset.qrTokenVersion + 1;
-    await this.assetsRepository.update(asset.id, {
-      qrToken: null,
-      qrTokenVersion: nextVersion,
-      qrSignedAt: null,
-      qrSignedBy: null,
-      updatedBy: actor.id,
-    });
-    await this.rotations.save(
-      this.rotations.create({
-        assetId: asset.id,
-        tokenVersion: nextVersion,
-        jti: randomUUID(),
-        action: 'REVOKED',
-        performedBy: actor.id,
-        createdAt: new Date(),
-      }),
-    );
-    await this.auditLogsRepository.record({
-      action: AuditAction.QrRevoked,
-      entityType: 'ASSET',
-      entityId: asset.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { tokenVersion: nextVersion },
+    await this.assetState.apply({
+      assetId: asset.id,
+      actorId: actor.id,
+      patch: {
+        qrToken: null,
+        qrTokenVersion: nextVersion,
+        qrSignedAt: null,
+        qrSignedBy: null,
+      },
+      audit: { action: AuditAction.QrRevoked, changes: { tokenVersion: nextVersion } },
+      alsoWrite: async (manager) => {
+        const rotations = manager.getRepository(QrTokenRotationLog);
+        await rotations.save(
+          rotations.create({
+            assetId: asset.id,
+            tokenVersion: nextVersion,
+            jti: randomUUID(),
+            action: 'REVOKED',
+            performedBy: actor.id,
+            createdAt: new Date(),
+          }),
+        );
+      },
     });
     return null;
   }
