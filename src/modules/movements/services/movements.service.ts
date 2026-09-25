@@ -18,6 +18,7 @@ import { MovementVerificationLog } from '../entities/movement-verification-log.e
 export interface RecordMovementInput extends CreateMovementRecord {
   readonly loanId?: string | null;
   readonly metadata?: Record<string, unknown> | null;
+  readonly executedAt?: Date;
 }
 
 export interface MovementListQuery {
@@ -41,16 +42,19 @@ export class MovementsService {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
-  // Con manager, el movimiento entra en la transacción del llamador.
   async record(
     input: RecordMovementInput,
     manager?: EntityManager,
   ): Promise<AssetMovement> {
     const movements = manager?.getRepository(AssetMovement) ?? this.movements;
-    const previous = await movements.findOne({
-      where: { assetId: input.assetId },
-      order: { executedAt: 'DESC', createdAt: 'DESC' },
-    });
+    const previous = await movements
+      .createQueryBuilder('m')
+      .where('m.asset_id = :assetId', { assetId: input.assetId })
+      .andWhere(
+        'NOT EXISTS (SELECT 1 FROM asset_movement n WHERE n.previous_movement_id = m.id)',
+      )
+      .orderBy('m.created_at', 'DESC')
+      .getOne();
     const now = new Date();
     const timestamp = now.toISOString();
     const previousValues = stableJson({
@@ -82,7 +86,7 @@ export class MovementsService {
       metadata: { ...(input.metadata ?? {}), signedAt: timestamp },
       previousMovementId: previous?.id ?? null,
       eventSignature: signMovement(this.secret(), canonical),
-      executedAt: now,
+      executedAt: input.executedAt ?? now,
       createdAt: now,
     });
     return movements.save(entity);

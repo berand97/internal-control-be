@@ -18,6 +18,7 @@ import { OperationalStatus } from '../enums/operational-status.enum.js';
 import { PhysicalCondition } from '../enums/physical-condition.enum.js';
 import type { AssetsRepository } from '../repositories/assets.repository.interface.js';
 import type { MovementsService } from '../../movements/services/movements.service.js';
+import { AssetStateService } from './asset-state.service.js';
 import { AssetsService } from './assets.service.js';
 
 const actor: AuthenticatedUser = {
@@ -120,6 +121,7 @@ describe('AssetsService', () => {
   let locationsRepository: LocationsRepository;
   let dynamicFieldsService: DynamicFieldsService;
   let movementsService: Pick<MovementsService, 'record'>;
+  let manager: { getRepository: () => { findOne: ReturnType<typeof vi.fn> } };
   let service: AssetsService;
 
   beforeEach(() => {
@@ -217,6 +219,13 @@ describe('AssetsService', () => {
       findLastLogins: vi.fn(),
     };
     movementsService = { record: vi.fn().mockResolvedValue({}) };
+    manager = {
+      getRepository: () => ({ findOne: vi.fn().mockResolvedValue(asset()) }),
+    };
+    const dataSource = {
+      transaction: (work: (manager: unknown) => Promise<unknown>) =>
+        work(manager),
+    } as unknown as DataSource;
     service = new AssetsService(
       assetsRepository,
       categoriesRepository,
@@ -225,10 +234,13 @@ describe('AssetsService', () => {
       dynamicFieldsService,
       auditLogsRepository,
       movementsService as MovementsService,
-      {
-        transaction: (work: (manager: unknown) => Promise<unknown>) =>
-          work({}),
-      } as unknown as DataSource,
+      dataSource,
+      new AssetStateService(
+        dataSource,
+        assetsRepository,
+        movementsService as MovementsService,
+        auditLogsRepository,
+      ),
     );
   });
 
@@ -316,6 +328,7 @@ describe('AssetsService', () => {
       expect.objectContaining({
         operationalStatus: OperationalStatus.WrittenOff,
       }),
+      manager,
     );
     expect(movementsService.record).toHaveBeenCalled();
     expect(result.id).toBe('asset-1');

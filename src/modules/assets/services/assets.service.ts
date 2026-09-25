@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { DataSource, type EntityManager } from 'typeorm';
+import { DataSource, type EntityManager, IsNull } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import {
@@ -34,6 +34,7 @@ import {
   AssetResponseDto,
 } from '../dto/responses/asset.response.dto.js';
 import { UpdateAssetDto } from '../dto/update-asset.dto.js';
+import { AssetIdentifier } from '../entities/asset-identifier.entity.js';
 import type { Asset } from '../entities/asset.entity.js';
 import {
   AssetIdentifierOrigin,
@@ -45,6 +46,10 @@ import { OperationalStatus } from '../enums/operational-status.enum.js';
 import { PhysicalCondition } from '../enums/physical-condition.enum.js';
 import type { AssetsRepository } from '../repositories/assets.repository.interface.js';
 import { parseAssetCsv } from '../csv/parse-asset-csv.js';
+import {
+  type AssetMovementSpec,
+  AssetStateService,
+} from './asset-state.service.js';
 import { MovementsService } from '../../movements/services/movements.service.js';
 
 const ENTITY_TYPE = 'ASSET';
@@ -67,6 +72,7 @@ export class AssetsService {
     private readonly auditLogsRepository: AuditLogsRepository,
     private readonly movementsService: MovementsService,
     private readonly dataSource: DataSource,
+    private readonly assetState: AssetStateService,
   ) {}
 
   async listAcquisitionTypes(): Promise<
@@ -254,49 +260,58 @@ export class AssetsService {
     if (category.requiresSerialNumber && !(dto.serialNumber ?? asset.serialNumber)) {
       throw new ApiException(ErrorCode.AssetSerialRequired);
     }
+    const customWrites = dto.customValues
+      ? this.buildCustomWrites(
+          await this.dynamicFieldsService.effectiveFields(nextCategoryId),
+          dto.customValues,
+        )
+      : null;
+    const barcode = dto.barcode !== undefined ? dto.barcode || null : undefined;
+    const movement = editMovement(asset, dto);
+    let updated: Asset;
     try {
-      await this.assetsRepository.update(asset.id, {
-        ...(dto.description !== undefined ? { description: dto.description } : {}),
-        ...(dto.model !== undefined ? { model: dto.model } : {}),
-        ...(dto.barcode !== undefined ? { barcode: dto.barcode || null } : {}),
-        ...(dto.serialNumber !== undefined
-          ? { serialNumber: dto.serialNumber || null }
-          : {}),
-        ...(dto.locationId !== undefined ? { locationId: dto.locationId } : {}),
-        ...(dto.responsibleId !== undefined
-          ? { responsibleId: dto.responsibleId }
-          : {}),
-        ...(dto.physicalCondition !== undefined
-          ? { physicalCondition: dto.physicalCondition }
-          : {}),
-        ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
-        ...(dto.insurancePolicyNumber !== undefined
-          ? { insurancePolicyNumber: dto.insurancePolicyNumber }
-          : {}),
-        updatedBy: actor.id,
+      updated = await this.assetState.apply({
+        assetId: asset.id,
+        actorId: actor.id,
+        patch: {
+          ...(dto.description !== undefined ? { description: dto.description } : {}),
+          ...(dto.model !== undefined ? { model: dto.model } : {}),
+          ...(barcode !== undefined ? { barcode } : {}),
+          ...(dto.serialNumber !== undefined
+            ? { serialNumber: dto.serialNumber || null }
+            : {}),
+          ...(dto.locationId !== undefined ? { locationId: dto.locationId } : {}),
+          ...(dto.responsibleId !== undefined
+            ? { responsibleId: dto.responsibleId }
+            : {}),
+          ...(dto.physicalCondition !== undefined
+            ? { physicalCondition: dto.physicalCondition }
+            : {}),
+          ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
+          ...(dto.insurancePolicyNumber !== undefined
+            ? { insurancePolicyNumber: dto.insurancePolicyNumber }
+            : {}),
+        },
+        guard: assertMutable,
+        ...(movement ? { movement } : {}),
+        audit: { action: AuditAction.AssetUpdated, changes: { ...dto } },
+        alsoWrite: async (manager, current) => {
+          if (customWrites) {
+            await this.assetsRepository.replaceCustomValues(
+              asset.id,
+              customWrites,
+              manager,
+            );
+          }
+          if (barcode !== undefined && barcode !== current.barcode) {
+            await this.replaceLegacyCode(current, barcode, actor.id, manager);
+          }
+        },
       });
-      if (dto.customValues) {
-        const fields = await this.dynamicFieldsService.effectiveFields(
-          nextCategoryId,
-        );
-        await this.assetsRepository.replaceCustomValues(
-          asset.id,
-          this.buildCustomWrites(fields, dto.customValues),
-        );
-      }
     } catch (error) {
       this.rethrowUnique(error);
     }
-    await this.auditLogsRepository.record({
-      action: AuditAction.AssetUpdated,
-      entityType: ENTITY_TYPE,
-      entityId: asset.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { ...dto },
-    });
-    return this.toDetail(await this.requireAsset(id));
+    return this.toDetail(updated);
   }
 
   async changeStatus(
@@ -319,38 +334,26 @@ export class AssetsService {
         : asset.operationalStatus === OperationalStatus.InMaintenance
           ? MovementType.MaintenanceOut
           : MovementType.ConditionChange;
-    await this.assetsRepository.update(asset.id, {
-      operationalStatus: status,
-      updatedBy: actor.id,
-    });
-    await this.movementsService.record({
+    const updated = await this.assetState.apply({
       assetId: asset.id,
-      movementType,
-      fromCostCenterId: asset.costCenterId,
-      fromLocationId: asset.locationId,
-      fromResponsibleId: asset.responsibleId,
-      fromOperationalStatus: asset.operationalStatus,
-      fromPhysicalCondition: asset.physicalCondition,
-      toCostCenterId: asset.costCenterId,
-      toLocationId: asset.locationId,
-      toResponsibleId: asset.responsibleId,
-      toOperationalStatus: status,
-      toPhysicalCondition: asset.physicalCondition,
-      requestedBy: actor.id,
-      authorizedBy: actor.id,
-      reason,
-      documentReference: null,
+      actorId: actor.id,
+      patch: { operationalStatus: status },
+      guard: (current) => {
+        assertMutable(current);
+        if (
+          current.operationalStatus !== asset.operationalStatus ||
+          !canTransitionStatus(current.operationalStatus, status)
+        ) {
+          throw new ApiException(ErrorCode.AssetInvalidStatusTransition);
+        }
+      },
+      movement: { type: movementType, reason, documentReference: null },
+      audit: {
+        action: AuditAction.AssetStatusChanged,
+        changes: { from: asset.operationalStatus, to: status, reason },
+      },
     });
-    await this.auditLogsRepository.record({
-      action: AuditAction.AssetStatusChanged,
-      entityType: ENTITY_TYPE,
-      entityId: asset.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { from: asset.operationalStatus, to: status, reason },
-    });
-    return this.toDetail(await this.requireAsset(id));
+    return this.toDetail(updated);
   }
 
   async writeOff(
@@ -363,42 +366,28 @@ export class AssetsService {
     await this.assertNoActiveLoan(asset.id);
     const writtenOffAt =
       dto.writtenOffAt ?? new Date().toISOString().slice(0, 10);
-    await this.assetsRepository.update(asset.id, {
-      operationalStatus: OperationalStatus.WrittenOff,
-      writtenOffAt,
-      writeOffReason: dto.reason,
-      writeOffDocument: dto.documentReference,
-      writeOffApprovedBy: actor.id,
-      updatedBy: actor.id,
-    });
-    await this.movementsService.record({
+    const updated = await this.assetState.apply({
       assetId: asset.id,
-      movementType: MovementType.WriteOff,
-      fromCostCenterId: asset.costCenterId,
-      fromLocationId: asset.locationId,
-      fromResponsibleId: asset.responsibleId,
-      fromOperationalStatus: asset.operationalStatus,
-      fromPhysicalCondition: asset.physicalCondition,
-      toCostCenterId: asset.costCenterId,
-      toLocationId: asset.locationId,
-      toResponsibleId: asset.responsibleId,
-      toOperationalStatus: OperationalStatus.WrittenOff,
-      toPhysicalCondition: asset.physicalCondition,
-      requestedBy: actor.id,
-      authorizedBy: actor.id,
-      reason: dto.reason,
-      documentReference: dto.documentReference,
+      actorId: actor.id,
+      patch: {
+        operationalStatus: OperationalStatus.WrittenOff,
+        writtenOffAt,
+        writeOffReason: dto.reason,
+        writeOffDocument: dto.documentReference,
+        writeOffApprovedBy: actor.id,
+      },
+      guard: assertMutable,
+      movement: {
+        type: MovementType.WriteOff,
+        reason: dto.reason,
+        documentReference: dto.documentReference,
+      },
+      audit: {
+        action: AuditAction.AssetWrittenOff,
+        changes: { documentReference: dto.documentReference },
+      },
     });
-    await this.auditLogsRepository.record({
-      action: AuditAction.AssetWrittenOff,
-      entityType: ENTITY_TYPE,
-      entityId: asset.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { documentReference: dto.documentReference },
-    });
-    return this.toDetail(await this.requireAsset(id));
+    return this.toDetail(updated);
   }
 
   async reassignLocation(
@@ -408,43 +397,25 @@ export class AssetsService {
     actor: AuthenticatedUser,
   ): Promise<AssetResponseDto> {
     const asset = await this.requireAsset(id);
-    if (asset.operationalStatus === OperationalStatus.WrittenOff) {
-      throw new ApiException(ErrorCode.AssetAlreadyWrittenOff);
-    }
+    assertNotWrittenOff(asset);
     await this.assertNotUnderInventory(asset.id);
     await this.requireLocation(locationId);
-    await this.assetsRepository.update(asset.id, {
-      locationId,
-      updatedBy: actor.id,
-    });
-    await this.movementsService.record({
+    const updated = await this.assetState.apply({
       assetId: asset.id,
-      movementType: MovementType.Relocation,
-      fromCostCenterId: asset.costCenterId,
-      fromLocationId: asset.locationId,
-      fromResponsibleId: asset.responsibleId,
-      fromOperationalStatus: asset.operationalStatus,
-      fromPhysicalCondition: asset.physicalCondition,
-      toCostCenterId: asset.costCenterId,
-      toLocationId: locationId,
-      toResponsibleId: asset.responsibleId,
-      toOperationalStatus: asset.operationalStatus,
-      toPhysicalCondition: asset.physicalCondition,
-      requestedBy: actor.id,
-      authorizedBy: actor.id,
-      reason: reason ?? null,
-      documentReference: null,
+      actorId: actor.id,
+      patch: { locationId },
+      guard: assertNotWrittenOff,
+      movement: {
+        type: MovementType.Relocation,
+        reason: reason ?? null,
+        documentReference: null,
+      },
+      audit: {
+        action: AuditAction.AssetRelocated,
+        changes: { from: asset.locationId, to: locationId },
+      },
     });
-    await this.auditLogsRepository.record({
-      action: AuditAction.AssetRelocated,
-      entityType: ENTITY_TYPE,
-      entityId: asset.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { from: asset.locationId, to: locationId },
-    });
-    return this.toDetail(await this.requireAsset(id));
+    return this.toDetail(updated);
   }
 
   async reassignCostCenter(
@@ -458,38 +429,55 @@ export class AssetsService {
     await this.assertNotUnderInventory(asset.id);
     await this.assertNoActiveLoan(asset.id);
     await this.requireCostCenter(costCenterId);
-    await this.assetsRepository.update(asset.id, {
-      costCenterId,
-      updatedBy: actor.id,
-    });
-    await this.movementsService.record({
+    const updated = await this.assetState.apply({
       assetId: asset.id,
-      movementType: MovementType.Transfer,
-      fromCostCenterId: asset.costCenterId,
-      fromLocationId: asset.locationId,
-      fromResponsibleId: asset.responsibleId,
-      fromOperationalStatus: asset.operationalStatus,
-      fromPhysicalCondition: asset.physicalCondition,
-      toCostCenterId: costCenterId,
-      toLocationId: asset.locationId,
-      toResponsibleId: asset.responsibleId,
-      toOperationalStatus: asset.operationalStatus,
-      toPhysicalCondition: asset.physicalCondition,
-      requestedBy: actor.id,
-      authorizedBy: actor.id,
-      reason: reason ?? null,
-      documentReference,
+      actorId: actor.id,
+      patch: { costCenterId },
+      guard: assertMutable,
+      movement: {
+        type: MovementType.Transfer,
+        reason: reason ?? null,
+        documentReference,
+      },
+      audit: {
+        action: AuditAction.AssetTransferred,
+        changes: { from: asset.costCenterId, to: costCenterId },
+      },
     });
-    await this.auditLogsRepository.record({
-      action: AuditAction.AssetTransferred,
-      entityType: ENTITY_TYPE,
-      entityId: asset.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { from: asset.costCenterId, to: costCenterId },
-    });
-    return this.toDetail(await this.requireAsset(id));
+    return this.toDetail(updated);
+  }
+
+  private async replaceLegacyCode(
+    current: Asset,
+    barcode: string | null,
+    actorId: string,
+    manager: EntityManager,
+  ): Promise<void> {
+    if (current.barcode) {
+      await manager.getRepository(AssetIdentifier).update(
+        {
+          assetId: current.id,
+          identifierType: AssetIdentifierType.LegacyCode,
+          value: current.barcode,
+          validTo: IsNull(),
+        },
+        { validTo: new Date() },
+      );
+    }
+    if (barcode) {
+      await this.assetsRepository.insertIdentifiers(
+        current.id,
+        [
+          {
+            type: AssetIdentifierType.LegacyCode,
+            value: barcode,
+            origin: AssetIdentifierOrigin.Manual,
+          },
+        ],
+        actorId,
+        manager,
+      );
+    }
   }
 
   private async persistNew(
@@ -751,12 +739,7 @@ export class AssetsService {
 
   private async requireMutable(id: string): Promise<Asset> {
     const asset = await this.requireAsset(id);
-    if (asset.operationalStatus === OperationalStatus.WrittenOff) {
-      throw new ApiException(ErrorCode.AssetAlreadyWrittenOff);
-    }
-    if (asset.operationalStatus === OperationalStatus.OnLoan) {
-      throw new ApiException(ErrorCode.AssetCannotBeModified);
-    }
+    assertMutable(asset);
     return asset;
   }
 
@@ -829,3 +812,34 @@ export class AssetsService {
     };
   }
 }
+
+const assertNotWrittenOff = (asset: Asset): void => {
+  if (asset.operationalStatus === OperationalStatus.WrittenOff) {
+    throw new ApiException(ErrorCode.AssetAlreadyWrittenOff);
+  }
+};
+
+const assertMutable = (asset: Asset): void => {
+  assertNotWrittenOff(asset);
+  if (asset.operationalStatus === OperationalStatus.OnLoan) {
+    throw new ApiException(ErrorCode.AssetCannotBeModified);
+  }
+};
+
+const editMovement = (
+  asset: Asset,
+  dto: UpdateAssetDto,
+): AssetMovementSpec | null => {
+  const changed = <T>(next: T | undefined, current: T): boolean =>
+    next !== undefined && next !== current;
+  const type = changed(dto.responsibleId, asset.responsibleId)
+    ? MovementType.Assignment
+    : changed(dto.locationId, asset.locationId)
+      ? MovementType.Relocation
+      : changed(dto.physicalCondition, asset.physicalCondition)
+        ? MovementType.ConditionChange
+        : null;
+  return type
+    ? { type, reason: 'Edición del activo', documentReference: null }
+    : null;
+};

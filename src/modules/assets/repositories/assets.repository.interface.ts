@@ -59,6 +59,7 @@ export interface UpdateAssetRecord {
   readonly qrTokenVersion?: number;
   readonly qrSignedAt?: Date | null;
   readonly qrSignedBy?: string | null;
+  readonly lastVerifiedAt?: Date | null;
   readonly updatedBy?: string | null;
 }
 
