@@ -15,8 +15,8 @@ export class AssetLoan {
   @Column({ name: 'target_location_id', type: 'uuid', nullable: true })
   targetLocationId!: string | null;
 
-  @Column({ name: 'target_responsible_id', type: 'uuid' })
-  contactPersonId!: string;
+  @Column({ name: 'target_responsible_id', type: 'uuid', nullable: true })
+  contactPersonId!: string | null;
 
   @Column({ name: 'requested_at', type: 'timestamptz' })
   requestedAt!: Date;
@@ -59,6 +59,9 @@ export class AssetLoan {
 
   @Column({ name: 'rejected_reason', type: 'text', nullable: true })
   rejectedReason!: string | null;
+
+  @Column({ name: 'delivery_document_id', type: 'uuid', nullable: true })
+  deliveryDocumentId!: string | null;
 
   @Column({ name: 'extension_requested_date', type: 'date', nullable: true })
   extensionRequestedDate!: string | null;

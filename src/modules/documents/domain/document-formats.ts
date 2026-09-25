@@ -56,7 +56,7 @@ export const DOCUMENT_FORMATS: ReadonlyArray<DocumentFormat> = [
       { order: 2, role: 'RECIBE', label: 'Recibe', source: 'RESPONSIBLE' },
       { ...CONTROL_INTERNO, order: 3 },
     ],
-    pendingDecisions: ['Firmantes y orden por confirmar con Control Interno'],
+    pendingDecisions: [],
   },
   {
     key: 'OCI-17-89',
