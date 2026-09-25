@@ -1,15 +1,17 @@
-import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from '../../src/app.module.js';
+import { applyTrustProxy } from '../../src/common/http/trust-proxy.js';
+import type { AppConfig } from '../../src/config/configuration.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { GotenbergPdfConverter, PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
@@ -41,7 +43,7 @@ interface Signer {
 }
 
 describe('Firma electrónica simple con el proveedor interno (HTTP real + PostgreSQL real)', () => {
-  let app: INestApplication<Server>;
+  let app: NestExpressApplication;
   let dataSource: DataSource;
   let engine: DocumentEngineService;
   let tokens: TokenService;
@@ -104,6 +106,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
       .post(`/api/v1/documents/${documentId}/signatures/${order}`)
       .set('Authorization', `Bearer ${who.token}`)
       .set('User-Agent', 'vitest-firma')
+      .set('X-Forwarded-For', '203.0.113.50')
       .send({ rubric });
 
   const envelopeOf = async (documentId: string) => {
@@ -126,7 +129,8 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
       .overrideProvider(PDF_CONVERTER)
       .useValue(new TestPdfConverter())
       .compile();
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication<NestExpressApplication>();
+    applyTrustProxy(app, app.get(ConfigService<AppConfig, true>).getOrThrow('trustProxy', { infer: true }));
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
@@ -221,7 +225,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     )) as Array<Record<string, string | boolean>>;
     expect(evidence[0]).toMatchObject({ signer_user_id: responsible.userId, session_id: responsible.sessionId, user_agent: 'vitest-firma', mfa_enabled: true });
     expect(evidence[1]).toMatchObject({ signer_user_id: auditor.userId, session_id: auditor.sessionId });
-    expect(evidence[0]?.['ip']).toBeTruthy();
+    expect(evidence.map((item) => item['ip'])).toEqual(['203.0.113.50', '203.0.113.50']);
     expect(evidence[1]?.['pdf_sha256_before']).toBe(evidence[0]?.['pdf_sha256_after']);
 
     const original = await engine.download(document.id, 'docx', directorId);

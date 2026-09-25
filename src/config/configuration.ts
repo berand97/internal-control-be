@@ -1,3 +1,9 @@
+import {
+  DEFAULT_TRUST_PROXY,
+  parseTrustProxy,
+  type TrustProxySetting,
+} from '../common/http/trust-proxy.js';
+
 export interface DatabaseConfig {
   readonly url: string;
   readonly logging: boolean;
@@ -78,6 +84,7 @@ export interface AppConfig {
   readonly appPublicUrl: string;
   readonly apiPublicUrl: string;
   readonly apiDocsEnabled: boolean;
+  readonly trustProxy: TrustProxySetting;
   readonly database: DatabaseConfig;
   readonly jwt: JwtConfig;
   readonly argon2: Argon2Config;
@@ -223,6 +230,7 @@ const configuration = (): AppConfig => ({
   appPublicUrl: readString('APP_PUBLIC_URL', 'http://localhost:4200'),
   apiPublicUrl: readString('API_PUBLIC_URL', 'http://localhost:3000'),
   apiDocsEnabled: readBoolean('API_DOCS_ENABLED', process.env['NODE_ENV'] !== 'production'),
+  trustProxy: parseTrustProxy(readString('TRUST_PROXY', DEFAULT_TRUST_PROXY)),
   database: {
     url: readRequiredString('DATABASE_URL'),
     logging: readBoolean('DATABASE_LOGGING', false),

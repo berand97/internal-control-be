@@ -2,11 +2,13 @@ import './instrumentation.js';
 import 'reflect-metadata';
 import type { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import cookieParser from 'cookie-parser';
 import { AppModule, ObserveInstrument } from './app.module.js';
+import { applyTrustProxy } from './common/http/trust-proxy.js';
 import { createAppValidationPipe } from './common/pipes/app-validation.pipe.js';
 import {
   OPENAPI_TAG_GROUPS,
@@ -52,7 +54,7 @@ async function bootstrap(): Promise<void> {
   const nestObserveEnabled = Boolean(
     process.env['OBSERVE_APP_KEY'] && process.env['OBSERVE_APP_SECRET'],
   );
-  const app = await NestFactory.create(
+  const app = await NestFactory.create<NestExpressApplication>(
     AppModule,
     nestObserveEnabled && ObserveInstrument
       ? { instrument: ObserveInstrument }
@@ -61,6 +63,7 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get(ConfigService<AppConfig, true>);
 
+  applyTrustProxy(app, config.getOrThrow('trustProxy', { infer: true }));
   app.use(cookieParser());
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(createAppValidationPipe());
