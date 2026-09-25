@@ -37,7 +37,8 @@ describe('Código interno de activo (PostgreSQL real)', () => {
       categoryId,
       costCenterId: await scalar<string>(
         dataSource,
-        `SELECT id FROM cost_center WHERE external_code = '4100'`,
+        `INSERT INTO cost_center (external_code, name)
+         VALUES ('IT-SEQ', 'Centro de prueba') RETURNING id`,
       ),
       acquisitionTypeId: await scalar<string>(
         dataSource,
