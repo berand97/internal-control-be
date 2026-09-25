@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import type { RawCellValue } from '../excel/read-workbook.js';
+import { headerRowFor, type StagingSourceKind } from '../staging-sources.js';
 import {
+  ASSET_COLUMNS,
   diagnoseAssetSheet,
   findColumn,
   type Issue,
@@ -10,7 +12,6 @@ import {
   type StagedSheet,
 } from '../diagnostics/asset-report-diagnostics.js';
 
-const ASSET_SHEETS = ['ACTIVOS', 'ACTIVOS DADOS DE BAJA'];
 const COST_CENTER_SHEET = '2026';
 const COST_CENTER_CODE_HEADERS = [
   'CODIGO',
@@ -37,10 +38,26 @@ export interface SheetDiagnosis {
   readonly metrics: ReadonlyArray<Metric>;
 }
 
+export interface SheetRelation {
+  readonly left: string;
+  readonly right: string;
+  readonly sharedIds: number;
+  readonly identicalRows: number;
+  readonly commonColumns: number;
+}
+
+export interface OtherSheet {
+  readonly name: string;
+  readonly headerRow: number;
+  readonly nonEmptyRows: number;
+  readonly headers: ReadonlyArray<string>;
+}
+
 export interface AssetReportDiagnosis {
   readonly batchId: string;
   readonly sheets: ReadonlyArray<SheetDiagnosis>;
-  readonly otherSheets: ReadonlyArray<{ readonly name: string; readonly nonEmptyRows: number }>;
+  readonly relations: ReadonlyArray<SheetRelation>;
+  readonly otherSheets: ReadonlyArray<OtherSheet>;
   readonly issues: ReadonlyArray<Issue>;
 }
 
@@ -59,24 +76,29 @@ export class StagingDiagnosticsService {
 
     const diagnosed: SheetDiagnosis[] = [];
     const issues: Issue[] = [];
-    const wanted = new Set(ASSET_SHEETS.map(normalizeHeader));
-    for (const meta of sheets.filter((sheet) => wanted.has(normalizeHeader(sheet.name)))) {
-      const result = diagnoseAssetSheet(
-        { ...meta, rows: await this.rowsOf(batchId, meta.name) },
-        costCenterCodes,
-      );
+    const staged: StagedSheet[] = [];
+    const assetSheets = sheets.filter((sheet) => findColumn(sheet.columns, ASSET_COLUMNS.assetId));
+    for (const meta of assetSheets) {
+      const sheet = { ...meta, rows: await this.rowsOf(batchId, meta.name) };
+      const result = diagnoseAssetSheet(sheet, costCenterCodes);
+      staged.push(sheet);
       diagnosed.push({ sheet: meta.name, metrics: result.metrics });
       issues.push(...result.issues);
     }
 
-    const otherSheets = [];
-    for (const meta of sheets.filter((sheet) => !wanted.has(normalizeHeader(sheet.name)))) {
+    const otherSheets: OtherSheet[] = [];
+    for (const meta of sheets.filter((sheet) => !assetSheets.includes(sheet))) {
       const [row] = (await this.dataSource.query(
         `SELECT count(*)::int AS count FROM staging_row
          WHERE batch_id = $1 AND sheet_name = $2 AND row_number > $3 AND cells <> '{}'::jsonb`,
         [batchId, meta.name, meta.headerRow],
       )) as Array<{ count: number }>;
-      otherSheets.push({ name: meta.name, nonEmptyRows: row?.count ?? 0 });
+      otherSheets.push({
+        name: meta.name,
+        headerRow: meta.headerRow,
+        nonEmptyRows: row?.count ?? 0,
+        headers: Object.values(meta.columns),
+      });
     }
 
     await this.dataSource.transaction(async (manager) => {
@@ -92,10 +114,13 @@ export class StagingDiagnosticsService {
       }
     });
 
-    return { batchId, sheets: diagnosed, otherSheets, issues };
+    return { batchId, sheets: diagnosed, relations: relationsBetween(staged), otherSheets, issues };
   }
 
-  private async sheetsOf(batchId: string, kind: string): Promise<ReadonlyArray<SheetMeta>> {
+  private async sheetsOf(
+    batchId: string,
+    kind: StagingSourceKind,
+  ): Promise<ReadonlyArray<SheetMeta>> {
     const [batch] = (await this.dataSource.query(
       'SELECT source_kind, sheets FROM staging_batch WHERE id = $1',
       [batchId],
@@ -106,7 +131,22 @@ export class StagingDiagnosticsService {
     if (batch.source_kind !== kind) {
       throw new Error(`El lote ${batchId} es ${batch.source_kind}, no ${kind}`);
     }
-    return batch.sheets;
+    const result: SheetMeta[] = [];
+    for (const sheet of batch.sheets) {
+      const headerRow = headerRowFor(kind, sheet.name);
+      const [row] = (await this.dataSource.query(
+        'SELECT cells FROM staging_row WHERE batch_id = $1 AND sheet_name = $2 AND row_number = $3',
+        [batchId, sheet.name, headerRow],
+      )) as Array<{ cells: Record<string, RawCellValue> }>;
+      result.push({
+        ...sheet,
+        headerRow,
+        columns: Object.fromEntries(
+          Object.entries(row?.cells ?? {}).map(([letter, value]) => [letter, String(value)]),
+        ),
+      });
+    }
+    return result;
   }
 
   private async rowsOf(batchId: string, sheet: string): Promise<StagedSheet['rows']> {
@@ -147,3 +187,57 @@ export class StagingDiagnosticsService {
     );
   }
 }
+
+const relationsBetween = (sheets: ReadonlyArray<StagedSheet>): ReadonlyArray<SheetRelation> => {
+  const indexed = sheets.map((sheet) => {
+    const idLetter = findColumn(sheet.columns, ASSET_COLUMNS.assetId);
+    const byId = new Map<string, Record<string, string>>();
+    for (const row of sheet.rows) {
+      if (row.rowNumber <= sheet.headerRow || !idLetter) {
+        continue;
+      }
+      const id = String(row.cells[idLetter] ?? '').trim();
+      if (id === '' || byId.has(id)) {
+        continue;
+      }
+      byId.set(
+        id,
+        Object.fromEntries(
+          Object.entries(sheet.columns).map(([letter, header]) => [
+            normalizeHeader(header),
+            String(row.cells[letter] ?? '').trim(),
+          ]),
+        ),
+      );
+    }
+    return { name: sheet.name, byId, headers: new Set(Object.values(sheet.columns).map(normalizeHeader)) };
+  });
+  const relations: SheetRelation[] = [];
+  for (let i = 0; i < indexed.length; i += 1) {
+    for (let j = i + 1; j < indexed.length; j += 1) {
+      const left = indexed[i]!;
+      const right = indexed[j]!;
+      const common = [...left.headers].filter((header) => header !== '' && right.headers.has(header));
+      let shared = 0;
+      let identical = 0;
+      for (const [id, values] of left.byId) {
+        const other = right.byId.get(id);
+        if (!other) {
+          continue;
+        }
+        shared += 1;
+        if (common.every((header) => values[header] === other[header])) {
+          identical += 1;
+        }
+      }
+      relations.push({
+        left: left.name,
+        right: right.name,
+        sharedIds: shared,
+        identicalRows: identical,
+        commonColumns: common.length,
+      });
+    }
+  }
+  return relations;
+};

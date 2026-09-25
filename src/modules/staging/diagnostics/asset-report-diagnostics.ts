@@ -38,9 +38,13 @@ export const ASSET_COLUMNS = {
   purchaseDate: ['MovFechaCompra'],
   price: ['MovPrecioCompra'],
   costCenter: ['MovIdCentro'],
+  writeOffFlag: ['MovDebaja'],
+  writeOffDate: ['MovFechaDebaja'],
 } as const;
 
 type AssetColumn = keyof typeof ASSET_COLUMNS;
+
+const OPTIONAL_COLUMNS: ReadonlySet<AssetColumn> = new Set(['writeOffFlag', 'writeOffDate']);
 
 export const normalizeHeader = (value: string): string =>
   value
@@ -101,7 +105,7 @@ export const diagnoseAssetSheet = (
   const letters = {} as Record<AssetColumn, string | null>;
   for (const key of Object.keys(ASSET_COLUMNS) as AssetColumn[]) {
     letters[key] = findColumn(sheet.columns, ASSET_COLUMNS[key]);
-    if (!letters[key]) {
+    if (!letters[key] && !OPTIONAL_COLUMNS.has(key)) {
       issue(null, ASSET_COLUMNS[key][0], 'MISSING_COLUMN', null, 'La columna no aparece en el encabezado');
     }
   }
@@ -148,6 +152,61 @@ export const diagnoseAssetSheet = (
     ? withContent.filter((row) => !isBlank(cell(row, 'assetId')))
     : withContent;
   const total = nonEmpty.length;
+
+  const byAssetId = new Map<string, number[]>();
+  if (letters.assetId) {
+    for (const row of nonEmpty) {
+      const id = text(cell(row, 'assetId'));
+      byAssetId.set(id, [...(byAssetId.get(id) ?? []), row.rowNumber]);
+    }
+  }
+  const repeatedIds = [...byAssetId.entries()].filter(([, rows]) => rows.length > 1);
+  for (const [id, rows] of repeatedIds) {
+    for (const rowNumber of rows) {
+      issue(
+        rowNumber,
+        header('assetId'),
+        'ASSET_ID_DUPLICATED',
+        id,
+        `El mismo ${header('assetId')} aparece en las filas ${rows.join(', ')}`,
+      );
+    }
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const isWrittenOff = (row: StagedRow): boolean =>
+    ['TRUE', 'SI', 'SÍ', '1', 'S'].includes(text(cell(row, 'writeOffFlag')).toUpperCase());
+  const writtenOff = letters.writeOffFlag ? nonEmpty.filter(isWrittenOff) : [];
+  const writeOffDates: string[] = [];
+  let writeOffMissing = 0;
+  let writeOffNotADate = 0;
+  let writeOffBeforePurchase = 0;
+  let writeOffFuture = 0;
+  for (const row of writtenOff) {
+    const value = cell(row, 'writeOffDate');
+    if (!letters.writeOffDate || isBlank(value)) {
+      writeOffMissing += 1;
+      issue(row.rowNumber, header('writeOffDate'), 'WRITE_OFF_DATE_MISSING', null);
+      continue;
+    }
+    if (!isDateType(type(row, 'writeOffDate'))) {
+      writeOffNotADate += 1;
+      issue(row.rowNumber, header('writeOffDate'), 'WRITE_OFF_DATE_NOT_A_DATE', value);
+      continue;
+    }
+    const date = String(value).slice(0, 10);
+    writeOffDates.push(date);
+    const purchase = cell(row, 'purchaseDate');
+    if (isDateType(type(row, 'purchaseDate')) && date < String(purchase).slice(0, 10)) {
+      writeOffBeforePurchase += 1;
+      issue(row.rowNumber, header('writeOffDate'), 'WRITE_OFF_BEFORE_PURCHASE', value, `Compra: ${String(purchase).slice(0, 10)}`);
+    }
+    if (date > today) {
+      writeOffFuture += 1;
+      issue(row.rowNumber, header('writeOffDate'), 'WRITE_OFF_DATE_FUTURE', value);
+    }
+  }
+  writeOffDates.sort();
 
   let temp = 0;
   let blankBarcode = 0;
@@ -262,6 +321,13 @@ export const diagnoseAssetSheet = (
       base: null,
     },
     {
+      key: 'asset_id_duplicated_ids',
+      label: `${header('assetId')} repetidos dentro de la hoja`,
+      value: letters.assetId ? repeatedIds.length : null,
+      base: null,
+      detail: `${repeatedIds.reduce((sum, [, rows]) => sum + rows.length, 0)} filas involucradas`,
+    },
+    {
       key: 'barcode_temp',
       label: 'Código de barras TEMP',
       value: has('barcode', temp),
@@ -341,5 +407,23 @@ export const diagnoseAssetSheet = (
       detail: percent(modelEmpty, total),
     },
   ];
+  if (letters.writeOffFlag) {
+    metrics.push(
+      { key: 'written_off', label: `Filas con ${header('writeOffFlag')} verdadero`, value: writtenOff.length, base: total },
+      {
+        key: 'write_off_date_present',
+        label: 'Bajas con fecha de baja',
+        value: writeOffDates.length,
+        base: writtenOff.length,
+        detail: writeOffDates.length > 0
+          ? `${percent(writeOffDates.length, writtenOff.length)}; de ${writeOffDates[0]} a ${writeOffDates.at(-1)}`
+          : percent(0, writtenOff.length),
+      },
+      { key: 'write_off_date_missing', label: 'Bajas sin fecha de baja', value: writeOffMissing, base: writtenOff.length, detail: percent(writeOffMissing, writtenOff.length) },
+      { key: 'write_off_date_not_a_date', label: 'Fecha de baja que no es fecha', value: writeOffNotADate, base: writtenOff.length },
+      { key: 'write_off_before_purchase', label: 'Baja anterior a la compra', value: writeOffBeforePurchase, base: writtenOff.length },
+      { key: 'write_off_date_future', label: 'Fecha de baja en el futuro', value: writeOffFuture, base: writtenOff.length },
+    );
+  }
   return { metrics, issues };
 };

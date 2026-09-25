@@ -56,12 +56,16 @@ const buildAssetReport = async (path: string): Promise<void> => {
     row.commit();
   }
   const writtenOff = workbook.addWorksheet('ACTIVOS DADOS DE BAJA');
-  writtenOff.addRow(HEADERS);
-  writtenOff.addRow([99, 'B-001', 'Dado de baja', null, null, '100', new Date('2010-01-01'), 50000]);
-  const movements = workbook.addWorksheet('Movimientos');
-  movements.addRow(['MovIdActivo', 'Fecha', 'Tipo']);
-  movements.addRow([1, new Date('2022-01-01'), 'TRASLADO']);
-  movements.addRow([2, new Date('2022-02-01'), 'PRESTAMO']);
+  writtenOff.addRow([...HEADERS, 'MovDebaja', 'MovFechaDebaja']);
+  writtenOff.addRow([99, 'B-001', 'Baja fechada', null, null, '100', new Date('2010-01-01'), 50000, true, new Date('2012-05-05')]);
+  writtenOff.addRow([100, 'B-002', 'Baja sin fecha', null, null, '100', new Date('2015-01-01'), 50000, true, null]);
+  writtenOff.addRow([101, 'B-003', 'Baja antes de compra', null, null, '100', new Date('2015-01-01'), 50000, true, new Date('2014-01-01')]);
+  writtenOff.addRow([102, 'B-004', 'Baja fechada', null, null, '100', new Date('2016-01-01'), 50000, true, new Date('2020-02-02')]);
+  writtenOff.addRow([99, 'B-005', 'ID repetido', null, null, '100', new Date('2010-01-01'), 50000, true, new Date('2012-05-05')]);
+  const lookup = workbook.addWorksheet('Hoja2');
+  lookup.getRow(2).values = [null, 'Codigo', 'Nombre'];
+  lookup.getRow(3).values = [null, 100, 'Control Interno'];
+  lookup.getRow(4).values = [null, 200, 'Talento Humano'];
   await workbook.xlsx.writeFile(path);
 };
 
@@ -114,8 +118,8 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
     expect(result.created).toBe(true);
     expect(result.sheets).toEqual([
       { name: 'ACTIVOS', rows: 18 },
-      { name: 'ACTIVOS DADOS DE BAJA', rows: 2 },
-      { name: 'Movimientos', rows: 3 },
+      { name: 'ACTIVOS DADOS DE BAJA', rows: 6 },
+      { name: 'Hoja2', rows: 4 },
     ]);
     const cell = async (rowNumber: number, column: string) =>
       (
@@ -140,7 +144,7 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
     expect(second).toEqual({ ...first, created: false });
     expect(
       Number(await scalar<string>(dataSource, 'SELECT count(*) FROM staging_row WHERE batch_id = $1', [first.batchId])),
-    ).toBe(23);
+    ).toBe(28);
     expect(Number(await scalar<string>(dataSource, `SELECT count(*) FROM staging_batch WHERE source_kind = 'ASSET_REPORT'`))).toBe(1);
   });
 
@@ -186,7 +190,34 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
       serialEmpty: 14,
       modelEmpty: 13,
     });
-    expect(diagnosis.otherSheets).toEqual([{ name: 'Movimientos', nonEmptyRows: 2 }]);
+    expect(diagnosis.otherSheets).toEqual([
+      { name: 'Hoja2', headerRow: 2, nonEmptyRows: 2, headers: ['Codigo', 'Nombre'] },
+    ]);
+    expect(diagnosis.relations).toEqual([
+      { left: 'ACTIVOS', right: 'ACTIVOS DADOS DE BAJA', sharedIds: 0, identicalRows: 0, commonColumns: 8 },
+    ]);
+    const writeOffs = diagnosis.sheets.find((sheet) => sheet.sheet === 'ACTIVOS DADOS DE BAJA');
+    const writeOffMetric = (key: string) => writeOffs?.metrics.find((item) => item.key === key)?.value;
+    expect({
+      rows: writeOffMetric('rows'),
+      repeatedIds: writeOffMetric('asset_id_duplicated_ids'),
+      writtenOff: writeOffMetric('written_off'),
+      withDate: writeOffMetric('write_off_date_present'),
+      withoutDate: writeOffMetric('write_off_date_missing'),
+      beforePurchase: writeOffMetric('write_off_before_purchase'),
+    }).toEqual({ rows: 5, repeatedIds: 1, writtenOff: 5, withDate: 4, withoutDate: 1, beforePurchase: 1 });
+    expect(
+      await dataSource.query(
+        `SELECT row_number, issue_code FROM staging_issue
+         WHERE batch_id = $1 AND sheet_name = 'ACTIVOS DADOS DE BAJA' ORDER BY row_number, issue_code`,
+        [report.batchId],
+      ),
+    ).toEqual([
+      { row_number: 2, issue_code: 'ASSET_ID_DUPLICATED' },
+      { row_number: 3, issue_code: 'WRITE_OFF_DATE_MISSING' },
+      { row_number: 4, issue_code: 'WRITE_OFF_BEFORE_PURCHASE' },
+      { row_number: 6, issue_code: 'ASSET_ID_DUPLICATED' },
+    ]);
 
     const issues = (await dataSource.query(
       `SELECT row_number, issue_code FROM staging_issue

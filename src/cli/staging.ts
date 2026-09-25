@@ -65,7 +65,12 @@ const run = async (): Promise<void> => {
           })),
         );
       }
-      console.table(diagnosis.otherSheets);
+      console.log('\nRelaciones entre hojas de activos');
+      console.table(diagnosis.relations);
+      console.log('\nOtras hojas');
+      console.table(
+        diagnosis.otherSheets.map((sheet) => ({ ...sheet, headers: sheet.headers.join(', ') })),
+      );
       console.log(
         `${diagnosis.issues.length} problemas por fila escritos en ${resolve(out)} (${seconds(start)} s)`,
       );

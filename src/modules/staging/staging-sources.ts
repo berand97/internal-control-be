@@ -7,6 +7,7 @@ export const STAGING_SOURCE_KINDS = [
 export type StagingSourceKind = (typeof STAGING_SOURCE_KINDS)[number];
 
 const HEADER_ROWS: Partial<Record<StagingSourceKind, Record<string, number>>> = {
+  ASSET_REPORT: { Hoja2: 2 },
   COST_CENTERS: { '2026': 3 },
 };
 
