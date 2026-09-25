@@ -16,5 +16,7 @@ export class DocumentRequestsJob {
       return;
     }
     await this.engine.processPending();
+    // Actas con todas sus firmas cuyo proceso falló al aplicar sus efectos: reintentar la transición.
+    await this.engine.retryLifecycle();
   }
 }

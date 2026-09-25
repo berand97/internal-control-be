@@ -73,6 +73,7 @@ import { InternalSignature1767225631000 } from './migrations/1767225631000-inter
 import { SignatureReassignment1767225632000 } from './migrations/1767225632000-signature-reassignment.js';
 import { AssetConditionUnverified1767225633000 } from './migrations/1767225633000-asset-condition-unverified.js';
 import { ReassignmentReissueHashes1767225634000 } from './migrations/1767225634000-reassignment-reissue-hashes.js';
+import { DocumentLifecycle1767225635000 } from './migrations/1767225635000-document-lifecycle.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -166,6 +167,7 @@ const dataSource = new DataSource({
     SignatureReassignment1767225632000,
     AssetConditionUnverified1767225633000,
     ReassignmentReissueHashes1767225634000,
+    DocumentLifecycle1767225635000,
   ],
 });
 

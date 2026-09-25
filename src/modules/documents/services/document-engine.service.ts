@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { DataSource, type EntityManager } from 'typeorm';
@@ -17,6 +17,7 @@ import {
   initialSequenceValue,
   periodFor,
 } from '../domain/document-formats.js';
+import { DocumentLifecycleRegistry } from '../lifecycle/document-lifecycle.registry.js';
 import { PDF_CONVERTER, type PdfConverter } from '../pdf/pdf-converter.js';
 import { SIGNATURE_PROVIDER, type SignatureProvider, type SignatureRequest } from '../signature/signature-provider.js';
 
@@ -31,6 +32,9 @@ const CONDITION_LABELS: Record<string, string> = {
 };
 
 export const UNVERIFIED_CONDITION = 'Sin verificar';
+
+/** Reintentos automáticos (job) de la transición de un acta cuyo proceso falló; el sync manual no tiene tope. */
+export const MAX_AUTOMATIC_LIFECYCLE_ATTEMPTS = 5;
 
 const conditionLabel = (condition: string | null, flags: ReadonlyArray<string>): string =>
   condition === null || flags.includes('PHYSICAL_CONDITION_UNKNOWN')
@@ -82,6 +86,7 @@ interface ActSigner extends ActParty {
 
 interface ActContext {
   firmantes: ActSigner[];
+  firmante: Record<string, ActParty>;
   responsable: ActParty;
   auditor: ActParty;
   [key: string]: unknown;
@@ -105,6 +110,19 @@ interface PersonRow {
   email: string | null;
 }
 
+/**
+ * Cada firmante por su rol, para que la plantilla lo nombre donde corresponde: {{firmante.recibe.nombre}},
+ * {{firmante.entrega.cargo}}, {{firmante.audita.documento}}... (rol en minúsculas: recibe, entrega, audita,
+ * responsable, control_interno, contabilidad). Contrato fijo con las plantillas.
+ */
+const signersByRole = (signers: ReadonlyArray<ActSigner>): Record<string, ActParty> =>
+  Object.fromEntries(
+    signers.map((signer) => [
+      signer.rol.toLowerCase(),
+      { nombre: signer.nombre, documento: signer.documento, cargo: signer.cargo },
+    ]),
+  );
+
 const sha256 = (content: Buffer): string => createHash('sha256').update(content).digest('hex');
 
 const longDate = (date: Date): string =>
@@ -118,6 +136,8 @@ const personName = (person: PersonRow | undefined): string =>
 
 @Injectable()
 export class DocumentEngineService {
+  private readonly logger = new Logger(DocumentEngineService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly storage: StorageService,
@@ -125,6 +145,7 @@ export class DocumentEngineService {
     private readonly config: ConfigService<AppConfig, true>,
     @Inject(PDF_CONVERTER) private readonly pdf: PdfConverter,
     @Inject(SIGNATURE_PROVIDER) private readonly signatures: SignatureProvider,
+    private readonly lifecycle: DocumentLifecycleRegistry,
   ) {}
 
   async formats() {
@@ -306,6 +327,8 @@ export class DocumentEngineService {
         [documentId, signer.orden, signer.rol, signer.personId, signer.nombre || null, signer.documento || null],
       );
     }
+    // Dentro de la transacción del llamador: si el proceso no acepta el acta, no queda documento (ni consecutivo).
+    await this.lifecycle.dispatch(manager, 'onGenerated', documentId);
     return {
       id: documentId,
       formatKey: format.key,
@@ -376,7 +399,10 @@ export class DocumentEngineService {
       return this.detail(documentId);
     }
     const statuses = await this.signatures.status(document.signature_reference);
-    await this.dataSource.transaction(async (manager) => {
+    const failure = await this.dataSource.transaction(async (manager) => {
+      const [locked] = (await manager.query('SELECT status FROM document WHERE id = $1 FOR UPDATE', [documentId])) as Array<{
+        status: string;
+      }>;
       for (const status of statuses) {
         await manager.query(
           `UPDATE document_signature SET status = $3, signed_at = $4, evidence = $5
@@ -384,21 +410,68 @@ export class DocumentEngineService {
           [documentId, status.order, status.status, status.signedAt ?? null, JSON.stringify(status.evidence ?? null)],
         );
       }
-      await manager.query(
-        `UPDATE document d SET
-           status = CASE
-             WHEN EXISTS (SELECT 1 FROM document_signature s WHERE s.document_id = d.id AND s.status = 'REJECTED') THEN 'REJECTED'
-             WHEN NOT EXISTS (SELECT 1 FROM document_signature s WHERE s.document_id = d.id AND s.status <> 'SIGNED') THEN 'SIGNED'
-             ELSE 'PENDING_SIGNATURE' END,
-           signed_at = CASE
-             WHEN NOT EXISTS (SELECT 1 FROM document_signature s WHERE s.document_id = d.id AND s.status <> 'SIGNED')
-             THEN coalesce(d.signed_at, NOW()) END
-         WHERE d.id = $1`,
+      const [counts] = (await manager.query(
+        `SELECT count(*) FILTER (WHERE status = 'REJECTED')::int AS rejected, count(*) FILTER (WHERE status <> 'SIGNED')::int AS unsigned
+         FROM document_signature WHERE document_id = $1`,
         [documentId],
-      );
+      )) as Array<{ rejected: number; unsigned: number }>;
+      const target = (counts?.rejected ?? 0) > 0 ? 'REJECTED' : counts?.unsigned === 0 ? 'SIGNED' : 'PENDING_SIGNATURE';
+      if (locked?.status !== 'PENDING_SIGNATURE' || target === 'PENDING_SIGNATURE') {
+        return null;
+      }
+      // La transición y el efecto del proceso van juntos: si el manejador falla se deshacen ambos (savepoint) y
+      // quedan confirmadas solo las firmas y el error. El acta sigue PENDING_SIGNATURE y un sync posterior reintenta.
+      await manager.query('SAVEPOINT document_lifecycle');
+      try {
+        await manager.query(
+          `UPDATE document SET status = $2::text, signed_at = CASE WHEN $2::text = 'SIGNED' THEN coalesce(signed_at, NOW()) END,
+             lifecycle_error = NULL, lifecycle_failed_at = NULL
+           WHERE id = $1`,
+          [documentId, target],
+        );
+        await this.lifecycle.dispatch(manager, target === 'SIGNED' ? 'onSigned' : 'onRejected', documentId);
+        await manager.query('RELEASE SAVEPOINT document_lifecycle');
+        return null;
+      } catch (error) {
+        await manager.query('ROLLBACK TO SAVEPOINT document_lifecycle');
+        const message = error instanceof Error ? error.message : String(error);
+        await manager.query(
+          `UPDATE document SET lifecycle_error = $2, lifecycle_failed_at = NOW(), lifecycle_attempts = lifecycle_attempts + 1
+           WHERE id = $1`,
+          [documentId, message.slice(0, 1000)],
+        );
+        return { target, error };
+      }
     });
+    if (failure) {
+      this.logger.error(
+        `El acta ${documentId} no pasó a ${failure.target}: el proceso que la originó falló y se reintentará`,
+        failure.error instanceof Error ? failure.error.stack : String(failure.error),
+      );
+    }
     await this.storeSignedPdf(documentId);
     return this.detail(documentId);
+  }
+
+  /** Reintenta la transición de las actas cuyo proceso falló al completarlas (lo llama el job). */
+  async retryLifecycle(limit = 20): Promise<{ retried: number; stillFailing: number }> {
+    const stalled = (await this.dataSource.query(
+      `SELECT id FROM document
+       WHERE lifecycle_error IS NOT NULL AND status = 'PENDING_SIGNATURE' AND lifecycle_attempts < $2
+       ORDER BY lifecycle_failed_at LIMIT $1`,
+      [limit, MAX_AUTOMATIC_LIFECYCLE_ATTEMPTS],
+    )) as Array<{ id: string }>;
+    let stillFailing = 0;
+    for (const { id } of stalled) {
+      try {
+        const detail = await this.syncSignatures(id);
+        stillFailing += detail.lifecycleError ? 1 : 0;
+      } catch (error) {
+        stillFailing += 1;
+        this.logger.error(`No se pudo reintentar el acta ${id}`, error instanceof Error ? error.stack : String(error));
+      }
+    }
+    return { retried: stalled.length, stillFailing };
   }
 
   async sign(
@@ -575,6 +648,7 @@ export class DocumentEngineService {
     const data: ActContext = {
       ...document.data,
       firmantes,
+      firmante: signersByRole(firmantes),
       ...(spec?.source === 'RESPONSIBLE' ? { responsable: signer } : {}),
       auditor: auditor ? { nombre: auditor.nombre, documento: auditor.documento, cargo: auditor.cargo } : document.data.auditor,
     };
@@ -625,6 +699,7 @@ export class DocumentEngineService {
       signerOrders: mine.map((slot) => slot.sign_order),
       isCurrentSigner:
         document.status === 'PENDING_SIGNATURE' &&
+        !slots.some((slot) => slot.status === 'REJECTED') &&
         next !== undefined &&
         slots.find((slot) => slot.status === 'PENDING')?.sign_order === next.sign_order,
       nextOrder: next?.sign_order ?? null,
@@ -650,7 +725,7 @@ export class DocumentEngineService {
     order: number,
     actor: AuthenticatedUser,
   ): Promise<{ readonly code: ErrorCode | null; readonly mfaEnabled: boolean }> {
-    if (document.status !== 'PENDING_SIGNATURE') {
+    if (document.status !== 'PENDING_SIGNATURE' || slots.some((item) => item.status === 'REJECTED')) {
       return { code: ErrorCode.InvalidState, mfaEnabled: false };
     }
     const slot = slots.find((item) => item.sign_order === order);
@@ -738,7 +813,11 @@ export class DocumentEngineService {
       status: slot.status,
       signedAt: slot.signed_at,
     }));
-    const pending = document.status === 'PENDING_SIGNATURE' ? slots.find((slot) => slot.status === 'PENDING') : undefined;
+    // Con una firma rechazada no hay turno, aunque el acta siga PENDING_SIGNATURE porque su proceso falló (lifecycleError).
+    const pending =
+      document.status === 'PENDING_SIGNATURE' && !slots.some((slot) => slot.status === 'REJECTED')
+        ? slots.find((slot) => slot.status === 'PENDING')
+        : undefined;
     const currentTurn = pending
       ? {
           order: pending.sign_order,
@@ -780,6 +859,8 @@ export class DocumentEngineService {
       pdfSha256: document.pdf_hash,
       signedPdfSha256: document.signed_pdf_hash,
       signatures,
+      lifecycleError: document.lifecycle_error,
+      lifecycleFailedAt: document.lifecycle_failed_at,
     };
   }
 
@@ -930,6 +1011,7 @@ export class DocumentEngineService {
         ? { nombre: auditor.nombre, documento: auditor.documento, cargo: auditor.cargo }
         : { nombre: '', documento: '', cargo: '' },
       firmantes: signers,
+      firmante: signersByRole(signers),
       activos: ordered.map((asset, index) => ({
         indice: index + 1,
         id: asset.id,
@@ -991,6 +1073,8 @@ export class DocumentEngineService {
       signed_pdf_driver: StorageDriver | null;
       signed_pdf_key: string | null;
       signed_pdf_hash: string | null;
+      lifecycle_error: string | null;
+      lifecycle_failed_at: Date | null;
     }>;
     if (!row) {
       throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el documento');

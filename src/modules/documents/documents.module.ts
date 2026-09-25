@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module.js';
 import { RolesModule } from '../roles/roles.module.js';
 import { DocumentsController } from './documents.controller.js';
 import { DocumentRequestsJob } from './jobs/document-requests.job.js';
+import { DocumentLifecycleRegistry } from './lifecycle/document-lifecycle.registry.js';
 import { GotenbergPdfConverter, PDF_CONVERTER } from './pdf/pdf-converter.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
 import { DocumentListService } from './services/document-list.service.js';
@@ -17,6 +18,7 @@ import { SignatureVerificationController } from './signature-verification.contro
   controllers: [DocumentsController, SignatureVerificationController],
   providers: [
     DocumentEngineService,
+    DocumentLifecycleRegistry,
     DocumentListService,
     DocumentRequestsJob,
     StubSignatureProvider,
@@ -32,6 +34,6 @@ import { SignatureVerificationController } from './signature-verification.contro
       ) => (config.getOrThrow('documents', { infer: true }).signatureProvider === 'stub' ? stub : internal),
     },
   ],
-  exports: [DocumentEngineService],
+  exports: [DocumentEngineService, DocumentLifecycleRegistry],
 })
 export class DocumentsModule {}
