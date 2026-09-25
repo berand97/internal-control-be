@@ -60,6 +60,15 @@ interface TemplateRow {
   storage_key: string;
 }
 
+interface SlotRow {
+  sign_order: number;
+  role: string;
+  signer_person_id: string | null;
+  signer_name: string | null;
+  status: string;
+  signed_at: Date | null;
+}
+
 interface PersonRow {
   id: string;
   first_name: string;
@@ -376,7 +385,8 @@ export class DocumentEngineService {
       userAgent: context.userAgent,
       rubricPng,
     });
-    return this.syncSignatures(documentId);
+    await this.syncSignatures(documentId);
+    return this.detail(documentId, actor);
   }
 
   async rejectSignature(
@@ -399,7 +409,8 @@ export class DocumentEngineService {
       userAgent: context.userAgent,
       reason,
     });
-    return this.syncSignatures(documentId);
+    await this.syncSignatures(documentId);
+    return this.detail(documentId, actor);
   }
 
   async attestation(verificationCode: string) {
@@ -410,20 +421,137 @@ export class DocumentEngineService {
     return attestation;
   }
 
-  private async prepareSignerAction(documentId: string, order: number, actor: AuthenticatedUser) {
+  async reassignSigner(
+    documentId: string,
+    order: number,
+    personId: string,
+    reason: string,
+    actor: AuthenticatedUser,
+    context: { readonly ipAddress: string | null; readonly userAgent: string | null },
+  ) {
     const document = await this.documentRow(documentId);
+    const format = this.requireFormat(document.format_key);
+    await this.assertPermission(actor.id, format.generatePermission);
+    const [person] = (await this.dataSource.query(
+      'SELECT id, first_name, last_name, document_number, position_title, email FROM person WHERE id = $1',
+      [personId],
+    )) as PersonRow[];
+    if (!person) {
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la persona indicada');
+    }
+    await this.dataSource.transaction(async (manager) => {
+      const [locked] = (await manager.query('SELECT status, signature_reference FROM document WHERE id = $1 FOR UPDATE', [
+        documentId,
+      ])) as Array<{ status: string; signature_reference: string | null }>;
+      if (locked?.status !== 'PENDING_SIGNATURE') {
+        throw new ApiException(ErrorCode.InvalidState, 'El documento no está pendiente de firma');
+      }
+      const [slot] = (await manager.query(
+        'SELECT role, signer_person_id, status FROM document_signature WHERE document_id = $1 AND sign_order = $2 FOR UPDATE',
+        [documentId, order],
+      )) as Array<{ role: string; signer_person_id: string | null; status: string }>;
+      if (!slot) {
+        throw new ApiException(ErrorCode.ResourceNotFound, `El documento no tiene el firmante ${order}`);
+      }
+      if (slot.status !== 'PENDING') {
+        throw new ApiException(ErrorCode.InvalidState, `El firmante ${order} ya no está pendiente`);
+      }
+      if (slot.signer_person_id === personId) {
+        throw new ApiException(ErrorCode.ValidationFailed, 'La persona ya está asignada a ese turno');
+      }
+      await manager.query(
+        `UPDATE document_signature SET signer_person_id = $3, signer_name = $4, signer_document = $5
+         WHERE document_id = $1 AND sign_order = $2`,
+        [documentId, order, personId, personName(person) || null, person.document_number],
+      );
+      await manager.query(
+        `INSERT INTO document_signature_reassignment (document_id, sign_order, role, from_person_id, to_person_id, reason,
+           reassigned_by, session_id, ip_address, user_agent)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          documentId,
+          order,
+          slot.role,
+          slot.signer_person_id,
+          personId,
+          reason,
+          actor.id,
+          actor.sessionId ?? null,
+          context.ipAddress,
+          context.userAgent,
+        ],
+      );
+      if (locked.signature_reference) {
+        if (!this.signatures.reassign) {
+          throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no permite reasignar firmantes`);
+        }
+        await this.signatures.reassign(
+          locked.signature_reference,
+          { order, personId, name: personName(person) || null, documentNumber: person.document_number },
+          manager,
+        );
+      }
+    });
+    return this.detail(documentId, actor);
+  }
+
+  private async viewerState(
+    document: { readonly status: string },
+    format: DocumentFormat,
+    slots: ReadonlyArray<SlotRow>,
+    actor: AuthenticatedUser,
+  ) {
+    const mine = slots.filter((slot) => slot.signer_person_id !== null && slot.signer_person_id === actor.personId);
+    const next = mine.find((slot) => slot.status === 'PENDING');
+    const blocker = next ? await this.signerBlocker(document, slots, next.sign_order, actor) : null;
+    return {
+      personId: actor.personId,
+      signerOrders: mine.map((slot) => slot.sign_order),
+      isCurrentSigner:
+        document.status === 'PENDING_SIGNATURE' &&
+        next !== undefined &&
+        slots.find((slot) => slot.status === 'PENDING')?.sign_order === next.sign_order,
+      nextOrder: next?.sign_order ?? null,
+      canSign: blocker !== null && blocker.code === null,
+      blockedBy: blocker?.code ?? null,
+      canReassign:
+        document.status === 'PENDING_SIGNATURE' &&
+        (await this.permissions.userHasPermission(actor.id, format.generatePermission)),
+    };
+  }
+
+  private async signerSlots(documentId: string): Promise<SlotRow[]> {
+    return (await this.dataSource.query(
+      `SELECT s.sign_order, s.role, s.signer_person_id, s.signer_name, s.status, s.signed_at
+       FROM document_signature s WHERE s.document_id = $1 ORDER BY s.sign_order`,
+      [documentId],
+    )) as SlotRow[];
+  }
+
+  private async signerBlocker(
+    document: { readonly status: string },
+    slots: ReadonlyArray<SlotRow>,
+    order: number,
+    actor: AuthenticatedUser,
+  ): Promise<{ readonly code: ErrorCode | null; readonly mfaEnabled: boolean }> {
     if (document.status !== 'PENDING_SIGNATURE') {
-      throw new ApiException(ErrorCode.InvalidState, 'El documento no está pendiente de firma');
+      return { code: ErrorCode.InvalidState, mfaEnabled: false };
     }
-    const [slot] = (await this.dataSource.query(
-      'SELECT signer_person_id FROM document_signature WHERE document_id = $1 AND sign_order = $2',
-      [documentId, order],
-    )) as Array<{ signer_person_id: string | null }>;
+    const slot = slots.find((item) => item.sign_order === order);
     if (!slot) {
-      throw new ApiException(ErrorCode.ResourceNotFound, `El documento no tiene el firmante ${order}`);
+      return { code: ErrorCode.ResourceNotFound, mfaEnabled: false };
     }
-    if (!slot.signer_person_id || slot.signer_person_id !== actor.personId) {
-      throw new ApiException(ErrorCode.SignatureNotAllowed, 'Solo la persona designada puede firmar este turno');
+    if (slot.status !== 'PENDING') {
+      return { code: ErrorCode.InvalidState, mfaEnabled: false };
+    }
+    if (!slot.signer_person_id) {
+      return { code: ErrorCode.SignatureSignerUnassigned, mfaEnabled: false };
+    }
+    if (slot.signer_person_id !== actor.personId) {
+      return { code: ErrorCode.SignatureNotDesignatedSigner, mfaEnabled: false };
+    }
+    if (slots.find((item) => item.status === 'PENDING')?.sign_order !== order) {
+      return { code: ErrorCode.SignatureOutOfOrder, mfaEnabled: false };
     }
     const [session] = (await this.dataSource.query(
       `SELECT u.mfa_enabled FROM app_user u
@@ -432,16 +560,31 @@ export class DocumentEngineService {
       [actor.id, actor.sessionId ?? null],
     )) as Array<{ mfa_enabled: boolean }>;
     if (!actor.sessionId || !session) {
-      throw new ApiException(ErrorCode.SignatureNotAllowed, 'La sesión de quien firma no está vigente');
+      return { code: ErrorCode.SignatureSessionInvalid, mfaEnabled: false };
     }
     if (!session.mfa_enabled) {
-      throw new ApiException(ErrorCode.SignatureNotAllowed, 'Quien firma debe tener MFA activo');
+      return { code: ErrorCode.SignatureMfaRequired, mfaEnabled: false };
+    }
+    return { code: null, mfaEnabled: true };
+  }
+
+  private async prepareSignerAction(documentId: string, order: number, actor: AuthenticatedUser) {
+    const document = await this.documentRow(documentId);
+    const blocker = await this.signerBlocker(document, await this.signerSlots(documentId), order, actor);
+    if (blocker.code === ErrorCode.InvalidState) {
+      throw new ApiException(ErrorCode.InvalidState, `El documento no está pendiente de firma en el turno ${order}`);
+    }
+    if (blocker.code === ErrorCode.ResourceNotFound) {
+      throw new ApiException(ErrorCode.ResourceNotFound, `El documento no tiene el firmante ${order}`);
+    }
+    if (blocker.code) {
+      throw new ApiException(blocker.code);
     }
     if (!document.signature_reference) {
       await this.requestSignatures(documentId);
     }
     const reference = document.signature_reference ?? (await this.documentRow(documentId)).signature_reference;
-    return { reference: reference ?? '', sessionId: actor.sessionId, mfaEnabled: session.mfa_enabled };
+    return { reference: reference ?? '', sessionId: actor.sessionId ?? '', mfaEnabled: blocker.mfaEnabled };
   }
 
   private async storeSignedPdf(documentId: string): Promise<void> {
@@ -462,17 +605,49 @@ export class DocumentEngineService {
     );
   }
 
-  async detail(documentId: string, actorId?: string) {
+  async detail(documentId: string, actor?: AuthenticatedUser) {
     const document = await this.documentRow(documentId);
-    if (actorId) {
-      await this.assertPermission(actorId, this.requireFormat(document.format_key).readPermission);
+    const format = this.requireFormat(document.format_key);
+    if (actor) {
+      await this.assertCanRead(documentId, format.readPermission, actor.id);
     }
-    const signatures = (await this.dataSource.query(
-      `SELECT sign_order AS "order", role, signer_name AS name, status, signed_at AS "signedAt"
-       FROM document_signature WHERE document_id = $1 ORDER BY sign_order`,
+    const slots = await this.signerSlots(documentId);
+    const label = (role: string) => format.signers.find((spec) => spec.role === role)?.label ?? role;
+    const signatures = slots.map((slot) => ({
+      order: slot.sign_order,
+      role: slot.role,
+      roleLabel: label(slot.role),
+      personId: slot.signer_person_id,
+      name: slot.signer_name,
+      status: slot.status,
+      signedAt: slot.signed_at,
+    }));
+    const pending = document.status === 'PENDING_SIGNATURE' ? slots.find((slot) => slot.status === 'PENDING') : undefined;
+    const currentTurn = pending
+      ? {
+          order: pending.sign_order,
+          role: pending.role,
+          roleLabel: label(pending.role),
+          personId: pending.signer_person_id,
+          name: pending.signer_name,
+          assigned: pending.signer_person_id !== null,
+        }
+      : null;
+    const reassignments = (await this.dataSource.query(
+      `SELECT r.sign_order AS "order", r.role, r.from_person_id AS "fromPersonId", r.to_person_id AS "toPersonId",
+              nullif(trim(concat_ws(' ', pf.first_name, pf.last_name)), '') AS "fromName",
+              nullif(trim(concat_ws(' ', pt.first_name, pt.last_name)), '') AS "toName",
+              r.reason, r.reassigned_by AS "reassignedBy", r.reassigned_at AS "reassignedAt"
+       FROM document_signature_reassignment r
+       LEFT JOIN person pf ON pf.id = r.from_person_id
+       JOIN person pt ON pt.id = r.to_person_id
+       WHERE r.document_id = $1 ORDER BY r.reassigned_at, r.id`,
       [documentId],
     )) as ReadonlyArray<Record<string, unknown>>;
     return {
+      currentTurn,
+      viewer: actor ? await this.viewerState(document, format, slots, actor) : null,
+      reassignments,
       id: document.id,
       formatKey: document.format_key,
       number: document.number,
@@ -489,7 +664,7 @@ export class DocumentEngineService {
 
   async download(documentId: string, kind: 'pdf' | 'docx', actorId: string) {
     const document = await this.documentRow(documentId);
-    await this.assertPermission(actorId, this.requireFormat(document.format_key).readPermission);
+    await this.assertCanRead(documentId, this.requireFormat(document.format_key).readPermission, actorId);
     const signed = kind === 'pdf' && document.signed_pdf_driver && document.signed_pdf_key;
     const body = signed
       ? await this.storage.getFrom(document.signed_pdf_driver as StorageDriver, document.signed_pdf_key as string)
@@ -700,6 +875,20 @@ export class DocumentEngineService {
       throw new ApiException(ErrorCode.ValidationFailed, `Formato desconocido: ${key}`);
     }
     return format;
+  }
+
+  private async assertCanRead(documentId: string, permission: string, actorId: string): Promise<void> {
+    if (await this.permissions.userHasPermission(actorId, permission)) {
+      return;
+    }
+    const [signer] = (await this.dataSource.query(
+      `SELECT 1 AS found FROM document_signature s JOIN app_user u ON u.person_id = s.signer_person_id
+       WHERE s.document_id = $1 AND u.id = $2 LIMIT 1`,
+      [documentId, actorId],
+    )) as Array<{ found: number }>;
+    if (!signer) {
+      throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${permission} o ser firmante del documento`);
+    }
   }
 
   private async assertPermission(actorId: string, permission: string): Promise<void> {

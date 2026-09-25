@@ -101,7 +101,10 @@ export enum ErrorCode {
   MovementTampered = 'MOVEMENT_TAMPERED',
   DocumentTampered = 'DOCUMENT_TAMPERED',
   SignatureOutOfOrder = 'SIGNATURE_OUT_OF_ORDER',
-  SignatureNotAllowed = 'SIGNATURE_NOT_ALLOWED',
+  SignatureNotDesignatedSigner = 'SIGNATURE_NOT_DESIGNATED_SIGNER',
+  SignatureSignerUnassigned = 'SIGNATURE_SIGNER_UNASSIGNED',
+  SignatureMfaRequired = 'SIGNATURE_MFA_REQUIRED',
+  SignatureSessionInvalid = 'SIGNATURE_SESSION_INVALID',
 
   InventoryScopeOverlap = 'INVENTORY_SCOPE_OVERLAP',
   InventoryUnverifiedExceedsThreshold = 'INVENTORY_UNVERIFIED_EXCEEDS',

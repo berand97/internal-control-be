@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { EntityManager } from 'typeorm';
 
 export const SIGNATURE_PROVIDER = 'SignatureProvider';
 
@@ -52,6 +53,13 @@ export interface SignatureRejection {
   readonly reason: string;
 }
 
+export interface SignerReassignment {
+  readonly order: number;
+  readonly personId: string;
+  readonly name: string | null;
+  readonly documentNumber: string | null;
+}
+
 export type AttestationIntegrity = 'INTACT' | 'ALTERED' | 'UNAVAILABLE';
 
 export interface SignatureAttestation {
@@ -76,6 +84,7 @@ export interface SignatureProvider {
   signedDocument?(externalReference: string): Promise<Buffer>;
   capture?(externalReference: string, capture: SignatureCapture): Promise<void>;
   reject?(externalReference: string, rejection: SignatureRejection): Promise<void>;
+  reassign?(externalReference: string, signer: SignerReassignment, manager: EntityManager): Promise<void>;
   attestation?(verificationCode: string): Promise<SignatureAttestation | null>;
 }
 

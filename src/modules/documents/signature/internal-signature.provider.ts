@@ -13,6 +13,7 @@ import type {
   SignatureCapture,
   SignatureProvider,
   SignatureRejection,
+  SignerReassignment,
   SignatureRequest,
   SignatureStatus,
   SignerStatus,
@@ -217,6 +218,23 @@ export class InternalSignatureProvider implements SignatureProvider {
     });
   }
 
+  async reassign(externalReference: string, signer: SignerReassignment, manager: EntityManager): Promise<void> {
+    const envelope = await this.envelope(manager, externalReference, true);
+    if (envelope.status !== 'PENDING') {
+      throw new ApiException(ErrorCode.InvalidState, 'La solicitud de firma ya está cerrada');
+    }
+    const updated = (await manager.query(
+      `WITH updated AS (
+         UPDATE signature_envelope_signer SET person_id = $3, name = $4, document_number = $5
+         WHERE envelope_id = $1 AND sign_order = $2 AND status = 'PENDING' RETURNING sign_order
+       ) SELECT sign_order FROM updated`,
+      [envelope.id, signer.order, signer.personId, signer.name, signer.documentNumber],
+    )) as Array<{ sign_order: number }>;
+    if (updated.length === 0) {
+      throw new ApiException(ErrorCode.InvalidState, `El firmante ${signer.order} no está pendiente`);
+    }
+  }
+
   async attestation(verificationCode: string): Promise<SignatureAttestation | null> {
     const [envelope] = (await this.dataSource.query('SELECT * FROM signature_envelope WHERE verification_code = $1', [
       verificationCode,
@@ -302,8 +320,11 @@ export class InternalSignatureProvider implements SignatureProvider {
     if (!signer || signer.status !== 'PENDING') {
       throw new ApiException(ErrorCode.InvalidState, `El firmante ${order} no está pendiente`);
     }
-    if (!signer.person_id || signer.person_id !== personId) {
-      throw new ApiException(ErrorCode.SignatureNotAllowed, 'Solo la persona designada puede firmar este turno');
+    if (!signer.person_id) {
+      throw new ApiException(ErrorCode.SignatureSignerUnassigned);
+    }
+    if (signer.person_id !== personId) {
+      throw new ApiException(ErrorCode.SignatureNotDesignatedSigner);
     }
     const next = signers.find((item) => item.status === 'PENDING');
     if (next?.sign_order !== order) {

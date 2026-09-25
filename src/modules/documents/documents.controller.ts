@@ -90,6 +90,16 @@ export class SignDocumentDto {
   readonly rubric!: string;
 }
 
+export class ReassignSignerDto {
+  @IsUUID()
+  readonly personId!: string;
+
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  readonly reason!: string;
+}
+
 export class RejectSignatureDto {
   @IsString()
   @MinLength(5)
@@ -213,17 +223,43 @@ export class DocumentsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Estado del documento y de sus firmas' })
+  @ApiOperation({
+    summary: 'Estado del documento y de sus firmas',
+    description:
+      'currentTurn dice de quién es el turno. viewer dice si el usuario firma en este documento, si es su turno, si puede firmar ya (canSign) y, si no, el código de error que recibiría (blockedBy). reassignments es la bitácora de reasignaciones.',
+  })
   detail(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
-    return this.engine.detail(id, actor.id);
+    return this.engine.detail(id, actor);
   }
 
   @Post(':id/signatures/sync')
   @HttpCode(200)
   @ApiOperation({ summary: 'Consultar al proveedor de firma y actualizar el estado' })
   async sync(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
-    await this.engine.detail(id, actor.id);
-    return this.engine.syncSignatures(id);
+    await this.engine.detail(id, actor);
+    await this.engine.syncSignatures(id);
+    return this.engine.detail(id, actor);
+  }
+
+  @Post(':id/signatures/:order/reassign')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Reasignar un turno de firma pendiente',
+    description:
+      'Solo quien administra el proceso (permiso de generación del formato). Queda como evidencia: quién, cuándo, desde dónde, de quién a quién y por qué.',
+  })
+  reassign(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('order', ParseIntPipe) order: number,
+    @Body() dto: ReassignSignerDto,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
+  ) {
+    return this.engine.reassignSigner(id, order, dto.personId, dto.reason, actor, {
+      ipAddress: ipAddress || null,
+      userAgent: userAgent ?? null,
+    });
   }
 
   @Post(':id/signatures/:order')

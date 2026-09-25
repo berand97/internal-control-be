@@ -188,7 +188,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     expect(early.body.error.code).toBe('SIGNATURE_OUT_OF_ORDER');
     const impostor = await sign(document.id, 1, outsider);
     expect(impostor.status).toBe(403);
-    expect(impostor.body.error.code).toBe('SIGNATURE_NOT_ALLOWED');
+    expect(impostor.body.error.code).toBe('SIGNATURE_NOT_DESIGNATED_SIGNER');
     expect((await http().post(`/api/v1/documents/${document.id}/signatures/1`).send({ rubric })).status).toBe(401);
 
     const first = await sign(document.id, 1, responsible);
@@ -268,7 +268,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     await dataSource.query('UPDATE app_user SET mfa_enabled = FALSE WHERE id = $1', [responsible.userId]);
     const withoutMfa = await sign(document.id, 1, responsible);
     expect(withoutMfa.status).toBe(403);
-    expect(withoutMfa.body.error.code).toBe('SIGNATURE_NOT_ALLOWED');
+    expect(withoutMfa.body.error.code).toBe('SIGNATURE_MFA_REQUIRED');
     await dataSource.query('UPDATE app_user SET mfa_enabled = TRUE WHERE id = $1', [responsible.userId]);
 
     await dataSource.query(`UPDATE refresh_token_family SET status = 'REVOKED', revoked_at = NOW() WHERE id = $1`, [
@@ -276,6 +276,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     ]);
     const revoked = await sign(document.id, 1, responsible);
     expect(revoked.status).toBe(403);
+    expect(revoked.body.error.code).toBe('SIGNATURE_SESSION_INVALID');
     await dataSource.query(`UPDATE refresh_token_family SET status = 'ACTIVE', revoked_at = NULL WHERE id = $1`, [
       responsible.sessionId,
     ]);

@@ -489,10 +489,25 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Todavía no es el turno de este firmante',
   },
-  [ErrorCode.SignatureNotAllowed]: {
+  [ErrorCode.SignatureNotDesignatedSigner]: {
     httpStatus: 403,
     action: 'CANCEL',
-    message: 'Quien firma debe ser la persona designada, con MFA activo y una sesión vigente',
+    message: 'Este turno de firma está asignado a otra persona',
+  },
+  [ErrorCode.SignatureSignerUnassigned]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Este turno de firma no tiene persona asignada; quien administra el proceso debe asignarla',
+  },
+  [ErrorCode.SignatureMfaRequired]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Para firmar debe tener la verificación en dos pasos activa',
+  },
+  [ErrorCode.SignatureSessionInvalid]: {
+    httpStatus: 403,
+    action: 'REAUTH',
+    message: 'La sesión ya no está vigente; inicie sesión de nuevo para firmar',
   },
   [ErrorCode.InventoryScopeOverlap]: {
     httpStatus: 406,
