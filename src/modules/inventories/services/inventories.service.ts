@@ -746,10 +746,13 @@ export class InventoriesService {
     const year = new Date().getFullYear();
     const rows: unknown = await this.dataSource.query(
       `
-      UPDATE code_sequence
-      SET current_value = current_value + 1, updated_at = NOW()
-      WHERE sequence_name = 'physical_inventory'
-      RETURNING current_value, padding_length, prefix
+      WITH reserved AS (
+        UPDATE code_sequence
+        SET current_value = current_value + 1, updated_at = NOW()
+        WHERE sequence_name = 'physical_inventory'
+        RETURNING current_value, padding_length, prefix
+      )
+      SELECT current_value, padding_length, prefix FROM reserved
       `,
     );
     const row =
