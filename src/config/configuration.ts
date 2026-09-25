@@ -91,9 +91,13 @@ export interface AppConfig {
 
 export type DocumentNumberingPolicy = 'continue' | 'restart';
 
+export type SignatureProviderName = 'internal' | 'stub';
+
 export interface DocumentsConfig {
   readonly gotenbergUrl: string | null;
   readonly numberingPolicy: DocumentNumberingPolicy;
+  readonly signatureProvider: SignatureProviderName;
+  readonly signatureVerifyUrl: string;
 }
 
 const DURATION_PATTERN = /^(\d+)([smhd])?$/;
@@ -205,6 +209,14 @@ const readNumberingPolicy = (): DocumentNumberingPolicy => {
   throw new Error(`DOCUMENT_NUMBERING_POLICY inválido: ${raw}`);
 };
 
+const readSignatureProvider = (): SignatureProviderName => {
+  const raw = readString('SIGNATURE_PROVIDER', 'internal');
+  if (raw === 'internal' || raw === 'stub') {
+    return raw;
+  }
+  throw new Error(`SIGNATURE_PROVIDER inválido: ${raw}`);
+};
+
 const configuration = (): AppConfig => ({
   port: readNumber('PORT', 3000),
   appPublicUrl: readString('APP_PUBLIC_URL', 'http://localhost:4200'),
@@ -284,6 +296,11 @@ const configuration = (): AppConfig => ({
   documents: {
     gotenbergUrl: readString('GOTENBERG_URL', '') || null,
     numberingPolicy: readNumberingPolicy(),
+    signatureProvider: readSignatureProvider(),
+    signatureVerifyUrl: readString(
+      'SIGNATURE_VERIFY_URL',
+      `${readString('APP_PUBLIC_URL', 'http://localhost:4200')}/verificar-firma`,
+    ),
   },
 });
 

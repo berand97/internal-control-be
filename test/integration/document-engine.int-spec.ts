@@ -13,7 +13,7 @@ import { DatabaseModule } from '../../src/database/database.module.js';
 import { DocumentsModule } from '../../src/modules/documents/documents.module.js';
 import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
-import { StubSignatureProvider } from '../../src/modules/documents/signature/signature-provider.js';
+import { SIGNATURE_PROVIDER, StubSignatureProvider } from '../../src/modules/documents/signature/signature-provider.js';
 import { FeaturesModule } from '../../src/modules/features/features.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { createActor, scalar } from './helpers.js';
@@ -42,6 +42,9 @@ const boot = async (converter: PdfConverter | null): Promise<TestingModule> => {
       DocumentsModule,
     ],
   });
+  builder = builder
+    .overrideProvider(SIGNATURE_PROVIDER)
+    .useFactory({ factory: (stub: StubSignatureProvider) => stub, inject: [StubSignatureProvider] });
   if (converter) {
     builder = builder.overrideProvider(PDF_CONVERTER).useValue(converter);
   }

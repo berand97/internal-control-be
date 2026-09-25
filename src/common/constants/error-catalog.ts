@@ -479,6 +479,21 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'La firma del movimiento no coincide; posible manipulación',
   },
+  [ErrorCode.DocumentTampered]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message: 'El PDF almacenado no coincide con el que se firmó; posible alteración',
+  },
+  [ErrorCode.SignatureOutOfOrder]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Todavía no es el turno de este firmante',
+  },
+  [ErrorCode.SignatureNotAllowed]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Quien firma debe ser la persona designada, con MFA activo y una sesión vigente',
+  },
   [ErrorCode.InventoryScopeOverlap]: {
     httpStatus: 406,
     action: 'CANCEL',

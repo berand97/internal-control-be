@@ -99,6 +99,9 @@ export enum ErrorCode {
   LoanSodViolation = 'LOAN_SOD_VIOLATION',
   LoanSameCostCenter = 'LOAN_SAME_COST_CENTER',
   MovementTampered = 'MOVEMENT_TAMPERED',
+  DocumentTampered = 'DOCUMENT_TAMPERED',
+  SignatureOutOfOrder = 'SIGNATURE_OUT_OF_ORDER',
+  SignatureNotAllowed = 'SIGNATURE_NOT_ALLOWED',
 
   InventoryScopeOverlap = 'INVENTORY_SCOPE_OVERLAP',
   InventoryUnverifiedExceedsThreshold = 'INVENTORY_UNVERIFIED_EXCEEDS',

@@ -82,7 +82,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
        VALUES ('Responsable', 'Historia', 'responsable.historia@unac.edu.co', 'CC', '1000000077') RETURNING id`,
     );
     const template = await readFile(TEMPLATE);
-    for (const formatKey of ['OCI-17-90-BAJA', 'OCI-17-90-INFORME']) {
+    for (const formatKey of ['OCI-17-90-INFORME']) {
       await engine.uploadTemplate(
         formatKey,
         { buffer: template, originalname: 'plantilla.docx' },
@@ -136,7 +136,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
     );
     const linked = await engine.generate(
       {
-        formatKey: 'OCI-17-90-BAJA',
+        formatKey: 'OCI-17-90-INFORME',
         costCenterId: costCenters.to,
         responsiblePersonId: personId,
         assetIds: [assetId],
@@ -175,7 +175,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
     expect(transferEvent).toMatchObject({
       summary: 'Traslado de centro de costo: TL-1 Bodega → TL-2 Laboratorio',
       documentId: linked.id,
-      document: { id: linked.id, formatKey: 'OCI-17-90-BAJA', number: linked.number, status: 'PENDING_SIGNATURE' },
+      document: { id: linked.id, formatKey: 'OCI-17-90-INFORME', number: linked.number, status: 'PENDING_SIGNATURE' },
     });
     expect(documentEvent).toMatchObject({
       documentId: standalone.id,

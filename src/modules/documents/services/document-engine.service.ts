@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
+import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig, StorageDriver } from '../../../config/configuration.js';
 import { StorageService } from '../../../shared/storage/storage.service.js';
@@ -298,15 +299,18 @@ export class DocumentEngineService {
       signer_document: string | null;
       email: string | null;
     }>;
+    const format = this.requireFormat(document.format_key);
     const { externalReference } = await this.signatures.request({
       documentId,
       documentNumber: document.number,
       formatKey: document.format_key,
+      title: `${format.sgcCode} · ${format.name} · ${document.number}`,
       pdf,
       pdfSha256: sha256(pdf),
       signers: signers.map((signer) => ({
         order: signer.sign_order,
         role: signer.role,
+        roleLabel: format.signers.find((spec) => spec.role === signer.role)?.label ?? signer.role,
         personId: signer.signer_person_id,
         name: signer.signer_name,
         documentNumber: signer.signer_document,
@@ -347,7 +351,115 @@ export class DocumentEngineService {
         [documentId],
       );
     });
+    await this.storeSignedPdf(documentId);
     return this.detail(documentId);
+  }
+
+  async sign(
+    documentId: string,
+    order: number,
+    actor: AuthenticatedUser,
+    rubricPng: Buffer,
+    context: { readonly ipAddress: string | null; readonly userAgent: string | null },
+  ) {
+    const { reference, sessionId, mfaEnabled } = await this.prepareSignerAction(documentId, order, actor);
+    if (!this.signatures.capture) {
+      throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no captura firmas en el sistema`);
+    }
+    await this.signatures.capture(reference, {
+      order,
+      signerUserId: actor.id,
+      signerPersonId: actor.personId,
+      sessionId,
+      mfaEnabled,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      rubricPng,
+    });
+    return this.syncSignatures(documentId);
+  }
+
+  async rejectSignature(
+    documentId: string,
+    order: number,
+    actor: AuthenticatedUser,
+    reason: string,
+    context: { readonly ipAddress: string | null; readonly userAgent: string | null },
+  ) {
+    const { reference, sessionId } = await this.prepareSignerAction(documentId, order, actor);
+    if (!this.signatures.reject) {
+      throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no recibe rechazos en el sistema`);
+    }
+    await this.signatures.reject(reference, {
+      order,
+      signerUserId: actor.id,
+      signerPersonId: actor.personId,
+      sessionId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      reason,
+    });
+    return this.syncSignatures(documentId);
+  }
+
+  async attestation(verificationCode: string) {
+    const attestation = this.signatures.attestation ? await this.signatures.attestation(verificationCode) : null;
+    if (!attestation) {
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe una firma con ese código');
+    }
+    return attestation;
+  }
+
+  private async prepareSignerAction(documentId: string, order: number, actor: AuthenticatedUser) {
+    const document = await this.documentRow(documentId);
+    if (document.status !== 'PENDING_SIGNATURE') {
+      throw new ApiException(ErrorCode.InvalidState, 'El documento no está pendiente de firma');
+    }
+    const [slot] = (await this.dataSource.query(
+      'SELECT signer_person_id FROM document_signature WHERE document_id = $1 AND sign_order = $2',
+      [documentId, order],
+    )) as Array<{ signer_person_id: string | null }>;
+    if (!slot) {
+      throw new ApiException(ErrorCode.ResourceNotFound, `El documento no tiene el firmante ${order}`);
+    }
+    if (!slot.signer_person_id || slot.signer_person_id !== actor.personId) {
+      throw new ApiException(ErrorCode.SignatureNotAllowed, 'Solo la persona designada puede firmar este turno');
+    }
+    const [session] = (await this.dataSource.query(
+      `SELECT u.mfa_enabled FROM app_user u
+       JOIN refresh_token_family f ON f.user_id = u.id
+       WHERE u.id = $1 AND f.id = $2 AND f.status = 'ACTIVE' AND f.expires_at > NOW() AND u.status = 'ACTIVE'`,
+      [actor.id, actor.sessionId ?? null],
+    )) as Array<{ mfa_enabled: boolean }>;
+    if (!actor.sessionId || !session) {
+      throw new ApiException(ErrorCode.SignatureNotAllowed, 'La sesión de quien firma no está vigente');
+    }
+    if (!session.mfa_enabled) {
+      throw new ApiException(ErrorCode.SignatureNotAllowed, 'Quien firma debe tener MFA activo');
+    }
+    if (!document.signature_reference) {
+      await this.requestSignatures(documentId);
+    }
+    const reference = document.signature_reference ?? (await this.documentRow(documentId)).signature_reference;
+    return { reference: reference ?? '', sessionId: actor.sessionId, mfaEnabled: session.mfa_enabled };
+  }
+
+  private async storeSignedPdf(documentId: string): Promise<void> {
+    const document = await this.documentRow(documentId);
+    if (document.status !== 'SIGNED' || document.signed_pdf_key || !document.signature_reference || !this.signatures.signedDocument) {
+      return;
+    }
+    const signed = await this.signatures.signedDocument(document.signature_reference);
+    const stored = await this.storage.put({
+      key: `documents/${document.format_key}/${document.period || 'unico'}/${document.number}-firmado.pdf`,
+      body: signed,
+      contentType: 'application/pdf',
+    });
+    await this.dataSource.query(
+      `UPDATE document SET signed_pdf_driver = $2, signed_pdf_key = $3, signed_pdf_hash = $4
+       WHERE id = $1 AND signed_pdf_key IS NULL`,
+      [documentId, stored.driver, stored.key, stored.checksumSha256],
+    );
   }
 
   async detail(documentId: string, actorId?: string) {
@@ -369,6 +481,8 @@ export class DocumentEngineService {
       entityId: document.entity_id,
       pdfDriver: document.pdf_driver,
       signatureProvider: document.signature_provider,
+      pdfSha256: document.pdf_hash,
+      signedPdfSha256: document.signed_pdf_hash,
       signatures,
     };
   }
@@ -376,13 +490,15 @@ export class DocumentEngineService {
   async download(documentId: string, kind: 'pdf' | 'docx', actorId: string) {
     const document = await this.documentRow(documentId);
     await this.assertPermission(actorId, this.requireFormat(document.format_key).readPermission);
-    const body =
-      kind === 'pdf'
+    const signed = kind === 'pdf' && document.signed_pdf_driver && document.signed_pdf_key;
+    const body = signed
+      ? await this.storage.getFrom(document.signed_pdf_driver as StorageDriver, document.signed_pdf_key as string)
+      : kind === 'pdf'
         ? await this.storage.getFrom(document.pdf_driver, document.pdf_key)
         : await this.storage.getFrom(document.docx_driver, document.docx_key);
     return {
       body,
-      fileName: `${document.format_key}-${document.number}.${kind}`,
+      fileName: `${document.format_key}-${document.number}${signed ? '-firmado' : ''}.${kind}`,
       contentType: kind === 'pdf' ? 'application/pdf' : DOCX_MIME,
     };
   }
@@ -557,15 +673,20 @@ export class DocumentEngineService {
       id: string;
       format_key: string;
       number: string;
+      period: string;
       status: string;
       entity_type: string | null;
       entity_id: string | null;
       pdf_driver: StorageDriver;
       pdf_key: string;
+      pdf_hash: string;
       docx_driver: StorageDriver;
       docx_key: string;
       signature_provider: string | null;
       signature_reference: string | null;
+      signed_pdf_driver: StorageDriver | null;
+      signed_pdf_key: string | null;
+      signed_pdf_hash: string | null;
     }>;
     if (!row) {
       throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el documento');

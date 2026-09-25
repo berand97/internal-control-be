@@ -69,6 +69,7 @@ import { ExcelImport1767225627000 } from './migrations/1767225627000-excel-impor
 import { DocumentEngine1767225628000 } from './migrations/1767225628000-document-engine.js';
 import { AssetSearchIndexes1767225629000 } from './migrations/1767225629000-asset-search-indexes.js';
 import { DocumentAssetLink1767225630000 } from './migrations/1767225630000-document-asset-link.js';
+import { InternalSignature1767225631000 } from './migrations/1767225631000-internal-signature.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -158,6 +159,7 @@ const dataSource = new DataSource({
     DocumentEngine1767225628000,
     AssetSearchIndexes1767225629000,
     DocumentAssetLink1767225630000,
+    InternalSignature1767225631000,
   ],
 });
 
