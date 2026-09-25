@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
+import { guardDatabaseUrl } from '../config/database-host-guard.js';
 import { AppUser } from '../modules/auth/entities/app-user.entity.js';
 import { AuditLog } from '../modules/auth/entities/audit-log.entity.js';
 import { PasswordResetToken } from '../modules/auth/entities/password-reset-token.entity.js';
@@ -76,6 +77,7 @@ import { ReassignmentReissueHashes1767225634000 } from './migrations/17672256340
 import { DocumentLifecycle1767225635000 } from './migrations/1767225635000-document-lifecycle.js';
 import { AssetHandover1767225640000 } from './migrations/1767225640000-asset-handover.js';
 import { LoanDeliveryDocument1767225650000 } from './migrations/1767225650000-loan-delivery-document.js';
+import { MfaRecovery1767225660000 } from './migrations/1767225660000-mfa-recovery.js';
 import { SigningChannels1767225670000 } from './migrations/1767225670000-signing-channels.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
@@ -83,11 +85,18 @@ import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-
 import { PhysicalInventoryScope } from '../modules/inventories/entities/physical-inventory-scope.entity.js';
 import { AssetDepreciation } from '../modules/depreciation/entities/asset-depreciation.entity.js';
 
+// El CLI de migraciones (y el de staging) no pasa por ConfigModule: misma guarda que la app.
+// Fuera de producción se niega a conectarse a un host no local salvo ALLOW_REMOTE_DATABASE=true.
+const databaseUrl = guardDatabaseUrl(
+  process.env['DATABASE_URL'] ??
+    'postgres://asset_admin:secret@localhost:5432/asset_management',
+  process.env,
+  (message) => console.warn(`[Database] ${message}`),
+);
+
 const dataSource = new DataSource({
   type: 'postgres',
-  url:
-    process.env['DATABASE_URL'] ??
-    'postgres://asset_admin:secret@localhost:5432/asset_management',
+  url: databaseUrl,
   logging: process.env['DATABASE_LOGGING'] === 'true',
   synchronize: false,
   entities: [
@@ -173,6 +182,7 @@ const dataSource = new DataSource({
     DocumentLifecycle1767225635000,
     AssetHandover1767225640000,
     LoanDeliveryDocument1767225650000,
+    MfaRecovery1767225660000,
     SigningChannels1767225670000,
   ],
 });
