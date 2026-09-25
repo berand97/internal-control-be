@@ -14,6 +14,7 @@ import { CostCenter } from '../modules/cost-centers/entities/cost-center.entity.
 import { AcquisitionType } from '../modules/assets/entities/acquisition-type.entity.js';
 import { Asset } from '../modules/assets/entities/asset.entity.js';
 import { AssetCustomValue } from '../modules/assets/entities/asset-custom-value.entity.js';
+import { AssetIdentifier } from '../modules/assets/entities/asset-identifier.entity.js';
 import { AssetImportBatch } from '../modules/assets/entities/asset-import-batch.entity.js';
 import { AssetMovement } from '../modules/assets/entities/asset-movement.entity.js';
 import { AssetPhoto } from '../modules/assets/entities/asset-photo.entity.js';
@@ -61,6 +62,7 @@ import { MailSettingsEncryptedText1767225620000 } from './migrations/17672256200
 import { PersonDocumentOptional1767225621000 } from './migrations/1767225621000-person-document-optional.js';
 import { InvitationRoleToken1767225622000 } from './migrations/1767225622000-invitation-role-token.js';
 import { RevokeDirectorStorage1767225623000 } from './migrations/1767225623000-revoke-director-storage.js';
+import { AssetIdentifier1767225624000 } from './migrations/1767225624000-asset-identifier.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -99,6 +101,7 @@ const dataSource = new DataSource({
     AssetMovement,
     AssetPhoto,
     AssetImportBatch,
+    AssetIdentifier,
     QrTokenRotationLog,
     StorageSettings,
     MailSettings,
@@ -142,6 +145,7 @@ const dataSource = new DataSource({
     PersonDocumentOptional1767225621000,
     InvitationRoleToken1767225622000,
     RevokeDirectorStorage1767225623000,
+    AssetIdentifier1767225624000,
   ],
 });
 

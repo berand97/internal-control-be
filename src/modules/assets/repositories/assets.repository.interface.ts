@@ -10,6 +10,10 @@ import type { MovementType } from '../enums/movement-type.enum.js';
 import type { OperationalStatus } from '../enums/operational-status.enum.js';
 import type { PhysicalCondition } from '../enums/physical-condition.enum.js';
 import type { CustomValueColumns } from '../domain/custom-values.js';
+import type {
+  AssetIdentifierOrigin,
+  AssetIdentifierType,
+} from '../enums/asset-identifier.enum.js';
 
 export interface CreateAssetRecord {
   readonly internalCode: string;
@@ -92,6 +96,12 @@ export interface CreateMovementRecord {
   readonly documentReference: string | null;
 }
 
+export interface AssetIdentifierWrite {
+  readonly type: AssetIdentifierType;
+  readonly value: string;
+  readonly origin: AssetIdentifierOrigin;
+}
+
 export interface CustomValueWrite {
   readonly fieldId: string;
   readonly columns: CustomValueColumns;
@@ -126,6 +136,12 @@ export interface AssetsRepository {
   replaceCustomValues(
     assetId: string,
     values: ReadonlyArray<CustomValueWrite>,
+    manager?: EntityManager,
+  ): Promise<void>;
+  insertIdentifiers(
+    assetId: string,
+    identifiers: ReadonlyArray<AssetIdentifierWrite>,
+    createdBy: string,
     manager?: EntityManager,
   ): Promise<void>;
   findCustomValues(assetId: string): Promise<ReadonlyArray<CustomValueWithField>>;

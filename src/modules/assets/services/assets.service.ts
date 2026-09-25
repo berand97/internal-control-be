@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
@@ -34,6 +35,10 @@ import {
 } from '../dto/responses/asset.response.dto.js';
 import { UpdateAssetDto } from '../dto/update-asset.dto.js';
 import type { Asset } from '../entities/asset.entity.js';
+import {
+  AssetIdentifierOrigin,
+  AssetIdentifierType,
+} from '../enums/asset-identifier.enum.js';
 import { ImportMode } from '../enums/import-mode.enum.js';
 import { MovementType } from '../enums/movement-type.enum.js';
 import { OperationalStatus } from '../enums/operational-status.enum.js';
@@ -542,6 +547,34 @@ export class AssetsService {
           notes: dto.notes ?? null,
           createdBy: actor.id,
         }, manager);
+        await this.assetsRepository.insertIdentifiers(
+          asset.id,
+          [
+            {
+              type: AssetIdentifierType.VisibleCode,
+              value: internalCode,
+              origin: dto.internalCode
+                ? AssetIdentifierOrigin.Manual
+                : AssetIdentifierOrigin.Generated,
+            },
+            {
+              type: AssetIdentifierType.OpaqueId,
+              value: randomUUID(),
+              origin: AssetIdentifierOrigin.Generated,
+            },
+            ...(dto.barcode
+              ? [
+                  {
+                    type: AssetIdentifierType.LegacyCode,
+                    value: dto.barcode,
+                    origin: AssetIdentifierOrigin.Manual,
+                  },
+                ]
+              : []),
+          ],
+          actor.id,
+          manager,
+        );
         await this.assetsRepository.replaceCustomValues(asset.id, writes, manager);
         if (dto.photoUrl) {
           await this.assetsRepository.insertPhoto(

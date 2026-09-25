@@ -12,6 +12,7 @@ import { MovementsModule } from '../movements/movements.module.js';
 import { AssetsController } from './assets.controller.js';
 import { AcquisitionType } from './entities/acquisition-type.entity.js';
 import { AssetCustomValue } from './entities/asset-custom-value.entity.js';
+import { AssetIdentifier } from './entities/asset-identifier.entity.js';
 import { AssetImportBatch } from './entities/asset-import-batch.entity.js';
 import { AssetMovement } from './entities/asset-movement.entity.js';
 import { AssetPhoto } from './entities/asset-photo.entity.js';
@@ -33,6 +34,7 @@ import { AssetsService } from './services/assets.service.js';
       AssetMovement,
       AssetPhoto,
       AssetImportBatch,
+      AssetIdentifier,
       AcquisitionType,
       AssetCategory,
       CostCenter,

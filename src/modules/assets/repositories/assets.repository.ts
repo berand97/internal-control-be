@@ -7,11 +7,13 @@ import { AssetCategoryField } from '../../dynamic-fields/entities/asset-category
 import { Location } from '../../locations/entities/location.entity.js';
 import { AcquisitionType } from '../entities/acquisition-type.entity.js';
 import { AssetCustomValue } from '../entities/asset-custom-value.entity.js';
+import { AssetIdentifier } from '../entities/asset-identifier.entity.js';
 import { AssetImportBatch } from '../entities/asset-import-batch.entity.js';
 import { AssetMovement } from '../entities/asset-movement.entity.js';
 import { AssetPhoto } from '../entities/asset-photo.entity.js';
 import { Asset } from '../entities/asset.entity.js';
 import type {
+  AssetIdentifierWrite,
   AssetSearchFilters,
   AssetsRepository,
   CreateAssetRecord,
@@ -186,6 +188,32 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
           fieldId: value.fieldId,
           ...value.columns,
           updatedAt: now,
+        }),
+      ),
+    );
+  }
+
+  async insertIdentifiers(
+    assetId: string,
+    identifiers: ReadonlyArray<AssetIdentifierWrite>,
+    createdBy: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repository = (manager ?? this.dataSource.manager).getRepository(
+      AssetIdentifier,
+    );
+    const now = new Date();
+    await repository.save(
+      identifiers.map((identifier) =>
+        repository.create({
+          assetId,
+          identifierType: identifier.type,
+          value: identifier.value,
+          origin: identifier.origin,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          createdBy,
         }),
       ),
     );

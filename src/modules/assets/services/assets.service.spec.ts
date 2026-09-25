@@ -131,6 +131,7 @@ describe('AssetsService', () => {
       update: vi.fn(),
       nextInternalCode: vi.fn().mockResolvedValue('A2026-0001'),
       replaceCustomValues: vi.fn(),
+      insertIdentifiers: vi.fn(),
       findCustomValues: vi.fn().mockResolvedValue([]),
       insertMovement: vi.fn(),
       findRecentMovements: vi.fn().mockResolvedValue([]),
