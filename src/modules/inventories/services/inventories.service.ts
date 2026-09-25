@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, type EntityManager, In, Repository } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
@@ -9,13 +9,13 @@ import { UserStatus } from '../../auth/enums/user-status.enum.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import { Asset } from '../../assets/entities/asset.entity.js';
+import { AssetStateService } from '../../assets/services/asset-state.service.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
 import { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
 import { CostCenter } from '../../cost-centers/entities/cost-center.entity.js';
 import { Location } from '../../locations/entities/location.entity.js';
 import { OrganizationalUnit } from '../../organizational-units/entities/organizational-unit.entity.js';
-import { MovementsService } from '../../movements/services/movements.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import {
   assertInventoryTransition,
@@ -69,10 +69,10 @@ export class InventoriesService {
     @InjectRepository(OrganizationalUnit)
     private readonly orgUnits: Repository<OrganizationalUnit>,
     private readonly dataSource: DataSource,
-    private readonly movementsService: MovementsService,
     private readonly permissionsService: PermissionsService,
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
+    private readonly assetState: AssetStateService,
   ) {}
 
   async list(query: QueryInventoriesDto) {
@@ -263,29 +263,25 @@ export class InventoriesService {
     item.notes = dto.notes ?? item.notes;
     item.verifiedAt = new Date();
     item.verifiedBy = actor.id;
-    await this.items.save(item);
-    await this.assets.update(
-      { id: asset.id },
-      { lastVerifiedAt: item.verifiedAt, updatedAt: item.verifiedAt },
-    );
-    await this.movementsService.record({
+    await this.assetState.apply({
       assetId: asset.id,
-      movementType: MovementType.PhysicalVerification,
-      fromCostCenterId: asset.costCenterId,
-      fromLocationId: asset.locationId,
-      fromResponsibleId: asset.responsibleId,
-      fromOperationalStatus: asset.operationalStatus,
-      fromPhysicalCondition: asset.physicalCondition,
-      toCostCenterId: asset.costCenterId,
-      toLocationId: actualLocationId,
-      toResponsibleId: asset.responsibleId,
-      toOperationalStatus: asset.operationalStatus,
-      toPhysicalCondition: dto.condition,
-      requestedBy: actor.id,
-      authorizedBy: actor.id,
-      reason: dto.notes ?? `Verificación ${inventory.code}`,
-      documentReference: inventory.code,
-      metadata: { inventoryId: inventory.id, result: item.verificationResult },
+      actorId: actor.id,
+      patch: { lastVerifiedAt: item.verifiedAt },
+      movement: {
+        type: MovementType.PhysicalVerification,
+        reason: dto.notes ?? `Verificación ${inventory.code}`,
+        documentReference: inventory.code,
+        executedAt: item.verifiedAt,
+        metadata: {
+          inventoryId: inventory.id,
+          result: item.verificationResult,
+          observedLocationId: actualLocationId,
+          observedCondition: dto.condition,
+        },
+      },
+      alsoWrite: async (manager) => {
+        await manager.getRepository(PhysicalInventoryItem).save(item);
+      },
     });
     return this.toItem(item);
   }
@@ -437,40 +433,45 @@ export class InventoriesService {
       throw new ApiException(ErrorCode.InventoryReconcileSod);
     }
     const items = await this.items.find({ where: { inventoryId: inventory.id } });
-    for (const item of items) {
-      if (!item.assetId) {
-        continue;
+    await this.dataSource.transaction(async (manager) => {
+      for (const item of items) {
+        if (!item.assetId) {
+          continue;
+        }
+        if (item.verificationResult === VerificationResult.Misplaced) {
+          await this.applyLocation(inventory, item, actor, manager);
+        }
+        if (item.verificationResult === VerificationResult.Missing) {
+          await this.applyLost(inventory, item, actor, manager);
+        }
+        if (
+          item.verificationResult === VerificationResult.Found &&
+          item.actualCondition &&
+          item.expectedCondition &&
+          item.actualCondition !== item.expectedCondition
+        ) {
+          await this.applyCondition(inventory, item, actor, manager);
+        }
       }
-      if (item.verificationResult === VerificationResult.Misplaced) {
-        await this.applyLocation(inventory, item, actor);
-      }
-      if (item.verificationResult === VerificationResult.Missing) {
-        await this.applyLost(inventory, item, actor);
-      }
-      if (
-        item.verificationResult === VerificationResult.Found &&
-        item.actualCondition &&
-        item.expectedCondition &&
-        item.actualCondition !== item.expectedCondition
-      ) {
-        await this.applyCondition(inventory, item, actor);
-      }
-    }
-    inventory.status = InventoryStatus.Reconciled;
-    inventory.reconcileApprovedAt = new Date();
-    inventory.reconcileApprovedBy = actor.id;
-    await this.inventories.save(inventory);
-    await this.auditLogsRepository.record({
-      action: AuditAction.InventoryReconciled,
-      entityType: ENTITY_TYPE,
-      entityId: inventory.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: {
-        requestedBy: inventory.reconcileRequestedBy,
-        approvedBy: actor.id,
-      },
+      inventory.status = InventoryStatus.Reconciled;
+      inventory.reconcileApprovedAt = new Date();
+      inventory.reconcileApprovedBy = actor.id;
+      await manager.getRepository(PhysicalInventory).save(inventory);
+      await this.auditLogsRepository.record(
+        {
+          action: AuditAction.InventoryReconciled,
+          entityType: ENTITY_TYPE,
+          entityId: inventory.id,
+          performedBy: actor.id,
+          ipAddress: null,
+          userAgent: null,
+          changes: {
+            requestedBy: inventory.reconcileRequestedBy,
+            approvedBy: actor.id,
+          },
+        },
+        manager,
+      );
     });
     return this.getById(inventory.id);
   }
@@ -479,118 +480,100 @@ export class InventoriesService {
     inventory: PhysicalInventory,
     item: PhysicalInventoryItem,
     actor: AuthenticatedUser,
+    manager: EntityManager,
   ): Promise<void> {
     if (!item.assetId || !item.actualLocationId) {
       return;
     }
-    const asset = await this.requireAsset(item.assetId);
+    const asset = await this.requireAssetWithin(item.assetId, manager);
     if (asset.locationId === item.actualLocationId) {
       return;
     }
-    const previous = asset.locationId;
-    await this.assets.update(
-      { id: asset.id },
-      { locationId: item.actualLocationId, updatedAt: new Date() },
+    await this.assetState.apply(
+      {
+        assetId: asset.id,
+        actorId: actor.id,
+        patch: { locationId: item.actualLocationId },
+        movement: {
+          type: MovementType.Relocation,
+          reason: `Reconciliación ${inventory.code}`,
+          documentReference: inventory.code,
+          requestedBy: inventory.reconcileRequestedBy,
+          metadata: { inventoryId: inventory.id },
+        },
+      },
+      manager,
     );
-    await this.movementsService.record({
-      assetId: asset.id,
-      movementType: MovementType.Relocation,
-      fromCostCenterId: asset.costCenterId,
-      fromLocationId: previous,
-      fromResponsibleId: asset.responsibleId,
-      fromOperationalStatus: asset.operationalStatus,
-      fromPhysicalCondition: asset.physicalCondition,
-      toCostCenterId: asset.costCenterId,
-      toLocationId: item.actualLocationId,
-      toResponsibleId: asset.responsibleId,
-      toOperationalStatus: asset.operationalStatus,
-      toPhysicalCondition: item.actualCondition ?? asset.physicalCondition,
-      requestedBy: inventory.reconcileRequestedBy,
-      authorizedBy: actor.id,
-      reason: `Reconciliación ${inventory.code}`,
-      documentReference: inventory.code,
-      metadata: { inventoryId: inventory.id },
-    });
   }
 
   private async applyLost(
     inventory: PhysicalInventory,
     item: PhysicalInventoryItem,
     actor: AuthenticatedUser,
+    manager: EntityManager,
   ): Promise<void> {
     if (!item.assetId) {
       return;
     }
-    const asset = await this.requireAsset(item.assetId);
+    const asset = await this.requireAssetWithin(item.assetId, manager);
     if (
       asset.operationalStatus === OperationalStatus.Lost ||
       asset.operationalStatus === OperationalStatus.WrittenOff
     ) {
       return;
     }
-    await this.assets.update(
-      { id: asset.id },
+    await this.assetState.apply(
       {
-        operationalStatus: OperationalStatus.Lost,
-        updatedAt: new Date(),
+        assetId: asset.id,
+        actorId: actor.id,
+        patch: { operationalStatus: OperationalStatus.Lost },
+        movement: {
+          type: MovementType.PhysicalVerification,
+          reason: `Faltante en ${inventory.code} — inicia baja formal`,
+          documentReference: inventory.code,
+          requestedBy: inventory.reconcileRequestedBy,
+          metadata: { inventoryId: inventory.id, result: 'MISSING' },
+        },
       },
+      manager,
     );
-    await this.movementsService.record({
-      assetId: asset.id,
-      movementType: MovementType.PhysicalVerification,
-      fromCostCenterId: asset.costCenterId,
-      fromLocationId: asset.locationId,
-      fromResponsibleId: asset.responsibleId,
-      fromOperationalStatus: asset.operationalStatus,
-      fromPhysicalCondition: asset.physicalCondition,
-      toCostCenterId: asset.costCenterId,
-      toLocationId: asset.locationId,
-      toResponsibleId: asset.responsibleId,
-      toOperationalStatus: OperationalStatus.Lost,
-      toPhysicalCondition: asset.physicalCondition,
-      requestedBy: inventory.reconcileRequestedBy,
-      authorizedBy: actor.id,
-      reason: `Faltante en ${inventory.code} — inicia baja formal`,
-      documentReference: inventory.code,
-      metadata: { inventoryId: inventory.id, result: 'MISSING' },
-    });
   }
 
   private async applyCondition(
     inventory: PhysicalInventory,
     item: PhysicalInventoryItem,
     actor: AuthenticatedUser,
+    manager: EntityManager,
   ): Promise<void> {
     if (!item.assetId || !item.actualCondition) {
       return;
     }
-    const asset = await this.requireAsset(item.assetId);
-    await this.assets.update(
-      { id: asset.id },
+    await this.assetState.apply(
       {
-        physicalCondition: item.actualCondition,
-        updatedAt: new Date(),
+        assetId: item.assetId,
+        actorId: actor.id,
+        patch: { physicalCondition: item.actualCondition },
+        movement: {
+          type: MovementType.ConditionChange,
+          reason: `Reconciliación ${inventory.code}`,
+          documentReference: inventory.code,
+          requestedBy: inventory.reconcileRequestedBy,
+          metadata: { inventoryId: inventory.id },
+        },
       },
+      manager,
     );
-    await this.movementsService.record({
-      assetId: asset.id,
-      movementType: MovementType.ConditionChange,
-      fromCostCenterId: asset.costCenterId,
-      fromLocationId: asset.locationId,
-      fromResponsibleId: asset.responsibleId,
-      fromOperationalStatus: asset.operationalStatus,
-      fromPhysicalCondition: asset.physicalCondition,
-      toCostCenterId: asset.costCenterId,
-      toLocationId: asset.locationId,
-      toResponsibleId: asset.responsibleId,
-      toOperationalStatus: asset.operationalStatus,
-      toPhysicalCondition: item.actualCondition,
-      requestedBy: inventory.reconcileRequestedBy,
-      authorizedBy: actor.id,
-      reason: `Reconciliación ${inventory.code}`,
-      documentReference: inventory.code,
-      metadata: { inventoryId: inventory.id },
-    });
+  }
+
+  private async requireAssetWithin(
+    id: string,
+    manager: EntityManager,
+  ): Promise<Asset> {
+    const asset = await manager.getRepository(Asset).findOne({ where: { id } });
+    if (!asset) {
+      throw new ApiException(ErrorCode.ResourceNotFound);
+    }
+    return asset;
   }
 
   private assertScope(

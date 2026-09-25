@@ -62,7 +62,7 @@ describe('InventoriesService', () => {
   let locations: { findOne: ReturnType<typeof vi.fn> };
   let orgUnits: { findOne: ReturnType<typeof vi.fn> };
   let dataSource: { query: ReturnType<typeof vi.fn> };
-  let movementsService: { record: ReturnType<typeof vi.fn> };
+  let assetState: { apply: ReturnType<typeof vi.fn> };
   let permissionsService: { userHasPermission: ReturnType<typeof vi.fn> };
   let auditLogsRepository: { record: ReturnType<typeof vi.fn> };
   let service: InventoriesService;
@@ -100,7 +100,7 @@ describe('InventoriesService', () => {
     dataSource = {
       query: vi.fn().mockResolvedValue([{ current_value: 1, padding_length: 3, prefix: 'TF-' }]),
     };
-    movementsService = { record: vi.fn() };
+    assetState = { apply: vi.fn() };
     permissionsService = { userHasPermission: vi.fn() };
     auditLogsRepository = { record: vi.fn() };
     service = new InventoriesService(
@@ -113,9 +113,9 @@ describe('InventoriesService', () => {
       locations as never,
       orgUnits as never,
       dataSource as never,
-      movementsService as never,
       permissionsService as never,
       auditLogsRepository as never,
+      assetState as never,
     );
   });
 

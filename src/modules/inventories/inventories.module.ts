@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module.js';
 import { AppUser } from '../auth/entities/app-user.entity.js';
+import { AssetsModule } from '../assets/assets.module.js';
 import { Asset } from '../assets/entities/asset.entity.js';
 import { CostCenter } from '../cost-centers/entities/cost-center.entity.js';
 import { Location } from '../locations/entities/location.entity.js';
@@ -17,6 +18,7 @@ import { InventoriesService } from './services/inventories.service.js';
 @Module({
   imports: [
     AuthModule,
+    AssetsModule,
     MovementsModule,
     RolesModule,
     TypeOrmModule.forFeature([
