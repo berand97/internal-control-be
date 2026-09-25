@@ -2,6 +2,7 @@ export const STAGING_SOURCE_KINDS = [
   'ASSET_REPORT',
   'COST_CENTERS',
   'EMPLOYEE_CONTRACTS',
+  'UPLOAD',
 ] as const;
 
 export type StagingSourceKind = (typeof STAGING_SOURCE_KINDS)[number];

@@ -27,6 +27,7 @@ import { DocumentTemplatesModule } from './modules/document-templates/document-t
 import { LoansModule } from './modules/loans/loans.module.js';
 import { InventoriesModule } from './modules/inventories/inventories.module.js';
 import { DepreciationModule } from './modules/depreciation/depreciation.module.js';
+import { StagingModule } from './modules/staging/staging.module.js';
 import { LocationsModule } from './modules/locations/locations.module.js';
 import { OrganizationalUnitsModule } from './modules/organizational-units/organizational-units.module.js';
 import { NavigationModule } from './modules/navigation/navigation.module.js';
@@ -77,6 +78,7 @@ const nestObserveImports =
     LoansModule,
     InventoriesModule,
     DepreciationModule,
+    StagingModule,
   ],
   controllers: [AppController],
   providers: [

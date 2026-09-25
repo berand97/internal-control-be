@@ -75,7 +75,7 @@ describe('Restricciones relajadas para datos reales (PostgreSQL real)', () => {
     await assets.create({ ...base, description: 'Uno', barcode: 'TEMP' }, actor);
     await assets.create({ ...base, description: 'Dos', barcode: 'TEMP' }, actor);
     expect(
-      Number(await scalar<string>(dataSource, `SELECT count(*) FROM asset WHERE barcode = 'TEMP'`)),
+      Number(await scalar<string>(dataSource, `SELECT count(*) FROM asset WHERE barcode = 'TEMP' AND category_id = $1`, [categoryId])),
     ).toBe(2);
   });
 

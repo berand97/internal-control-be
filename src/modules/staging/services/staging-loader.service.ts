@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { DataSource } from 'typeorm';
 import { isUniqueViolation } from '../../../common/exceptions/postgres-error.js';
@@ -24,15 +24,23 @@ export class StagingLoaderService {
     kind: StagingSourceKind,
     loadedBy: string | null = null,
   ): Promise<StagingLoadResult> {
-    const content = await readFile(path);
+    return this.loadBuffer(await readFile(path), basename(path), kind, loadedBy);
+  }
+
+  async loadBuffer(
+    content: Buffer,
+    fileName: string,
+    kind: StagingSourceKind,
+    loadedBy: string | null = null,
+  ): Promise<StagingLoadResult> {
     const sha256 = createHash('sha256').update(content).digest('hex');
     const existing = await this.findBatch(kind, sha256);
     if (existing) {
       return existing;
     }
 
-    const sheets = await readWorkbook(path);
-    const size = (await stat(path)).size;
+    const sheets = await readWorkbook(content);
+    const size = content.length;
     const summary = sheets.map((sheet) => sheetSummary(kind, sheet));
 
     try {
@@ -40,7 +48,7 @@ export class StagingLoaderService {
         const [batch] = (await manager.query(
           `INSERT INTO staging_batch (source_kind, file_name, file_sha256, file_size, sheets, loaded_by)
            VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-          [kind, basename(path), sha256, size, JSON.stringify(summary), loadedBy],
+          [kind, fileName, sha256, size, JSON.stringify(summary), loadedBy],
         )) as Array<{ id: string }>;
         const id = batch?.id ?? '';
         for (const sheet of sheets) {

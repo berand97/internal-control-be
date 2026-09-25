@@ -65,6 +65,7 @@ import { RevokeDirectorStorage1767225623000 } from './migrations/1767225623000-r
 import { AssetIdentifier1767225624000 } from './migrations/1767225624000-asset-identifier.js';
 import { RelaxAssetConstraints1767225625000 } from './migrations/1767225625000-relax-asset-constraints.js';
 import { ExcelStaging1767225626000 } from './migrations/1767225626000-excel-staging.js';
+import { ExcelImport1767225627000 } from './migrations/1767225627000-excel-import.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -150,6 +151,7 @@ const dataSource = new DataSource({
     AssetIdentifier1767225624000,
     RelaxAssetConstraints1767225625000,
     ExcelStaging1767225626000,
+    ExcelImport1767225627000,
   ],
 });
 

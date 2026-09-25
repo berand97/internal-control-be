@@ -19,6 +19,7 @@ export interface AssetMovementSpec {
   readonly executedAt?: Date;
   readonly requestedBy?: string | null;
   readonly metadata?: Record<string, unknown>;
+  readonly initial?: boolean;
 }
 
 export interface AssetChange {
@@ -73,15 +74,16 @@ export class AssetStateService {
     const next = { ...current, ...definedOnly(change.patch) };
 
     if (change.movement) {
+      const from = change.movement.initial ? null : current;
       await this.movementsService.record(
         {
           assetId: current.id,
           movementType: change.movement.type,
-          fromCostCenterId: current.costCenterId,
-          fromLocationId: current.locationId,
-          fromResponsibleId: current.responsibleId,
-          fromOperationalStatus: current.operationalStatus,
-          fromPhysicalCondition: current.physicalCondition,
+          fromCostCenterId: from?.costCenterId ?? null,
+          fromLocationId: from?.locationId ?? null,
+          fromResponsibleId: from?.responsibleId ?? null,
+          fromOperationalStatus: from?.operationalStatus ?? null,
+          fromPhysicalCondition: from?.physicalCondition ?? null,
           toCostCenterId: next.costCenterId,
           toLocationId: next.locationId,
           toResponsibleId: next.responsibleId,

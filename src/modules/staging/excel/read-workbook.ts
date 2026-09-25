@@ -63,9 +63,9 @@ const readCell = (cell: ExcelJS.Cell): [RawCellValue, string] | null => {
 
 const columnLetter = (address: string): string => address.replace(/\d+/g, '');
 
-export const readWorkbook = async (path: string): Promise<ReadonlyArray<RawSheet>> => {
+export const readWorkbook = async (content: Buffer): Promise<ReadonlyArray<RawSheet>> => {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(path);
+  await workbook.xlsx.load(content as unknown as ArrayBuffer);
   return workbook.worksheets.map((worksheet) => {
     const rows: RawRow[] = [];
     for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {

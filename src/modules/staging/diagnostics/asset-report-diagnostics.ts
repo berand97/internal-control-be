@@ -42,7 +42,7 @@ export const ASSET_COLUMNS = {
   writeOffDate: ['MovFechaDebaja'],
 } as const;
 
-type AssetColumn = keyof typeof ASSET_COLUMNS;
+export type AssetColumn = keyof typeof ASSET_COLUMNS;
 
 const OPTIONAL_COLUMNS: ReadonlySet<AssetColumn> = new Set(['writeOffFlag', 'writeOffDate']);
 
@@ -84,6 +84,7 @@ const percent = (value: number, base: number): string =>
 export const diagnoseAssetSheet = (
   sheet: StagedSheet,
   costCenterCodes: ReadonlySet<string> | null,
+  mapping?: Partial<Record<AssetColumn, string>>,
 ): { readonly metrics: ReadonlyArray<Metric>; readonly issues: ReadonlyArray<Issue> } => {
   const issues: Issue[] = [];
   const issue = (
@@ -104,8 +105,8 @@ export const diagnoseAssetSheet = (
 
   const letters = {} as Record<AssetColumn, string | null>;
   for (const key of Object.keys(ASSET_COLUMNS) as AssetColumn[]) {
-    letters[key] = findColumn(sheet.columns, ASSET_COLUMNS[key]);
-    if (!letters[key] && !OPTIONAL_COLUMNS.has(key)) {
+    letters[key] = mapping ? (mapping[key] ?? null) : findColumn(sheet.columns, ASSET_COLUMNS[key]);
+    if (!mapping && !letters[key] && !OPTIONAL_COLUMNS.has(key)) {
       issue(null, ASSET_COLUMNS[key][0], 'MISSING_COLUMN', null, 'La columna no aparece en el encabezado');
     }
   }
