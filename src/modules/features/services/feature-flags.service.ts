@@ -137,7 +137,8 @@ export class FeatureFlagsService implements OnModuleInit {
     if (stored) {
       return this.toSnapshot(definition, stored.enabled, stored.reason);
     }
-    return this.toSnapshot(definition, true, null);
+    const enabled = definition.defaultEnabled ?? true;
+    return this.toSnapshot(definition, enabled, enabled ? null : 'DEFAULT');
   }
 
   private toSnapshot(

@@ -1,4 +1,4 @@
-export const FEATURE_DISABLED_REASONS = ['MANUAL', 'CIRCUIT', 'ENV'] as const;
+export const FEATURE_DISABLED_REASONS = ['MANUAL', 'CIRCUIT', 'ENV', 'DEFAULT'] as const;
 
 export type FeatureDisabledReason = (typeof FEATURE_DISABLED_REASONS)[number];
 
@@ -10,6 +10,7 @@ export interface FeatureDefinition {
   readonly core: boolean;
   readonly resourceTypes: ReadonlyArray<string>;
   readonly pathPrefixes: ReadonlyArray<string>;
+  readonly defaultEnabled?: boolean;
 }
 
 export interface FeatureSnapshot {
@@ -140,6 +141,7 @@ export const FEATURE_CATALOG: ReadonlyArray<FeatureDefinition> = [
     core: false,
     resourceTypes: ['depreciation'],
     pathPrefixes: ['/depreciation'],
+    defaultEnabled: false,
   },
   {
     code: 'document-templates',

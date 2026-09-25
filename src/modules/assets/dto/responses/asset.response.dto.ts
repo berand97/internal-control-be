@@ -102,8 +102,8 @@ export class AssetResponseDto {
   @ApiProperty({ format: 'uuid' })
   readonly acquisitionTypeId!: string;
 
-  @ApiProperty()
-  readonly acquisitionDate!: string;
+  @ApiProperty({ nullable: true })
+  readonly acquisitionDate!: string | null;
 
   @ApiProperty({ nullable: true })
   readonly acquisitionDocument!: string | null;
@@ -176,7 +176,9 @@ export class AssetResponseDto {
       locationId: asset.locationId,
       responsibleId: asset.responsibleId,
       acquisitionTypeId: asset.acquisitionTypeId,
-      acquisitionDate: String(asset.acquisitionDate).slice(0, 10),
+      acquisitionDate: asset.acquisitionDate
+        ? String(asset.acquisitionDate).slice(0, 10)
+        : null,
       acquisitionDocument: asset.acquisitionDocument,
       acquisitionPrice: Number(asset.acquisitionPrice),
       currency: asset.currency,

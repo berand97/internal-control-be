@@ -32,8 +32,8 @@ export class Asset {
   @Column({ name: 'acquisition_type_id', type: 'uuid' })
   acquisitionTypeId!: string;
 
-  @Column({ name: 'acquisition_date', type: 'date' })
-  acquisitionDate!: string;
+  @Column({ name: 'acquisition_date', type: 'date', nullable: true })
+  acquisitionDate!: string | null;
 
   @Column({ name: 'acquisition_document', type: 'varchar', length: 100, nullable: true })
   acquisitionDocument!: string | null;

@@ -32,7 +32,11 @@ export class DepreciationService {
   async calculate(dto: CalculateDepreciationDto, actor: AuthenticatedUser | null) {
     this.assertPeriod(dto.year, dto.month);
     const assets = await this.assets.find();
-    const inputs: DepreciationAssetInput[] = assets.map((asset) => ({
+    const dated = assets.filter(
+      (asset): asset is typeof asset & { acquisitionDate: string } =>
+        asset.acquisitionDate !== null,
+    );
+    const inputs: DepreciationAssetInput[] = dated.map((asset) => ({
       id: asset.id,
       acquisitionDate: asset.acquisitionDate,
       acquisitionPrice: Number(asset.acquisitionPrice),
