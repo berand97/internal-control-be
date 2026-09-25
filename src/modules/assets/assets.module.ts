@@ -19,6 +19,7 @@ import { AssetPhoto } from './entities/asset-photo.entity.js';
 import { Asset } from './entities/asset.entity.js';
 import { TypeOrmAssetsRepository } from './repositories/assets.repository.js';
 import { AssetStateService } from './services/asset-state.service.js';
+import { AssetTimelineService } from './services/asset-timeline.service.js';
 import { AssetsService } from './services/assets.service.js';
 
 @Module({
@@ -45,6 +46,7 @@ import { AssetsService } from './services/assets.service.js';
   controllers: [AssetsController],
   providers: [
     AssetsService,
+    AssetTimelineService,
     AssetStateService,
     { provide: 'AssetsRepository', useClass: TypeOrmAssetsRepository },
   ],

@@ -40,6 +40,8 @@ import { ChangeAssetStatusDto } from './dto/change-asset-status.dto.js';
 import { CommitAssetImportDto } from './dto/commit-asset-import.dto.js';
 import { CreateAssetDto } from './dto/create-asset.dto.js';
 import { QueryAssetsDto } from './dto/query-assets.dto.js';
+import { QueryTimelineDto } from './dto/query-timeline.dto.js';
+import { AssetTimelineResponseDto } from './dto/responses/asset-timeline.response.dto.js';
 import { ReassignCostCenterDto } from './dto/reassign-cost-center.dto.js';
 import { ReassignLocationDto } from './dto/reassign-location.dto.js';
 import {
@@ -52,6 +54,7 @@ import {
 import { UpdateAssetDto } from './dto/update-asset.dto.js';
 import { WriteOffAssetDto } from './dto/write-off-asset.dto.js';
 import { ImportMode } from './enums/import-mode.enum.js';
+import { AssetTimelineService } from './services/asset-timeline.service.js';
 import { AssetsService } from './services/assets.service.js';
 
 export interface CsvUpload {
@@ -69,11 +72,15 @@ export interface CsvUpload {
   AcquisitionTypeResponseDto,
   AssetImportPreviewResponseDto,
   AssetBulkResultResponseDto,
+  AssetTimelineResponseDto,
 )
 @Feature('assets')
 @Controller('assets')
 export class AssetsController {
-  constructor(private readonly assetsService: AssetsService) {}
+  constructor(
+    private readonly assetsService: AssetsService,
+    private readonly timelineService: AssetTimelineService,
+  ) {}
 
   @Get('acquisition-types')
   @RequirePermission('asset:read:global')
@@ -92,6 +99,26 @@ export class AssetsController {
   @ApiResponse({ status: 200, schema: envelopedSchema(AssetListResponseDto) })
   list(@Query() query: QueryAssetsDto): Promise<AssetListResponseDto> {
     return this.assetsService.list(query);
+  }
+
+  @Get(':id/timeline')
+  @RequirePermission('asset:read:global')
+  @ApiOperation({
+    summary: 'Historia del activo',
+    description:
+      'Compra, movimientos, documentos generados, fotos y tomas físicas en orden cronológico. Cada evento trae documentId cuando tiene documento, descargable en GET /documents/:id/pdf.',
+  })
+  @ApiResponse({ status: 200, schema: envelopedSchema(AssetTimelineResponseDto) })
+  @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
+  timeline(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Query() query: QueryTimelineDto,
+  ): Promise<AssetTimelineResponseDto> {
+    return this.timelineService.timeline(id, {
+      page: query.page,
+      pageSize: query.pageSize,
+      order: query.order,
+    });
   }
 
   @Get(':id')
