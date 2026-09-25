@@ -1,5 +1,7 @@
-# Dokploy detecta este archivo y el Dockerfile de la misma carpeta.
-# En la UI, monta el volumen backend_storage en /data/storage si no usa Compose.
+# Dokploy detecta este archivo y el Dockerfile de la misma carpeta. Ver docs/DEPLOY.md.
+# Dokploy escribe las variables del panel en un .env junto a este archivo: sirve para
+# interpolar ${...} aquí y, vía env_file, llega completo al contenedor del api.
+# `docker compose config` falla con un mensaje claro si falta una variable obligatoria.
 services:
   api:
     build:
@@ -8,14 +10,65 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       NODE_ENV: production
       PORT: 3000
       STORAGE_DRIVER: project
       STORAGE_PROJECT_PATH: /data/storage
-      RUN_MIGRATIONS: "true"
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL es obligatoria (postgres://usuario:clave@host:5432/base). Ver docs/DEPLOY.md}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET es obligatoria (openssl rand -base64 64). Ver docs/DEPLOY.md}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET es obligatoria (openssl rand -base64 64). Ver docs/DEPLOY.md}
+      # Queda impresa en el QR de cada acta firmada; el backend exige https y host público.
+      SIGNATURE_VERIFY_URL: ${SIGNATURE_VERIFY_URL:?SIGNATURE_VERIFY_URL es obligatoria en produccion (https publica del frontend, ej. https://control-interno.unac.edu.co/verificar-firma). Ver docs/DEPLOY.md}
+      # Servicio interno de abajo; solo cambiarla si Gotenberg corre en otro lado.
+      GOTENBERG_URL: ${GOTENBERG_URL:-http://gotenberg:3000}
     volumes:
       - backend_storage:/data/storage
+    depends_on:
+      gotenberg:
+        condition: service_healthy
+
+  # Conversión DOCX→PDF de las actas (POST /forms/libreoffice/convert).
+  # Variante -libreoffice: sin Chromium (el backend no convierte HTML/URLs), imagen más
+  # pequeña y menos superficie. Versión fijada: 8.37.0 es la última 8.x publicada
+  # (2026-09-11) y es la que resuelve hoy la etiqueta flotante `8` que usa el CI; el
+  # digest evita que un re-push de la etiqueta cambie el render de las actas sin aviso.
+  gotenberg:
+    image: gotenberg/gotenberg:8.37.0-libreoffice@sha256:f1d5a60e9ddcfa9b0788ec6ef80b43520ec2a8e9f59d9e2cf965b7416cb09ad1
+    restart: unless-stopped
+    # Sin `ports`: solo accesible desde la red interna del compose (http://gotenberg:3000).
+    command:
+      - gotenberg
+      # Tiempo máximo por petición (el backend no tiene otro límite sobre el fetch).
+      - --api-timeout=60s
+      # Un acta con fotos pesa pocos MB; rechaza cuerpos absurdos.
+      - --api-body-limit=50MB
+      # El backend sube el archivo: nada de descargar URLs remotas ni webhooks (SSRF).
+      - --api-disable-download-from=true
+      - --webhook-disable=true
+      # LibreOffice no puede seguir enlaces de la plantilla hacia la red interna.
+      - --libreoffice-deny-private-ips=true
+      # Arranca LibreOffice al iniciar: el healthcheck lo cubre y la primera acta no espera.
+      - --libreoffice-auto-start=true
+      - --libreoffice-start-timeout=30s
+      # Cola acotada: bajo carga responde 503 en vez de acumular peticiones hasta el timeout.
+      - --libreoffice-max-queue-size=20
+      - --libreoffice-restart-after=10
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--fail", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
 
 volumes:
   backend_storage:
