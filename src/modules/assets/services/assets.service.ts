@@ -260,12 +260,17 @@ export class AssetsService {
     if (category.requiresSerialNumber && !(dto.serialNumber ?? asset.serialNumber)) {
       throw new ApiException(ErrorCode.AssetSerialRequired);
     }
-    const customWrites = dto.customValues
-      ? this.buildCustomWrites(
-          await this.dynamicFieldsService.effectiveFields(nextCategoryId),
-          dto.customValues,
-        )
-      : null;
+    const categoryChanged = nextCategoryId !== asset.categoryId;
+    const customWrites =
+      dto.customValues || categoryChanged
+        ? this.buildCustomWrites(
+            await this.dynamicFieldsService.effectiveFields(nextCategoryId),
+            {
+              ...(categoryChanged ? await this.currentCustomValues(asset.id) : {}),
+              ...(dto.customValues ?? {}),
+            },
+          )
+        : null;
     const barcode = dto.barcode !== undefined ? dto.barcode || null : undefined;
     const movement = editMovement(asset, dto);
     let updated: Asset;
@@ -274,6 +279,7 @@ export class AssetsService {
         assetId: asset.id,
         actorId: actor.id,
         patch: {
+          ...(categoryChanged ? { categoryId: nextCategoryId } : {}),
           ...(dto.description !== undefined ? { description: dto.description } : {}),
           ...(dto.model !== undefined ? { model: dto.model } : {}),
           ...(barcode !== undefined ? { barcode } : {}),
@@ -445,6 +451,15 @@ export class AssetsService {
       },
     });
     return this.toDetail(updated);
+  }
+
+  private async currentCustomValues(
+    assetId: string,
+  ): Promise<Record<string, unknown>> {
+    const rows = await this.assetsRepository.findCustomValues(assetId);
+    return Object.fromEntries(
+      rows.map((item) => [item.code, fromCustomValueColumns(item.type, item.row)]),
+    );
   }
 
   private async replaceLegacyCode(

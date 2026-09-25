@@ -40,6 +40,7 @@ export interface CreateAssetRecord {
 }
 
 export interface UpdateAssetRecord {
+  readonly categoryId?: string;
   readonly description?: string;
   readonly model?: string | null;
   readonly barcode?: string | null;
