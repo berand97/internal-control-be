@@ -64,8 +64,8 @@ const fieldInstructions = (xml) => [
 ];
 
 // Metadatos del paquete (autor, último editor, …). Solo se revisan si el
-// llamador lo pide: la plantilla OCI-01-55 versionada aún conserva el autor
-// del ejemplo en docProps/core.xml.
+// llamador lo pide; las dos plantillas versionadas (OCI-01-55 y OCI-01-65) se
+// construyen con clearAuthorMetadata y pasan con { metadata: true }.
 const METADATA_PARTS = /^docProps\/(core|app|custom)\.xml$/;
 
 export const findLeftovers = (docx, sample, { metadata = false } = {}) => {

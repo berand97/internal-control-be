@@ -578,4 +578,14 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     message:
       'Tu rol está asignado a una unidad organizacional, pero aún no está definido qué centros de costo cubre una unidad, así que no da acceso. Pide a Control Interno que te asigne el rol sobre un centro de costo.',
   },
+  [ErrorCode.CostCenterHeadOverlap]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Esa persona ya dirige ese centro de costo en parte del período indicado',
+  },
+  [ErrorCode.CostCenterHeadEnded]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'La jefatura ya terminó',
+  },
 };

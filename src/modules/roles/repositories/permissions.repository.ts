@@ -38,4 +38,20 @@ export class TypeOrmPermissionsRepository implements PermissionsRepository {
       ];
     });
   }
+
+  async findHeadedCostCenterIds(userId: string): Promise<ReadonlyArray<string>> {
+    const rows = await this.dataSource.query<Array<{ cost_center_id: string }>>(
+      `
+      SELECT DISTINCT h.cost_center_id
+      FROM app_user u
+      JOIN cost_center_head h ON h.person_id = u.person_id
+      WHERE u.id = $1
+        AND h.valid_from <= NOW()
+        AND (h.valid_until IS NULL OR h.valid_until > NOW())
+      ORDER BY h.cost_center_id
+      `,
+      [userId],
+    );
+    return rows.map((row) => row.cost_center_id);
+  }
 }
