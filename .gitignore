@@ -59,3 +59,7 @@ storage/generated/
 storage/attachments/
 # typescript incremental build info
 *.tsbuildinfo
+
+# Dumps de base de datos: traen hashes y secretos MFA. Nunca al repo.
+db/
+*.dump
