@@ -4,6 +4,13 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
+import {
+  assertTemplateClean,
+  OCI_01_55_SAMPLE,
+  removeInvisibleRuns,
+  removeOrphanExternalRelationships,
+} from './template-leftovers.mjs';
+
 const require = createRequire(import.meta.url);
 const PizZip = require('pizzip');
 
@@ -32,7 +39,6 @@ const ROW_TAGS = [
   '{{estado}}{{/activos}}',
 ];
 
-const FORBIDDEN = ['LEIZ', 'PADILLA', 'MONICA', '1006799678', '1.037.595.676', '0092', '16762', 'docs.google.com', 'MERGEFIELD'];
 
 const escape = (text) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
@@ -169,6 +175,8 @@ document = replaceInParagraphs(
         /docs\.google\.com|nk de fotograf|Link de/.test(text) ? `${open}${close}` : match,
       ),
 );
+document = removeInvisibleRuns(document);
+document = replaceText(document, `9${FIELDS.TACTIVOS}`, FIELDS.TACTIVOS);
 document = replaceText(document, 'MONICA ELIANA PEÑA', '{{auditor.nombre}}');
 document = replaceText(document, '1.037.595.676', '{{auditor.documento}}');
 document = replaceInParagraphs(
@@ -209,13 +217,16 @@ zip.file('word/header1.xml', header);
 const settings = zip.file('word/settings.xml').asText().replace(/<w:mailMerge>.*?<\/w:mailMerge>/s, '');
 zip.file('word/settings.xml', settings);
 
+for (const rels of Object.keys(zip.files).filter((name) => /^word\/_rels\/.+\.xml\.rels$/.test(name))) {
+  const owner = zip.file(rels.replace('_rels/', '').replace(/\.rels$/, ''));
+  zip.file(rels, removeOrphanExternalRelationships(zip.file(rels).asText(), owner ? owner.asText() : ''));
+}
+
+const output = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+assertTemplateClean(output, OCI_01_55_SAMPLE);
+await writeFile(target, output);
 const plain = ['word/document.xml', 'word/header1.xml']
   .map((name) => zip.file(name).asText().replace(/<[^>]+>/g, ''))
   .join('\n');
-const leaked = FORBIDDEN.filter((value) => plain.includes(value));
-if (leaked.length > 0) {
-  throw new Error(`La plantilla aún contiene datos del ejemplo: ${leaked.join(', ')}`);
-}
-await writeFile(target, zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' }));
 console.log(`Plantilla escrita en ${target}`);
 console.log([...plain.matchAll(/\{\{[^}]+\}\}/g)].map((match) => match[0]).join(' '));
