@@ -30,6 +30,13 @@ const CONDITION_LABELS: Record<string, string> = {
   OBSOLETE: 'Obsoleto',
 };
 
+export const UNVERIFIED_CONDITION = 'Sin verificar';
+
+const conditionLabel = (condition: string | null, flags: ReadonlyArray<string>): string =>
+  condition === null || flags.includes('PHYSICAL_CONDITION_UNKNOWN')
+    ? UNVERIFIED_CONDITION
+    : (CONDITION_LABELS[condition] ?? condition);
+
 export interface DocumentRequestPayload {
   readonly formatKey: string;
   readonly entityType?: string;
@@ -742,7 +749,7 @@ export class DocumentEngineService {
     const assetIds = payload.assetIds ?? [];
     const assets = assetIds.length
       ? ((await manager.query(
-          `SELECT a.id, a.internal_code, a.description, a.physical_condition, o.legacy_asset_id,
+          `SELECT a.id, a.internal_code, a.description, a.physical_condition, a.data_quality_flags, o.legacy_asset_id,
              (SELECT value FROM asset_identifier i WHERE i.asset_id = a.id AND i.identifier_type = 'VISIBLE_CODE' AND i.valid_to IS NULL LIMIT 1) AS visible_code,
              (SELECT value FROM asset_identifier i WHERE i.asset_id = a.id AND i.identifier_type = 'LEGACY_CODE' AND i.valid_to IS NULL ORDER BY i.created_at LIMIT 1) AS legacy_code
            FROM asset a LEFT JOIN asset_import_origin o ON o.asset_id = a.id
@@ -752,7 +759,8 @@ export class DocumentEngineService {
           id: string;
           internal_code: string;
           description: string;
-          physical_condition: string;
+          physical_condition: string | null;
+          data_quality_flags: string[];
           legacy_asset_id: string | null;
           visible_code: string | null;
           legacy_code: string | null;
@@ -809,7 +817,7 @@ export class DocumentEngineService {
         descripcion: asset.description,
         unidades: 1,
         observacion: payload.assetNotes?.[asset.id] ?? '',
-        estado: CONDITION_LABELS[asset.physical_condition] ?? asset.physical_condition,
+        estado: conditionLabel(asset.physical_condition, asset.data_quality_flags),
       })),
       totalElementos: ordered.length,
       campos: payload.fields ?? {},
