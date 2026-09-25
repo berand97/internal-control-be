@@ -551,4 +551,16 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Este módulo no se puede activar o desactivar',
   },
+  [ErrorCode.ScopeNoCostCenter]: {
+    httpStatus: 403,
+    action: 'CONTACT_SUPPORT',
+    message:
+      'Tu rol solo da acceso a los centros de costo que tengas asignados y no tienes ninguno. Pide a Control Interno que te asigne el rol sobre tu centro de costo.',
+  },
+  [ErrorCode.ScopeOrgUnitUnresolved]: {
+    httpStatus: 403,
+    action: 'CONTACT_SUPPORT',
+    message:
+      'Tu rol está asignado a una unidad organizacional, pero aún no está definido qué centros de costo cubre una unidad, así que no da acceso. Pide a Control Interno que te asigne el rol sobre un centro de costo.',
+  },
 };

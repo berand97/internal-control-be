@@ -98,4 +98,17 @@ describe('PermissionsService', () => {
     await service.getEffectivePermissions('user-1');
     expect(repository.findEffectivePermissions).toHaveBeenCalledTimes(2);
   });
+  it('costCenterScope resuelve centros desde los permisos efectivos del usuario', async () => {
+    vi.mocked(repository.findEffectivePermissions).mockResolvedValue([
+      { permissionCode: 'asset:read:org_unit', userScopeType: 'COST_CENTER', userScopeId: 'cc-1' },
+      { permissionCode: 'asset:read:org_unit', userScopeType: 'ORG_UNIT', userScopeId: 'ou-1' },
+    ]);
+    await expect(
+      service.costCenterScope('user-1', 'asset:read:global', 'asset:read:org_unit'),
+    ).resolves.toEqual({ kind: 'COST_CENTERS', costCenterIds: ['cc-1'] });
+    await expect(
+      service.costCenterScope('user-1', 'loan:approve:global', 'loan:approve:org_unit'),
+    ).resolves.toEqual({ kind: 'DENIED' });
+    expect(repository.findEffectivePermissions).toHaveBeenCalledTimes(1);
+  });
 });
