@@ -8,6 +8,7 @@ import type { FeatureSnapshot } from '../../../features/feature-catalog.js';
 import { FeatureResponseDto } from '../../../features/dto/feature.response.dto.js';
 import type { AppUser } from '../../entities/app-user.entity.js';
 import type { AuditLog } from '../../entities/audit-log.entity.js';
+import type { MfaStatus } from '../../services/mfa-account.service.js';
 import { LoginEventResponseDto } from './login-event.response.dto.js';
 import { NavigationItemResponseDto } from './navigation-item.response.dto.js';
 import { ResourceCapabilityResponseDto } from './resource-capability.response.dto.js';
@@ -46,6 +47,26 @@ export class MeResponseDto {
 
   @ApiProperty({ description: 'Indica si el segundo factor está activado' })
   readonly mfaEnabled!: boolean;
+
+  @ApiProperty({
+    description:
+      'Códigos de recuperación sin usar. 0 si MFA no está activo. Nunca se exponen los códigos: solo se muestran al generarlos.',
+    example: 10,
+    minimum: 0,
+  })
+  readonly recoveryCodesRemaining!: number;
+
+  @ApiProperty({
+    description:
+      'True si algún rol activo exige MFA: la UI no debe ofrecer desactivarlo (el API responde MFA_REQUIRED_BY_ROLE).',
+  })
+  readonly mfaRequiredByRole!: boolean;
+
+  @ApiProperty({
+    description:
+      'True si la sesión actual se abrió (o se elevó al enrolar) con segundo factor. Regenerar códigos y restablecer el MFA de otro usuario lo exigen (MFA_SESSION_REQUIRED).',
+  })
+  readonly mfaSessionVerified!: boolean;
 
   @ApiProperty({
     description:
@@ -108,6 +129,7 @@ export class MeResponseDto {
     granted: ReadonlyArray<GrantedPermission>,
     features: ReadonlyArray<FeatureSnapshot>,
     catalog: ReadonlyArray<NavigationDefinition>,
+    mfa: MfaStatus,
   ): MeResponseDto {
     const person = user.person;
     const access = applyFeatureFlags(
@@ -122,6 +144,9 @@ export class MeResponseDto {
       email: person?.email ?? '',
       status: user.status,
       mfaEnabled: user.mfaEnabled,
+      recoveryCodesRemaining: mfa.recoveryCodesRemaining,
+      mfaRequiredByRole: mfa.requiredByRole,
+      mfaSessionVerified: mfa.sessionVerified,
       mustChangePassword: user.mustChangePassword === true,
       roles,
       scopes: scopes.map((scope): TokenScopeResponseDto => ({
