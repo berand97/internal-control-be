@@ -12,11 +12,14 @@ import { ForgotPasswordDto } from '../dto/forgot-password.dto.js';
 import { LoginDto } from '../dto/login.dto.js';
 import { ResetPasswordDto } from '../dto/reset-password.dto.js';
 import { VerifyMfaDto } from '../dto/verify-mfa.dto.js';
+import { VerifyRecoveryCodeDto } from '../dto/verify-recovery-code.dto.js';
 import { LoginResponseDto } from '../dto/responses/login-response.dto.js';
 import { MeResponseDto } from '../dto/responses/me-response.dto.js';
 import { MfaChallengeResponseDto } from '../dto/responses/mfa-challenge-response.dto.js';
 import { MfaEnrollmentResponseDto } from '../dto/responses/mfa-enrollment.response.dto.js';
+import { MfaSetupConfirmedResponseDto } from '../dto/responses/mfa-setup-confirmed.response.dto.js';
 import { MfaSetupRequiredResponseDto } from '../dto/responses/mfa-setup-required.response.dto.js';
+import { RecoveryLoginResponseDto } from '../dto/responses/recovery-login-response.dto.js';
 import { RefreshResponseDto } from '../dto/responses/refresh-response.dto.js';
 import { AuditAction } from '../enums/audit-action.enum.js';
 import { RefreshTokenFamilyStatus } from '../enums/refresh-token-family-status.enum.js';
@@ -26,6 +29,8 @@ import type { AuthUsersRepository } from '../repositories/auth-users.repository.
 import type { PasswordResetTokensRepository } from '../repositories/password-reset-tokens.repository.interface.js';
 import type { RefreshTokenFamiliesRepository } from '../repositories/refresh-token-families.repository.interface.js';
 import type { RefreshTokenPayload } from '../types/token-payloads.type.js';
+import { MfaAccountService, type MfaProofMethod } from './mfa-account.service.js';
+import { requiresMfaEnrollment } from './mfa-policy.js';
 import { MfaService } from './mfa.service.js';
 import { TokenService } from './token.service.js';
 import { FeatureFlagsService } from '../../features/services/feature-flags.service.js';
@@ -56,11 +61,6 @@ export type LoginOutcome =
   | MfaChallengeOutcome
   | MfaSetupOutcome;
 
-const MFA_REQUIRED_ROLE_CODES = [
-  'SUPER_ADMIN',
-  'INTERNAL_CONTROL_DIRECTOR',
-] as const;
-
 export interface RefreshOutcome {
   readonly response: RefreshResponseDto;
   readonly refreshToken: string;
@@ -88,6 +88,7 @@ export class AuthService {
     private readonly mailService: MailService,
     private readonly featureFlags: FeatureFlagsService,
     private readonly navigationService: NavigationService,
+    private readonly mfaAccount: MfaAccountService,
   ) {}
 
   async login(
@@ -145,7 +146,10 @@ export class AuthService {
     const roleCodes = await this.authUsersRepository.findActiveRoleCodes(
       user.id,
     );
-    if (!user.mustChangePassword && requiresMfaEnrollment(roleCodes)) {
+    if (
+      !user.mustChangePassword &&
+      (requiresMfaEnrollment(roleCodes) || user.mfaEnrollmentRequired)
+    ) {
       return {
         response: MfaSetupRequiredResponseDto.from(
           this.tokenService.signMfaSetupToken(user.id, user.username),
@@ -192,7 +196,58 @@ export class AuthService {
       throw new ApiException(ErrorCode.MfaCodeInvalid);
     }
 
-    return this.issueSession(user, context);
+    return this.issueSession(user, context, 'TOTP');
+  }
+
+  /**
+   * Alternativa a POST /auth/mfa/verify cuando no se tiene el dispositivo: consume un código de recuperación del
+   * usuario del desafío. El código queda usado aunque la sesión se cierre enseguida.
+   */
+  async verifyRecoveryCode(
+    dto: VerifyRecoveryCodeDto,
+    authorizationHeader: string | undefined,
+    context: AuthRequestContext,
+  ): Promise<{
+    readonly response: RecoveryLoginResponseDto;
+    readonly refreshToken: string;
+  }> {
+    const challenge =
+      this.tokenService.verifyMfaChallengeToken(authorizationHeader);
+    const user = await this.authUsersRepository.findByIdWithPerson(
+      challenge.sub,
+    );
+    if (!user || !user.mfaEnabled) {
+      throw new ApiException(ErrorCode.MfaRequired);
+    }
+    this.assertAccountUsable(user);
+
+    const remaining = await this.mfaAccount.consumeForLogin(
+      user,
+      dto.recoveryCode,
+      context,
+    );
+    if (remaining === null) {
+      await this.recordAudit(
+        AuditAction.LoginFailed,
+        user.id,
+        user.id,
+        context,
+        {
+          username: user.username,
+          reason: 'MFA_RECOVERY_CODE_INVALID',
+        },
+      );
+      throw new ApiException(ErrorCode.MfaCodeInvalid);
+    }
+
+    const outcome = await this.issueSession(user, context, 'RECOVERY_CODE');
+    return {
+      response: RecoveryLoginResponseDto.withRemaining(
+        outcome.response,
+        remaining,
+      ),
+      refreshToken: outcome.refreshToken,
+    };
   }
 
   async refresh(
@@ -312,6 +367,8 @@ export class AuthService {
       this.navigationService.listActiveDefinitions(),
     ]);
 
+    const mfa = await this.mfaAccount.status(user, dbUser, roles);
+
     return MeResponseDto.from(
       dbUser,
       roles,
@@ -320,6 +377,7 @@ export class AuthService {
       granted,
       this.featureFlags.list(),
       catalog,
+      mfa,
     );
   }
 
@@ -348,7 +406,10 @@ export class AuthService {
     dto: VerifyMfaDto,
     authorizationHeader: string | undefined,
     context: AuthRequestContext,
-  ): Promise<AuthenticatedLoginOutcome> {
+  ): Promise<{
+    readonly response: MfaSetupConfirmedResponseDto;
+    readonly refreshToken: string;
+  }> {
     const setup = this.tokenService.verifyMfaSetupToken(authorizationHeader);
     const user = await this.authUsersRepository.findByIdWithPerson(setup.sub);
     if (!user || !user.mfaSecret || user.mfaEnabled) {
@@ -359,16 +420,21 @@ export class AuthService {
     if (!codeValid) {
       throw new ApiException(ErrorCode.MfaCodeInvalid);
     }
-    await this.authUsersRepository.enableMfa(user.id);
-    await this.recordAudit(
-      AuditAction.MfaEnabled,
-      user.id,
-      user.id,
+    const recoveryCodes = await this.mfaAccount.completeSetupEnrollment(
+      user,
+      user.mfaSecret,
       context,
-      null,
     );
     user.mfaEnabled = true;
-    return this.issueSession(user, context);
+    user.mfaEnrollmentRequired = false;
+    const outcome = await this.issueSession(user, context, 'TOTP');
+    return {
+      response: MfaSetupConfirmedResponseDto.withCodes(
+        outcome.response,
+        recoveryCodes,
+      ),
+      refreshToken: outcome.refreshToken,
+    };
   }
 
   async forgotPassword(
@@ -483,6 +549,7 @@ export class AuthService {
   private async issueSession(
     user: AppUser,
     context: AuthRequestContext,
+    mfaMethod: MfaProofMethod | null = null,
   ): Promise<AuthenticatedLoginOutcome> {
     const [roles, scopes] = await Promise.all([
       this.authUsersRepository.findActiveRoleCodes(user.id),
@@ -505,6 +572,7 @@ export class AuthService {
       userId: user.id,
       currentJti: jti,
       expiresAt,
+      mfaVerifiedAt: mfaMethod ? now : null,
     });
 
     const accessToken = this.tokenService.signAccessToken({
@@ -514,6 +582,7 @@ export class AuthService {
     await this.authUsersRepository.markLoggedIn(user.id, now);
     await this.recordAudit(AuditAction.Login, user.id, user.id, context, {
       familyId,
+      ...(mfaMethod ? { mfaMethod } : {}),
     });
 
     return {
@@ -620,9 +689,4 @@ export class AuthService {
 export const hashPasswordResetToken = (token: string): string =>
   createHash('sha256').update(token).digest('hex');
 
-export const requiresMfaEnrollment = (
-  roleCodes: ReadonlyArray<string>,
-): boolean =>
-  roleCodes.some((code) =>
-    (MFA_REQUIRED_ROLE_CODES as ReadonlyArray<string>).includes(code),
-  );
+export { requiresMfaEnrollment } from './mfa-policy.js';
