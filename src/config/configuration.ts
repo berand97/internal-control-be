@@ -77,6 +77,7 @@ export interface AppConfig {
   readonly port: number;
   readonly appPublicUrl: string;
   readonly apiPublicUrl: string;
+  readonly apiDocsEnabled: boolean;
   readonly database: DatabaseConfig;
   readonly jwt: JwtConfig;
   readonly argon2: Argon2Config;
@@ -221,6 +222,7 @@ const configuration = (): AppConfig => ({
   port: readNumber('PORT', 3000),
   appPublicUrl: readString('APP_PUBLIC_URL', 'http://localhost:4200'),
   apiPublicUrl: readString('API_PUBLIC_URL', 'http://localhost:3000'),
+  apiDocsEnabled: readBoolean('API_DOCS_ENABLED', process.env['NODE_ENV'] !== 'production'),
   database: {
     url: readRequiredString('DATABASE_URL'),
     logging: readBoolean('DATABASE_LOGGING', false),

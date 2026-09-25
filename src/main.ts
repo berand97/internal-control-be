@@ -1,5 +1,6 @@
 import './instrumentation.js';
 import 'reflect-metadata';
+import type { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -13,29 +14,7 @@ import {
 } from './common/swagger/openapi-tags.js';
 import type { AppConfig } from './config/configuration.js';
 
-async function bootstrap(): Promise<void> {
-  const nestObserveEnabled = Boolean(
-    process.env['OBSERVE_APP_KEY'] && process.env['OBSERVE_APP_SECRET'],
-  );
-  const app = await NestFactory.create(
-    AppModule,
-    nestObserveEnabled && ObserveInstrument
-      ? { instrument: ObserveInstrument }
-      : {},
-  );
-
-  const config = app.get(ConfigService<AppConfig, true>);
-
-  app.use(cookieParser());
-  app.setGlobalPrefix('api/v1');
-  app.useGlobalPipes(createAppValidationPipe());
-  app.enableCors({
-    origin: Array.from(
-      config.getOrThrow('cors.allowedOrigins', { infer: true }),
-    ),
-    credentials: true,
-  });
-
+function publishApiDocs(app: INestApplication): void {
   const openApiBuilder = new DocumentBuilder()
     .setTitle('Control Interno UNAC')
     .setDescription('API del Sistema de Gestión de Activos')
@@ -67,6 +46,34 @@ async function bootstrap(): Promise<void> {
       theme: 'purple',
     }),
   );
+}
+
+async function bootstrap(): Promise<void> {
+  const nestObserveEnabled = Boolean(
+    process.env['OBSERVE_APP_KEY'] && process.env['OBSERVE_APP_SECRET'],
+  );
+  const app = await NestFactory.create(
+    AppModule,
+    nestObserveEnabled && ObserveInstrument
+      ? { instrument: ObserveInstrument }
+      : {},
+  );
+
+  const config = app.get(ConfigService<AppConfig, true>);
+
+  app.use(cookieParser());
+  app.setGlobalPrefix('api/v1');
+  app.useGlobalPipes(createAppValidationPipe());
+  app.enableCors({
+    origin: Array.from(
+      config.getOrThrow('cors.allowedOrigins', { infer: true }),
+    ),
+    credentials: true,
+  });
+
+  if (config.getOrThrow('apiDocsEnabled', { infer: true })) {
+    publishApiDocs(app);
+  }
 
   await app.listen(config.getOrThrow('port', { infer: true }));
 }
