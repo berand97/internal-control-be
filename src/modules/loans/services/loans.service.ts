@@ -244,7 +244,7 @@ export class LoansService {
       order: { createdAt: 'ASC' },
     });
     const attachments = await this.attachments.find({ where: { loanId: id } });
-    const returnFormat = this.documents.formatReadiness(LOAN_RETURN_FORMAT);
+    const returnFormat = await this.documents.formatReadiness(LOAN_RETURN_FORMAT);
     return {
       ...this.toSummary(loan, bogotaDate(new Date())),
       items: items
@@ -559,7 +559,7 @@ export class LoansService {
    * Permiso: el de generación del formato (loan:update:global).
    */
   async regenerateDeliveryAct(id: string, dto: RegenerateDeliveryActDto, actor: AuthenticatedUser) {
-    const { format } = this.documents.formatReadiness(LOAN_DELIVERY_FORMAT);
+    const { format } = await this.documents.formatReadiness(LOAN_DELIVERY_FORMAT);
     if (!(await this.permissions.userHasPermission(actor.id, format.generatePermission))) {
       throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${format.generatePermission}`);
     }
@@ -628,7 +628,7 @@ export class LoansService {
    * (fila del outbox → onGenerated bloquea el préstamo), para no cruzarse con el job.
    */
   async undoDelivery(id: string, dto: UndoDeliveryDto, actor: AuthenticatedUser) {
-    const { format } = this.documents.formatReadiness(LOAN_DELIVERY_FORMAT);
+    const { format } = await this.documents.formatReadiness(LOAN_DELIVERY_FORMAT);
     if (!(await this.permissions.userHasPermission(actor.id, format.generatePermission))) {
       throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${format.generatePermission}`);
     }
@@ -758,7 +758,7 @@ export class LoansService {
    * guarda returnAct.status = PENDING_FORMAT.
    */
   async receiveReturn(id: string, dto: ReceiveReturnDto, actor: AuthenticatedUser) {
-    const readiness = this.documents.formatReadiness(LOAN_RETURN_FORMAT);
+    const readiness = await this.documents.formatReadiness(LOAN_RETURN_FORMAT);
     await this.dataSource.transaction(async (manager) => {
       const loan = await this.lockLoan(manager, id);
       if (loan.status !== 'PENDING_RECEPTION') {

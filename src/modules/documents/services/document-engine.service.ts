@@ -13,7 +13,6 @@ import { MfaAccountService } from '../../auth/services/mfa-account.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import {
   type DocumentFormat,
-  DOCUMENT_FORMAT_CATALOG,
   formatNotReadyReasons,
   formatNumber,
   initialSequenceValue,
@@ -31,6 +30,7 @@ import {
 import { DocumentLifecycleRegistry } from '../lifecycle/document-lifecycle.registry.js';
 import { PDF_CONVERTER, type PdfConverter } from '../pdf/pdf-converter.js';
 import { SIGNATURE_PROVIDER, type SignatureProvider, type SignatureRequest } from '../signature/signature-provider.js';
+import { bogotaToday, DocumentFormatCatalogService } from './document-format-catalog.service.js';
 import { linkState, newSecret, sha256Hex, SigningLinkService, type SigningLinkRow } from './signing-link.service.js';
 
 export interface VoidForEntityInput {
@@ -184,15 +184,18 @@ export class DocumentEngineService {
     private readonly lifecycle: DocumentLifecycleRegistry,
     private readonly links: SigningLinkService,
     private readonly mfaAccount: MfaAccountService,
-    @Inject(DOCUMENT_FORMAT_CATALOG) private readonly catalog: ReadonlyArray<DocumentFormat>,
+    private readonly catalog: DocumentFormatCatalogService,
   ) {}
 
   /**
-   * Si el motor puede generar el formato: con código SGC y firmantes definidos. Los procesos lo consultan antes
-   * de encolar para no romperse cuando el formato institucional aún no existe (acta de devolución).
+   * Si el motor puede generar el formato hoy: su versión vigente tiene código SGC y firmantes. Los procesos lo
+   * consultan antes de encolar para no romperse cuando el formato institucional aún no existe (acta de devolución).
    */
-  formatReadiness(formatKey: string): { readonly format: DocumentFormat; readonly ready: boolean; readonly reasons: string[] } {
-    const format = this.requireFormat(formatKey);
+  async formatReadiness(
+    formatKey: string,
+    manager: EntityManager = this.dataSource.manager,
+  ): Promise<{ readonly format: DocumentFormat; readonly ready: boolean; readonly reasons: string[] }> {
+    const format = await this.catalog.current(formatKey, manager);
     const reasons = formatNotReadyReasons(format);
     return { format, ready: reasons.length === 0, reasons };
   }
@@ -207,41 +210,83 @@ export class DocumentEngineService {
     }
   }
 
+  /** Versión vigente de cada formato, ordenados por código SGC (sin código al final), con plantilla y consecutivo. */
   async formats() {
-    const today = new Date().toISOString().slice(0, 10);
+    const formats = (await this.catalog.currentAll()).sort(
+      (a, b) =>
+        Number(a.sgcCode === null) - Number(b.sgcCode === null) ||
+        (a.sgcCode ?? '').localeCompare(b.sgcCode ?? '') ||
+        a.key.localeCompare(b.key),
+    );
     const result = [];
-    for (const format of this.catalog) {
-      const template = await this.activeTemplate(format.key, today, this.dataSource.manager);
-      const [sequence] = (await this.dataSource.query(
-        'SELECT current_value FROM document_sequence WHERE format_key = $1 AND period = $2',
-        [format.key, periodFor(format, new Date())],
-      )) as Array<{ current_value: string }>;
-      result.push({
-        ...format,
-        ready: formatNotReadyReasons(format).length === 0,
-        activeTemplate: template
-          ? { id: template.id, version: template.sgc_version, effectiveDate: template.effective_date }
-          : null,
-        lastIssuedNumber: sequence ? Number(sequence.current_value) : null,
-      });
+    for (const format of formats) {
+      result.push(await this.formatSummary(format));
     }
     return result;
   }
 
+  /** Un formato con su versión vigente, como en GET /documents/formats. */
+  async formatSummary(format: DocumentFormat) {
+    const today = new Date().toISOString().slice(0, 10);
+    const template = await this.activeTemplate(format.key, today, this.dataSource.manager);
+    const [sequence] = (await this.dataSource.query(
+      'SELECT current_value FROM document_sequence WHERE format_key = $1 AND period = $2',
+      [format.key, periodFor(format, new Date())],
+    )) as Array<{ current_value: string }>;
+    const binding = this.catalog.bindingFor(format.key);
+    const scheduled = await this.catalog.scheduled(format.key);
+    return {
+      key: format.key,
+      sgcCode: format.sgcCode,
+      version: format.version,
+      name: format.name,
+      numbering: format.numbering,
+      readPermission: format.readPermission,
+      generatePermission: format.generatePermission,
+      signers: format.signers,
+      pendingDecisions: format.pendingDecisions,
+      ready: formatNotReadyReasons(format).length === 0,
+      activeTemplate: template ? { id: template.id, version: template.sgc_version, effectiveDate: template.effective_date } : null,
+      lastIssuedNumber: sequence ? Number(sequence.current_value) : null,
+      versionId: format.versionId,
+      versionNumber: format.versionNumber,
+      effectiveFrom: format.effectiveFrom,
+      scheduledVersion: scheduled
+        ? { versionId: scheduled.versionId, versionNumber: scheduled.versionNumber, effectiveFrom: scheduled.effectiveFrom ?? '' }
+        : null,
+      process: binding
+        ? {
+            name: binding.process,
+            requiredSigners:
+              binding.signers === 'ANY'
+                ? null
+                : Object.entries(binding.signers).map(([role, source]) => ({ role, source })),
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Plantilla Word del formato con su fecha de vigencia. Se registra con el código SGC de la versión del formato que
+   * regirá cuando la plantilla empiece a usarse (la de su fecha de vigencia, o la vigente hoy si la fecha ya pasó).
+   * sgcVersion (versión impresa en formato.version) por defecto es la de esa versión del formato.
+   */
   async uploadTemplate(
     formatKey: string,
     file: { readonly buffer: Buffer; readonly originalname: string },
-    meta: { readonly sgcVersion: string; readonly effectiveDate: string },
+    meta: { readonly sgcVersion?: string; readonly effectiveDate: string },
     actorId: string | null,
   ) {
-    const format = this.requireFormat(formatKey);
+    const today = bogotaToday();
+    const format = await this.catalog.current(formatKey, this.dataSource.manager, meta.effectiveDate > today ? meta.effectiveDate : today);
     if (!format.sgcCode) {
       // La plantilla se registra con su código SGC (document_template_version.sgc_code NOT NULL).
       throw new ApiException(ErrorCode.DocumentFormatNotReady, `El formato ${format.key} aún no tiene código SGC institucional`);
     }
+    const sgcVersion = meta.sgcVersion?.trim() || format.version || '';
     const placeholders = readDocxPlaceholders(file.buffer);
     const stored = await this.storage.put({
-      key: `document-templates/${format.key}/${meta.effectiveDate}-v${meta.sgcVersion}.docx`,
+      key: `document-templates/${format.key}/${meta.effectiveDate}-v${sgcVersion}.docx`,
       body: file.buffer,
       contentType: DOCX_MIME,
     });
@@ -252,7 +297,7 @@ export class DocumentEngineService {
       [
         format.key,
         format.sgcCode,
-        meta.sgcVersion,
+        sgcVersion,
         meta.effectiveDate,
         stored.driver,
         stored.key,
@@ -265,14 +310,13 @@ export class DocumentEngineService {
     return { id: row?.id, formatKey: format.key, placeholders };
   }
 
-  enqueue(manager: EntityManager, payload: DocumentRequestPayload, requestedBy: string | null): Promise<string> {
-    this.assertReady(this.requireFormat(payload.formatKey));
-    return (
-      manager.query(
-        `INSERT INTO document_request (format_key, payload, requested_by) VALUES ($1, $2, $3) RETURNING id`,
-        [payload.formatKey, JSON.stringify(payload), requestedBy],
-      ) as Promise<Array<{ id: string }>>
-    ).then((rows) => rows[0]?.id ?? '');
+  async enqueue(manager: EntityManager, payload: DocumentRequestPayload, requestedBy: string | null): Promise<string> {
+    this.assertReady(await this.catalog.current(payload.formatKey, manager));
+    const rows = (await manager.query(
+      `INSERT INTO document_request (format_key, payload, requested_by) VALUES ($1, $2, $3) RETURNING id`,
+      [payload.formatKey, JSON.stringify(payload), requestedBy],
+    )) as Array<{ id: string }>;
+    return rows[0]?.id ?? '';
   }
 
   async processPending(limit = 20): Promise<{ generated: number; failed: number }> {
@@ -324,7 +368,7 @@ export class DocumentEngineService {
   }
 
   async generate(payload: DocumentRequestPayload, actorId: string): Promise<GeneratedDocument> {
-    const format = this.requireFormat(payload.formatKey);
+    const format = await this.catalog.current(payload.formatKey);
     await this.assertPermission(actorId, format.generatePermission);
     const document = await this.dataSource.transaction((manager) => this.generateWithin(manager, payload, actorId));
     await this.afterGeneration(document.id);
@@ -359,7 +403,8 @@ export class DocumentEngineService {
     actorId: string | null,
     options: { readonly documentDate?: Date } = {},
   ): Promise<GeneratedDocument> {
-    const format = this.requireFormat(payload.formatKey);
+    // La versión vigente al generar queda enlazada al acta (format_version_id): firmantes y etiquetas salen de ella.
+    const format = await this.catalog.current(payload.formatKey, manager);
     this.assertReady(format);
     const now = new Date();
     const template = await this.activeTemplate(format.key, now.toISOString().slice(0, 10), manager);
@@ -382,8 +427,8 @@ export class DocumentEngineService {
 
     const [row] = (await manager.query(
       `INSERT INTO document (format_key, number, period, sequence_value, template_version_id, status, entity_type,
-         entity_id, data, docx_driver, docx_key, docx_hash, pdf_driver, pdf_key, pdf_hash, created_by)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING_SIGNATURE', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         entity_id, data, docx_driver, docx_key, docx_hash, pdf_driver, pdf_key, pdf_hash, created_by, format_version_id)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING_SIGNATURE', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING id`,
       [
         format.key,
@@ -401,6 +446,7 @@ export class DocumentEngineService {
         storedPdf.key,
         storedPdf.checksumSha256,
         actorId,
+        format.versionId,
       ],
     )) as Array<{ id: string }>;
     const documentId = row?.id ?? '';
@@ -464,7 +510,8 @@ export class DocumentEngineService {
       signer_document: string | null;
       email: string | null;
     }>;
-    const format = this.requireFormat(document.format_key);
+    // La versión con que se emitió el acta, no la vigente: el sobre y la hoja de firmas describen sus reglas.
+    const format = await this.catalog.forDocument(document.id, manager);
     return {
       documentId: document.id,
       documentNumber: document.number,
@@ -658,8 +705,7 @@ export class DocumentEngineService {
 
   /** Reenvía el enlace de firma del turno actual (invalida el anterior). Permiso de generación del formato. */
   async resendSigningLink(documentId: string, order: number, actor: AuthenticatedUser) {
-    const document = await this.documentRow(documentId);
-    await this.assertPermission(actor.id, this.requireFormat(document.format_key).generatePermission);
+    await this.assertPermission(actor.id, (await this.catalog.forDocument(documentId)).generatePermission);
     await this.links.resend(documentId, order, actor.id);
     return this.detail(documentId, actor);
   }
@@ -757,7 +803,7 @@ export class DocumentEngineService {
   async signingLinkView(token: string) {
     const { link, document, current, status } = await this.linkContext(this.dataSource.manager, token, false);
     const active = status === 'ACTIVE';
-    const format = this.requireFormat(document.format_key);
+    const format = await this.catalog.forDocument(document.id);
     const [slot] = (await this.dataSource.query(
       'SELECT signer_name FROM document_signature WHERE document_id = $1 AND sign_order = $2',
       [link.document_id, link.sign_order],
@@ -949,7 +995,7 @@ export class DocumentEngineService {
     context: { readonly ipAddress: string | null; readonly userAgent: string | null },
   ) {
     const document = await this.documentRow(documentId);
-    const format = this.requireFormat(document.format_key);
+    const format = await this.catalog.forDocument(document.id);
     await this.assertPermission(actor.id, format.generatePermission);
     const [person] = (await this.dataSource.query(
       'SELECT id, first_name, last_name, document_number, position_title, email FROM person WHERE id = $1',
@@ -1241,7 +1287,7 @@ export class DocumentEngineService {
 
   async detail(documentId: string, actor?: AuthenticatedUser) {
     const document = await this.documentRow(documentId);
-    const format = this.requireFormat(document.format_key);
+    const format = await this.catalog.forDocument(document.id);
     if (actor) {
       await this.assertCanRead(documentId, format.readPermission, actor.id);
     }
@@ -1343,7 +1389,7 @@ export class DocumentEngineService {
 
   async download(documentId: string, kind: 'pdf' | 'docx', actorId: string) {
     const document = await this.documentRow(documentId);
-    await this.assertCanRead(documentId, this.requireFormat(document.format_key).readPermission, actorId);
+    await this.assertCanRead(documentId, (await this.catalog.forDocument(documentId)).readPermission, actorId);
     const signed = kind === 'pdf' && document.signed_pdf_driver && document.signed_pdf_key;
     const body = signed
       ? await this.storage.getFrom(document.signed_pdf_driver as StorageDriver, document.signed_pdf_key as string)
@@ -1567,14 +1613,6 @@ export class DocumentEngineService {
       throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el documento');
     }
     return row;
-  }
-
-  private requireFormat(key: string): DocumentFormat {
-    const format = this.catalog.find((item) => item.key === key);
-    if (!format) {
-      throw new ApiException(ErrorCode.ValidationFailed, `Formato desconocido: ${key}`);
-    }
-    return format;
   }
 
   private async assertCanRead(documentId: string, permission: string, actorId: string): Promise<void> {

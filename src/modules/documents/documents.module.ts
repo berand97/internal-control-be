@@ -6,7 +6,7 @@ import { MailModule } from '../../shared/mail/mail.module.js';
 import { RolesModule } from '../roles/roles.module.js';
 import { DocumentsController } from './documents.controller.js';
 import { DocumentRequestsJob } from './jobs/document-requests.job.js';
-import { DOCUMENT_FORMAT_CATALOG, DOCUMENT_FORMATS } from './domain/document-formats.js';
+import { DocumentFormatCatalogService } from './services/document-format-catalog.service.js';
 import { DocumentLifecycleRegistry } from './lifecycle/document-lifecycle.registry.js';
 import { GotenbergPdfConverter, PDF_CONVERTER } from './pdf/pdf-converter.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
@@ -29,7 +29,7 @@ import { SignatureVerificationController } from './signature-verification.contro
     StubSignatureProvider,
     InternalSignatureProvider,
     { provide: PDF_CONVERTER, useClass: GotenbergPdfConverter },
-    { provide: DOCUMENT_FORMAT_CATALOG, useValue: DOCUMENT_FORMATS },
+    DocumentFormatCatalogService,
     {
       provide: SIGNATURE_PROVIDER,
       inject: [ConfigService, InternalSignatureProvider, StubSignatureProvider],
@@ -40,6 +40,6 @@ import { SignatureVerificationController } from './signature-verification.contro
       ) => (config.getOrThrow('documents', { infer: true }).signatureProvider === 'stub' ? stub : internal),
     },
   ],
-  exports: [DocumentEngineService, DocumentLifecycleRegistry],
+  exports: [DocumentEngineService, DocumentLifecycleRegistry, DocumentFormatCatalogService],
 })
 export class DocumentsModule {}

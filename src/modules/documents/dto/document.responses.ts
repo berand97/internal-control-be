@@ -182,6 +182,39 @@ export class DocumentFormatSignerDto {
   readonly source!: (typeof SIGNER_SOURCES)[number];
 }
 
+
+export class DocumentFormatScheduledVersionDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly versionId!: string;
+
+  @ApiProperty({ type: 'integer' })
+  readonly versionNumber!: number;
+
+  @ApiProperty({ type: 'string', format: 'date', description: 'Desde cuándo regirá (medianoche de Bogotá)' })
+  readonly effectiveFrom!: string;
+}
+
+export class DocumentFormatProcessSignerDto {
+  @ApiProperty({ example: 'ENTREGA' })
+  readonly role!: string;
+
+  @ApiProperty({ enum: SIGNER_SOURCES, enumName: 'DocumentSignerSource' })
+  readonly source!: (typeof SIGNER_SOURCES)[number];
+}
+
+export class DocumentFormatProcessDto {
+  @ApiProperty({ example: 'Préstamos (acta de entrega)', description: 'Proceso de negocio que genera el formato (enlace en código)' })
+  readonly name!: string;
+
+  @ApiProperty({
+    type: [DocumentFormatProcessSignerDto],
+    nullable: true,
+    description:
+      'Roles y origen que el proceso asigna: toda versión debe tener exactamente estos (si no, 409 DOCUMENT_FORMAT_BREAKS_PROCESS). null: el proceso acepta cualquier conjunto de roles',
+  })
+  readonly requiredSigners!: DocumentFormatProcessSignerDto[] | null;
+}
+
 export class DocumentActiveTemplateDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
@@ -205,7 +238,7 @@ export class DocumentFormatResponseDto {
   })
   readonly sgcCode!: string | null;
 
-  @ApiProperty({ type: 'string', nullable: true, description: 'Versión SGC declarada en el catálogo del backend; null sin formato emitido' })
+  @ApiProperty({ type: 'string', nullable: true, description: 'Versión SGC de la versión vigente del formato; null sin formato emitido' })
   readonly version!: string | null;
 
   @ApiProperty({
@@ -237,6 +270,95 @@ export class DocumentFormatResponseDto {
 
   @ApiProperty({ type: 'integer', nullable: true, description: 'Valor actual del consecutivo del periodo en curso; null si aún no existe' })
   readonly lastIssuedNumber!: number | null;
+
+  @ApiProperty({ format: 'uuid', description: 'Versión vigente del formato (la que usará la próxima acta)' })
+  readonly versionId!: string;
+
+  @ApiProperty({ type: 'integer', description: 'Número de la versión vigente (1, 2, 3…); no es la versión SGC' })
+  readonly versionNumber!: number;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'date',
+    nullable: true,
+    description: 'Desde cuándo rige la versión vigente. null: versión inicial sembrada desde el catálogo en código, vigente desde siempre',
+  })
+  readonly effectiveFrom!: string | null;
+
+  @ApiProperty({
+    type: () => DocumentFormatScheduledVersionDto,
+    nullable: true,
+    description: 'Próxima versión ya creada con vigencia futura; null si no hay',
+  })
+  readonly scheduledVersion!: DocumentFormatScheduledVersionDto | null;
+
+  @ApiProperty({
+    type: () => DocumentFormatProcessDto,
+    nullable: true,
+    description: 'Proceso de negocio enchufado al formato (en código). null: formato libre, solo se genera con POST /documents',
+  })
+  readonly process!: DocumentFormatProcessDto | null;
+}
+
+export const DOCUMENT_FORMAT_VERSION_STATUSES = ['CURRENT', 'SCHEDULED', 'SUPERSEDED'] as const;
+
+// ---------- GET/POST /documents/formats/:formatKey/versions ----------
+
+export class DocumentFormatVersionResponseDto {
+  @ApiProperty({ example: 'LOAN_RETURN' })
+  readonly key!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  readonly versionId!: string;
+
+  @ApiProperty({ type: 'integer' })
+  readonly versionNumber!: number;
+
+  @ApiProperty({
+    enum: DOCUMENT_FORMAT_VERSION_STATUSES,
+    enumName: 'DocumentFormatVersionStatus',
+    description: 'CURRENT: la que usa la próxima acta; SCHEDULED: vigencia futura; SUPERSEDED: reemplazada (sus actas la conservan)',
+  })
+  readonly status!: (typeof DOCUMENT_FORMAT_VERSION_STATUSES)[number];
+
+  @ApiProperty({ type: 'string', format: 'date', nullable: true, description: 'null solo en la versión inicial sembrada' })
+  readonly effectiveFrom!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, example: 'OCI-01-65', description: 'null solo en la versión sembrada de un formato sin código emitido' })
+  readonly sgcCode!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Versión SGC' })
+  readonly version!: string | null;
+
+  @ApiProperty()
+  readonly name!: string;
+
+  @ApiProperty({ type: () => DocumentFormatNumberingDto })
+  readonly numbering!: DocumentFormatNumberingDto;
+
+  @ApiProperty({ example: 'loan:read:global' })
+  readonly readPermission!: string;
+
+  @ApiProperty({ example: 'loan:update:global' })
+  readonly generatePermission!: string;
+
+  @ApiProperty({ type: [DocumentFormatSignerDto] })
+  readonly signers!: DocumentFormatSignerDto[];
+
+  @ApiProperty({ type: [String] })
+  readonly pendingDecisions!: string[];
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Motivo del cambio que dio quien creó la versión' })
+  readonly changeReason!: string | null;
+
+  @ApiProperty({ type: () => DocumentListRequesterDto, nullable: true, description: 'null en la versión sembrada por migración' })
+  readonly createdBy!: DocumentListRequesterDto | null;
+
+  @ApiProperty({ type: 'string', format: 'date-time' })
+  readonly createdAt!: string;
+
+  @ApiProperty({ type: 'integer', description: 'Actas emitidas con esta versión' })
+  readonly documentCount!: number;
 }
 
 // ---------- POST /documents/formats/:formatKey/templates ----------
@@ -706,6 +828,7 @@ export const DOCUMENT_RESPONSE_MODELS = [
   DocumentListResponseDto,
   DocumentListItemDto,
   DocumentFormatResponseDto,
+  DocumentFormatVersionResponseDto,
   UploadedTemplateResponseDto,
   GeneratedDocumentResponseDto,
   DocumentDetailResponseDto,
