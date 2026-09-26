@@ -394,4 +394,56 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
       spy.mockRestore();
     }
   });
+
+  it('administración de formatos: crear formato, historial y versión nueva cumplen el esquema', async () => {
+    const director = await person('Administradora');
+    await dataSource.query(
+      `INSERT INTO user_role (user_id, role_id, scope_type) SELECT $1, id, 'GLOBAL' FROM role WHERE code = 'INTERNAL_CONTROL_DIRECTOR'`,
+      [director.userId],
+    );
+    const auth = { Authorization: `Bearer ${director.token}` };
+    const key = `IT-CONTRATO-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const version = {
+      sgcCode: 'PRUEBA-CONTRATO',
+      sgcVersion: '1',
+      name: 'Formato de prueba del contrato',
+      signers: [
+        { order: 1, role: 'RECIBE', label: 'Recibe', source: 'RESPONSIBLE' },
+        { order: 2, role: 'AUDITA', label: 'Control Interno', source: 'REQUEST' },
+      ],
+      numbering: { width: 4, perYear: true, lastIssued: 0 },
+      pendingDecisions: ['Solo para el test de contrato'],
+    };
+    try {
+      const created = await http()
+        .post('/api/v1/documents/formats')
+        .set(auth)
+        .send({ ...version, key, readPermission: 'asset:read:global', generatePermission: 'asset:update:global' })
+        .expect(201);
+      expectConforms('post', '/api/v1/documents/formats', 201, created.body);
+
+      const next = await http()
+        .post(`/api/v1/documents/formats/${key}/versions`)
+        .set(auth)
+        .send({ ...version, sgcVersion: '2', changeReason: 'Prueba de contrato' })
+        .expect(201);
+      expect(next.body.data).toMatchObject({ versionNumber: 2, status: 'CURRENT' });
+      expectConforms('post', '/api/v1/documents/formats/{formatKey}/versions', 201, next.body);
+
+      const history = await http().get(`/api/v1/documents/formats/${key}/versions`).set(auth).expect(200);
+      expect(history.body.data).toHaveLength(2);
+      expectConforms('get', '/api/v1/documents/formats/{formatKey}/versions', 200, history.body);
+      // La versión inicial sembrada (effectiveFrom y createdBy null) también cumple.
+      const seeded = await http().get('/api/v1/documents/formats/LOAN_RETURN/versions').set(auth).expect(200);
+      expect(seeded.body.data.at(-1)).toMatchObject({ versionNumber: 1, effectiveFrom: null, createdBy: null, sgcCode: null });
+      expectConforms('get', '/api/v1/documents/formats/{formatKey}/versions', 200, seeded.body);
+
+      const formats = await http().get('/api/v1/documents/formats').set(auth).expect(200);
+      expect(formats.body.data.find((format: { key: string }) => format.key === key)).toMatchObject({ versionNumber: 2 });
+      expectConforms('get', '/api/v1/documents/formats', 200, formats.body);
+    } finally {
+      await dataSource.query('DELETE FROM document_format_version WHERE format_key = $1', [key]);
+      await dataSource.query('DELETE FROM document_format WHERE key = $1', [key]);
+    }
+  });
 });
