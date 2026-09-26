@@ -11,8 +11,13 @@ export const HANDOVER_FORMAT_KEY = 'OCI-01-55';
  * PENDING_SIGNATURE: acta generada, esperando firmas.
  * SIGNED: acta firmada; cada activo tiene como responsable al firmante RECIBE final.
  * REJECTED: un firmante rechazó el acta; los activos no cambiaron.
+ * CANCELLED: cancelada antes de firmarse (POST /handovers/:id/cancel): solicitud CANCELLED o acta VOIDED, activos
+ *   liberados, sin cambios en ellos.
  */
-export const HANDOVER_STATUSES = ['AWAITING_DOCUMENT', 'PENDING_SIGNATURE', 'SIGNED', 'REJECTED'] as const;
+export const HANDOVER_STATUSES = ['AWAITING_DOCUMENT', 'PENDING_SIGNATURE', 'SIGNED', 'REJECTED', 'CANCELLED'] as const;
+
+/** Estados desde los que se puede cancelar: antes de que el acta quede firmada o rechazada. */
+export const CANCELLABLE_HANDOVER_STATUSES: ReadonlyArray<HandoverStatus> = ['AWAITING_DOCUMENT', 'PENDING_SIGNATURE'];
 export type HandoverStatus = (typeof HANDOVER_STATUSES)[number];
 
 /**

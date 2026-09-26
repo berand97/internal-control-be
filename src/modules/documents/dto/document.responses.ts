@@ -197,11 +197,22 @@ export class DocumentFormatResponseDto {
   @ApiProperty({ example: 'OCI-17-90-BAJA' })
   readonly key!: string;
 
-  @ApiProperty({ example: 'OCI-17-90' })
-  readonly sgcCode!: string;
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    example: 'OCI-17-90',
+    description: 'null: formato nuevo sin código SGC emitido por la universidad (la UI lo muestra como "código pendiente"); no se genera',
+  })
+  readonly sgcCode!: string | null;
 
-  @ApiProperty({ description: 'Versión SGC declarada en el catálogo del backend' })
-  readonly version!: string;
+  @ApiProperty({ type: 'string', nullable: true, description: 'Versión SGC declarada en el catálogo del backend; null sin formato emitido' })
+  readonly version!: string | null;
+
+  @ApiProperty({
+    description:
+      'El motor puede generarlo: tiene código SGC y firmantes. false: generar responde 409 DOCUMENT_FORMAT_NOT_READY; pendingDecisions dice qué falta',
+  })
+  readonly ready!: boolean;
 
   @ApiProperty()
   readonly name!: string;

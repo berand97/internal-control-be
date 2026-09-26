@@ -13,8 +13,8 @@ import { MfaAccountService } from '../../auth/services/mfa-account.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import {
   type DocumentFormat,
-  DOCUMENT_FORMATS,
-  findFormat,
+  DOCUMENT_FORMAT_CATALOG,
+  formatNotReadyReasons,
   formatNumber,
   initialSequenceValue,
   periodFor,
@@ -81,6 +81,8 @@ export interface DocumentRequestPayload {
   readonly signers?: Record<string, string>;
   readonly assetNotes?: Record<string, string>;
   readonly fields?: Record<string, string>;
+  /** Campos por activo: la plantilla los lee como activos[].campos.<nombre> ({} si el activo no trae). */
+  readonly assetFields?: Record<string, Record<string, string>>;
 }
 
 export interface GeneratedDocument {
@@ -182,12 +184,33 @@ export class DocumentEngineService {
     private readonly lifecycle: DocumentLifecycleRegistry,
     private readonly links: SigningLinkService,
     private readonly mfaAccount: MfaAccountService,
+    @Inject(DOCUMENT_FORMAT_CATALOG) private readonly catalog: ReadonlyArray<DocumentFormat>,
   ) {}
+
+  /**
+   * Si el motor puede generar el formato: con código SGC y firmantes definidos. Los procesos lo consultan antes
+   * de encolar para no romperse cuando el formato institucional aún no existe (acta de devolución).
+   */
+  formatReadiness(formatKey: string): { readonly format: DocumentFormat; readonly ready: boolean; readonly reasons: string[] } {
+    const format = this.requireFormat(formatKey);
+    const reasons = formatNotReadyReasons(format);
+    return { format, ready: reasons.length === 0, reasons };
+  }
+
+  private assertReady(format: DocumentFormat): void {
+    const reasons = formatNotReadyReasons(format);
+    if (reasons.length > 0) {
+      throw new ApiException(
+        ErrorCode.DocumentFormatNotReady,
+        `El formato ${format.key} no se puede generar: ${reasons.join('; ')}`,
+      );
+    }
+  }
 
   async formats() {
     const today = new Date().toISOString().slice(0, 10);
     const result = [];
-    for (const format of DOCUMENT_FORMATS) {
+    for (const format of this.catalog) {
       const template = await this.activeTemplate(format.key, today, this.dataSource.manager);
       const [sequence] = (await this.dataSource.query(
         'SELECT current_value FROM document_sequence WHERE format_key = $1 AND period = $2',
@@ -195,6 +218,7 @@ export class DocumentEngineService {
       )) as Array<{ current_value: string }>;
       result.push({
         ...format,
+        ready: formatNotReadyReasons(format).length === 0,
         activeTemplate: template
           ? { id: template.id, version: template.sgc_version, effectiveDate: template.effective_date }
           : null,
@@ -211,6 +235,10 @@ export class DocumentEngineService {
     actorId: string | null,
   ) {
     const format = this.requireFormat(formatKey);
+    if (!format.sgcCode) {
+      // La plantilla se registra con su código SGC (document_template_version.sgc_code NOT NULL).
+      throw new ApiException(ErrorCode.DocumentFormatNotReady, `El formato ${format.key} aún no tiene código SGC institucional`);
+    }
     const placeholders = readDocxPlaceholders(file.buffer);
     const stored = await this.storage.put({
       key: `document-templates/${format.key}/${meta.effectiveDate}-v${meta.sgcVersion}.docx`,
@@ -238,7 +266,7 @@ export class DocumentEngineService {
   }
 
   enqueue(manager: EntityManager, payload: DocumentRequestPayload, requestedBy: string | null): Promise<string> {
-    this.requireFormat(payload.formatKey);
+    this.assertReady(this.requireFormat(payload.formatKey));
     return (
       manager.query(
         `INSERT INTO document_request (format_key, payload, requested_by) VALUES ($1, $2, $3) RETURNING id`,
@@ -332,6 +360,7 @@ export class DocumentEngineService {
     options: { readonly documentDate?: Date } = {},
   ): Promise<GeneratedDocument> {
     const format = this.requireFormat(payload.formatKey);
+    this.assertReady(format);
     const now = new Date();
     const template = await this.activeTemplate(format.key, now.toISOString().slice(0, 10), manager);
     if (!template) {
@@ -440,7 +469,7 @@ export class DocumentEngineService {
       documentId: document.id,
       documentNumber: document.number,
       formatKey: document.format_key,
-      title: `${format.sgcCode} · ${format.name} · ${document.number}`,
+      title: `${format.sgcCode ?? format.key} · ${format.name} · ${document.number}`,
       pdf,
       pdfSha256: sha256(pdf),
       signers: signers.map((signer) => ({
@@ -738,7 +767,7 @@ export class DocumentEngineService {
       expiresAt: link.expires_at ? new Date(link.expires_at).toISOString() : null,
       consumedAction: link.consumed_action,
       identityAttemptsRemaining: Math.max(0, MAX_IDENTITY_ATTEMPTS - link.identity_attempts),
-      document: active ? { sgcCode: format.sgcCode, formatName: format.name, number: document.number } : null,
+      document: active ? { sgcCode: format.sgcCode ?? format.key, formatName: format.name, number: document.number } : null,
       turn:
         active && current
           ? {
@@ -1446,7 +1475,7 @@ export class DocumentEngineService {
 
     return {
       formato: {
-        codigo: format.sgcCode,
+        codigo: format.sgcCode ?? '',
         clave: format.key,
         nombre: format.name,
         version: template.sgc_version,
@@ -1474,6 +1503,8 @@ export class DocumentEngineService {
         unidades: 1,
         observacion: payload.assetNotes?.[asset.id] ?? '',
         estado: conditionLabel(asset.physical_condition, asset.data_quality_flags),
+        // Solo con assetFields: las actas que no los usan conservan su data tal cual.
+        ...(payload.assetFields ? { campos: payload.assetFields[asset.id] ?? {} } : {}),
       })),
       totalElementos: ordered.length,
       campos: payload.fields ?? {},
@@ -1539,7 +1570,7 @@ export class DocumentEngineService {
   }
 
   private requireFormat(key: string): DocumentFormat {
-    const format = findFormat(key);
+    const format = this.catalog.find((item) => item.key === key);
     if (!format) {
       throw new ApiException(ErrorCode.ValidationFailed, `Formato desconocido: ${key}`);
     }

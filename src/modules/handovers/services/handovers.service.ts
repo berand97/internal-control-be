@@ -16,6 +16,7 @@ import {
 } from '../../documents/lifecycle/document-lifecycle.registry.js';
 import { DocumentEngineService } from '../../documents/services/document-engine.service.js';
 import {
+  CANCELLABLE_HANDOVER_STATUSES,
   HANDOVER_ENTITY_TYPE,
   HANDOVER_FORMAT_KEY,
   NOT_DELIVERABLE_STATUSES,
@@ -142,7 +143,54 @@ export class HandoversService implements OnModuleInit {
     return this.detail(handoverId);
   }
 
-  async list(query: { readonly page: number; readonly pageSize: number; readonly status?: HandoverStatus }): Promise<HandoverListResponseDto> {
+  /**
+   * Cancela una entrega antes de que su acta quede firmada, en UNA transacción: voidForEntity cancela la solicitud
+   * del outbox (si no se generó) o anula el acta PENDING_SIGNATURE (VOIDED, con motivo; nadie puede firmarla
+   * después), la entrega queda CANCELLED con motivo y quién, y sus activos se liberan (open = FALSE) sin cambios.
+   * Acta ya firmada: 409 DOCUMENT_ALREADY_SIGNED; entrega SIGNED/REJECTED/CANCELLED: 406 INVALID_STATE.
+   * Regla provisional (quién y cuándo no están definidos): permiso de generación del OCI-01-55 (asset:update:global),
+   * solo antes de SIGNED. Orden de bloqueos: primero el acta (voidForEntity), después la entrega, el mismo orden que
+   * la generación del outbox (fila de la solicitud → onGenerated bloquea la entrega), para no cruzarse con el job.
+   */
+  async cancel(id: string, reason: string, actor: AuthenticatedUser): Promise<HandoverDetailDto> {
+    const motive = reason.trim();
+    if (motive.length < 5) {
+      throw new ApiException(ErrorCode.ValidationFailed, 'El motivo de la cancelación es obligatorio', [
+        { field: 'reason', message: 'Mínimo 5 caracteres' },
+      ]);
+    }
+    await this.dataSource.transaction(async (manager) => {
+      const [exists] = (await manager.query('SELECT status FROM asset_handover WHERE id = $1', [id])) as Array<{
+        status: HandoverStatus;
+      }>;
+      if (!exists) {
+        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la entrega');
+      }
+      if (exists.status === 'SIGNED') {
+        throw new ApiException(ErrorCode.DocumentAlreadySigned, 'La entrega ya está firmada y aplicada; no se puede cancelar');
+      }
+      await this.engine.voidForEntity(manager, {
+        entityType: HANDOVER_ENTITY_TYPE,
+        entityId: id,
+        reason: motive,
+        actorId: actor.id,
+      });
+      const [handover] = (await manager.query('SELECT status FROM asset_handover WHERE id = $1 FOR UPDATE', [id])) as Array<{
+        status: HandoverStatus;
+      }>;
+      if (!handover || !CANCELLABLE_HANDOVER_STATUSES.includes(handover.status)) {
+        throw new ApiException(ErrorCode.InvalidState, `La entrega está ${handover?.status ?? 'sin estado'} y no se puede cancelar`);
+      }
+      await manager.query(
+        `UPDATE asset_handover SET status = 'CANCELLED', closed_at = NOW(), cancelled_by = $2, cancel_reason = $3 WHERE id = $1`,
+        [id, actor.id, motive],
+      );
+      await manager.query('UPDATE asset_handover_item SET open = FALSE WHERE handover_id = $1', [id]);
+    });
+    return this.detail(id);
+  }
+
+  async list(query:{ readonly page: number; readonly pageSize: number; readonly status?: HandoverStatus }): Promise<HandoverListResponseDto> {
     const status = query.status ?? null;
     const [count] = (await this.dataSource.query(
       'SELECT count(*)::int AS total FROM asset_handover WHERE ($1::text IS NULL OR status = $1)',
@@ -181,7 +229,10 @@ export class HandoversService implements OnModuleInit {
               ${PERSON_JSON('au')} AS auditor,
               ${PERSON_JSON('ap')} AS "assignedPerson",
               json_build_object('userId', u.id, 'name', nullif(trim(concat_ws(' ', up.first_name, up.last_name)), '')) AS "createdBy",
-              h.created_at AS "createdAt", h.closed_at AS "closedAt"
+              h.created_at AS "createdAt", h.closed_at AS "closedAt",
+              CASE WHEN cu.id IS NULL THEN NULL ELSE
+                json_build_object('userId', cu.id, 'name', nullif(trim(concat_ws(' ', cp.first_name, cp.last_name)), '')) END AS "cancelledBy",
+              h.cancel_reason AS "cancelReason"
        FROM asset_handover h
        JOIN cost_center cc ON cc.id = h.cost_center_id
        JOIN person rp ON rp.id = h.receiver_person_id
@@ -189,6 +240,8 @@ export class HandoversService implements OnModuleInit {
        LEFT JOIN person ap ON ap.id = h.assigned_person_id
        JOIN app_user u ON u.id = h.created_by
        LEFT JOIN person up ON up.id = u.person_id
+       LEFT JOIN app_user cu ON cu.id = h.cancelled_by
+       LEFT JOIN person cp ON cp.id = cu.person_id
        WHERE h.id = $1`,
       [id],
     )) as Array<

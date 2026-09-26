@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -13,7 +13,13 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { ApiSuccessEnvelope, envelopedSchema } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
-import { CreateHandoverDto, HandoverDetailDto, HandoverListResponseDto, QueryHandoversDto } from './dto/handover.dto.js';
+import {
+  CancelHandoverDto,
+  CreateHandoverDto,
+  HandoverDetailDto,
+  HandoverListResponseDto,
+  QueryHandoversDto,
+} from './dto/handover.dto.js';
 import { HandoversService } from './services/handovers.service.js';
 
 /** Permisos del formato OCI-01-55 (document-formats.ts): generar = asset:update:global, leer = asset:read:global. */
@@ -35,6 +41,25 @@ export class HandoversController {
   @ApiCreatedResponse({ schema: envelopedSchema(HandoverDetailDto) })
   create(@Body() dto: CreateHandoverDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.handovers.create(dto, actor);
+  }
+
+  @Post(':id/cancel')
+  @RequirePermission('asset:update:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancelar una entrega antes de que su acta quede firmada',
+    description:
+      'En una transacción: la solicitud del acta queda CANCELLED o el acta PENDING_SIGNATURE queda VOIDED (con el motivo; nadie puede firmarla), la entrega queda CANCELLED y sus activos se liberan sin cambios. ' +
+      'Regla provisional (pendiente de Control Interno): permiso de generación del OCI-01-55 (asset:update:global) y solo antes de SIGNED. ' +
+      'Errores: 400 VALIDATION_FAILED (motivo), 404 RESOURCE_NOT_FOUND, 409 DOCUMENT_ALREADY_SIGNED (ya firmada), 406 INVALID_STATE (REJECTED o CANCELLED).',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(HandoverDetailDto) })
+  cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelHandoverDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.handovers.cancel(id, dto.reason, actor);
   }
 
   @Get()

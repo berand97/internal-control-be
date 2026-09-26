@@ -7,6 +7,7 @@ import ExcelJS from 'exceljs';
 import { PDFDocument } from 'pdf-lib';
 import QRCode from 'qrcode';
 import request from 'supertest';
+import { SAMPLE as OCI_01_65_SAMPLE } from '../../scripts/formats/build-oci-01-65-template.mjs';
 import { findLeftovers, OCI_01_55_SAMPLE } from '../../scripts/formats/template-leftovers.mjs';
 import { pdfText, sampleLeftovers, squash } from './pdf-text.js';
 import { DataSource } from 'typeorm';
@@ -367,5 +368,232 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       integrity: response.body.data?.integrity,
     });
     expect(response.body.data?.integrity).toBe('ALTERED');
+  });
+  // ---------- Actas reales en PDF para revisión humana (artefacto de CI): OCI-01-65 y OCI-01-55 ----------
+
+  const loanState: {
+    solicitante?: User;
+    entrega?: User;
+    recibe?: { personId: string; last4: string };
+    handoverReceiver?: { personId: string; last4: string };
+    targetCostCenterId?: string;
+    loanId?: string;
+    loanDocumentId?: string;
+    handoverId?: string;
+    handoverDocumentId?: string;
+  } = {};
+
+  const download = async (documentId: string | undefined) =>
+    http()
+      .get(`/api/v1/documents/${documentId}/pdf`)
+      .set('Authorization', auth(state.director))
+      .buffer(true)
+      .parse((res, done) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => done(null, Buffer.concat(chunks)));
+      });
+
+  /** Escribe el PDF y su capa de texto; devuelve el texto aplanado. */
+  const keepPdf = async (name: string, body: Buffer): Promise<string> => {
+    await writeFile(join(OUTPUT, `${name}.pdf`), body);
+    const text = squash(await pdfText(body));
+    await writeFile(join(OUTPUT, `${name}.txt`), text);
+    return text;
+  };
+
+  const drainOutbox = async () => {
+    const { DocumentEngineService } = await import('../../src/modules/documents/services/document-engine.service.js');
+    return app.get(DocumentEngineService).processPending(100);
+  };
+
+  const signByLink = async (last4: string, label: string) => {
+    const rubric = `data:image/png;base64,${(await QRCode.toBuffer(label, { width: 160 })).toString('base64')}`;
+    const token = mailed.at(-1)?.url.split('/firmar/')[1] ?? '';
+    const identity = await http().post(`/api/v1/public/signing-links/${token}/identity`).send({ last4 });
+    return http()
+      .post(`/api/v1/public/signing-links/${token}/sign`)
+      .set('X-Forwarded-For', '181.49.10.30')
+      .send({ identityToken: identity.body.data?.identityToken, rubric });
+  };
+
+  const signBySession = async (documentId: string | undefined, order: number, who: User | undefined, label: string) =>
+    http()
+      .post(`/api/v1/documents/${documentId}/signatures/${order}`)
+      .set('Authorization', auth(who))
+      .set('X-Forwarded-For', '181.49.10.31')
+      .send({ rubric: `data:image/png;base64,${(await QRCode.toBuffer(label, { width: 160 })).toString('base64')}` });
+
+  it('7. préstamo: carga OCI-01-65, entrega y genera el acta (PDF sin firmar, firmantes CC y CE)', async () => {
+    const { TokenService } = await import('../../src/modules/auth/services/token.service.js');
+    const tokens = app.get(TokenService);
+    const person = async (first: string, last: string, type: 'CC' | 'CE', number: string, title: string, withUser: boolean, role: string | null) => {
+      const tag = randomUUID().slice(0, 8);
+      const [row] = (await dataSource.query(
+        `INSERT INTO person (first_name, last_name, email, document_type, document_number, position_title)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [first, last, `e2e.${tag}@unac.edu.co`, type, number, title],
+      )) as Array<{ id: string }>;
+      const personId = row?.id ?? '';
+      if (!withUser) {
+        return { userId: '', personId, token: '' };
+      }
+      const [userRow] = (await dataSource.query(
+        `INSERT INTO app_user (person_id, username, password_hash, mfa_enabled, status) VALUES ($1, $2, 'x', TRUE, 'ACTIVE') RETURNING id`,
+        [personId, `e2e.${tag}`],
+      )) as Array<{ id: string }>;
+      const userId = userRow?.id ?? '';
+      if (role) {
+        await dataSource.query(`INSERT INTO user_role (user_id, role_id, scope_type) SELECT $1, id, 'GLOBAL' FROM role WHERE code = $2`, [userId, role]);
+      }
+      const sessionId = randomUUID();
+      await dataSource.query(
+        `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at) VALUES ($1, $2, $3, NOW() + interval '1 day', NOW())`,
+        [sessionId, userId, randomUUID()],
+      );
+      const token = tokens.signAccessToken({ id: userId, personId, username: `e2e.${tag}`, roles: [], scopes: [], mustChangePassword: false, sessionId });
+      return { userId, personId, token };
+    };
+    loanState.solicitante = await person('Gabriel', 'Solicitante E2E', 'CC', '1000000910', 'Coordinador de Biblioteca', true, 'INTERNAL_CONTROL_DIRECTOR');
+    // Entrega: persona con cédula de extranjería (el acta debe imprimir C.E.), firma con su sesión.
+    loanState.entrega = await person('Anneliese', 'Extranjera E2E', 'CE', 'E2E847361', 'Jefa de Finanzas Estudiantiles', true, null);
+    // Recibe: sin usuario, firma por enlace.
+    const recibe = await person('Tomas', 'Receptor E2E', 'CC', '1000000912', 'Auxiliar de Biblioteca', false, null);
+    loanState.recibe = { personId: recibe.personId, last4: '0912' };
+    const [target] = (await dataSource.query(
+      `INSERT INTO cost_center (external_code, name) VALUES ('E2E-BIB', 'BIBLIOTECA CENTRAL E2E') RETURNING id`,
+    )) as Array<{ id: string }>;
+    loanState.targetCostCenterId = target?.id ?? '';
+    const [category] = (await dataSource.query(`SELECT category_id FROM asset WHERE id = $1`, [state.assetId])) as Array<{ category_id: string }>;
+    const [loanAsset] = (await dataSource.query(
+      `INSERT INTO asset (internal_code, description, category_id, acquisition_type_id, acquisition_date, current_cost_center_id, physical_condition, created_by)
+       VALUES ('E2E-PRESTAMO-A', 'Videoproyector Epson E2E', $1, (SELECT id FROM acquisition_type WHERE code = 'PURCHASE'), '2023-02-01', $2, 'GOOD', $3)
+       RETURNING id`,
+      [category?.category_id, state.costCenterId, state.director?.userId],
+    )) as Array<{ id: string }>;
+
+    const upload = await http()
+      .post('/api/v1/documents/formats/OCI-01-65/templates')
+      .set('Authorization', auth(state.director))
+      .field('sgcVersion', '2')
+      .field('effectiveDate', '2026-09-08')
+      .attach('file', await readFile('templates/formats/OCI-01-65-v2.docx'), 'OCI-01-65-v2.docx');
+    const expected = new Date(Date.now() + 40 * 86_400_000).toISOString().slice(0, 10);
+    const created = await http()
+      .post('/api/v1/loans')
+      .set('Authorization', auth(loanState.solicitante))
+      .send({
+        assets: [loanAsset?.id],
+        targetCostCenterId: loanState.targetCostCenterId,
+        expectedReturnDate: expected,
+        justification: 'Préstamo del videoproyector para la semana de lectura',
+        contactPerson: loanState.recibe.personId,
+      });
+    loanState.loanId = created.body.data?.id;
+    const approved = await http().post(`/api/v1/loans/${loanState.loanId}/approve`).set('Authorization', auth(state.director)).send({});
+    const delivered = await http()
+      .post(`/api/v1/loans/${loanState.loanId}/deliver`)
+      .set('Authorization', auth(state.director))
+      .send({ deliveredByPersonId: loanState.entrega.personId, controlInternoPersonId: state.director?.personId });
+    await drainOutbox();
+    const loan = (await http().get(`/api/v1/loans/${loanState.loanId}`).set('Authorization', auth(state.director))).body.data;
+    loanState.loanDocumentId = loan?.deliveryAct?.documentId;
+    const pdf = await download(loanState.loanDocumentId);
+    const text = pdf.status === 200 ? await keepPdf('4-acta-prestamo-OCI-01-65-sin-firmar', pdf.body as Buffer) : '';
+    const leftovers = sampleLeftovers(text, OCI_01_65_SAMPLE, { numbers: true });
+    record('préstamo: acta OCI-01-65 generada', pdf.status === 200, {
+      upload: upload.status,
+      created: created.status,
+      approved: approved.status,
+      delivered: [delivered.status, delivered.body.data?.status],
+      act: loan?.deliveryAct,
+      leftovers,
+    });
+    expect(delivered.body.data?.status).toBe('PENDING_SIGNATURES');
+    expect(loan?.deliveryAct?.status).toBe('GENERATED');
+    expect(pdf.status).toBe(200);
+    expect(leftovers).toEqual([]);
+    expect(text).toContain('C.E. E2E847361');
+    expect(text).toContain('C.C. 1000000912');
+  });
+
+  it('8. préstamo: firmas Entrega (sesión) → Recibe (enlace) → Control Interno (MFA); PDF firmado con anexo y préstamo ACTIVE', async () => {
+    const first = await signBySession(loanState.loanDocumentId, 1, loanState.entrega, 'rubrica entrega');
+    const second = await signByLink(loanState.recibe?.last4 ?? '', 'rubrica recibe');
+    const third = await signBySession(loanState.loanDocumentId, 3, state.director, 'rubrica control interno');
+    const signed = await download(loanState.loanDocumentId);
+    const text = signed.status === 200 ? await keepPdf('5-acta-prestamo-OCI-01-65-firmada', signed.body as Buffer) : '';
+    const leftovers = sampleLeftovers(text, OCI_01_65_SAMPLE, { numbers: false });
+    const loan = (await http().get(`/api/v1/loans/${loanState.loanId}`).set('Authorization', auth(state.director))).body.data;
+    record('préstamo: acta firmada', third.status === 200, {
+      first: [first.status, first.body.error?.code],
+      second: [second.status, second.body.error?.code],
+      third: [third.status, third.body.data?.status ?? third.body.error?.code],
+      loanStatus: loan?.status,
+      leftovers,
+    });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(third.body.data?.status).toBe('SIGNED');
+    expect(loan?.status).toBe('ACTIVE');
+    expect(leftovers).toEqual([]);
+    expect(text).toContain('Enlace de un solo uso enviado al correo');
+  });
+
+  it('9. entrega OCI-01-55 por /handovers con receptor CE que firma por enlace: PDF sin firmar y firmado', async () => {
+    const [receiver] = (await dataSource.query(
+      `INSERT INTO person (first_name, last_name, email, document_type, document_number, position_title)
+       VALUES ('Ingrid', 'Extranjera E2E', $1, 'CE', 'E2E552190', 'Analista de Finanzas Estudiantiles') RETURNING id`,
+      [`e2e.${randomUUID().slice(0, 8)}@unac.edu.co`],
+    )) as Array<{ id: string }>;
+    loanState.handoverReceiver = { personId: receiver?.id ?? '', last4: '2190' };
+    const [category] = (await dataSource.query(`SELECT category_id FROM asset WHERE id = $1`, [state.assetId])) as Array<{ category_id: string }>;
+    const [handoverAsset] = (await dataSource.query(
+      `INSERT INTO asset (internal_code, description, category_id, acquisition_type_id, acquisition_date, current_cost_center_id, physical_condition, created_by)
+       VALUES ('E2E-ENTREGA-B', 'Escritorio en L E2E', $1, (SELECT id FROM acquisition_type WHERE code = 'PURCHASE'), '2024-03-01', $2, 'GOOD', $3)
+       RETURNING id`,
+      [category?.category_id, state.costCenterId, state.director?.userId],
+    )) as Array<{ id: string }>;
+    const created = await http()
+      .post('/api/v1/handovers')
+      .set('Authorization', auth(state.director))
+      .send({
+        assets: [{ assetId: handoverAsset?.id, note: 'Con cajonera' }],
+        receiverPersonId: loanState.handoverReceiver.personId,
+        costCenterId: state.costCenterId,
+        auditorPersonId: state.director?.personId,
+      });
+    loanState.handoverId = created.body.data?.id;
+    await drainOutbox();
+    const handover = (await http().get(`/api/v1/handovers/${loanState.handoverId}`).set('Authorization', auth(state.director))).body.data;
+    loanState.handoverDocumentId = handover?.document?.documentId;
+    const pdf = await download(loanState.handoverDocumentId);
+    const unsignedText = pdf.status === 200 ? await keepPdf('6-acta-entrega-OCI-01-55-sin-firmar', pdf.body as Buffer) : '';
+    const unsignedLeftovers = sampleLeftovers(unsignedText, OCI_01_55_SAMPLE, { numbers: true });
+
+    const first = await signByLink(loanState.handoverReceiver.last4, 'rubrica receptora');
+    const second = await signBySession(loanState.handoverDocumentId, 2, state.director, 'rubrica control interno');
+    const signed = await download(loanState.handoverDocumentId);
+    const signedText = signed.status === 200 ? await keepPdf('7-acta-entrega-OCI-01-55-firmada', signed.body as Buffer) : '';
+    const signedLeftovers = sampleLeftovers(signedText, OCI_01_55_SAMPLE, { numbers: false });
+    const closed = (await http().get(`/api/v1/handovers/${loanState.handoverId}`).set('Authorization', auth(state.director))).body.data;
+    record('entrega OCI-01-55', second.status === 200, {
+      created: created.status,
+      generation: handover?.document?.generation,
+      first: [first.status, first.body.error?.code],
+      second: [second.status, second.body.data?.status ?? second.body.error?.code],
+      handoverStatus: closed?.status,
+      unsignedLeftovers,
+      signedLeftovers,
+    });
+    expect(created.status).toBe(201);
+    expect(pdf.status).toBe(200);
+    expect(unsignedLeftovers).toEqual([]);
+    expect(unsignedText).toContain('C.E. E2E552190');
+    expect(first.status).toBe(200);
+    expect(second.body.data?.status).toBe('SIGNED');
+    expect(closed?.status).toBe('SIGNED');
+    expect(signedLeftovers).toEqual([]);
+    expect(signedText).toContain('Enlace de un solo uso enviado al correo');
   });
 });
