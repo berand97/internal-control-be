@@ -80,7 +80,8 @@ describe('GET /documents y reintento por el outbox (HTTP real + PostgreSQL real)
     const sessionId = randomUUID();
     if (withSession) {
       await dataSource.query(
-        `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at) VALUES ($1, $2, $3, NOW() + interval '1 day')`,
+        `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at)
+       VALUES ($1, $2, $3, NOW() + interval '1 day', (SELECT CASE WHEN mfa_enabled THEN NOW() END FROM app_user WHERE id = $2))`,
         [sessionId, user.id, randomUUID()],
       );
     }

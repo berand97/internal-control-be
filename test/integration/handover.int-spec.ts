@@ -163,7 +163,8 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     );
     const sessionId = randomUUID();
     await dataSource.query(
-      `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at) VALUES ($1, $2, $3, NOW() + interval '1 day')`,
+      `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at)
+       VALUES ($1, $2, $3, NOW() + interval '1 day', (SELECT CASE WHEN mfa_enabled THEN NOW() END FROM app_user WHERE id = $2))`,
       [sessionId, userId, randomUUID()],
     );
     const token = app.get(TokenService).signAccessToken({

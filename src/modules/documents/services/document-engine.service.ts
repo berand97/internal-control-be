@@ -8,6 +8,7 @@ import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig, StorageDriver } from '../../../config/configuration.js';
 import { StorageService } from '../../../shared/storage/storage.service.js';
 import { readDocxPlaceholders, renderDocx } from '../../document-templates/domain/docx-template.js';
+import { MfaAccountService } from '../../auth/services/mfa-account.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import {
   type DocumentFormat,
@@ -18,7 +19,6 @@ import {
   periodFor,
 } from '../domain/document-formats.js';
 import {
-  channelFor,
   IDENTITY_AUTHORIZATION_MINUTES,
   lastFourDigits,
   maskName,
@@ -176,6 +176,7 @@ export class DocumentEngineService {
     @Inject(SIGNATURE_PROVIDER) private readonly signatures: SignatureProvider,
     private readonly lifecycle: DocumentLifecycleRegistry,
     private readonly links: SigningLinkService,
+    private readonly mfaAccount: MfaAccountService,
   ) {}
 
   async formats() {
@@ -1142,19 +1143,22 @@ export class DocumentEngineService {
       return blocked(ErrorCode.SignatureOutOfOrder);
     }
     const [session] = (await this.dataSource.query(
-      `SELECT u.mfa_enabled FROM app_user u
+      `SELECT 1 AS found FROM app_user u
        JOIN refresh_token_family f ON f.user_id = u.id
        WHERE u.id = $1 AND f.id = $2 AND f.status = 'ACTIVE' AND f.expires_at > NOW() AND u.status = 'ACTIVE'`,
       [actor.id, actor.sessionId ?? null],
-    )) as Array<{ mfa_enabled: boolean }>;
+    )) as Array<{ found: number }>;
     if (!actor.sessionId || !session) {
       return blocked(ErrorCode.SignatureSessionInvalid);
     }
+    // "Sesión con MFA" = sesión abierta o elevada con segundo factor (MfaAccountService.isMfaSession), no el
+    // mfa_enabled del usuario: quien tiene MFA pero entró solo con contraseña firma como SESSION.
+    const mfaSession = await this.mfaAccount.isMfaSession(actor);
     // MFA obligatorio solo en los turnos de Control Interno; en los demás basta la sesión vigente.
-    if (requiresMfa(slot.role) && !session.mfa_enabled) {
+    if (requiresMfa(slot.role) && !mfaSession) {
       return blocked(ErrorCode.SignatureMfaRequired);
     }
-    return { code: null, method: session.mfa_enabled ? 'SESSION_MFA' : 'SESSION' };
+    return { code: null, method: mfaSession ? 'SESSION_MFA' : 'SESSION' };
   }
 
   private async prepareSignerAction(documentId: string, order: number, actor: AuthenticatedUser) {
