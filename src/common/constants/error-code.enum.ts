@@ -125,6 +125,10 @@ export enum ErrorCode {
   HandoverAssetInOpenHandover = 'HANDOVER_ASSET_IN_OPEN_HANDOVER',
   HandoverCostCenterMismatch = 'HANDOVER_COST_CENTER_MISMATCH',
   HandoverAssetNotDeliverable = 'HANDOVER_ASSET_NOT_DELIVERABLE',
+  DocumentFormatNotReady = 'DOCUMENT_FORMAT_NOT_READY',
+  LoanExtensionNotRequester = 'LOAN_EXTENSION_NOT_REQUESTER',
+  LoanNoPendingExtension = 'LOAN_NO_PENDING_EXTENSION',
+  LoanDeliveryActNotRejected = 'LOAN_DELIVERY_ACT_NOT_REJECTED',
 
   InventoryScopeOverlap = 'INVENTORY_SCOPE_OVERLAP',
   InventoryUnverifiedExceedsThreshold = 'INVENTORY_UNVERIFIED_EXCEEDS',
