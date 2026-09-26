@@ -12,7 +12,8 @@ export type UnknownCostCenterPolicy = (typeof UNKNOWN_COST_CENTER_POLICIES)[numb
  * ExcelImportService, no una regla nueva): QUARANTINE = la fila no se importa (columna obligatoria en la
  * plantilla); FLAG = se importa con una marca de calidad; NONE = el dato queda vacío.
  */
-export type EmptyEffect = 'QUARANTINE' | 'FLAG' | 'NONE';
+export const EMPTY_EFFECTS = ['QUARANTINE', 'FLAG', 'NONE'] as const;
+export type EmptyEffect = (typeof EMPTY_EFFECTS)[number];
 
 /** Catálogos que alimentan los desplegables de la plantilla (hoja oculta). */
 export const TEMPLATE_CATALOGS = ['COST_CENTERS', 'DOCUMENT_TYPES', 'CATEGORIES', 'PHYSICAL_CONDITIONS'] as const;
@@ -22,7 +23,8 @@ export type TemplateCatalog = (typeof TEMPLATE_CATALOGS)[number];
  * Tipo de dato de la columna en la plantilla. code y catalog van con formato de TEXTO en Excel (01979 no se vuelve
  * 1979); date con formato de fecha; number/integer sin formato de texto.
  */
-export type FieldKind = 'text' | 'code' | 'catalog' | 'date' | 'number' | 'integer';
+export const FIELD_KINDS = ['text', 'code', 'catalog', 'date', 'number', 'integer'] as const;
+export type FieldKind = (typeof FIELD_KINDS)[number];
 
 export interface ImportField {
   readonly label: string;

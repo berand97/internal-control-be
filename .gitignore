@@ -65,3 +65,4 @@ db/
 *.dump
 storage/documents/
 storage/document-templates/
+storage/import-templates/

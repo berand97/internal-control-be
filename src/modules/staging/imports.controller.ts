@@ -40,11 +40,13 @@ import {
   ImportQuarantineRowDto,
   ImportResultDto,
   ImportTargetFieldsDto,
+  ImportUploadResponseDto,
 } from './dto/import.responses.js';
 import {
   fieldsFor,
   IMPORT_TARGETS,
   type ImportTarget,
+  TARGET_RULES,
   UNKNOWN_COST_CENTER_POLICIES,
   type UnknownCostCenterPolicy,
 } from './import/import-fields.js';
@@ -117,7 +119,14 @@ export class IssuesQueryDto {
 
 @ApiTags(OpenApiTag.Assets)
 @ApiBearerAuth()
-@ApiExtraModels(ApiSuccessEnvelope, ImportPreviewResponseDto, ImportResultDto, ImportTargetFieldsDto, ImportQuarantineRowDto)
+@ApiExtraModels(
+  ApiSuccessEnvelope,
+  ImportPreviewResponseDto,
+  ImportResultDto,
+  ImportTargetFieldsDto,
+  ImportQuarantineRowDto,
+  ImportUploadResponseDto,
+)
 @Feature('assets')
 @Controller('imports')
 export class ImportsController {
@@ -127,7 +136,12 @@ export class ImportsController {
   @RequirePermission('asset:create:global')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Subir un Excel: devuelve sus hojas y las columnas detectadas' })
+  @ApiOperation({
+    summary: 'Subir un Excel: devuelve sus hojas y las columnas detectadas',
+    description:
+      'Si el archivo es una plantilla descargada de GET /imports/templates/{target}, template trae su versión (y si es la vigente) y el mapeo reconocido por encabezados. Un Excel cualquiera sigue funcionando: template es null',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(ImportUploadResponseDto) })
   upload(@UploadedFile() file: ExcelUpload | undefined, @CurrentUser() actor: AuthenticatedUser) {
     if (!file) {
       throw new ApiException(ErrorCode.ValidationFailed, 'Falta el archivo');
@@ -153,16 +167,15 @@ export class ImportsController {
         field,
         label: definition.label,
         required: definition.required,
+        header: definition.header,
+        kind: definition.kind,
+        catalog: definition.catalog ?? null,
+        format: definition.format,
+        whenEmpty: definition.whenEmpty.effect,
+        whenEmptyText: definition.whenEmpty.text,
+        inTemplate: definition.inTemplate !== false,
       })),
-      rules:
-        known === 'PERSONS'
-          ? [
-              'Nombre: fullName (se guarda sin partir, marca NAME_NOT_SPLIT) o firstName + lastName, no ambos',
-              'Tipo de documento: columna documentType o documentType declarado en la vista previa, no ambos',
-              'Sin correo institucional la fila va a cuarentena (EMAIL_MISSING / EMAIL_NOT_INSTITUTIONAL)',
-              'Centro de costo inexistente: cuarentena (unknownCostCenters=create no aplica)',
-            ]
-          : [],
+      rules: [...TARGET_RULES[known]],
     };
   }
 

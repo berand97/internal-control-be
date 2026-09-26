@@ -20,13 +20,22 @@ import {
 import type { RawCellValue } from '../excel/read-workbook.js';
 import {
   ASSET_IMPORT_FIELDS,
+  catalogCode,
+  catalogCodeSql,
   COLUMN_LETTER,
   detectHeaderRow,
   fieldsFor,
   type ImportField,
   type ImportTarget,
+  isImportTarget,
+  recognizeColumns,
+  templateFields,
   type UnknownCostCenterPolicy,
 } from '../import/import-fields.js';
+import { normalizeHeader } from '../diagnostics/asset-report-diagnostics.js';
+import { PHYSICAL_CONDITIONS } from '../../assets/enums/physical-condition.enum.js';
+import { CATALOG_SHEET, INSTRUCTIONS_SHEET, META_SHEET } from '../templates/import-template.js';
+import { detectTemplate, type TemplateDetection } from '../templates/import-template.service.js';
 import { StagingLoaderService } from './staging-loader.service.js';
 
 export const PLACEHOLDER_CATEGORY = 'SIN_CLASIFICAR';
@@ -40,6 +49,77 @@ export interface UploadedSheet {
   readonly detectedHeaderRow: number;
   readonly columns: Record<string, string>;
 }
+
+/** Columna de la plantilla que el archivo no trae (plantilla de otra versión o columna borrada). */
+export interface MissingTemplateColumn {
+  readonly field: string;
+  readonly header: string;
+  /** En la plantilla es obligatoria: sin ella cada fila va a cuarentena. */
+  readonly required: boolean;
+}
+
+/** Plantilla reconocida al subir el archivo: destino, versión y mapeo automático por encabezados. */
+export interface UploadedTemplate {
+  readonly target: string;
+  readonly version: string;
+  readonly currentVersion: string | null;
+  readonly outdated: boolean;
+  readonly knownVersion: boolean;
+  readonly versionGeneratedAt: string | null;
+  readonly dataSheet: string;
+  readonly headerRow: number;
+  readonly mapping: Record<string, string>;
+  readonly missingColumns: ReadonlyArray<MissingTemplateColumn>;
+}
+
+/** Uso de plantilla de una vista previa (null si el archivo no viene de una plantilla). */
+export interface TemplateUsage {
+  readonly target: string;
+  readonly version: string;
+  readonly currentVersion: string | null;
+  readonly outdated: boolean;
+  readonly knownVersion: boolean;
+  readonly versionGeneratedAt: string | null;
+  readonly missingColumns: ReadonlyArray<MissingTemplateColumn>;
+  readonly exampleRowsIgnored: ReadonlyArray<number>;
+}
+
+export interface UnmappedColumn {
+  readonly column: string;
+  readonly header: string;
+}
+
+const TEMPLATE_INTERNAL_SHEETS: ReadonlySet<string> = new Set([META_SHEET, CATALOG_SHEET, INSTRUCTIONS_SHEET]);
+
+type StagedHead = Array<{ row_number: number; cells: Record<string, RawCellValue>; cell_types: Record<string, string> }>;
+
+const headerColumns = (cells: Record<string, RawCellValue> | undefined): Record<string, string> =>
+  Object.fromEntries(Object.entries(cells ?? {}).map(([letter, value]) => [letter, String(value)]));
+
+/** La plantilla detectada aplica a esta hoja y destino. */
+const templateApplies = (detection: TemplateDetection | null, sheet: string, target: ImportTarget): boolean =>
+  detection !== null && detection.dataSheet === sheet && detection.target === target;
+
+/**
+ * Campos de la plantilla vigente cuyo encabezado no está en el archivo y que no se mapearon: con una plantilla de
+ * otra versión (o una columna borrada) se tratan como vacíos; las reglas de cada fila siguen aplicando.
+ */
+const missingTemplateColumns = (
+  target: ImportTarget,
+  columns: Record<string, string>,
+  mapping: Record<string, string>,
+): MissingTemplateColumn[] => {
+  const present = new Set(Object.values(columns).map(normalizeHeader));
+  return templateFields(target)
+    .filter(([field, definition]) => !mapping[field] && !present.has(normalizeHeader(definition.header)))
+    .map(([field, definition]) => ({
+      field,
+      header: definition.header,
+      required: definition.whenEmpty.effect === 'QUARANTINE',
+    }));
+};
+
+const PHYSICAL_CONDITION_LIST = PHYSICAL_CONDITIONS.map((code) => `'${code}'`).join(', ');
 
 export interface PreviewRequest {
   readonly sheet: string;
@@ -62,6 +142,9 @@ interface ImportOptions {
 }
 
 export interface ImportSummary {
+  /** Columnas con encabezado que no quedaron asignadas a ningún campo: se ignoran, no se guardan. */
+  readonly unmappedColumns: ReadonlyArray<UnmappedColumn>;
+  readonly template: TemplateUsage | null;
   readonly rowsRead: number;
   readonly toInsert: number;
   readonly alreadyPresent: number;
@@ -90,6 +173,10 @@ interface ImportRow {
   readonly options: ImportOptions;
   readonly status: 'PREVIEWED' | 'CONFIRMED';
   readonly file_name: string;
+  /** Versión de la plantilla detectada en el archivo; null si no viene de una plantilla. */
+  readonly template_version: string | null;
+  /** Filas idénticas a la fila de ejemplo de la plantilla: no se clasifican ni se importan. */
+  readonly template_example_rows: number[];
 }
 
 interface Classified {
@@ -146,6 +233,15 @@ const colType = (mapping: Record<string, string>, field: string): string => {
   return letter ? `r.cell_types ->> '${letter}'` : 'NULL::text';
 };
 
+/**
+ * Excluye las filas de ejemplo de la plantilla (enteros leídos de staging_import.template_example_rows, así que se
+ * pueden escribir en el SQL). Alias de staging_row: r.
+ */
+const notExampleRow = (job: { readonly template_example_rows?: ReadonlyArray<number> | null }): string => {
+  const rows = (job.template_example_rows ?? []).filter((row) => Number.isInteger(row));
+  return rows.length > 0 ? `AND NOT (r.row_number = ANY('{${rows.join(',')}}'::int[]))` : '';
+};
+
 const countBy = (rows: ReadonlyArray<{ key: string; count: number }>): Record<string, number> =>
   Object.fromEntries(rows.map((row) => [row.key, Number(row.count)]));
 
@@ -154,7 +250,11 @@ const countBy = (rows: ReadonlyArray<{ key: string; count: number }>): Record<st
  * (firstName + lastName); el tipo de documento sale de una columna o lo declara el operador, no de ambas; un
  * centro de costo inexistente siempre va a cuarentena (no se crea).
  */
-const targetRuleErrors = (request: PreviewRequest): Array<{ field: string; message: string }> => {
+const targetRuleErrors = (
+  request: PreviewRequest,
+  /** Campos de una plantilla detectada que el archivo no trae: se tratan como vacíos, no invalidan el mapeo. */
+  absent: ReadonlySet<string> = new Set(),
+): Array<{ field: string; message: string }> => {
   const errors: Array<{ field: string; message: string }> = [];
   const m = request.mapping;
   if (request.target !== 'PERSONS') {
@@ -166,7 +266,11 @@ const targetRuleErrors = (request: PreviewRequest): Array<{ field: string; messa
   if (m['fullName'] && (m['firstName'] || m['lastName'])) {
     errors.push({ field: 'fullName', message: 'Use nombre completo o nombres y apellidos, no ambos' });
   }
-  if (!m['fullName'] && !(m['firstName'] && m['lastName'])) {
+  const nameAbsentFromTemplate =
+    !m['fullName'] &&
+    ['firstName', 'lastName'].some((field) => !m[field]) &&
+    ['firstName', 'lastName'].every((field) => m[field] || absent.has(field));
+  if (!m['fullName'] && !(m['firstName'] && m['lastName']) && !nameAbsentFromTemplate) {
     errors.push({ field: 'fullName', message: 'Falta el nombre: asigne nombre completo, o nombres y apellidos' });
   }
   if (m['documentType'] && request.documentType) {
@@ -213,29 +317,51 @@ export class ExcelImportService {
     content: Buffer,
     fileName: string,
     actorId: string | null,
-  ): Promise<{ readonly batchId: string; readonly created: boolean; readonly sheets: ReadonlyArray<UploadedSheet> }> {
+  ): Promise<{
+    readonly batchId: string;
+    readonly created: boolean;
+    readonly sheets: ReadonlyArray<UploadedSheet>;
+    readonly template: UploadedTemplate | null;
+  }> {
     const loaded = await this.loader.loadBuffer(content, fileName, 'UPLOAD', actorId);
+    const detection = await detectTemplate(this.dataSource, loaded.batchId);
     const sheets: UploadedSheet[] = [];
     for (const sheet of loaded.sheets) {
+      // Las hojas propias de la plantilla (instrucciones, catálogos, metadatos) no son datos a importar.
+      if (detection && TEMPLATE_INTERNAL_SHEETS.has(sheet.name)) {
+        continue;
+      }
       const head = (await this.dataSource.query(
         `SELECT row_number, cells, cell_types FROM staging_row
          WHERE batch_id = $1 AND sheet_name = $2 AND row_number <= 30 ORDER BY row_number`,
         [loaded.batchId, sheet.name],
-      )) as Array<{ row_number: number; cells: Record<string, RawCellValue>; cell_types: Record<string, string> }>;
-      const headerRow = detectHeaderRow(
-        head.map((row) => ({ rowNumber: row.row_number, cells: row.cells, types: row.cell_types })),
-      );
+      )) as StagedHead;
+      const headerRow =
+        detection?.dataSheet === sheet.name
+          ? detection.headerRow
+          : detectHeaderRow(head.map((row) => ({ rowNumber: row.row_number, cells: row.cells, types: row.cell_types })));
       const header = head.find((row) => row.row_number === headerRow);
-      sheets.push({
-        name: sheet.name,
-        rows: sheet.rows,
-        detectedHeaderRow: headerRow,
-        columns: Object.fromEntries(
-          Object.entries(header?.cells ?? {}).map(([letter, value]) => [letter, String(value)]),
-        ),
-      });
+      sheets.push({ name: sheet.name, rows: sheet.rows, detectedHeaderRow: headerRow, columns: headerColumns(header?.cells) });
     }
-    return { batchId: loaded.batchId, created: loaded.created, sheets };
+    let template: UploadedTemplate | null = null;
+    if (detection) {
+      const data = sheets.find((sheet) => sheet.name === detection.dataSheet);
+      const target = isImportTarget(detection.target) ? detection.target : null;
+      const mapping = target && data ? recognizeColumns(target, data.columns) : {};
+      template = {
+        target: detection.target,
+        version: detection.version,
+        currentVersion: detection.currentVersion,
+        outdated: detection.outdated,
+        knownVersion: detection.knownVersion,
+        versionGeneratedAt: detection.versionGeneratedAt,
+        dataSheet: detection.dataSheet,
+        headerRow: detection.headerRow,
+        mapping,
+        missingColumns: target && data ? missingTemplateColumns(target, data.columns, mapping) : [],
+      };
+    }
+    return { batchId: loaded.batchId, created: loaded.created, sheets, template };
   }
 
   async preview(
@@ -243,7 +369,19 @@ export class ExcelImportService {
     request: PreviewRequest,
     actorId: string | null,
   ): Promise<{ readonly importId: string; readonly summary: ImportSummary }> {
-    const headerRow = await this.validate(batchId, request);
+    const detection = await detectTemplate(this.dataSource, batchId);
+    const { headerRow, columns } = await this.validate(batchId, request, detection);
+    const applies = templateApplies(detection, request.sheet, request.target);
+    const exampleRows =
+      detection && detection.dataSheet === request.sheet && Object.keys(detection.example).length > 0
+        ? (
+            (await this.dataSource.query(
+              `SELECT row_number FROM staging_row
+               WHERE batch_id = $1 AND sheet_name = $2 AND row_number > $3 AND cells = $4::jsonb ORDER BY row_number`,
+              [batchId, request.sheet, headerRow, JSON.stringify(detection.example)],
+            )) as Array<{ row_number: number }>
+          ).map((row) => row.row_number)
+        : [];
     const options: ImportOptions =
       request.target === 'PERSONS'
         ? {
@@ -256,9 +394,20 @@ export class ExcelImportService {
           }
         : { unknownCostCenters: request.unknownCostCenters ?? 'quarantine' };
     const [created] = (await this.dataSource.query(
-      `INSERT INTO staging_import (batch_id, sheet_name, header_row, target, mapping, options, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [batchId, request.sheet, headerRow, request.target, JSON.stringify(request.mapping), JSON.stringify(options), actorId],
+      `INSERT INTO staging_import (batch_id, sheet_name, header_row, target, mapping, options, created_by,
+         template_version, template_example_rows)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::int[]) RETURNING id`,
+      [
+        batchId,
+        request.sheet,
+        headerRow,
+        request.target,
+        JSON.stringify(request.mapping),
+        JSON.stringify(options),
+        actorId,
+        detection?.version ?? null,
+        exampleRows,
+      ],
     )) as Array<{ id: string }>;
     const importId = created?.id ?? '';
     const job = await this.importRow(importId);
@@ -296,7 +445,64 @@ export class ExcelImportService {
         });
       }
     }
+    const mappedLetters = new Set(Object.values(request.mapping));
+    const unmappedColumns: UnmappedColumn[] = Object.entries(columns)
+      .filter(([letter, header]) => header.trim() !== '' && !mappedLetters.has(letter))
+      .map(([letter, header]) => ({ column: letter, header }));
+    const missingColumns = applies ? missingTemplateColumns(request.target, columns, request.mapping) : [];
+    const template: TemplateUsage | null = detection
+      ? {
+          target: detection.target,
+          version: detection.version,
+          currentVersion: detection.currentVersion,
+          outdated: detection.outdated,
+          knownVersion: detection.knownVersion,
+          versionGeneratedAt: detection.versionGeneratedAt,
+          missingColumns,
+          exampleRowsIgnored: exampleRows,
+        }
+      : null;
+    const fileIssue = (code: string, column: string | null, detail: string, rowNumber: number | null = null): Issue => ({
+      sheet: job.sheet_name,
+      rowNumber,
+      column,
+      code,
+      rawValue: null,
+      detail,
+    });
+    const templateIssues: Issue[] = [
+      ...(detection?.outdated
+        ? [
+            fileIssue(
+              'TEMPLATE_OUTDATED',
+              null,
+              `Plantilla de la versión ${detection.version}${detection.versionGeneratedAt ? ` (generada ${detection.versionGeneratedAt.slice(0, 10)})` : ''}; la vigente es ${detection.currentVersion ?? '—'}. Las columnas que no trae se tratan como vacías.`,
+            ),
+          ]
+        : []),
+      ...(detection && detection.target !== request.target
+        ? [fileIssue('TEMPLATE_TARGET_MISMATCH', null, `La plantilla es de ${detection.target}; se importa como ${request.target}`)]
+        : []),
+      ...missingColumns.map((missing) =>
+        fileIssue(
+          'TEMPLATE_COLUMN_MISSING',
+          missing.header,
+          missing.required
+            ? 'El archivo no trae esta columna obligatoria: se trata como vacía y cada fila va a cuarentena'
+            : 'El archivo no trae esta columna: se trata como vacía',
+        ),
+      ),
+      ...unmappedColumns.map((unmapped) =>
+        fileIssue('COLUMN_UNMAPPED', unmapped.header, `Columna ${unmapped.column} sin campo asignado: se ignora, no se guarda`),
+      ),
+      ...exampleRows.map((row) =>
+        fileIssue('TEMPLATE_EXAMPLE_ROW_IGNORED', null, 'Fila de ejemplo de la plantilla: no se importa', row),
+      ),
+    ];
+    issues.unshift(...templateIssues);
     const summary: ImportSummary = {
+      unmappedColumns,
+      template,
       rowsRead: result.rowsRead,
       toInsert: result.toInsert,
       alreadyPresent: result.alreadyPresent,
@@ -402,12 +608,13 @@ export class ExcelImportService {
       return [];
     }
     const idColumn = col(job.mapping, 'legacyAssetId');
+    const notExample = notExampleRow(job);
     const legacyIds = `SELECT ${idColumn} FROM staging_row r
-      WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 AND ${idColumn} IS NOT NULL`;
+      WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 AND ${idColumn} IS NOT NULL ${notExample}`;
     const params = [job.batch_id, job.sheet_name, job.header_row, importId];
     const [base] = (await this.dataSource.query(
       `SELECT
-         (SELECT count(*) FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3)::int AS read,
+         (SELECT count(*) FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 ${notExample})::int AS read,
          (SELECT count(*) FROM staging_issue WHERE import_id = $4 AND issue_code IN ('EMPTY_ROW', 'ROW_WITHOUT_ASSET_ID'))::int AS not_assets,
          (SELECT count(*) FROM asset_import_origin WHERE legacy_asset_id IN (${legacyIds}))::int AS in_model,
          (SELECT count(*) FROM staging_quarantine WHERE import_id = $4)::int AS quarantined,
@@ -458,7 +665,16 @@ export class ExcelImportService {
     return rows;
   }
 
-  private async validate(batchId: string, request: PreviewRequest): Promise<number> {
+  /**
+   * Valida el mapeo y devuelve la fila de encabezados y sus columnas. Con una plantilla detectada (misma hoja y
+   * destino), un campo obligatorio cuya columna el archivo no trae (plantilla de otra versión) no invalida el mapeo:
+   * se trata como vacío y cada fila sigue su regla (va a cuarentena). En un Excel cualquiera, igual que siempre.
+   */
+  private async validate(
+    batchId: string,
+    request: PreviewRequest,
+    detection: TemplateDetection | null,
+  ): Promise<{ readonly headerRow: number; readonly columns: Record<string, string> }> {
     const [batch] = (await this.dataSource.query(
       'SELECT sheets FROM staging_batch WHERE id = $1',
       [batchId],
@@ -469,13 +685,36 @@ export class ExcelImportService {
     if (!batch.sheets.some((sheet) => sheet.name === request.sheet)) {
       throw new ApiException(ErrorCode.ValidationFailed, `El archivo no tiene la hoja '${request.sheet}'`);
     }
+    const applies = templateApplies(detection, request.sheet, request.target);
+    let headerRow = request.headerRow;
+    if (headerRow === undefined) {
+      if (applies && detection) {
+        headerRow = detection.headerRow;
+      } else {
+        const head = (await this.dataSource.query(
+          `SELECT row_number, cells, cell_types FROM staging_row
+           WHERE batch_id = $1 AND sheet_name = $2 AND row_number <= 30 ORDER BY row_number`,
+          [batchId, request.sheet],
+        )) as StagedHead;
+        headerRow = detectHeaderRow(head.map((row) => ({ rowNumber: row.row_number, cells: row.cells, types: row.cell_types })));
+      }
+    }
+    const [header] = (await this.dataSource.query(
+      'SELECT cells FROM staging_row WHERE batch_id = $1 AND sheet_name = $2 AND row_number = $3',
+      [batchId, request.sheet, headerRow],
+    )) as Array<{ cells: Record<string, RawCellValue> }>;
+    const columns = headerColumns(header?.cells);
+    const absent = new Set(
+      applies ? missingTemplateColumns(request.target, columns, request.mapping).map((column) => column.field) : [],
+    );
+
     const fields: Record<string, ImportField> = fieldsFor(request.target);
     const unknown = Object.keys(request.mapping).filter((field) => !(field in fields));
     const missing = Object.entries(fields)
-      .filter(([field, definition]) => definition.required && !request.mapping[field])
+      .filter(([field, definition]) => definition.required && !request.mapping[field] && !absent.has(field))
       .map(([field]) => field);
     const badLetters = Object.entries(request.mapping).filter(([, letter]) => !COLUMN_LETTER.test(letter));
-    const rules = targetRuleErrors(request);
+    const rules = targetRuleErrors(request, absent);
     if (unknown.length > 0 || missing.length > 0 || badLetters.length > 0 || rules.length > 0) {
       throw new ApiException(ErrorCode.ValidationFailed, 'Mapeo inválido', [
         ...unknown.map((field) => ({ field, message: 'Campo destino desconocido' })),
@@ -484,15 +723,7 @@ export class ExcelImportService {
         ...rules,
       ]);
     }
-    if (request.headerRow !== undefined) {
-      return request.headerRow;
-    }
-    const head = (await this.dataSource.query(
-      `SELECT row_number, cells, cell_types FROM staging_row
-       WHERE batch_id = $1 AND sheet_name = $2 AND row_number <= 30 ORDER BY row_number`,
-      [batchId, request.sheet],
-    )) as Array<{ row_number: number; cells: Record<string, RawCellValue>; cell_types: Record<string, string> }>;
-    return detectHeaderRow(head.map((row) => ({ rowNumber: row.row_number, cells: row.cells, types: row.cell_types })));
+    return { headerRow, columns };
   }
 
   private async importRow(importId: string): Promise<ImportRow> {
@@ -527,16 +758,17 @@ export class ExcelImportService {
     if (job.options.unknownCostCenters !== 'create') {
       return 0;
     }
+    const centerCode = catalogCodeSql(col(job.mapping, 'costCenterCode'));
     const created = (await manager.query(
       `INSERT INTO cost_center (external_code, name, accepts_assets, is_active, sync_source, last_synced_at, external_metadata)
-       SELECT DISTINCT ${col(job.mapping, 'costCenterCode')},
-              'Centro ' || ${col(job.mapping, 'costCenterCode')} || ' (no está en el catálogo)',
+       SELECT DISTINCT ${centerCode},
+              'Centro ' || ${centerCode} || ' (no está en el catálogo)',
               TRUE, TRUE, 'IMPORT_EXCEL', NOW(),
               jsonb_build_object('notInCatalog', true, 'importId', $4::text, 'createdBy', $5::text)
        FROM staging_row r
-       WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3
+       WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 ${notExampleRow(job)}
          AND ${col(job.mapping, 'legacyAssetId')} IS NOT NULL
-         AND ${col(job.mapping, 'costCenterCode')} IS NOT NULL
+         AND ${centerCode} IS NOT NULL
        ON CONFLICT (external_code) DO NOTHING
        RETURNING id`,
       [job.batch_id, job.sheet_name, job.header_row, job.id, actorId],
@@ -555,7 +787,7 @@ export class ExcelImportService {
          SELECT r.row_number, r.cells,
            NOT EXISTS (SELECT 1 FROM jsonb_each_text(r.cells) e WHERE btrim(e.value) <> '') AS is_blank,
            ${col(m, 'code')} AS code, ${col(m, 'name')} AS name, NULL::text AS reason, NULL::text AS detail
-         FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3`,
+         FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 ${notExampleRow(job)}`,
         [job.batch_id, job.sheet_name, job.header_row],
       );
       await manager.query(`
@@ -576,12 +808,14 @@ export class ExcelImportService {
          ${col(m, 'legacyAssetId')} AS legacy_id, ${col(m, 'legacyCode')} AS barcode,
          ${col(m, 'description')} AS description, ${col(m, 'model')} AS model,
          ${col(m, 'serial')} AS serial, ${col(m, 'acquisitionDocument')} AS document,
-         ${col(m, 'costCenterCode')} AS center_code,
+         ${catalogCodeSql(col(m, 'costCenterCode'))} AS center_code,
+         ${catalogCodeSql(col(m, 'categoryCode'))} AS category_code,
+         upper(${catalogCodeSql(col(m, 'physicalCondition'))}) AS physical_condition,
          ${col(m, 'acquisitionDate')} AS purchase_raw, ${colType(m, 'acquisitionDate')} AS purchase_type,
          ${col(m, 'acquisitionPrice')} AS price_raw, ${col(m, 'usefulLifeYears')} AS useful_raw,
          ${col(m, 'notes')} AS notes,
          NULL::text AS reason, NULL::text AS detail, FALSE AS barcode_dup
-       FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3`,
+       FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 ${notExampleRow(job)}`,
       [job.batch_id, job.sheet_name, job.header_row],
     );
     await manager.query(`
@@ -601,11 +835,21 @@ export class ExcelImportService {
             WHEN center_code IS NULL
               OR NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = import_src.center_code)
               THEN 'COST_CENTER_UNKNOWN'
+            WHEN category_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM asset_category ac
+                WHERE ac.code = import_src.category_code AND ac.is_active)
+              THEN 'CATEGORY_UNKNOWN'
+            WHEN physical_condition IS NOT NULL AND physical_condition NOT IN (${PHYSICAL_CONDITION_LIST})
+              THEN 'PHYSICAL_CONDITION_INVALID'
           END AS reason,
           CASE
             WHEN center_code IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = import_src.center_code)
               THEN 'Centro de costo ' || center_code
+            WHEN category_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM asset_category ac
+                WHERE ac.code = import_src.category_code AND ac.is_active)
+              THEN 'Categoría ' || left(category_code, 40)
+            WHEN physical_condition IS NOT NULL AND physical_condition NOT IN (${PHYSICAL_CONDITION_LIST})
+              THEN 'Condición física ' || left(physical_condition, 40)
           END AS detail
         FROM import_src) c
       WHERE s.row_number = c.row_number`);
@@ -643,15 +887,15 @@ export class ExcelImportService {
        SELECT r.row_number,
          NOT EXISTS (SELECT 1 FROM jsonb_each_text(r.cells) e WHERE btrim(e.value) <> '') AS is_blank,
          ${col(m, 'documentNumber')} AS doc_number,
-         ${col(m, 'documentType')} AS doc_type_raw,
+         ${catalogCodeSql(col(m, 'documentType'))} AS doc_type_raw,
          NULL::varchar(10) AS doc_type,
          ${fullName ? col(m, 'fullName') : col(m, 'firstName')} AS first_name,
          ${fullName ? "''::text" : col(m, 'lastName')} AS last_name,
          ${col(m, 'positionTitle')} AS position_title,
          ${col(m, 'email')} AS email,
-         ${col(m, 'costCenterCode')} AS center_code,
+         ${catalogCodeSql(col(m, 'costCenterCode'))} AS center_code,
          NULL::text AS reason, NULL::text AS detail
-       FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3`,
+       FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 ${notExampleRow(job)}`,
       [job.batch_id, job.sheet_name, job.header_row],
     );
     await manager.query(
@@ -967,6 +1211,17 @@ export class ExcelImportService {
       [job.batch_id, job.sheet_name],
     )) as Array<{ row_number: number; cells: Record<string, RawCellValue>; cell_types: Record<string, string> }>;
     const header = rows.find((row) => row.row_number === job.header_row);
+    const examples = new Set(job.template_example_rows ?? []);
+    const centerLetter = job.mapping['costCenterCode'];
+    // Mismas filas y mismos códigos que la clasificación: sin la fila de ejemplo y con el código del desplegable.
+    const staged = rows
+      .filter((row) => !examples.has(row.row_number))
+      .map((row) => {
+        const center = centerLetter ? row.cells[centerLetter] : undefined;
+        return typeof center === 'string'
+          ? { ...row, cells: { ...row.cells, [centerLetter as string]: catalogCode(center.trim()) } }
+          : row;
+      });
     const codes = (await this.dataSource.query('SELECT external_code FROM cost_center')) as Array<{
       external_code: string;
     }>;
@@ -984,7 +1239,7 @@ export class ExcelImportService {
         columns: Object.fromEntries(
           Object.entries(header?.cells ?? {}).map(([letter, value]) => [letter, String(value)]),
         ),
-        rows: rows.map((row) => ({ rowNumber: row.row_number, cells: row.cells, types: row.cell_types })),
+        rows: staged.map((row) => ({ rowNumber: row.row_number, cells: row.cells, types: row.cell_types })),
       },
       new Set(codes.map((code) => code.external_code)),
       mapping,
