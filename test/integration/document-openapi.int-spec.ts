@@ -12,6 +12,7 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
+import { MailService } from '../../src/shared/mail/mail.service.js';
 import { scalar, useSharedStorage } from './helpers.js';
 
 const FORMAT = 'OCI-21-37';
@@ -199,6 +200,7 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
       `DELETE FROM signature_envelope_signer WHERE envelope_id IN (SELECT id FROM signature_envelope WHERE document_id = ANY($1))`,
       [ids],
     );
+    await dataSource.query('DELETE FROM signature_signing_link WHERE document_id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM signature_envelope WHERE document_id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM document_request WHERE format_key = $1', [FORMAT]);
     await dataSource.query('DELETE FROM document WHERE id = ANY($1)', [ids]);
@@ -310,5 +312,81 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
     const retried = await http().post(`/api/v1/documents/requests/${requestId}/retry`).set(auth(director)).expect(200);
     expect(retried.body.data.status).toBe('PENDING_GENERATION');
     expectConforms('post', '/api/v1/documents/requests/{requestId}/retry', 200, retried.body);
+
+    // Firma por enlace: reenvío, páginas públicas y detalle con el enlace; luego anulación.
+    const mail = app.get(MailService);
+    const urls: string[] = [];
+    const spy = vi.spyOn(mail, 'sendSigningLink').mockImplementation((_to, context) => {
+      urls.push(context.url);
+      return Promise.resolve(true);
+    });
+    try {
+      const documentNumber = `6${Date.now().toString().slice(-9)}`;
+      const outsider = await scalar<string>(
+        dataSource,
+        `INSERT INTO person (first_name, last_name, email, document_type, document_number)
+         VALUES ('Externa', 'Contrato', $1, 'CC', $2) RETURNING id`,
+        [`externa.${randomUUID().slice(0, 8)}@unac.edu.co`, documentNumber],
+      );
+      const byLink = await http()
+        .post('/api/v1/documents')
+        .set(auth(director))
+        .send({ formatKey: FORMAT, responsiblePersonId: outsider, signers: { AUDITA: director.personId } })
+        .expect(201);
+      const linkDocumentId = byLink.body.data.id as string;
+      const resent = await http()
+        .post(`/api/v1/documents/${linkDocumentId}/signatures/1/signing-link`)
+        .set(auth(director))
+        .expect(200);
+      expect(resent.body.data.signatures[0].signingLink.status).toBe('SENT');
+      expectConforms('post', '/api/v1/documents/{id}/signatures/{order}/signing-link', 200, resent.body);
+      const token = urls.at(-1)?.split('/firmar/')[1] ?? '';
+      const linkView = await http().get(`/api/v1/public/signing-links/${token}`).expect(200);
+      expectConforms('get', '/api/v1/public/signing-links/{token}', 200, linkView.body);
+      const confirmed = await http()
+        .post(`/api/v1/public/signing-links/${token}/identity`)
+        .send({ last4: documentNumber.slice(-4) })
+        .expect(200);
+      expectConforms('post', '/api/v1/public/signing-links/{token}/identity', 200, confirmed.body);
+      const linkSigned = await http()
+        .post(`/api/v1/public/signing-links/${token}/sign`)
+        .send({ identityToken: confirmed.body.data.identityToken, rubric })
+        .expect(200);
+      expectConforms('post', '/api/v1/public/signing-links/{token}/sign', 200, linkSigned.body);
+      const consumed = await http().get(`/api/v1/public/signing-links/${token}`).expect(200);
+      expectConforms('get', '/api/v1/public/signing-links/{token}', 200, consumed.body);
+      const withLink = await http().get(`/api/v1/documents/${linkDocumentId}`).set(auth(director)).expect(200);
+      expect(withLink.body.data.signatures[0].method).toBe('EMAIL_LINK');
+      expectConforms('get', '/api/v1/documents/{id}', 200, withLink.body);
+
+      const toVoid = await http()
+        .post('/api/v1/documents')
+        .set(auth(director))
+        .send({ formatKey: FORMAT, responsiblePersonId: outsider, signers: { AUDITA: director.personId } })
+        .expect(201);
+      const toReject2 = urls.at(-1)?.split('/firmar/')[1] ?? '';
+      const confirmed2 = await http()
+        .post(`/api/v1/public/signing-links/${toReject2}/identity`)
+        .send({ last4: documentNumber.slice(-4) })
+        .expect(200);
+      const linkRejected = await http()
+        .post(`/api/v1/public/signing-links/${toReject2}/reject`)
+        .send({ identityToken: confirmed2.body.data.identityToken, reason: 'No recibí los activos' })
+        .expect(200);
+      expectConforms('post', '/api/v1/public/signing-links/{token}/reject', 200, linkRejected.body);
+      await dataSource.query(
+        `UPDATE document SET status = 'VOIDED', voided_at = NOW(), void_reason = 'prueba de contrato' WHERE id = $1`,
+        [toVoid.body.data.id],
+      );
+      const voided = await http().get(`/api/v1/documents/${toVoid.body.data.id}`).set(auth(director)).expect(200);
+      expectConforms('get', '/api/v1/documents/{id}', 200, voided.body);
+      const voidedAttestation = await http().get(`/api/v1/public/signatures/${voided.body.data.verification.code}`).expect(200);
+      expect(voidedAttestation.body.data.status).toBe('VOIDED');
+      expectConforms('get', '/api/v1/public/signatures/{code}', 200, voidedAttestation.body);
+      const listed = await http().get('/api/v1/documents').query({ formatKey: FORMAT, pageSize: 100 }).set(auth(director)).expect(200);
+      expectConforms('get', '/api/v1/documents', 200, listed.body);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

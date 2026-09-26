@@ -353,6 +353,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       `DELETE FROM signature_envelope_signer WHERE envelope_id IN (SELECT id FROM signature_envelope WHERE document_id = ANY($1))`,
       [ids],
     );
+    await dataSource.query('DELETE FROM signature_signing_link WHERE document_id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM signature_envelope WHERE document_id = ANY($1)', [ids]);
     await dataSource.query(`DELETE FROM document_request WHERE payload->>'entityType' = 'LOAN'`);
     await dataSource.query('DELETE FROM document WHERE id = ANY($1)', [ids]);

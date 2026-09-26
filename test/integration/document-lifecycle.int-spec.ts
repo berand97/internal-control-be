@@ -275,6 +275,7 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     ])) as Array<{ id: string }>;
     const ids = documents.map((item) => item.id);
     await dataSource.query('DELETE FROM document_signature_reassignment WHERE document_id = ANY($1)', [ids]);
+    await dataSource.query('DELETE FROM signature_signing_link WHERE document_id = ANY($1)', [ids]);
     await dataSource.query(`DELETE FROM document_request WHERE document_id = ANY($1) OR payload->>'entityType' = $2`, [
       ids,
       ENTITY,
