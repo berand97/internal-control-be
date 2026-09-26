@@ -49,7 +49,7 @@ describe('plantillas de importación generadas desde la definición', () => {
       [META_SHEET, 'hidden'],
     ]);
     for (const sheet of workbook.worksheets) {
-      expect(Object.keys((sheet.model as { merges?: Record<string, unknown> }).merges ?? {})).toEqual([]);
+      expect(sheet.model.merges ?? []).toEqual([]);
       sheet.eachRow({ includeEmpty: false }, (row) =>
         row.eachCell({ includeEmpty: false }, (cell) => {
           expect(cell.type).not.toBe(ExcelJS.ValueType.Formula);

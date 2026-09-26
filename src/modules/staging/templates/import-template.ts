@@ -163,6 +163,11 @@ export interface BuiltTemplate {
   readonly body: Buffer;
 }
 
+/** exceljs 4.4 acepta rangos («D2:D5001») en dataValidations.add, pero sus tipos no declaran la propiedad. */
+interface RangeValidations {
+  readonly dataValidations: { add(address: string, validation: ExcelJS.DataValidation): void };
+}
+
 const REQUIRED_FILL = 'FFC00000';
 const OPTIONAL_FILL = 'FFD9D9D9';
 const EXAMPLE_FILL = 'FFFFF2CC';
@@ -231,7 +236,7 @@ export const buildTemplate = async ({ target, catalogs, generatedAt }: BuildTemp
 
     const range = field.catalog ? catalogRange.get(field.catalog) : undefined;
     if (range) {
-      data.dataValidations.add(`${letter}${EXAMPLE_ROW}:${letter}${TEMPLATE_ROWS + 1}`, {
+      (data as unknown as RangeValidations).dataValidations.add(`${letter}${EXAMPLE_ROW}:${letter}${TEMPLATE_ROWS + 1}`, {
         type: 'list',
         allowBlank: true,
         formulae: [range],
