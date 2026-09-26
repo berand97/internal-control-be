@@ -26,13 +26,32 @@ interface Sample {
 
 const fold = (text: string): string => text.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase();
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Clase que no puede tocar ese borde del fragmento: un dígito no sigue a un dígito, una letra no sigue a una letra. */
+const edgeClass = (char: string | undefined): string | null =>
+  char === undefined ? null : /\p{N}/u.test(char) ? '\\p{N}' : /\p{L}/u.test(char) ? '\\p{L}' : null;
+
+/**
+ * El fragmento aparece como palabra/número completo: "9 de septiembre" no coincide dentro de "19 de septiembre" ni
+ * "Buen estado" dentro de "Buen estados", pero sí con cualquier puntuación o espacio alrededor.
+ */
+export const containsFragment = (haystack: string, fragment: string): boolean => {
+  const before = edgeClass(fragment[0]);
+  const after = edgeClass(fragment.at(-1));
+  return new RegExp(
+    `${before ? `(?<!${before})` : ''}${escapeRegExp(fragment)}${after ? `(?!${after})` : ''}`,
+    'u',
+  ).test(haystack);
+};
+
 export const sampleLeftovers = (text: string, sample: Sample, options: { readonly numbers: boolean }): string[] => {
   const folded = fold(text);
   const compact = text.replace(/[.\s]/g, '');
   const found = [
     ...sample.names.filter((value) => new RegExp(`\\b${fold(value)}\\b`).test(folded)),
     ...sample.documents.filter((value) => compact.includes(value)),
-    ...sample.text.filter((value) => folded.includes(fold(value))),
+    ...sample.text.filter((value) => containsFragment(folded, fold(value))),
     ...(options.numbers ? sample.numbers.filter((value) => new RegExp(`(^|\\D)${value}(\\D|$)`).test(text)) : []),
   ];
   if (/docs\.google|drive\.google/i.test(text)) {

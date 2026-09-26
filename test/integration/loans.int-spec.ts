@@ -817,6 +817,18 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     expect(await scalar<string>(dataSource, 'SELECT status::text FROM asset_loan WHERE id = $1', [unsignedLate])).toBe('PENDING_SIGNATURES');
   });
   describe('decisiones de Control Interno y defectos corregidos', () => {
+    /** Filas de audit_log del préstamo con esa acción; ninguna lleva números de documento de los usuarios. */
+    const loanAudits = async (loanId: string, action: string) => {
+      const rows = (await dataSource.query(
+        `SELECT entity_type, performed_by, changes FROM audit_log WHERE entity_id = $1 AND action = $2 ORDER BY id`,
+        [loanId, action],
+      )) as Array<{ entity_type: string; performed_by: string; changes: Record<string, unknown> | null }>;
+      for (const user of Object.values(users)) {
+        expect(JSON.stringify(rows)).not.toContain(user.documentNumber);
+      }
+      return rows;
+    };
+
     const sign = (documentId: string, order: number, who: string) =>
       http().post(`/api/v1/documents/${documentId}/signatures/${order}`).set(auth(who)).send({ rubric });
 
@@ -938,6 +950,21 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expectConforms('post', '/api/v1/loans/{id}/delivery-act/regenerate', 200, regenerated.body);
       expect(regenerated.body.data).toMatchObject({ status: 'PENDING_SIGNATURES', contactPersonId: users['recibe2']?.personId });
       expect(regenerated.body.data.deliveryAct).toMatchObject({ status: 'PENDING', documentId: null, regenerable: false });
+      // Auditoría con su propia acción (antes LOAN_DELIVERED + changes.kind), en la transacción de la regeneración.
+      expect(await loanAudits(loan.id, 'LOAN_ACT_REGENERATED')).toEqual([
+        {
+          entity_type: 'LOAN',
+          performed_by: users['director']?.userId,
+          changes: {
+            documentRequestId: expect.any(String),
+            previousDocumentId: loan.documentId,
+            reason: 'Se corrige la persona que recibe',
+          },
+        },
+      ]);
+      expect(
+        (await loanAudits(loan.id, 'LOAN_DELIVERED')).filter((row) => row.changes !== null && 'kind' in row.changes),
+      ).toEqual([]);
       // La movida del enlace movimiento ↔ acta: la rechazada ya no lo tiene.
       expect(
         await scalar<number>(dataSource, 'SELECT count(*)::int FROM document_asset WHERE document_id = $1 AND movement_id IS NOT NULL', [
@@ -1022,6 +1049,14 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         recorded.filter((item) => item.movement_type === 'RETURN').every((item) => item.metadata['undoDelivery'] === true && item.metadata['loanId'] === loan.id),
       ).toBe(true);
       expect(undone.body.data.events.at(-1)).toMatchObject({ eventType: 'DELIVERY_UNDONE' });
+      expect(await loanAudits(loan.id, 'LOAN_DELIVERY_UNDONE')).toEqual([
+        {
+          entity_type: 'LOAN',
+          performed_by: users['director']?.userId,
+          changes: { reason: 'La dependencia de destino desistió del préstamo', voidedDocumentIds: [loan.documentId] },
+        },
+      ]);
+      expect(await loanAudits(loan.id, 'LOAN_RETURNED')).toEqual([]);
       // Nadie firma el acta anulada; deshacer dos veces no es una transición válida.
       expect((await sign(loan.documentId, 1, 'entrega')).status).toBe(406);
       const again = await http().post(`/api/v1/loans/${loan.id}/undo-delivery`).set(auth('director')).send({ reason: 'Otra vez' });
@@ -1119,6 +1154,10 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expectConforms('post', '/api/v1/loans/{id}/extension/reject', 200, rejected.body);
       expect(rejected.body.data).toMatchObject({ expectedReturnDate: newDate, extensionRequestedDate: null });
       expect(rejected.body.data.events.at(-1)).toMatchObject({ eventType: 'EXTENSION_REJECTED' });
+      expect(await loanAudits(loan.id, 'LOAN_EXT_REJECTED')).toEqual([
+        { entity_type: 'LOAN', performed_by: users['director']?.userId, changes: { reason: 'No hay más plazo' } },
+      ]);
+      expect((await loanAudits(loan.id, 'LOAN_EXTENDED')).filter((row) => row.changes !== null && 'kind' in row.changes)).toEqual([]);
 
       // OVERDUE con la nueva fecha no vencida vuelve a ACTIVE.
       await dataSource.query(`UPDATE asset_loan SET status = 'OVERDUE', expected_return_date = $2 WHERE id = $1`, [

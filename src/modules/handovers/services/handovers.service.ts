@@ -1,4 +1,4 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { DataSource, type EntityManager, QueryFailedError } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
@@ -10,6 +10,7 @@ import { MovementType } from '../../assets/enums/movement-type.enum.js';
 import type { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import { AssetStateService } from '../../assets/services/asset-state.service.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
+import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import {
   DocumentLifecycleRegistry,
   type DocumentLifecycleEvent,
@@ -75,6 +76,8 @@ export class HandoversService implements OnModuleInit {
     private readonly engine: DocumentEngineService,
     private readonly lifecycle: DocumentLifecycleRegistry,
     private readonly assetState: AssetStateService,
+    @Inject('AuditLogsRepository')
+    private readonly auditLogsRepository: AuditLogsRepository,
   ) {}
 
   onModuleInit(): void {
@@ -169,7 +172,7 @@ export class HandoversService implements OnModuleInit {
       if (exists.status === 'SIGNED') {
         throw new ApiException(ErrorCode.DocumentAlreadySigned, 'La entrega ya está firmada y aplicada; no se puede cancelar');
       }
-      await this.engine.voidForEntity(manager, {
+      const voided = await this.engine.voidForEntity(manager, {
         entityType: HANDOVER_ENTITY_TYPE,
         entityId: id,
         reason: motive,
@@ -186,6 +189,23 @@ export class HandoversService implements OnModuleInit {
         [id, actor.id, motive],
       );
       await manager.query('UPDATE asset_handover_item SET open = FALSE WHERE handover_id = $1', [id]);
+      await this.auditLogsRepository.record(
+        {
+          action: AuditAction.HandoverCancelled,
+          entityType: HANDOVER_ENTITY_TYPE,
+          entityId: id,
+          performedBy: actor.id,
+          ipAddress: null,
+          userAgent: null,
+          changes: {
+            from: handover.status,
+            reason: motive,
+            cancelledRequestIds: voided.cancelledRequestIds,
+            voidedDocumentIds: voided.voidedDocumentIds,
+          },
+        },
+        manager,
+      );
     });
     return this.detail(id);
   }

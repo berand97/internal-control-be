@@ -298,7 +298,8 @@ export class AssetsController {
   @RequirePermission('asset:update:global')
   @ApiOperation({
     summary: 'Actualizar activo',
-    description: 'internalCode no es editable. Para centro de costo usar reassign-cost-center.',
+    description:
+      'internalCode no es editable. Para centro de costo usar reassign-cost-center. Bloqueado (406 ASSET_HAS_ACTIVE_LOAN) si el activo está en un préstamo abierto.',
   })
   update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
