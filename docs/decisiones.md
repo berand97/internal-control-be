@@ -57,20 +57,44 @@ fecha (perdería la información de que falta el acta).
 
 ## 5c. Acta de devolución (formato SGC pendiente)
 
-- Clave interna `LOAN_RETURN` en `src/modules/documents/domain/document-formats.ts`, con `sgcCode: null`,
-  `version: null`, `signers: []`, consecutivo propio (su propia fila en `document_sequence`) y el contrato de
-  marcadores documentado en el mismo archivo. `GET /documents/formats` lo muestra con `sgcCode: null`,
+- Clave interna `LOAN_RETURN`, sembrada (migración 1767225730000) como versión 1 sin código SGC, sin versión y sin
+  firmantes, con consecutivo propio (su propia fila en `document_sequence`); el contrato de marcadores está en
+  `src/modules/documents/domain/document-formats.ts`. `GET /documents/formats` lo muestra con `sgcCode: null`,
   `ready: false` y `pendingDecisions`.
 - El motor se niega a generar, encolar o registrar plantilla de un formato sin código o sin firmantes:
   `409 DOCUMENT_FORMAT_NOT_READY`.
 - La devolución no se rompe: `receive-return` registra todo y el préstamo expone `returnActFormat` (formato
   pendiente) y un `returnActs[]` por recepción con `status: PENDING_FORMAT`.
-- Cuando el catálogo tenga código y firmantes, `receive-return` encola el acta en su transacción, con cada activo
-  enlazado a su movimiento `RETURN` (probado con un formato y una plantilla de prueba en
-  `test/integration/loan-return-act.int-spec.ts`).
+- Cuando Control Interno le cree por API una versión con código y firmantes
+  (`POST /documents/formats/LOAN_RETURN/versions`) y suba la plantilla, `receive-return` encola el acta en su
+  transacción, con cada activo enlazado a su movimiento `RETURN` (probado de punta a punta con un código, firmantes y
+  plantilla de prueba en `test/integration/loan-return-act.int-spec.ts`).
 
 **Pendiente de la universidad / Control Interno:** código SGC y versión; firmantes y orden; formato del consecutivo
 (se dejó AAAA-NNNN provisional); si las devoluciones anteriores a la emisión del formato deben tener acta retroactiva.
+
+## 5d. Formatos SGC administrables y versionados
+
+- **Administrable (API, permiso `document_template:update:global`; leer con `document_template:read:global`):** crear
+  un formato (clave estable + permisos de lectura y generación existentes) y, por versión con fecha de vigencia,
+  código y versión SGC, nombre, firmantes (orden, rol, etiqueta, origen), forma y valor inicial del consecutivo,
+  decisiones pendientes; la plantilla Word con su vigencia. Un formato nuevo se genera con `POST /documents`.
+- **Código (desarrollo):** enchufar un formato a un proceso de negocio. El proceso declara en
+  `DocumentLifecycleRegistry.register({ formats })` qué claves usa y qué roles asigna: OCI-01-55 → entregas (RECIBE
+  RESPONSIBLE, AUDITA REQUEST), OCI-01-65 → préstamos (ENTREGA REQUEST, RECIBE RESPONSIBLE, AUDITA REQUEST),
+  LOAN_RETURN → devolución (cualquier rol: pide los REQUEST de la versión vigente). Una versión que quite, añada o
+  cambie el origen de esos roles se rechaza con `409 DOCUMENT_FORMAT_BREAKS_PROCESS`. AUDITA y CONTROL_INTERNO
+  siguen siendo turnos de Control Interno (sesión con MFA).
+- **Nunca se sobrescribe:** cada cambio es una versión nueva (trigger en BD impide editar una versión). Cada acta
+  guarda la versión con que se emitió (`document.format_version_id`; las existentes quedaron en la versión 1):
+  firmantes, etiquetas del sobre y de la hoja de firmas, título y verificación pública salen de esa versión.
+- **Vigencia:** medianoche de Bogotá. Versión nueva: hoy o después, nunca antes de la última. La versión 1
+  sembrada no tiene fecha (vigente desde siempre).
+- **Consecutivo:** `document_sequence` no se toca. El valor inicial de una versión solo aplica si el consecutivo de
+  ese periodo aún no existe; cambiarlo después se rechaza con `409 DOCUMENT_FORMAT_SEQUENCE_STARTED`.
+- `document-formats.ts` ya no tiene datos: tipos, reglas puras, el contrato de marcadores y la explicación de qué es
+  administrable. La única copia de los datos iniciales está en la migración (histórica). Excepción temporal: un mapa
+  de nombres iniciales (`findFormat`, deprecado) que aún usa la línea de tiempo del activo.
 
 ## Otras decisiones de esta ronda
 

@@ -623,6 +623,21 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CONTACT_SUPPORT',
     message: 'El formato institucional de esta acta aún no está definido (código SGC o firmantes pendientes)',
   },
+  [ErrorCode.DocumentFormatAlreadyExists]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Ya existe un formato con esa clave',
+  },
+  [ErrorCode.DocumentFormatBreaksProcess]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Esta versión cambia firmantes que el proceso que usa el formato necesita; el proceso dejaría de generar el acta',
+  },
+  [ErrorCode.DocumentFormatSequenceStarted]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El consecutivo de ese periodo ya empezó: el valor inicial solo se puede cambiar antes de emitir la primera acta',
+  },
   [ErrorCode.LoanExtensionNotRequester]: {
     httpStatus: 403,
     action: 'CANCEL',

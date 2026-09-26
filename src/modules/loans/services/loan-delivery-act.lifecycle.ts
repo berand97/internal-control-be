@@ -33,6 +33,16 @@ export class LoanDeliveryActLifecycle implements OnModuleInit {
   onModuleInit(): void {
     this.lifecycle.register({
       entityType: LOAN_DOCUMENT_ENTITY,
+      // Firmantes que este código asigna (LoansService.deliver/regenerateDeliveryAct y receiveReturn): la administración
+      // de formatos no puede crear una versión que los quite. La devolución pide los REQUEST que diga su versión vigente.
+      formats: [
+        {
+          formatKey: LOAN_DELIVERY_FORMAT,
+          process: 'Préstamos (acta de entrega)',
+          signers: { ENTREGA: 'REQUEST', RECIBE: 'RESPONSIBLE', AUDITA: 'REQUEST' },
+        },
+        { formatKey: LOAN_RETURN_FORMAT, process: 'Préstamos (acta de devolución)', signers: 'ANY' },
+      ],
       onGenerated: (manager, event) =>
         event.formatKey === LOAN_RETURN_FORMAT ? this.returnAct(manager, event, 'RETURN_ACT_GENERATED') : this.generated(manager, event),
       onSigned: (manager, event) =>

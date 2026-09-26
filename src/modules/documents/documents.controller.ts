@@ -52,13 +52,16 @@ import {
   DOCUMENT_RESPONSE_MODELS,
   DocumentDetailResponseDto,
   DocumentFormatResponseDto,
+  DocumentFormatVersionResponseDto,
   DocumentListItemDto,
   DocumentListResponseDto,
   envelopedArraySchema,
   GeneratedDocumentResponseDto,
   UploadedTemplateResponseDto,
 } from './dto/document.responses.js';
+import { CreateDocumentFormatDto, DocumentFormatVersionInputDto } from './dto/document-format.dto.js';
 import { DocumentLifecycleRegistry } from './lifecycle/document-lifecycle.registry.js';
+import { DocumentFormatCatalogService } from './services/document-format-catalog.service.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
 import { DOCUMENT_LIST_STATUSES, DocumentListService, type DocumentListStatus } from './services/document-list.service.js';
 
@@ -159,8 +162,11 @@ export class QueryDocumentsDto {
 }
 
 export class UploadTemplateDto {
+  /** Versión SGC impresa en formato.version. Por defecto, la de la versión del formato que regirá con la plantilla. */
+  @IsOptional()
   @IsString()
-  readonly sgcVersion!: string;
+  @MaxLength(10)
+  readonly sgcVersion?: string;
 
   @IsDateString()
   readonly effectiveDate!: string;
@@ -182,6 +188,7 @@ export class DocumentsController {
     private readonly engine: DocumentEngineService,
     private readonly documentList: DocumentListService,
     private readonly lifecycle: DocumentLifecycleRegistry,
+    private readonly catalog: DocumentFormatCatalogService,
   ) {}
 
   @Get()
@@ -218,17 +225,70 @@ export class DocumentsController {
 
   @Get('formats')
   @RequirePermission('document_template:read:global')
-  @ApiOperation({ summary: 'Formatos SGC configurados, plantilla vigente y último consecutivo' })
+  @ApiOperation({
+    summary: 'Formatos SGC: versión vigente, plantilla vigente y último consecutivo',
+    description:
+      'Cada formato con su versión vigente hoy (versionId, versionNumber, effectiveFrom), la próxima programada (scheduledVersion) y el proceso de negocio enchufado en código (process). Orden: código SGC, sin código al final.',
+  })
   @ApiOkResponse({ schema: envelopedArraySchema(DocumentFormatResponseDto) })
   formats() {
     return this.engine.formats();
+  }
+
+  @Post('formats')
+  @RequirePermission('document_template:update:global')
+  @ApiOperation({
+    summary: 'Crear un formato SGC con su primera versión',
+    description:
+      'Queda generable de inmediato con POST /documents (subida la plantilla). Conectarlo a un proceso de negocio es desarrollo, no se hace aquí. ' +
+      'Errores: 409 DOCUMENT_FORMAT_ALREADY_EXISTS (clave usada), 400 VALIDATION_FAILED (campos, permisos inexistentes), ' +
+      '409 DOCUMENT_FORMAT_SEQUENCE_STARTED (ya hay consecutivo con esa clave y el valor inicial no aplicaría).',
+  })
+  @ApiCreatedResponse({ schema: envelopedSchema(DocumentFormatResponseDto) })
+  async createFormat(@Body() dto: CreateDocumentFormatDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.engine.formatSummary(await this.catalog.createFormat(dto, actor.id));
+  }
+
+  @Get('formats/:formatKey/versions')
+  @RequirePermission('document_template:read:global')
+  @ApiOperation({
+    summary: 'Historial de versiones de un formato, la más reciente primero',
+    description: 'status: CURRENT (la usa la próxima acta), SCHEDULED (vigencia futura), SUPERSEDED. documentCount: actas emitidas con cada versión.',
+  })
+  @ApiOkResponse({ schema: envelopedArraySchema(DocumentFormatVersionResponseDto) })
+  versions(@Param('formatKey') formatKey: string) {
+    return this.catalog.history(formatKey);
+  }
+
+  @Post('formats/:formatKey/versions')
+  @RequirePermission('document_template:update:global')
+  @ApiOperation({
+    summary: 'Crear una versión nueva de un formato (código y versión SGC, nombre, firmantes, numeración)',
+    description:
+      'Instantánea completa: lo que no se envía no se hereda. Nunca modifica una versión existente: las actas ya emitidas conservan la suya ' +
+      '(firmantes, etiquetas, hoja de firmas y verificación pública). Rige desde effectiveFrom (hoy por defecto). ' +
+      'Errores: 404 formato inexistente; 400 VALIDATION_FAILED; 409 DOCUMENT_FORMAT_BREAKS_PROCESS (quita, añade o cambia el origen de un rol ' +
+      'que el proceso enchufado necesita; ver process.requiredSigners en GET /documents/formats); 409 DOCUMENT_FORMAT_SEQUENCE_STARTED ' +
+      '(cambia el valor inicial de un consecutivo que ya empezó).',
+  })
+  @ApiCreatedResponse({ schema: envelopedSchema(DocumentFormatVersionResponseDto) })
+  async createVersion(
+    @Param('formatKey') formatKey: string,
+    @Body() dto: DocumentFormatVersionInputDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    const created = await this.catalog.createVersion(formatKey, dto, actor.id);
+    const history = await this.catalog.history(formatKey);
+    return history.find((item) => item.versionId === created.versionId);
   }
 
   @Post('formats/:formatKey/templates')
   @RequirePermission('document_template:update:global')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Subir una versión de plantilla DOCX con su versión SGC y fecha de vigencia' })
+  @ApiOperation({ summary: 'Subir una versión de plantilla DOCX con su fecha de vigencia',
+    description:
+      'Se registra con el código SGC de la versión del formato que regirá cuando la plantilla empiece a usarse. sgcVersion es opcional: por defecto, la versión SGC de esa versión del formato. 409 DOCUMENT_FORMAT_NOT_READY si esa versión no tiene código SGC.' })
   @ApiCreatedResponse({ schema: envelopedSchema(UploadedTemplateResponseDto) })
   uploadTemplate(
     @Param('formatKey') formatKey: string,
@@ -239,7 +299,7 @@ export class DocumentsController {
     if (!file || !file.originalname.toLowerCase().endsWith('.docx')) {
       throw new ApiException(ErrorCode.FileTypeNotAllowed, 'Se espera un archivo .docx');
     }
-    return this.engine.uploadTemplate(formatKey, file, { sgcVersion: dto.sgcVersion, effectiveDate: dto.effectiveDate.slice(0, 10) }, actor.id);
+    return this.engine.uploadTemplate(formatKey, file, { ...(dto.sgcVersion ? { sgcVersion: dto.sgcVersion } : {}), effectiveDate: dto.effectiveDate.slice(0, 10) }, actor.id);
   }
 
   @Post()

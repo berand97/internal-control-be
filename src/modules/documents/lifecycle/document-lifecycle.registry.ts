@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
+import type { ProcessFormatBinding } from '../domain/document-formats.js';
 
 /**
  * Gancho de completitud: el proceso de negocio que originó un acta (entrega, préstamo...) se entera de que el acta
@@ -53,6 +54,12 @@ export interface DocumentLifecycleHandler {
   readonly onGenerated?: DocumentLifecycleCallback;
   readonly onSigned?: DocumentLifecycleCallback;
   readonly onRejected?: DocumentLifecycleCallback;
+  /**
+   * Formatos que genera este proceso y los firmantes que su código necesita. Con esto la administración de formatos
+   * (DocumentFormatCatalogService.createVersion) rechaza una versión que rompería el proceso. Enchufar un formato a
+   * un proceso es desarrollo: se declara aquí, no desde la interfaz.
+   */
+  readonly formats?: ReadonlyArray<ProcessFormatBinding>;
 }
 
 export type DocumentLifecyclePhase = 'onGenerated' | 'onSigned' | 'onRejected';
@@ -112,6 +119,7 @@ export interface EntityDocumentsState {
 @Injectable()
 export class DocumentLifecycleRegistry {
   private readonly handlers = new Map<string, DocumentLifecycleHandler>();
+  private readonly bindings = new Map<string, ProcessFormatBinding>();
 
   constructor(private readonly dataSource: DataSource) {}
 
@@ -122,7 +130,20 @@ export class DocumentLifecycleRegistry {
     if (this.handlers.has(handler.entityType)) {
       throw new Error(`Ya hay un manejador del ciclo de vida del acta para ${handler.entityType}`);
     }
+    for (const binding of handler.formats ?? []) {
+      if (this.bindings.has(binding.formatKey)) {
+        throw new Error(`El formato ${binding.formatKey} ya está enchufado a otro proceso`);
+      }
+    }
     this.handlers.set(handler.entityType, handler);
+    for (const binding of handler.formats ?? []) {
+      this.bindings.set(binding.formatKey, binding);
+    }
+  }
+
+  /** Proceso de negocio que usa el formato (declarado en código), o undefined si es un formato libre. */
+  bindingFor(formatKey: string): ProcessFormatBinding | undefined {
+    return this.bindings.get(formatKey);
   }
 
   has(entityType: string | null | undefined): boolean {

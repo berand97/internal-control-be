@@ -1,8 +1,9 @@
 // Acta de devolución (LOAN_RETURN) generada de punta a punta con un formato de PRUEBA.
-// El formato institucional no existe (sin código SGC ni firmantes): aquí, y solo aquí, el catálogo del motor se
-// sustituye (DOCUMENT_FORMAT_CATALOG) por uno donde LOAN_RETURN tiene un código y firmantes de prueba, y la plantilla
-// es un DOCX mínimo armado en el test con el contrato de marcadores documentado en document-formats.ts.
-// Nada de esto es institucional: código, firmantes y plantilla son fixtures.
+// El formato institucional no existe: la migración lo siembra sin código SGC ni firmantes. Aquí Control Interno (el
+// director, permiso document_template:update:global) le crea una versión por API con un código y firmantes de prueba
+// (POST /documents/formats/LOAN_RETURN/versions), sube la plantilla por API y la devolución del préstamo genera el acta.
+// La plantilla es un DOCX mínimo armado en el test con el contrato de marcadores documentado en document-formats.ts.
+// Nada de esto es institucional: código, firmantes y plantilla son fixtures; afterAll borra la versión de prueba.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
@@ -15,11 +16,6 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import {
-  DOCUMENT_FORMAT_CATALOG,
-  DOCUMENT_FORMATS,
-  type DocumentFormat,
-} from '../../src/modules/documents/domain/document-formats.js';
 import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { bogotaDate, longSpanishDate } from '../../src/modules/loans/domain/loan-dates.js';
@@ -29,20 +25,18 @@ import { DocxTextPdfConverter } from './pdf-text.js';
 
 const FORMAT = 'LOAN_RETURN';
 
-/** Formato de PRUEBA: código y firmantes inventados para el test, nunca para producción. */
-const TEST_CATALOG: ReadonlyArray<DocumentFormat> = DOCUMENT_FORMATS.map((format) =>
-  format.key === FORMAT
-    ? {
-        ...format,
-        sgcCode: 'PRUEBA-DEV',
-        version: '0',
-        signers: [
-          { order: 1, role: 'DEVUELVE', label: 'Devuelve (prueba)', source: 'RESPONSIBLE' },
-          { order: 2, role: 'RECIBE_ORIGEN', label: 'Recibe en origen (prueba)', source: 'REQUEST' },
-        ],
-      }
-    : format,
-);
+/** Versión de PRUEBA: código y firmantes inventados para el test, nunca para producción. */
+const TEST_VERSION = {
+  sgcCode: 'PRUEBA-DEV',
+  sgcVersion: '0',
+  name: 'Acta de devolución de préstamo temporal de activos fijos',
+  signers: [
+    { order: 1, role: 'DEVUELVE', label: 'Devuelve (prueba)', source: 'RESPONSIBLE' },
+    { order: 2, role: 'RECIBE_ORIGEN', label: 'Recibe en origen (prueba)', source: 'REQUEST' },
+  ],
+  numbering: { width: 4, perYear: true, lastIssued: 0 },
+  changeReason: 'Formato de prueba del test de integración',
+};
 
 /** DOCX mínimo con el contrato de marcadores del acta de devolución (document-formats.ts). */
 const fixtureTemplate = (): Buffer => {
@@ -154,8 +148,6 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PDF_CONVERTER)
       .useValue(new DocxTextPdfConverter())
-      .overrideProvider(DOCUMENT_FORMAT_CATALOG)
-      .useValue(TEST_CATALOG)
       .compile();
     app = moduleRef.createNestApplication<NestExpressApplication>();
     app.setGlobalPrefix('api/v1');
@@ -182,15 +174,31 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     await user('solicitante', 'Solicitante', 'Coordinador', 'INTERNAL_CONTROL_DIRECTOR');
     await user('contacto', 'Contacto', 'DOCENTE QUE DEVUELVE', null);
     await user('receptor', 'Receptor', 'ALMACENISTA DE ORIGEN', null);
-    templateId =
-      (
-        await engine.uploadTemplate(
-          FORMAT,
-          { buffer: fixtureTemplate(), originalname: 'acta-devolucion-prueba.docx' },
-          { sgcVersion: '0', effectiveDate: bogotaDate(new Date()) },
-          users['director']?.userId ?? null,
-        )
-      ).id ?? '';
+    // Sembrado sin código ni firmantes: el motor no lo genera.
+    const before = (await http().get('/api/v1/documents/formats').set(auth('director')).expect(200)).body.data.find(
+      (format: { key: string }) => format.key === FORMAT,
+    );
+    expect(before).toMatchObject({ sgcCode: null, ready: false, versionNumber: 1, signers: [] });
+    // Control Interno crea la versión por API...
+    const version = await http()
+      .post(`/api/v1/documents/formats/${FORMAT}/versions`)
+      .set(auth('director'))
+      .send(TEST_VERSION)
+      .expect(201);
+    expect(version.body.data).toMatchObject({ key: FORMAT, versionNumber: 2, status: 'CURRENT', sgcCode: 'PRUEBA-DEV' });
+    // ... sube la plantilla por API (sgcVersion por defecto: la de la versión del formato)...
+    const uploaded = await http()
+      .post(`/api/v1/documents/formats/${FORMAT}/templates`)
+      .set(auth('director'))
+      .field('effectiveDate', bogotaDate(new Date()))
+      .attach('file', fixtureTemplate(), 'acta-devolucion-prueba.docx')
+      .expect(201);
+    templateId = uploaded.body.data.id as string;
+    expect(
+      await scalar<string>(dataSource, "SELECT sgc_code || '/' || sgc_version FROM document_template_version WHERE id = $1", [templateId]),
+    ).toBe('PRUEBA-DEV/0');
+    // ... y el formato queda listo.
+    expect((await engine.formatReadiness(FORMAT)).ready).toBe(true);
   });
 
   afterAll(async () => {
@@ -207,6 +215,7 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     await dataSource.query('DELETE FROM document WHERE id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM document_template_version WHERE id = $1', [templateId || null]);
     await dataSource.query('DELETE FROM document_sequence WHERE format_key = $1', [FORMAT]);
+    await dataSource.query('DELETE FROM document_format_version WHERE format_key = $1 AND version_number > 1', [FORMAT]);
     await app.close();
   });
 

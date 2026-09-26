@@ -3,7 +3,8 @@ import { DataSource } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
-import { DOCUMENT_FORMATS, findFormat } from '../domain/document-formats.js';
+import type { DocumentFormat } from '../domain/document-formats.js';
+import { DocumentFormatCatalogService } from './document-format-catalog.service.js';
 
 export const DOCUMENT_LIST_STATUSES = [
   'PENDING_GENERATION',
@@ -49,6 +50,7 @@ export interface DocumentListItem {
 }
 
 interface Row {
+  format_version_id: string | null;
   lifecycle_error: string | null;
   id: string;
   document_id: string | null;
@@ -73,7 +75,7 @@ const ITEMS_SQL = `
            coalesce(r.requested_by, d.created_by) AS requested_by, NULL::text AS error, r.attempts,
            (SELECT count(*)::int FROM document_asset da WHERE da.document_id = d.id) AS asset_count,
            (SELECT min(da.asset_id::text) FROM document_asset da WHERE da.document_id = d.id) AS first_asset,
-           d.lifecycle_error
+           d.lifecycle_error, d.format_version_id
     FROM document d
     LEFT JOIN document_request r ON r.document_id = d.id
     UNION ALL
@@ -83,7 +85,8 @@ const ITEMS_SQL = `
            r.attempts,
            CASE WHEN jsonb_typeof(r.payload->'assetIds') = 'array' THEN jsonb_array_length(r.payload->'assetIds') ELSE 0 END,
            r.payload->'assetIds'->>0,
-           NULL::text
+           NULL::text,
+           NULL::uuid
     FROM document_request r
     WHERE r.document_id IS NULL
   ),
@@ -102,11 +105,13 @@ export class DocumentListService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly permissions: PermissionsService,
+    private readonly catalog: DocumentFormatCatalogService,
   ) {}
 
   async list(query: DocumentListQuery, actorId: string) {
-    const readable = await this.readableFormats(actorId);
-    if (query.formatKey && !findFormat(query.formatKey)) {
+    const formats = await this.catalog.currentAll();
+    const readable = await this.readableFormats(formats, actorId);
+    if (query.formatKey && !formats.some((format) => format.key === query.formatKey)) {
       throw new ApiException(ErrorCode.ValidationFailed, `Formato desconocido: ${query.formatKey}`);
     }
     if (query.formatKey && !readable.includes(query.formatKey)) {
@@ -129,7 +134,7 @@ export class DocumentListService {
       `${ITEMS_SQL}
        SELECT f.id, f.document_id, f.request_id, f.format_key, f.number, f.status, f.created_at, f.requested_by,
               nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') AS requested_by_name,
-              f.error, f.attempts, f.asset_count, f.lifecycle_error,
+              f.error, f.attempts, f.asset_count, f.lifecycle_error, f.format_version_id,
               a.id AS asset_id,
               coalesce(
                 (SELECT value FROM asset_identifier i WHERE i.asset_id = a.id AND i.identifier_type = 'VISIBLE_CODE' AND i.valid_to IS NULL LIMIT 1),
@@ -146,7 +151,7 @@ export class DocumentListService {
     )) as Row[];
     const total = counted?.total ?? 0;
     return {
-      items: rows.map((row) => this.toItem(row)),
+      items: await this.toItems(rows, formats),
       page: query.page,
       pageSize: query.pageSize,
       total,
@@ -159,7 +164,7 @@ export class DocumentListService {
       'SELECT format_key, status, document_id FROM document_request WHERE id = $1',
       [requestId],
     )) as Array<{ format_key: string; status: string; document_id: string | null }>;
-    const format = request ? findFormat(request.format_key) : undefined;
+    const format = request ? await this.catalog.find(request.format_key) : undefined;
     if (!request || !format) {
       throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la solicitud de documento');
     }
@@ -183,10 +188,10 @@ export class DocumentListService {
     return item;
   }
 
-  private async readableFormats(actorId: string): Promise<string[]> {
+  private async readableFormats(formats: ReadonlyArray<DocumentFormat>, actorId: string): Promise<string[]> {
     const byPermission = new Map<string, boolean>();
     const readable: string[] = [];
-    for (const format of DOCUMENT_FORMATS) {
+    for (const format of formats) {
       if (!byPermission.has(format.readPermission)) {
         byPermission.set(format.readPermission, await this.permissions.userHasPermission(actorId, format.readPermission));
       }
@@ -197,8 +202,14 @@ export class DocumentListService {
     return readable;
   }
 
-  private toItem(row: Row): DocumentListItem {
-    const format = findFormat(row.format_key);
+  /** Código y nombre: los de la versión con que se emitió el acta; una solicitud sin acta muestra la vigente. */
+  private async toItems(rows: ReadonlyArray<Row>, formats: ReadonlyArray<DocumentFormat>): Promise<DocumentListItem[]> {
+    const versions = await this.catalog.byVersionIds(rows.map((row) => row.format_version_id).filter((id): id is string => id !== null));
+    const current = new Map(formats.map((format) => [format.key, format]));
+    return rows.map((row) => this.toItem(row, (row.format_version_id ? versions.get(row.format_version_id) : undefined) ?? current.get(row.format_key)));
+  }
+
+  private toItem(row: Row, format: DocumentFormat | undefined): DocumentListItem {
     return {
       id: row.id,
       documentId: row.document_id,

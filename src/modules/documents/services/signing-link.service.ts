@@ -6,7 +6,7 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig } from '../../../config/configuration.js';
 import { MailService } from '../../../shared/mail/mail.service.js';
-import { findFormat } from '../domain/document-formats.js';
+import { DocumentFormatCatalogService } from './document-format-catalog.service.js';
 import {
   channelFor,
   LINK_SEND_RETRY_MINUTES,
@@ -84,6 +84,7 @@ export class SigningLinkService {
     private readonly dataSource: DataSource,
     private readonly mail: MailService,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly catalog: DocumentFormatCatalogService,
   ) {}
 
   signingUrl(token: string): string {
@@ -246,7 +247,7 @@ export class SigningLinkService {
     const tokenHash = sha256Hex(token);
     const claimed = await this.dataSource.transaction(async (manager) => {
       const [link] = (await manager.query(
-        `SELECT l.id, l.email, l.sign_order, d.format_key, d.number, d.created_by, s.role,
+        `SELECT l.id, l.email, l.sign_order, l.document_id, d.format_key, d.number, d.created_by, s.role,
                 nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') AS signer_name
          FROM signature_signing_link l
          JOIN document d ON d.id = l.document_id
@@ -261,6 +262,7 @@ export class SigningLinkService {
         id: string;
         email: string;
         sign_order: number;
+        document_id: string;
         format_key: string;
         number: string;
         created_by: string | null;
@@ -289,7 +291,8 @@ export class SigningLinkService {
       return 'SKIPPED';
     }
     const { link, expiresAt, contact } = claimed;
-    const format = findFormat(link.format_key);
+    // Código, nombre y etiqueta del rol: los de la versión del formato con que se emitió el acta.
+    const format = await this.catalog.forDocument(link.document_id).catch(() => undefined);
     let error: string | null = null;
     try {
       const delivered = await this.mail.sendSigningLink(link.email, {

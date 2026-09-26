@@ -83,6 +83,8 @@ export class HandoversService implements OnModuleInit {
   onModuleInit(): void {
     this.lifecycle.register({
       entityType: HANDOVER_ENTITY_TYPE,
+      // create() asigna RECIBE (responsiblePersonId) y AUDITA (signers); onSigned los lee de signersByRole.
+      formats: [{ formatKey: HANDOVER_FORMAT_KEY, process: 'Entregas de activos', signers: { RECIBE: 'RESPONSIBLE', AUDITA: 'REQUEST' } }],
       onGenerated: (manager, event) => this.onGenerated(manager, event),
       onSigned: (manager, event) => this.onSigned(manager, event),
       onRejected: (manager, event) => this.onRejected(manager, event),

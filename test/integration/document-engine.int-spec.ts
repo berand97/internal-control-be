@@ -248,14 +248,14 @@ describe('Motor de documentos (PostgreSQL real)', () => {
 
   it('el número es único por formato', async () => {
     const [existing] = (await dataSource.query(
-      `SELECT template_version_id FROM document WHERE format_key = 'OCI-01-55' LIMIT 1`,
-    )) as Array<{ template_version_id: string }>;
+      `SELECT template_version_id, format_version_id FROM document WHERE format_key = 'OCI-01-55' LIMIT 1`,
+    )) as Array<{ template_version_id: string; format_version_id: string }>;
     await expect(
       dataSource.query(
         `INSERT INTO document (format_key, number, period, sequence_value, template_version_id, status, data,
-           docx_driver, docx_key, docx_hash, pdf_driver, pdf_key, pdf_hash)
-         VALUES ('OCI-01-55', '0093', '', 93, $1, 'PENDING_SIGNATURE', '{}', 'project', 'x', repeat('a', 64), 'project', 'y', repeat('a', 64))`,
-        [existing?.template_version_id],
+           docx_driver, docx_key, docx_hash, pdf_driver, pdf_key, pdf_hash, format_version_id)
+         VALUES ('OCI-01-55', '0093', '', 93, $1, 'PENDING_SIGNATURE', '{}', 'project', 'x', repeat('a', 64), 'project', 'y', repeat('a', 64), $2)`,
+        [existing?.template_version_id, existing?.format_version_id],
       ),
     ).rejects.toThrow(/uq_document_number/);
   });
