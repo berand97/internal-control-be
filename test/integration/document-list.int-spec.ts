@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { PDFDocument } from 'pdf-lib';
 import QRCode from 'qrcode';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
@@ -102,6 +103,10 @@ describe('GET /documents y reintento por el outbox (HTTP real + PostgreSQL real)
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
+    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
+    for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
+      await job.stop();
+    }
     dataSource = app.get(DataSource);
     engine = app.get(DocumentEngineService);
     await useSharedStorage(dataSource);
@@ -236,7 +241,8 @@ describe('GET /documents y reintento por el outbox (HTTP real + PostgreSQL real)
     const generated = (await items({ formatKey: FORMAT, status: 'PENDING_SIGNATURE', pageSize: 100 })).items.find(
       (item) => item.requestId === exhaustedId,
     );
-    expect(generated).toMatchObject({ id: documentId, documentId, status: 'PENDING_SIGNATURE', attempts: 6 });
+    // El reintento manual reinicia el contador: el intento que la generó es el primero del nuevo ciclo.
+    expect(generated).toMatchObject({ id: documentId, documentId, status: 'PENDING_SIGNATURE', attempts: 1 });
     expect(generated?.number).toBeTruthy();
   });
 

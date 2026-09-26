@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { PDFDocument } from 'pdf-lib';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
@@ -35,6 +36,10 @@ describe('Enlace de verificación del documento', () => {
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
+    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
+    for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
+      await job.stop();
+    }
     dataSource = app.get(DataSource);
     engine = app.get(DocumentEngineService);
     await useSharedStorage(dataSource);
