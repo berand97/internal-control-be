@@ -609,8 +609,7 @@ export class LoansService {
         ...(contactPersonId !== loan.contactPersonId ? { previousContactPersonId: loan.contactPersonId } : {}),
         reason: dto.reason,
       });
-      await this.audit(manager, AuditAction.LoanDelivered, loan.id, actor.id, {
-        kind: 'DELIVERY_ACT_REGENERATED',
+      await this.audit(manager, AuditAction.LoanDeliveryActRegenerated, loan.id, actor.id, {
         documentRequestId: requestId,
         previousDocumentId: act.documentId,
         reason: dto.reason,
@@ -686,8 +685,7 @@ export class LoansService {
         cancelledRequestIds: voided.cancelledRequestIds,
         voidedDocumentIds: voided.voidedDocumentIds,
       });
-      await this.audit(manager, AuditAction.LoanReturned, loan.id, actor.id, {
-        kind: 'DELIVERY_UNDONE',
+      await this.audit(manager, AuditAction.LoanDeliveryUndone, loan.id, actor.id, {
         reason,
         voidedDocumentIds: voided.voidedDocumentIds,
       });
@@ -1034,8 +1032,7 @@ export class LoansService {
         expectedReturnDate: loan.extensionRequestedDate,
         reason: dto.reason,
       });
-      await this.audit(manager, AuditAction.LoanExtended, loan.id, actor.id, {
-        kind: 'EXTENSION_REJECTED',
+      await this.audit(manager, AuditAction.LoanExtensionRejected, loan.id, actor.id, {
         reason: dto.reason,
       });
     });

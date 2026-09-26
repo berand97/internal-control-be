@@ -276,6 +276,7 @@ export class AssetsService {
       throw new ApiException(ErrorCode.AssetCannotBeModified);
     }
     await this.assertNotUnderInventory(asset.id);
+    await this.assertNoActiveLoan(asset.id);
     if (dto.locationId) {
       await this.requireLocation(dto.locationId);
     }
@@ -810,6 +811,11 @@ export class AssetsService {
     return location;
   }
 
+  /**
+   * Un activo retenido por un préstamo abierto (countActiveLoans: misma definición que la solicitud de préstamo,
+   * con REQUESTED, PENDING_SIGNATURES y los pendientes de un PARTIALLY_RETURNED) no se edita, no se da de baja ni
+   * cambia de centro, aunque su estado operacional no sea ON_LOAN.
+   */
   private async assertNoActiveLoan(assetId: string): Promise<void> {
     const count = await this.assetsRepository.countActiveLoans(assetId);
     if (count > 0) {
