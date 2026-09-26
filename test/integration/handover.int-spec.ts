@@ -325,6 +325,7 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
       'DELETE FROM signature_envelope_signer WHERE envelope_id IN (SELECT id FROM signature_envelope WHERE document_id = ANY($1))',
       [ids],
     );
+    await dataSource.query('DELETE FROM signature_signing_link WHERE document_id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM signature_envelope WHERE document_id = ANY($1)', [ids]);
     await dataSource.query(`DELETE FROM document_request WHERE payload->>'entityType' = 'HANDOVER'`);
     await dataSource.query('DELETE FROM document WHERE id = ANY($1)', [ids]);
