@@ -671,6 +671,45 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect(await detail(signedHandover.id)).toMatchObject({ status: 'SIGNED', cancelReason: null, cancelledBy: null });
     expect(await responsibleOf(signedAsset)).toBe(receiver.personId);
     await cancel(randomUUID(), 'No existe esta entrega').expect(404);
+
+    // 4. Auditoría: una fila HANDOVER_CANCELLED por cancelación efectiva, en la misma transacción; los intentos
+    // rechazados (400, 403, 406, 409) no dejan fila. Sin datos personales: ni números de documento en changes.
+    const audits = (await dataSource.query(
+      `SELECT entity_id, entity_type, performed_by, changes FROM audit_log
+       WHERE action = 'HANDOVER_CANCELLED' AND entity_id = ANY($1) ORDER BY id`,
+      [[queued.id, pending.id, signedHandover.id]],
+    )) as Array<{ entity_id: string; entity_type: string; performed_by: string; changes: Record<string, unknown> }>;
+    expect(audits).toEqual([
+      {
+        entity_id: queued.id,
+        entity_type: 'HANDOVER',
+        performed_by: director.userId,
+        changes: {
+          from: 'AWAITING_DOCUMENT',
+          reason: 'Se entregó por error',
+          cancelledRequestIds: [queued.document.requestId],
+          voidedDocumentIds: [],
+        },
+      },
+      {
+        entity_id: pending.id,
+        entity_type: 'HANDOVER',
+        performed_by: director.userId,
+        changes: {
+          from: 'PENDING_SIGNATURE',
+          reason: 'El receptor ya no trabaja en el centro',
+          cancelledRequestIds: [],
+          voidedDocumentIds: [pending.documentId],
+        },
+      },
+    ]);
+    const documentNumbers = (await dataSource.query(
+      'SELECT document_number FROM person WHERE id = ANY($1) AND document_number IS NOT NULL',
+      [[receiver.personId, auditor.personId, director.personId]],
+    )) as Array<{ document_number: string }>;
+    for (const { document_number: number } of documentNumbers) {
+      expect(JSON.stringify(audits)).not.toContain(number);
+    }
   });
 
   it('la lista pagina y filtra por estado; leer exige asset:read:global', async () => {

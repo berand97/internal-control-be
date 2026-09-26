@@ -4,6 +4,7 @@ import { DataSource, type EntityManager, Repository } from 'typeorm';
 import { AssetCategory } from '../../categories/entities/asset-category.entity.js';
 import { CostCenter } from '../../cost-centers/entities/cost-center.entity.js';
 import { AssetCategoryField } from '../../dynamic-fields/entities/asset-category-field.entity.js';
+import { OPEN_LOAN_STATUSES } from '../../loans/enums/loan-status.js';
 import { Location } from '../../locations/entities/location.entity.js';
 import { AcquisitionType } from '../entities/acquisition-type.entity.js';
 import { AssetCustomValue } from '../entities/asset-custom-value.entity.js';
@@ -25,6 +26,14 @@ import type {
 } from './assets.repository.interface.js';
 
 const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
+
+/**
+ * El préstamo retiene el activo: la misma definición con la que LoansService.create bloquea un activo ya
+ * comprometido. Préstamo abierto (OPEN_LOAN_STATUSES, parámetro $2, incluye REQUESTED, PENDING_SIGNATURES y
+ * PARTIALLY_RETURNED) y el ítem aún no recibido de vuelta (received_at IS NULL): de un PARTIALLY_RETURNED solo
+ * cuentan los activos que siguen fuera.
+ */
+const HOLDS_ASSET = 'l.status::text = ANY($2) AND i.received_at IS NULL';
 
 const SORT_COLUMNS: Record<string, string> = {
   internalCode: 'asset.internal_code',
@@ -420,9 +429,9 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
       FROM asset_loan_item i
       JOIN asset_loan l ON l.id = i.loan_id
       WHERE i.asset_id = $1
-        AND l.status IN ('APPROVED','IN_TRANSIT','ACTIVE','OVERDUE','PENDING_RECEPTION')
+        AND ${HOLDS_ASSET}
       `,
-      [assetId],
+      [assetId, OPEN_LOAN_STATUSES],
     );
     return countFrom(rows);
   }
@@ -436,9 +445,9 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
       FROM asset_loan l
       JOIN asset_loan_item i ON i.loan_id = l.id
       WHERE i.asset_id = $1
-        AND l.status IN ('APPROVED','IN_TRANSIT','ACTIVE','OVERDUE','PENDING_RECEPTION')
+        AND ${HOLDS_ASSET}
       `,
-      [assetId],
+      [assetId, OPEN_LOAN_STATUSES],
     );
     if (!Array.isArray(rows)) {
       return [];
