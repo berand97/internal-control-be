@@ -28,6 +28,8 @@ export interface SignatureMark {
   readonly documentNumber: string | null;
   readonly signedAt: Date;
   readonly ipAddress: string | null;
+  /** Método de firma en lenguaje claro ("Sesión con verificación en dos pasos", "Enlace de un solo uso..."). */
+  readonly methodLabel: string;
 }
 
 const latin1 = (text: string): string =>
@@ -81,6 +83,15 @@ export const prepareForSignature = async (pdf: Buffer, input: PrepareInput): Pro
   return Buffer.from(await document.save());
 };
 
+const wrap = (text: string, max: number): [string, string] => {
+  if (text.length <= max) {
+    return [text, ''];
+  }
+  const cut = text.lastIndexOf(' ', max);
+  const index = cut > 0 ? cut : max;
+  return [text.slice(0, index), text.slice(index).trim()];
+};
+
 export const stampSignature = async (pdf: Buffer, mark: SignatureMark): Promise<Buffer> => {
   const document = await PDFDocument.load(pdf);
   const font = await document.embedFont(StandardFonts.Helvetica);
@@ -90,13 +101,19 @@ export const stampSignature = async (pdf: Buffer, mark: SignatureMark): Promise<
   const scale = Math.min(200 / image.width, 70 / image.height, 1);
   page.drawImage(image, { x: MARGIN + 10, y: y - 98, width: image.width * scale, height: image.height * scale });
   const x = MARGIN + 240;
-  write(page, font, mark.name, x, y - 32, 9);
+  write(page, font, mark.name, x, y - 30, 9);
   if (mark.documentNumber) {
-    write(page, font, `Documento: ${mark.documentNumber}`, x, y - 46, 8);
+    write(page, font, `Documento: ${mark.documentNumber}`, x, y - 42, 8);
   }
-  write(page, font, `Firmó: ${bogota(mark.signedAt)}`, x, y - 60, 8);
-  write(page, font, `Desde: ${mark.ipAddress ?? 'sin IP registrada'}`, x, y - 74, 8, GREY);
-  write(page, font, `Rol: ${mark.label}`, x, y - 88, 8, GREY);
+  write(page, font, `Firmó: ${bogota(mark.signedAt)}`, x, y - 54, 8);
+  write(page, font, `Desde: ${mark.ipAddress ?? 'sin IP registrada'}`, x, y - 66, 8, GREY);
+  write(page, font, `Rol: ${mark.label}`, x, y - 78, 8, GREY);
+  // "Enlace de un solo uso enviado al correo institucional" no cabe en una línea del recuadro.
+  const [first, second] = wrap(`Método: ${mark.methodLabel}`, 58);
+  write(page, font, first, x, y - 90, 7.5, GREY);
+  if (second) {
+    write(page, font, second, x, y - 100, 7.5, GREY);
+  }
   return Buffer.from(await document.save());
 };
 

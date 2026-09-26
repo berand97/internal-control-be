@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import QRCode from 'qrcode';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
@@ -54,7 +55,8 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     );
     const sessionId = randomUUID();
     await dataSource.query(
-      `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at) VALUES ($1, $2, $3, NOW() + interval '1 day')`,
+      `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at)
+       VALUES ($1, $2, $3, NOW() + interval '1 day', (SELECT CASE WHEN mfa_enabled THEN NOW() END FROM app_user WHERE id = $2))`,
       [sessionId, userId, randomUUID()],
     );
     const token = app.get(TokenService).signAccessToken({
@@ -106,6 +108,10 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
+    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
+    for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
+      await job.stop();
+    }
     dataSource = app.get(DataSource);
     engine = app.get(DocumentEngineService);
     await useSharedStorage(dataSource);
@@ -199,6 +205,61 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     expect(done.status).toBe('SIGNED');
     expect(done.currentTurn).toBeNull();
     expect(done.viewer).toMatchObject({ isCurrentSigner: false, canSign: false, nextOrder: null });
+  });
+
+  it('MFA habilitado pero sesión abierta solo con contraseña: bloqueado en Control Interno y SESSION en los demás turnos', async () => {
+    const document = await generate(true);
+    const passwordOnly = [responsible.sessionId, auditor.sessionId];
+    await dataSource.query('UPDATE refresh_token_family SET mfa_verified_at = NULL WHERE id = ANY($1)', [passwordOnly]);
+    try {
+      const first = await sign(document.id, 1, responsible);
+      expect(first.status).toBe(200);
+      expect(first.body.data.signatures[0]).toMatchObject({ status: 'SIGNED', method: 'SESSION', methodLabel: 'Sesión' });
+      // canReassign pasa a false tras la primera firma, aunque el acta siga pendiente.
+      expect((await detail(document.id, director)).viewer).toMatchObject({ canReassign: false });
+
+      const blocked = await sign(document.id, 2, auditor);
+      expect([blocked.status, blocked.body.error.code]).toEqual([403, 'SIGNATURE_MFA_REQUIRED']);
+      expect((await detail(document.id, auditor)).viewer).toMatchObject({ canSign: false, blockedBy: 'SIGNATURE_MFA_REQUIRED' });
+    } finally {
+      await dataSource.query('UPDATE refresh_token_family SET mfa_verified_at = NOW() WHERE id = ANY($1)', [passwordOnly]);
+    }
+    const done = await sign(document.id, 2, auditor).expect(200);
+    expect(done.body.data.signatures[1]).toMatchObject({ method: 'SESSION_MFA' });
+  });
+
+  it('reasignar valida que la persona pueda firmar el turno por algún camino', async () => {
+    const document = await generate(true);
+    const bare = async (documentNumber: string | null, active = true) => {
+      const tag = randomUUID().slice(0, 8);
+      return scalar<string>(
+        dataSource,
+        `INSERT INTO person (first_name, last_name, email, document_type, document_number, is_active)
+         VALUES ('Sin usuario', $1, $2, 'CC', $3, $4) RETURNING id`,
+        [tag, `sinusuario.${tag}@unac.edu.co`, documentNumber, active],
+      );
+    };
+    // Turno de Control Interno: una persona sin usuario no puede firmarlo.
+    const noUser = await bare(`6${Date.now().toString().slice(-9)}`);
+    const ci = await reassign(document.id, 2, director, noUser);
+    expect([ci.status, ci.body.error.code]).toEqual([409, 'SIGNATURE_SIGNER_CANNOT_SIGN']);
+    expect(ci.body.error.details).toEqual([{ field: 'personId', message: 'SIGNATURE_NO_CHANNEL' }]);
+    // Usuario con MFA deshabilitado en turno CI.
+    const noMfa = await person('SinMfa', false);
+    const ciNoMfa = await reassign(document.id, 2, director, noMfa.personId);
+    expect(ciNoMfa.body.error.details).toEqual([{ field: 'personId', message: 'SIGNATURE_MFA_REQUIRED' }]);
+    // Turno no CI: sin usuario y sin número de documento no hay confirmación de identidad.
+    const noDocument = await bare(null);
+    const nd = await reassign(document.id, 1, director, noDocument);
+    expect(nd.body.error.details).toEqual([{ field: 'personId', message: 'SIGNATURE_NO_IDENTITY_CHECK' }]);
+    // Persona inactiva.
+    const inactive = await bare(`5${Date.now().toString().slice(-9)}`, false);
+    const ina = await reassign(document.id, 1, director, inactive);
+    expect(ina.body.error.details).toEqual([{ field: 'personId', message: 'SIGNATURE_SIGNER_INACTIVE' }]);
+    // Sin usuario, con correo y documento: firma por enlace, se acepta.
+    const byLink = await reassign(document.id, 1, director, noUser);
+    expect(byLink.status).toBe(200);
+    expect(byLink.body.data.currentTurn).toMatchObject({ order: 1, personId: noUser, channel: 'EMAIL_LINK', blockedBy: null });
   });
 
   it('reasignar antes de la primera firma reemite el acta y el PDF final nombra a quien firmó', async () => {

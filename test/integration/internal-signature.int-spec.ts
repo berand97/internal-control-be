@@ -5,6 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -73,7 +74,8 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     );
     const sessionId = randomUUID();
     await dataSource.query(
-      `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at) VALUES ($1, $2, $3, NOW() + interval '1 day')`,
+      `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at)
+       VALUES ($1, $2, $3, NOW() + interval '1 day', (SELECT CASE WHEN mfa_enabled THEN NOW() END FROM app_user WHERE id = $2))`,
       [sessionId, userId, randomUUID()],
     );
     const token = tokens.signAccessToken({
@@ -133,6 +135,10 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
+    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
+    for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
+      await job.stop();
+    }
     dataSource = app.get(DataSource);
     engine = app.get(DocumentEngineService);
     tokens = app.get(TokenService);
@@ -208,19 +214,26 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
 
     const attestation = (await verify(envelope.verification_code)).body.data;
     expect(attestation).toMatchObject({ reference: envelope.verification_code, status: 'COMPLETED', integrity: 'INTACT' });
+    const mfa = { method: 'SESSION_MFA', methodLabel: 'Sesión con verificación en dos pasos' };
     expect(attestation.signers).toEqual([
-      { order: 1, role: 'Responsable', name: 'Responsable Firma', status: 'SIGNED', signedAt: expect.any(String) },
-      { order: 2, role: 'Control Interno', name: 'Auditora Firma', status: 'SIGNED', signedAt: expect.any(String) },
+      { order: 1, role: 'Responsable', name: 'Responsable Firma', status: 'SIGNED', signedAt: expect.any(String), ...mfa },
+      { order: 2, role: 'Control Interno', name: 'Auditora Firma', status: 'SIGNED', signedAt: expect.any(String), ...mfa },
     ]);
 
     const evidence = (await dataSource.query(
-      `SELECT sign_order, signer_user_id, session_id, host(ip_address) AS ip, user_agent, mfa_enabled,
+      `SELECT sign_order, signer_user_id, session_id, host(ip_address) AS ip, user_agent, mfa_enabled, method,
          pdf_sha256_before, pdf_sha256_after, rubric_sha256
        FROM signature_envelope_signer s JOIN signature_envelope e ON e.id = s.envelope_id
        WHERE e.document_id = $1 ORDER BY sign_order`,
       [document.id],
     )) as Array<Record<string, string | boolean>>;
-    expect(evidence[0]).toMatchObject({ signer_user_id: responsible.userId, session_id: responsible.sessionId, user_agent: 'vitest-firma', mfa_enabled: true });
+    expect(evidence[0]).toMatchObject({
+      signer_user_id: responsible.userId,
+      session_id: responsible.sessionId,
+      user_agent: 'vitest-firma',
+      mfa_enabled: true,
+      method: 'SESSION_MFA',
+    });
     expect(evidence[1]).toMatchObject({ signer_user_id: auditor.userId, session_id: auditor.sessionId });
     expect(evidence.map((item) => item['ip'])).toEqual(['203.0.113.50', '203.0.113.50']);
     expect(evidence[1]?.['pdf_sha256_before']).toBe(evidence[0]?.['pdf_sha256_after']);
@@ -263,24 +276,43 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     expect((await verify(pendingEnvelope.verification_code)).body.data.integrity).toBe('ALTERED');
   });
 
-  it('no deja firmar sin MFA ni con la sesión revocada', async () => {
+  it('MFA solo es obligatorio en el turno de Control Interno; la sesión revocada no firma', async () => {
     const document = await generate();
-    await dataSource.query('UPDATE app_user SET mfa_enabled = FALSE WHERE id = $1', [responsible.userId]);
-    const withoutMfa = await sign(document.id, 1, responsible);
-    expect(withoutMfa.status).toBe(403);
-    expect(withoutMfa.body.error.code).toBe('SIGNATURE_MFA_REQUIRED');
-    await dataSource.query('UPDATE app_user SET mfa_enabled = TRUE WHERE id = $1', [responsible.userId]);
+    await dataSource.query('UPDATE app_user SET mfa_enabled = FALSE WHERE id = ANY($1)', [[responsible.userId, auditor.userId]]);
+    try {
+      await dataSource.query(`UPDATE refresh_token_family SET status = 'REVOKED', revoked_at = NOW() WHERE id = $1`, [
+        responsible.sessionId,
+      ]);
+      const revoked = await sign(document.id, 1, responsible);
+      expect([revoked.status, revoked.body.error.code]).toEqual([403, 'SIGNATURE_SESSION_INVALID']);
+      await dataSource.query(`UPDATE refresh_token_family SET status = 'ACTIVE', revoked_at = NULL WHERE id = $1`, [
+        responsible.sessionId,
+      ]);
 
-    await dataSource.query(`UPDATE refresh_token_family SET status = 'REVOKED', revoked_at = NOW() WHERE id = $1`, [
-      responsible.sessionId,
+      // Responsable (turno no CI) sin MFA: firma con sesión y queda como SESSION.
+      const first = await sign(document.id, 1, responsible);
+      expect(first.status).toBe(200);
+      const [slot] = first.body.data.signatures as Array<{ method: string; methodLabel: string }>;
+      expect(slot).toMatchObject({ method: 'SESSION', methodLabel: 'Sesión' });
+
+      // Control Interno sin MFA: bloqueado, sin excepción.
+      const withoutMfa = await sign(document.id, 2, auditor);
+      expect([withoutMfa.status, withoutMfa.body.error.code]).toEqual([403, 'SIGNATURE_MFA_REQUIRED']);
+      const detail = (await http().get(`/api/v1/documents/${document.id}`).set('Authorization', `Bearer ${auditor.token}`)).body.data;
+      expect(detail.currentTurn).toMatchObject({ order: 2, channel: null, blockedBy: 'SIGNATURE_MFA_REQUIRED' });
+    } finally {
+      await dataSource.query('UPDATE app_user SET mfa_enabled = TRUE WHERE id = ANY($1)', [[responsible.userId, auditor.userId]]);
+    }
+    await sign(document.id, 2, auditor).expect(200);
+    const evidence = (await dataSource.query(
+      `SELECT s.method, s.mfa_enabled FROM signature_envelope_signer s JOIN signature_envelope e ON e.id = s.envelope_id
+       WHERE e.document_id = $1 ORDER BY s.sign_order`,
+      [document.id],
+    )) as Array<{ method: string; mfa_enabled: boolean }>;
+    expect(evidence).toEqual([
+      { method: 'SESSION', mfa_enabled: false },
+      { method: 'SESSION_MFA', mfa_enabled: true },
     ]);
-    const revoked = await sign(document.id, 1, responsible);
-    expect(revoked.status).toBe(403);
-    expect(revoked.body.error.code).toBe('SIGNATURE_SESSION_INVALID');
-    await dataSource.query(`UPDATE refresh_token_family SET status = 'ACTIVE', revoked_at = NULL WHERE id = $1`, [
-      responsible.sessionId,
-    ]);
-    await sign(document.id, 1, responsible).expect(200);
   });
 
   it('la página pública no expone el contenido del documento ni permite enumerar', async () => {
@@ -292,7 +324,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     const data = response.body.data as Record<string, unknown>;
     expect(Object.keys(data).sort()).toEqual(['checkedAt', 'documentSha256', 'integrity', 'reference', 'signers', 'status']);
     for (const signerItem of data['signers'] as Array<Record<string, unknown>>) {
-      expect(Object.keys(signerItem).sort()).toEqual(['name', 'order', 'role', 'signedAt', 'status']);
+      expect(Object.keys(signerItem).sort()).toEqual(['method', 'methodLabel', 'name', 'order', 'role', 'signedAt', 'status']);
     }
     const text = JSON.stringify(response.body);
     for (const secret of [
@@ -347,6 +379,7 @@ describe.runIf(Boolean(process.env['GOTENBERG_URL']))('Estampado de firma sobre 
         documentNumber: '1000000001',
         signedAt: new Date(),
         ipAddress: '10.0.0.1',
+        methodLabel: slotIndex === 0 ? 'Enlace de un solo uso enviado al correo institucional' : 'Sesión con verificación en dos pasos',
       });
     }
     expect((await PDFDocument.load(signed)).getPageCount()).toBe(originalPages + 1);

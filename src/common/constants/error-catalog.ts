@@ -550,6 +550,59 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     message:
       'El acta ya tiene firmas: cambiar un firmante alteraría lo que otros firmaron. Rechace el acta y genere una nueva',
   },
+  [ErrorCode.SignatureNoChannel]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message:
+      'La persona de este turno no tiene cómo firmar: no tiene usuario activo ni correo para enviarle el enlace (o el turno de Control Interno exige usuario con verificación en dos pasos). Quien administra el proceso debe reasignar el turno',
+  },
+  [ErrorCode.SignatureNoIdentityCheck]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message:
+      'La persona de este turno no tiene usuario activo y no tiene número de documento registrado: no se puede confirmar su identidad para enviarle el enlace de firma. Registre su documento o reasigne el turno',
+  },
+  [ErrorCode.SignatureSignerInactive]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message: 'La persona de este turno está inactiva; quien administra el proceso debe reasignar el turno',
+  },
+  [ErrorCode.SignatureSignerCannotSign]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'La persona indicada no puede firmar este turno por ningún camino; details dice por qué',
+  },
+  [ErrorCode.SignatureLinkNotApplicable]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Este turno no se firma por enlace de correo, o no es el turno actual del acta',
+  },
+  [ErrorCode.SignatureLinkUnavailable]: {
+    httpStatus: 410,
+    action: 'CANCEL',
+    message: 'El enlace de firma ya no sirve: se usó, venció o fue reemplazado. Pida a quien administra el proceso que se lo reenvíe',
+  },
+  [ErrorCode.SignatureIdentityMismatch]: {
+    httpStatus: 403,
+    action: 'RETRY',
+    message: 'Los dígitos no coinciden con el documento de la persona designada',
+  },
+  [ErrorCode.SignatureIdentityLocked]: {
+    httpStatus: 410,
+    action: 'CANCEL',
+    message:
+      'Se agotaron los intentos de confirmar la identidad y el enlace quedó invalidado. Pida a quien administra el proceso que se lo reenvíe',
+  },
+  [ErrorCode.SignatureIdentityRequired]: {
+    httpStatus: 403,
+    action: 'RETRY',
+    message: 'Confirme su identidad antes de firmar o rechazar; la confirmación vence a los pocos minutos',
+  },
+  [ErrorCode.DocumentAlreadySigned]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message: 'El acta ya está firmada y no se puede anular',
+  },
   [ErrorCode.HandoverAssetInOpenHandover]: {
     httpStatus: 409,
     action: 'CANCEL',
