@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import QRCode from 'qrcode';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
@@ -44,6 +45,8 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
   let auditor: User;
   let rubric: string;
   let ipCounter = 0;
+  let templateId = '';
+  let sequenceBefore: string | undefined;
   /** Correos que "salieron": el token solo existe aquí (y en el correo real). */
   const outbox: Array<{ to: string; url: string }> = [];
   let smtpUp = true;
@@ -145,6 +148,10 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
+    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
+    for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
+      await job.stop();
+    }
     dataSource = app.get(DataSource);
     engine = app.get(DocumentEngineService);
     await useSharedStorage(dataSource);
@@ -185,16 +192,51 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     );
     auditor = await user('Auditora', true, docNumber());
     rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica enlace', { width: 120 })).toString('base64')}`;
-    await engine.uploadTemplate(
+    sequenceBefore = await scalar<string | undefined>(
+      dataSource,
+      `SELECT current_value FROM document_sequence WHERE format_key = $1 AND period = ''`,
+      [FORMAT],
+    );
+    // Vigente hoy para ganarle a cualquier otra plantilla del formato; se borra en afterAll.
+    const uploaded = await engine.uploadTemplate(
       FORMAT,
       { buffer: await readFile(TEMPLATE), originalname: 'plantilla.docx' },
-      { sgcVersion: '2', effectiveDate: '2026-01-20' },
+      { sgcVersion: '2', effectiveDate: new Date().toISOString().slice(0, 10) },
       director.userId,
     );
+    templateId = uploaded.id ?? '';
   });
 
   afterAll(async () => {
     vi.restoreAllMocks();
+    // Deja OCI-01-55 como estaba: otros archivos esperan su consecutivo y su plantilla.
+    const ids = (
+      (await dataSource.query('SELECT id FROM document WHERE created_by = $1 OR template_version_id = $2', [
+        director.userId,
+        templateId,
+      ])) as Array<{ id: string }>
+    ).map((item) => item.id);
+    await dataSource.query('DELETE FROM document_signature_reassignment WHERE document_id = ANY($1)', [ids]);
+    await dataSource.query(
+      'DELETE FROM signature_envelope_signer WHERE envelope_id IN (SELECT id FROM signature_envelope WHERE document_id = ANY($1))',
+      [ids],
+    );
+    await dataSource.query('DELETE FROM signature_signing_link WHERE document_id = ANY($1)', [ids]);
+    await dataSource.query('DELETE FROM signature_envelope WHERE document_id = ANY($1)', [ids]);
+    await dataSource.query(`DELETE FROM document_request WHERE document_id = ANY($1) OR requested_by = $2 OR payload->>'entityType' = $3`, [
+      ids,
+      director.userId,
+      ENTITY,
+    ]);
+    await dataSource.query('DELETE FROM document WHERE id = ANY($1)', [ids]);
+    await dataSource.query('DELETE FROM document_template_version WHERE id = $1', [templateId]);
+    await dataSource.query(`DELETE FROM document_sequence WHERE format_key = $1 AND period = ''`, [FORMAT]);
+    if (sequenceBefore !== undefined) {
+      await dataSource.query(`INSERT INTO document_sequence (format_key, period, current_value) VALUES ($1, '', $2)`, [
+        FORMAT,
+        sequenceBefore,
+      ]);
+    }
     await app.close();
   });
 

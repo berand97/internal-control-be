@@ -514,7 +514,8 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     const recovered = await detail(created.id);
     expect(recovered).toMatchObject({
       status: 'PENDING_SIGNATURE',
-      document: { generation: 'GENERATED', attempts: 2, lastError: null, retryable: false, status: 'PENDING_SIGNATURE' },
+      // El reintento manual reinicia attempts (Tarea 2): el intento que la generó cuenta como 1.
+      document: { generation: 'GENERATED', attempts: 1, lastError: null, retryable: false, status: 'PENDING_SIGNATURE' },
     });
     expect(recovered.document.documentId).not.toBeNull();
     expect(await responsibleOf(assetId)).toBeNull();

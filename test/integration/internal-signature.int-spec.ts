@@ -5,6 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -134,6 +135,10 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
+    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
+    for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
+      await job.stop();
+    }
     dataSource = app.get(DataSource);
     engine = app.get(DocumentEngineService);
     tokens = app.get(TokenService);
