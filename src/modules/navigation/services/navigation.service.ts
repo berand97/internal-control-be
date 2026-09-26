@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { NAVIGATION_ICONS } from '../../../common/authorization/navigation-icons.js';
 import type { NavigationDefinition } from '../../../common/authorization/navigation.registry.js';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
@@ -6,6 +7,7 @@ import { isUniqueViolation } from '../../../common/exceptions/postgres-error.js'
 import { CreateNavigationItemDto } from '../dto/create-navigation-item.dto.js';
 import { UpdateNavigationItemDto } from '../dto/update-navigation-item.dto.js';
 import { NavigationAdminItemResponseDto } from '../dto/responses/navigation-admin-item.response.dto.js';
+import { NavigationIconCatalogResponseDto } from '../dto/responses/navigation-icon-catalog.response.dto.js';
 import type { NavigationRepository } from '../repositories/navigation.repository.interface.js';
 
 @Injectable()
@@ -26,6 +28,10 @@ export class NavigationService {
     return this.activeCache;
   }
 
+  listIcons(): NavigationIconCatalogResponseDto {
+    return { icons: [...NAVIGATION_ICONS] };
+  }
+
   async listAdmin(): Promise<ReadonlyArray<NavigationAdminItemResponseDto>> {
     const items = await this.repository.findAll();
     return items.map(NavigationAdminItemResponseDto.from);
@@ -42,6 +48,7 @@ export class NavigationService {
         path: dto.path,
         label: dto.label,
         requiredAction: dto.requiredAction,
+        icon: dto.icon ?? null,
         sortOrder: dto.sortOrder ?? 0,
         isActive: dto.isActive ?? true,
       });
@@ -73,6 +80,8 @@ export class NavigationService {
         ...(dto.requiredAction !== undefined
           ? { requiredAction: dto.requiredAction }
           : {}),
+        // null borra el ícono propio; omitido lo deja como está.
+        ...(dto.icon !== undefined ? { icon: dto.icon } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       });

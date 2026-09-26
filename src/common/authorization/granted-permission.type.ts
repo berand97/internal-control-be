@@ -1,3 +1,5 @@
+import type { NavigationIcon } from './navigation-icons.js';
+
 export interface GrantedPermission {
   readonly code: string;
   readonly module: string;
@@ -19,4 +21,5 @@ export interface NavigationItem {
   readonly resource: string;
   readonly path: string;
   readonly label: string;
+  readonly icon: NavigationIcon | null;
 }

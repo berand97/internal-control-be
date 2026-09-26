@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { NAVIGATION_ICONS, type NavigationIcon } from '../../../../common/authorization/navigation-icons.js';
 import type { NavigationDefinition } from '../../../../common/authorization/navigation.registry.js';
 import type { NavigationItemEntity } from '../../entities/navigation-item.entity.js';
 
@@ -24,6 +25,14 @@ export class NavigationAdminItemResponseDto {
   @ApiProperty()
   readonly requiredAction!: string;
 
+  @ApiProperty({
+    enum: NAVIGATION_ICONS,
+    enumName: 'NavigationIcon',
+    nullable: true,
+    description: 'Clave de ícono Lucide del catálogo cerrado (GET /navigation/icons); null sin ícono propio',
+  })
+  readonly icon!: NavigationIcon | null;
+
   @ApiProperty()
   readonly sortOrder!: number;
 
@@ -39,6 +48,7 @@ export class NavigationAdminItemResponseDto {
       path: item.path,
       label: item.label,
       requiredAction: item.requiredAction,
+      icon: item.icon,
       sortOrder: item.sortOrder,
       isActive: item.isActive,
     };
@@ -53,6 +63,7 @@ export class NavigationAdminItemResponseDto {
       label: item.label,
       requiredAction: item.requiredAction,
       sortOrder: item.sortOrder,
+      icon: item.icon,
     };
   }
 }

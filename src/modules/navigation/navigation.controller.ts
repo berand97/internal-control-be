@@ -13,6 +13,7 @@ import {
 import {
   ApiBearerAuth,
   ApiExtraModels,
+  ApiOkResponse,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -29,7 +30,9 @@ import {
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import { CreateNavigationItemDto } from './dto/create-navigation-item.dto.js';
 import { UpdateNavigationItemDto } from './dto/update-navigation-item.dto.js';
+import { envelopedArraySchema } from '../documents/dto/document.responses.js';
 import { NavigationAdminItemResponseDto } from './dto/responses/navigation-admin-item.response.dto.js';
+import { NavigationIconCatalogResponseDto } from './dto/responses/navigation-icon-catalog.response.dto.js';
 import { NavigationService } from './services/navigation.service.js';
 
 @ApiTags(OpenApiTag.Navigation)
@@ -38,6 +41,7 @@ import { NavigationService } from './services/navigation.service.js';
   ApiSuccessEnvelope,
   ApiErrorEnvelope,
   NavigationAdminItemResponseDto,
+  NavigationIconCatalogResponseDto,
 )
 @Feature('roles')
 @Controller('navigation')
@@ -53,15 +57,28 @@ export class NavigationController {
   })
   @ApiResponse({
     status: 200,
-    schema: envelopedSchema(NavigationAdminItemResponseDto),
+    schema: envelopedArraySchema(NavigationAdminItemResponseDto),
   })
   list(): Promise<ReadonlyArray<NavigationAdminItemResponseDto>> {
     return this.navigationService.listAdmin();
   }
 
+  @Get('icons')
+  @RequirePermission('navigation:manage:global')
+  @ApiOperation({
+    summary: 'Catálogo de íconos permitidos para un ítem de menú',
+    description:
+      'Claves de ícono Lucide que aceptan POST y PATCH /navigation en `icon`. Cualquier otra se rechaza con 400.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(NavigationIconCatalogResponseDto) })
+  icons(): NavigationIconCatalogResponseDto {
+    return this.navigationService.listIcons();
+  }
+
   @Post()
   @RequirePermission('navigation:manage:global')
   @ApiOperation({ summary: 'Crear ítem de menú' })
+  @ApiResponse({ status: 400, schema: errorEnvelopeSchema(), description: 'Validación (p. ej. icon fuera del catálogo)' })
   @ApiResponse({
     status: 201,
     schema: envelopedSchema(NavigationAdminItemResponseDto),
@@ -75,6 +92,7 @@ export class NavigationController {
   @Patch(':id')
   @RequirePermission('navigation:manage:global')
   @ApiOperation({ summary: 'Actualizar ítem de menú' })
+  @ApiResponse({ status: 400, schema: errorEnvelopeSchema(), description: 'Validación (p. ej. icon fuera del catálogo)' })
   @ApiResponse({
     status: 200,
     schema: envelopedSchema(NavigationAdminItemResponseDto),

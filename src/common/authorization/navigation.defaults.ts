@@ -1,5 +1,10 @@
 import type { NavigationDefinition } from './navigation.registry.js';
 
+/**
+ * Menú sembrado por las migraciones, tal como queda tras 1767225740000 (íconos, /imports, /handovers y
+ * /document-templates → /documents). La app no lo lee: el menú real vive en navigation_item. Solo sirve de catálogo
+ * de fixture a los specs de autorización, que deben describir el menú que existe.
+ */
 export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
   {
     module: 'USER',
@@ -9,6 +14,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Usuarios',
     requiredAction: 'read',
     sortOrder: 10,
+    icon: 'users',
   },
   {
     module: 'USER',
@@ -18,6 +24,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Roles y permisos',
     requiredAction: 'read',
     sortOrder: 20,
+    icon: 'shield',
   },
   {
     module: 'STRUCTURE',
@@ -27,6 +34,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Campus y ubicaciones',
     requiredAction: 'read',
     sortOrder: 30,
+    icon: 'map-pinned',
   },
   {
     module: 'STRUCTURE',
@@ -36,6 +44,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Organigrama',
     requiredAction: 'read',
     sortOrder: 40,
+    icon: 'landmark',
   },
   {
     module: 'STRUCTURE',
@@ -45,6 +54,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Centros de costo',
     requiredAction: 'read',
     sortOrder: 50,
+    icon: 'wallet',
   },
   {
     module: 'ASSET',
@@ -54,6 +64,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Categorías',
     requiredAction: 'read',
     sortOrder: 60,
+    icon: 'tags',
   },
   {
     module: 'ASSET',
@@ -63,6 +74,27 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Activos',
     requiredAction: 'read',
     sortOrder: 70,
+    icon: 'package',
+  },
+  {
+    module: 'ASSET',
+    moduleLabel: 'Activos',
+    resource: 'asset',
+    path: '/imports',
+    label: 'Importar desde Excel',
+    requiredAction: 'create',
+    sortOrder: 72,
+    icon: 'file-spreadsheet',
+  },
+  {
+    module: 'ASSET',
+    moduleLabel: 'Activos',
+    resource: 'asset',
+    path: '/handovers',
+    label: 'Entregas de activos',
+    requiredAction: 'read',
+    sortOrder: 74,
+    icon: 'package-check',
   },
   {
     module: 'INVENTORY',
@@ -72,6 +104,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Tomas físicas',
     requiredAction: 'read',
     sortOrder: 75,
+    icon: 'clipboard-check',
   },
   {
     module: 'ASSET',
@@ -81,6 +114,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Préstamos',
     requiredAction: 'read',
     sortOrder: 80,
+    icon: 'handshake',
   },
   {
     module: 'ASSET',
@@ -90,15 +124,17 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Depreciación',
     requiredAction: 'read',
     sortOrder: 85,
+    icon: 'calculator',
   },
   {
     module: 'ASSET',
     moduleLabel: 'Activos',
     resource: 'document_template',
-    path: '/document-templates',
-    label: 'Plantillas',
+    path: '/documents',
+    label: 'Documentos',
     requiredAction: 'read',
     sortOrder: 90,
+    icon: 'file-text',
   },
   {
     module: 'SYSTEM',
@@ -108,6 +144,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Almacenamiento',
     requiredAction: 'update',
     sortOrder: 100,
+    icon: 'hard-drive',
   },
   {
     module: 'SYSTEM',
@@ -117,6 +154,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Correo',
     requiredAction: 'manage',
     sortOrder: 105,
+    icon: 'circle',
   },
   {
     module: 'SYSTEM',
@@ -126,6 +164,7 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Módulos',
     requiredAction: 'manage',
     sortOrder: 110,
+    icon: 'panels-top-left',
   },
   {
     module: 'SYSTEM',
@@ -135,5 +174,6 @@ export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
     label: 'Menús',
     requiredAction: 'manage',
     sortOrder: 120,
+    icon: 'list-tree',
   },
 ];

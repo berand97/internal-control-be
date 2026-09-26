@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NAVIGATION_ICONS } from '../../../common/authorization/navigation-icons.js';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { NavigationItemEntity } from '../entities/navigation-item.entity.js';
 import type { NavigationRepository } from '../repositories/navigation.repository.interface.js';
@@ -13,6 +14,7 @@ const item = (): NavigationItemEntity => {
   row.path = '/assets';
   row.label = 'Activos';
   row.requiredAction = 'read';
+  row.icon = 'package';
   row.sortOrder = 70;
   row.isActive = true;
   row.createdAt = new Date();
@@ -55,6 +57,30 @@ describe('NavigationService', () => {
     });
     await service.listActiveDefinitions();
     expect(repository.findActive).toHaveBeenCalledTimes(2);
+  });
+
+  it('publica el catálogo cerrado de íconos y los pasa al catálogo activo', async () => {
+    expect(service.listIcons().icons).toEqual([...NAVIGATION_ICONS]);
+    const [definition] = await service.listActiveDefinitions();
+    expect(definition?.icon).toBe('package');
+  });
+
+  it('crea sin ícono como null y el PATCH con null lo borra', async () => {
+    vi.mocked(repository.insert).mockResolvedValue(item());
+    vi.mocked(repository.findById).mockResolvedValue(item());
+    await service.create({
+      module: 'ASSET',
+      moduleLabel: 'Activos',
+      resource: 'asset',
+      path: '/x',
+      label: 'X',
+      requiredAction: 'read',
+    });
+    expect(repository.insert).toHaveBeenCalledWith(expect.objectContaining({ icon: null }));
+    await service.update('nav-1', { icon: null });
+    expect(repository.update).toHaveBeenCalledWith('nav-1', { icon: null });
+    await service.update('nav-1', { label: 'Y' });
+    expect(repository.update).toHaveBeenLastCalledWith('nav-1', { label: 'Y' });
   });
 
   it('rechaza eliminar un ítem inexistente', async () => {

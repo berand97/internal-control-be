@@ -37,7 +37,10 @@ describe('applyFeatureFlags', () => {
       snapshot(true, ['asset']),
     ]);
 
-    expect(profile.navigation.map((item) => item.resource)).toEqual(['asset']);
+    expect(profile.navigation.map((item) => item.path)).toEqual([
+      '/assets',
+      '/handovers',
+    ]);
     expect(profile.capabilities.map((item) => item.resource)).toEqual(['asset']);
     expect(profile.permissions).toEqual([
       'asset:read:global',

@@ -1,3 +1,4 @@
+import type { NavigationIcon } from '../../../common/authorization/navigation-icons.js';
 import type { NavigationItemEntity } from '../entities/navigation-item.entity.js';
 
 export interface CreateNavigationRecord {
@@ -7,6 +8,7 @@ export interface CreateNavigationRecord {
   readonly path: string;
   readonly label: string;
   readonly requiredAction: string;
+  readonly icon: NavigationIcon | null;
   readonly sortOrder: number;
   readonly isActive: boolean;
 }
@@ -18,6 +20,7 @@ export interface UpdateNavigationRecord {
   readonly path?: string;
   readonly label?: string;
   readonly requiredAction?: string;
+  readonly icon?: NavigationIcon | null;
   readonly sortOrder?: number;
   readonly isActive?: boolean;
 }

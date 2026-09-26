@@ -59,6 +59,7 @@ export const buildAccessProfile = (
       resource: item.resource,
       path: item.path,
       label: item.label,
+      icon: item.icon,
     }));
 
   return {

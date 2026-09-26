@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -9,6 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { NAVIGATION_ICONS, type NavigationIcon } from '../../../common/authorization/navigation-icons.js';
 
 export class CreateNavigationItemDto {
   @ApiProperty({ example: 'ASSET', maxLength: 50 })
@@ -52,6 +54,19 @@ export class CreateNavigationItemDto {
   @IsNotEmpty()
   @MaxLength(30)
   readonly requiredAction!: string;
+
+  @ApiPropertyOptional({
+    enum: NAVIGATION_ICONS,
+    enumName: 'NavigationIcon',
+    nullable: true,
+    example: 'file-spreadsheet',
+    description: 'Clave del catálogo de GET /navigation/icons; null u omitido deja el ítem sin ícono propio',
+  })
+  @IsOptional()
+  @IsIn(NAVIGATION_ICONS, {
+    message: 'icon debe ser una clave del catálogo de íconos (GET /navigation/icons)',
+  })
+  readonly icon?: NavigationIcon | null;
 
   @ApiPropertyOptional({ example: 70, default: 0 })
   @IsOptional()

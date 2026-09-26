@@ -101,4 +101,32 @@ describe('buildAccessProfile', () => {
       'feature',
     ]);
   });
+
+  it('importar exige asset:create; entregas basta con asset:read; publica el ícono', () => {
+    const asset = (action: string) => ({
+      code: `asset:${action}:global`,
+      module: 'ASSET',
+      resourceType: 'asset',
+      action,
+      scopeLevel: 'GLOBAL',
+    });
+    const reader = buildAccessProfile([asset('read')], DEFAULT_NAVIGATION_ITEMS);
+    expect(reader.navigation.map((item) => [item.path, item.icon])).toEqual([
+      ['/assets', 'package'],
+      ['/handovers', 'package-check'],
+    ]);
+
+    const creator = buildAccessProfile(
+      [asset('read'), asset('create')],
+      DEFAULT_NAVIGATION_ITEMS,
+    );
+    expect(creator.navigation.map((item) => item.path)).toEqual([
+      '/assets',
+      '/imports',
+      '/handovers',
+    ]);
+    expect(creator.navigation.find((item) => item.path === '/imports')?.icon).toBe(
+      'file-spreadsheet',
+    );
+  });
 });
