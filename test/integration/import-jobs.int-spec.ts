@@ -444,19 +444,24 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     expect(chain).toHaveLength(2);
     expect(chain[1]?.previous_movement_id).toBe(chain[0]?.id);
     expect(await movements.verifyAssetChain(first)).toEqual([]);
-    // Alterar un registro inicial se detecta.
-    const runner = dataSource.createQueryRunner();
-    await runner.connect();
-    try {
-      await runner.query('SET session_replication_role = replica');
-      await runner.query(`UPDATE asset_movement SET reason = 'Otro' WHERE id = $1`, [rows[1]?.['id']]);
-    } finally {
-      await runner.query('SET session_replication_role = origin');
-      await runner.release();
-    }
+    // Alterar un registro inicial se detecta (y se deja como estaba: verifySample de otro archivo recorre toda la base).
+    const setReason = async (reason: string) => {
+      const runner = dataSource.createQueryRunner();
+      await runner.connect();
+      try {
+        await runner.query('SET session_replication_role = replica');
+        await runner.query('UPDATE asset_movement SET reason = $2 WHERE id = $1', [rows[1]?.['id'], reason]);
+      } finally {
+        await runner.query('SET session_replication_role = origin');
+        await runner.release();
+      }
+    };
+    await setReason('Otro');
     expect(await movements.verifyAssetChain(rows[1]?.['asset_id'] as string)).toEqual([
       { assetId: rows[1]?.['asset_id'], movementId: rows[1]?.['id'], reason: 'SIGNATURE_MISMATCH' },
     ]);
+    await setReason('Importación desde Excel');
+    expect(await movements.verifyAssetChain(rows[1]?.['asset_id'] as string)).toEqual([]);
     // recordInitial se niega sobre un activo que ya tiene movimientos.
     await expect(
       dataSource.transaction((manager) =>
