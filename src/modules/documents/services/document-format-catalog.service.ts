@@ -321,10 +321,18 @@ export class DocumentFormatCatalogService {
       );
       this.assertProcess(key, input.signers);
       await this.assertInitialValueApplies(manager, key, null, input.numbering);
-      await manager.query(
-        'INSERT INTO document_format (key, read_permission, generate_permission, created_by) VALUES ($1, $2, $3, $4)',
+      // ON CONFLICT: dos altas simultáneas de la misma clave; la segunda recibe el mismo 409, no un 500.
+      const inserted = (await manager.query(
+        `INSERT INTO document_format (key, read_permission, generate_permission, created_by) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (key) DO NOTHING RETURNING key`,
         [key, input.readPermission, input.generatePermission, actorId],
-      );
+      )) as unknown[];
+      if (inserted.length === 0) {
+        throw new ApiException(
+          ErrorCode.DocumentFormatAlreadyExists,
+          `Ya existe el formato ${key}`,
+        );
+      }
       const versionId = await this.insertVersion(
         manager,
         key,

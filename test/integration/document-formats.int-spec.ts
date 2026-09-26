@@ -6,7 +6,6 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import QRCode from 'qrcode';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
