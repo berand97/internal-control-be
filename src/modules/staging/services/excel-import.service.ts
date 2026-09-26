@@ -2,6 +2,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
+import {
+  IDENTITY_DOCUMENT_TYPE_CODES,
+  IDENTITY_DOCUMENT_TYPES,
+  type IdentityDocumentType,
+} from '../../../common/identity/identity-document-types.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
@@ -42,6 +47,18 @@ export interface PreviewRequest {
   readonly target: ImportTarget;
   readonly mapping: Record<string, string>;
   readonly unknownCostCenters?: UnknownCostCenterPolicy;
+  /** Solo PERSONS: tipo de documento que el operador declara para todo el lote (el archivo no trae columna). */
+  readonly documentType?: IdentityDocumentType;
+}
+
+/** De dónde sale el tipo de documento de las personas de un lote. */
+export type DocumentTypeSource = 'COLUMN' | 'DECLARED_BY_OPERATOR' | 'UNKNOWN';
+
+interface ImportOptions {
+  readonly unknownCostCenters?: UnknownCostCenterPolicy;
+  readonly documentTypeSource?: DocumentTypeSource;
+  readonly declaredDocumentType?: IdentityDocumentType;
+  readonly declaredBy?: string | null;
 }
 
 export interface ImportSummary {
@@ -70,7 +87,7 @@ interface ImportRow {
   readonly header_row: number;
   readonly target: ImportTarget;
   readonly mapping: Record<string, string>;
-  readonly options: { unknownCostCenters?: UnknownCostCenterPolicy };
+  readonly options: ImportOptions;
   readonly status: 'PREVIEWED' | 'CONFIRMED';
   readonly file_name: string;
 }
@@ -82,6 +99,7 @@ interface Classified {
   readonly quarantined: Record<string, number>;
   readonly flagged: Record<string, number>;
   readonly reasons: ReadonlyArray<{ row_number: number; legacy_id: string | null; reason: string; detail: string | null }>;
+  readonly metrics?: ReadonlyArray<Metric>;
 }
 
 class PreviewRollback extends Error {}
@@ -131,6 +149,56 @@ const colType = (mapping: Record<string, string>, field: string): string => {
 const countBy = (rows: ReadonlyArray<{ key: string; count: number }>): Record<string, number> =>
   Object.fromEntries(rows.map((row) => [row.key, Number(row.count)]));
 
+/**
+ * Reglas del mapeo que dependen del destino. PERSONS: el nombre va en una columna (fullName) o en dos
+ * (firstName + lastName); el tipo de documento sale de una columna o lo declara el operador, no de ambas; un
+ * centro de costo inexistente siempre va a cuarentena (no se crea).
+ */
+const targetRuleErrors = (request: PreviewRequest): Array<{ field: string; message: string }> => {
+  const errors: Array<{ field: string; message: string }> = [];
+  const m = request.mapping;
+  if (request.target !== 'PERSONS') {
+    if (request.documentType) {
+      errors.push({ field: 'documentType', message: 'Solo aplica a la importación de personas' });
+    }
+    return errors;
+  }
+  if (m['fullName'] && (m['firstName'] || m['lastName'])) {
+    errors.push({ field: 'fullName', message: 'Use nombre completo o nombres y apellidos, no ambos' });
+  }
+  if (!m['fullName'] && !(m['firstName'] && m['lastName'])) {
+    errors.push({ field: 'fullName', message: 'Falta el nombre: asigne nombre completo, o nombres y apellidos' });
+  }
+  if (m['documentType'] && request.documentType) {
+    errors.push({
+      field: 'documentType',
+      message: 'El tipo de documento viene de una columna o lo declara el operador, no de ambas',
+    });
+  }
+  if (request.unknownCostCenters === 'create') {
+    errors.push({
+      field: 'unknownCostCenters',
+      message: 'En personas un centro de costo inexistente va a cuarentena; no se crea',
+    });
+  }
+  return errors;
+};
+
+const sqlText = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+
+/** (código, forma plegada) de cada tipo del catálogo: el código y la abreviatura sin puntos. */
+const DOCUMENT_TYPE_ALIASES = IDENTITY_DOCUMENT_TYPE_CODES.flatMap((code) => [
+  `(${sqlText(code)}, ${sqlText(code)})`,
+  `(${sqlText(code)}, ${sqlText(IDENTITY_DOCUMENT_TYPES[code].abbreviation.replaceAll('.', '').toUpperCase())})`,
+]).join(', ');
+
+const NUMERIC_DOCUMENT_TYPES = IDENTITY_DOCUMENT_TYPE_CODES.filter((code) => IDENTITY_DOCUMENT_TYPES[code].numeric)
+  .map(sqlText)
+  .join(', ');
+
+const PERSON_ALREADY_PRESENT =
+  'SELECT 1 FROM person p WHERE p.document_number = s.doc_number AND p.document_type IS NOT DISTINCT FROM s.doc_type';
+
 @Injectable()
 export class ExcelImportService {
   constructor(
@@ -176,7 +244,17 @@ export class ExcelImportService {
     actorId: string | null,
   ): Promise<{ readonly importId: string; readonly summary: ImportSummary }> {
     const headerRow = await this.validate(batchId, request);
-    const options = { unknownCostCenters: request.unknownCostCenters ?? 'quarantine' };
+    const options: ImportOptions =
+      request.target === 'PERSONS'
+        ? {
+            documentTypeSource: request.mapping['documentType']
+              ? 'COLUMN'
+              : request.documentType
+                ? 'DECLARED_BY_OPERATOR'
+                : 'UNKNOWN',
+            ...(request.documentType ? { declaredDocumentType: request.documentType, declaredBy: actorId } : {}),
+          }
+        : { unknownCostCenters: request.unknownCostCenters ?? 'quarantine' };
     const [created] = (await this.dataSource.query(
       `INSERT INTO staging_import (batch_id, sheet_name, header_row, target, mapping, options, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
@@ -225,7 +303,7 @@ export class ExcelImportService {
       quarantined: result.quarantined,
       flagged: result.flagged,
       issues: issues.length,
-      metrics: diagnosis.metrics,
+      metrics: job.target === 'ASSETS' ? diagnosis.metrics : (result.metrics ?? []),
     };
     await this.dataSource.transaction(async (manager) => {
       await this.saveIssues(manager, job, issues);
@@ -277,7 +355,9 @@ export class ExcelImportService {
       const inserted =
         job.target === 'ASSETS'
           ? await this.insertAssets(manager, job, actorId)
-          : await this.insertCostCenters(manager, job);
+          : job.target === 'PERSONS'
+            ? await this.insertPersons(manager, job, actorId)
+            : await this.insertCostCenters(manager, job);
       return { classified, inserted, costCentersCreated };
     });
     const rowsSeconds = seconds(rowsStart);
@@ -395,11 +475,13 @@ export class ExcelImportService {
       .filter(([field, definition]) => definition.required && !request.mapping[field])
       .map(([field]) => field);
     const badLetters = Object.entries(request.mapping).filter(([, letter]) => !COLUMN_LETTER.test(letter));
-    if (unknown.length > 0 || missing.length > 0 || badLetters.length > 0) {
+    const rules = targetRuleErrors(request);
+    if (unknown.length > 0 || missing.length > 0 || badLetters.length > 0 || rules.length > 0) {
       throw new ApiException(ErrorCode.ValidationFailed, 'Mapeo inválido', [
         ...unknown.map((field) => ({ field, message: 'Campo destino desconocido' })),
         ...missing.map((field) => ({ field, message: 'Campo obligatorio sin columna asignada' })),
         ...badLetters.map(([field]) => ({ field, message: 'Columna inválida' })),
+        ...rules,
       ]);
     }
     if (request.headerRow !== undefined) {
@@ -464,6 +546,9 @@ export class ExcelImportService {
 
   private async classify(manager: EntityManager, job: ImportRow): Promise<Classified> {
     const m = job.mapping;
+    if (job.target === 'PERSONS') {
+      return this.classifyPersons(manager, job);
+    }
     if (job.target === 'COST_CENTERS') {
       await manager.query(
         `CREATE TEMP TABLE import_src ON COMMIT DROP AS
@@ -544,6 +629,181 @@ export class ExcelImportService {
           WHERE s.reason IS NULL AND NOT EXISTS (SELECT 1 FROM asset_import_origin o WHERE o.legacy_asset_id = s.legacy_id)
         ) f GROUP BY flag`,
     );
+  }
+
+  /**
+   * Personas. El número de documento nunca sale de aquí: la cuarentena y los problemas se identifican por fila
+   * (legacy_id NULL) y los detalles no lo incluyen.
+   */
+  private async classifyPersons(manager: EntityManager, job: ImportRow): Promise<Classified> {
+    const m = job.mapping;
+    const fullName = Boolean(m['fullName']);
+    await manager.query(
+      `CREATE TEMP TABLE import_src ON COMMIT DROP AS
+       SELECT r.row_number,
+         NOT EXISTS (SELECT 1 FROM jsonb_each_text(r.cells) e WHERE btrim(e.value) <> '') AS is_blank,
+         ${col(m, 'documentNumber')} AS doc_number,
+         ${col(m, 'documentType')} AS doc_type_raw,
+         NULL::varchar(10) AS doc_type,
+         ${fullName ? col(m, 'fullName') : col(m, 'firstName')} AS first_name,
+         ${fullName ? "''::text" : col(m, 'lastName')} AS last_name,
+         ${col(m, 'positionTitle')} AS position_title,
+         ${col(m, 'email')} AS email,
+         ${col(m, 'costCenterCode')} AS center_code,
+         NULL::text AS reason, NULL::text AS detail
+       FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3`,
+      [job.batch_id, job.sheet_name, job.header_row],
+    );
+    await manager.query(
+      `UPDATE import_src SET doc_type = coalesce($1::text,
+         (SELECT a.code FROM (VALUES ${DOCUMENT_TYPE_ALIASES}) AS a(code, folded)
+          WHERE a.folded = upper(regexp_replace(doc_type_raw, '[[:space:].]', '', 'g')) LIMIT 1))`,
+      [job.options.declaredDocumentType ?? null],
+    );
+    await manager.query(`
+      UPDATE import_src s SET reason = c.reason, detail = c.detail FROM (
+        SELECT row_number, reason,
+          CASE reason
+            WHEN 'DOCUMENT_TYPE_INVALID' THEN 'Tipo de documento «' || left(doc_type_raw, 20) || '» fuera del catálogo'
+            WHEN 'DOCUMENT_NUMBER_INVALID' THEN 'El número no corresponde al tipo de documento'
+            WHEN 'DOCUMENT_NUMBER_DUPLICATED' THEN 'El número aparece ' || repeated || ' veces en el archivo'
+            WHEN 'DOCUMENT_TYPE_CONFLICT' THEN
+              CASE WHEN doc_type IS NULL
+                THEN 'Ya existe una persona con ese número y tipo de documento; declare el tipo del lote'
+                ELSE 'Ya existe una persona con ese número sin tipo de documento; complete su tipo antes de importar' END
+            WHEN 'COST_CENTER_UNKNOWN' THEN 'Centro de costo ' || center_code
+            WHEN 'FIELD_TOO_LONG' THEN 'Nombre (máx. 100) o cargo (máx. 150) demasiado largo'
+          END AS detail
+        FROM (
+          SELECT row_number, doc_type, doc_type_raw, center_code,
+            count(*) OVER (PARTITION BY doc_number) AS repeated,
+            CASE
+              WHEN is_blank THEN 'EMPTY_ROW'
+              WHEN doc_number IS NULL THEN 'DOCUMENT_NUMBER_MISSING'
+              WHEN doc_type_raw IS NOT NULL AND doc_type IS NULL THEN 'DOCUMENT_TYPE_INVALID'
+              WHEN length(doc_number) > 30
+                OR (doc_type IN (${NUMERIC_DOCUMENT_TYPES}) AND doc_number !~ '^[0-9]+$') THEN 'DOCUMENT_NUMBER_INVALID'
+              WHEN count(*) OVER (PARTITION BY doc_number) > 1 THEN 'DOCUMENT_NUMBER_DUPLICATED'
+              WHEN first_name IS NULL OR last_name IS NULL THEN 'REQUIRED_FIELD_MISSING'
+              WHEN length(first_name) > 100 OR length(last_name) > 100 OR length(position_title) > 150
+                THEN 'FIELD_TOO_LONG'
+              WHEN (doc_type IS NULL AND EXISTS (SELECT 1 FROM person p
+                      WHERE p.document_number = import_src.doc_number AND p.document_type IS NOT NULL))
+                OR (doc_type IS NOT NULL AND EXISTS (SELECT 1 FROM person p
+                      WHERE p.document_number = import_src.doc_number AND p.document_type IS NULL))
+                THEN 'DOCUMENT_TYPE_CONFLICT'
+              WHEN center_code IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = import_src.center_code)
+                THEN 'COST_CENTER_UNKNOWN'
+              WHEN email IS NULL THEN 'EMAIL_MISSING'
+              WHEN email !~* '@unac\\.edu\\.co$' THEN 'EMAIL_NOT_INSTITUTIONAL'
+            END AS reason
+          FROM import_src) x) c
+      WHERE s.row_number = c.row_number`);
+    const classified = await this.summarize(
+      manager,
+      'NULL::text',
+      PERSON_ALREADY_PRESENT,
+      `
+        SELECT flag AS key, count(*)::int AS count FROM (
+          SELECT unnest(array_remove(ARRAY[
+            CASE WHEN doc_type IS NULL THEN 'DOCUMENT_TYPE_UNKNOWN' END,
+            ${fullName ? "'NAME_NOT_SPLIT'" : 'NULL'}
+          ], NULL)) AS flag
+          FROM import_src s WHERE s.reason IS NULL AND NOT EXISTS (${PERSON_ALREADY_PRESENT})
+        ) f GROUP BY flag`,
+    );
+    // Conteos independientes del orden de los motivos: cada fila tiene un solo motivo de cuarentena, pero el
+    // operador necesita saber cuántas no traen correo y cuántas apuntan a un centro inexistente.
+    const unknownCenter =
+      'center_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = s.center_code)';
+    const [counts] = (await manager.query(`
+      SELECT
+        count(*) FILTER (WHERE NOT is_blank)::int AS rows,
+        count(*) FILTER (WHERE NOT is_blank AND email IS NULL)::int AS without_email,
+        count(*) FILTER (WHERE NOT is_blank AND doc_type IS NULL)::int AS without_type,
+        count(*) FILTER (WHERE NOT is_blank AND center_code IS NULL)::int AS without_center,
+        count(*) FILTER (WHERE NOT is_blank AND ${unknownCenter})::int AS unknown_center_rows,
+        count(DISTINCT center_code) FILTER (WHERE ${unknownCenter})::int AS unknown_centers,
+        string_agg(DISTINCT center_code, ', ' ORDER BY center_code) FILTER (WHERE ${unknownCenter}) AS unknown_codes
+      FROM import_src s`)) as Array<{
+      rows: number;
+      without_email: number;
+      without_type: number;
+      without_center: number;
+      unknown_center_rows: number;
+      unknown_centers: number;
+      unknown_codes: string | null;
+    }>;
+    const base = counts?.rows ?? 0;
+    const typeSource = job.options.documentTypeSource;
+    const metrics: Metric[] = [
+      { key: 'PERSONS_WITHOUT_EMAIL', label: 'Filas sin correo', value: counts?.without_email ?? 0, base },
+      {
+        key: 'PERSONS_WITHOUT_DOCUMENT_TYPE',
+        label: 'Filas sin tipo de documento',
+        value: counts?.without_type ?? 0,
+        base,
+        detail:
+          typeSource === 'DECLARED_BY_OPERATOR'
+            ? `Tipo declarado por el operador para todo el lote: ${job.options.declaredDocumentType ?? ''}`
+            : typeSource === 'COLUMN'
+              ? 'Tipo tomado de la columna del archivo'
+              : 'Sin columna ni tipo declarado: se guardan sin tipo, con la marca DOCUMENT_TYPE_UNKNOWN',
+      },
+      { key: 'PERSONS_WITHOUT_COST_CENTER', label: 'Filas sin centro de costo', value: counts?.without_center ?? 0, base },
+      {
+        key: 'PERSONS_COST_CENTER_UNKNOWN_ROWS',
+        label: 'Filas con centro de costo inexistente',
+        value: counts?.unknown_center_rows ?? 0,
+        base,
+      },
+      {
+        key: 'PERSONS_COST_CENTER_UNKNOWN',
+        label: 'Centros de costo inexistentes (distintos)',
+        value: counts?.unknown_centers ?? 0,
+        base: null,
+        ...(counts?.unknown_codes ? { detail: counts.unknown_codes } : {}),
+      },
+    ];
+    return { ...classified, metrics };
+  }
+
+  private async insertPersons(manager: EntityManager, job: ImportRow, actorId: string): Promise<number> {
+    const fullName = Boolean(job.mapping['fullName']);
+    const source = job.options.documentTypeSource === 'DECLARED_BY_OPERATOR' ? 'DECLARED_BY_OPERATOR' : 'COLUMN';
+    const [row] = (await manager.query(
+      `WITH src AS (
+         SELECT s.*, cc.id AS cost_center_id
+         FROM import_src s LEFT JOIN cost_center cc ON cc.external_code = s.center_code
+         WHERE s.reason IS NULL AND NOT EXISTS (${PERSON_ALREADY_PRESENT})
+       ),
+       inserted AS (
+         INSERT INTO person (document_type, document_number, first_name, last_name, email, position_title,
+           cost_center_id, data_quality_flags)
+         SELECT src.doc_type, src.doc_number, src.first_name, src.last_name, src.email, src.position_title,
+           src.cost_center_id,
+           array_remove(ARRAY[
+             CASE WHEN src.doc_type IS NULL THEN 'DOCUMENT_TYPE_UNKNOWN' END,
+             ${fullName ? "'NAME_NOT_SPLIT'" : 'NULL'}
+           ], NULL)::varchar(40)[]
+         FROM src
+         ON CONFLICT DO NOTHING
+         RETURNING id, document_type, document_number
+       ),
+       origin AS (
+         INSERT INTO person_import_origin (person_id, import_id, source_file, sheet_name, row_number,
+           document_type_source, imported_by)
+         SELECT i.id, $1, $2, $3, src.row_number,
+           CASE WHEN i.document_type IS NULL THEN 'UNKNOWN' ELSE $4 END, $5
+         FROM inserted i
+         JOIN src ON src.doc_number = i.document_number AND src.doc_type IS NOT DISTINCT FROM i.document_type
+         RETURNING person_id
+       )
+       SELECT count(*)::int AS inserted FROM origin`,
+      [job.id, job.file_name, job.sheet_name, source, actorId],
+    )) as Array<{ inserted: number }>;
+    return row?.inserted ?? 0;
   }
 
   private async summarize(

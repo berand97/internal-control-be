@@ -126,6 +126,12 @@ const rolesTemplate = (): Buffer => {
     (role) =>
       `${role.toUpperCase()}|{{firmante.${role}.nombre}}|{{firmante.${role}.documento}}|{{firmante.${role}.cargo}}|`,
   );
+  // Tipo de documento de cada firmante y del responsable (abreviatura del catálogo o vacío).
+  lines.push(
+    ...['entrega', 'recibe', 'audita'].map((role) => `TIPO-${role}|{{firmante.${role}.tipoDocumento}} {{firmante.${role}.documento}}|`),
+    'TIPO-responsable|{{responsable.tipoDocumento}} {{responsable.documento}}|',
+    'TIPO-auditor|{{auditor.tipoDocumento}} {{auditor.documento}}|',
+  );
   zip.file(
     'word/document.xml',
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${lines.map(paragraph).join('')}</w:body></w:document>`,
@@ -473,7 +479,10 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     const data = async () =>
       (
         (await dataSource.query('SELECT data, docx_driver, docx_key FROM document WHERE id = $1', [document.id])) as Array<{
-          data: { firmante: Record<string, { nombre: string; documento: string; cargo: string }>; firmantes: unknown[] };
+          data: {
+            firmante: Record<string, { nombre: string; tipoDocumento: string; documento: string; cargo: string }>;
+            firmantes: unknown[];
+          };
           docx_driver: 'project';
           docx_key: string;
         }>
@@ -481,9 +490,19 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     const original = await data();
     const doc = (id: string) => scalar<string>(dataSource, 'SELECT document_number FROM person WHERE id = $1', [id]);
     expect(original?.data.firmante).toEqual({
-      entrega: { nombre: 'Entregador Ciclo', documento: await doc(people.entrega), cargo: 'Almacenista' },
-      recibe: { nombre: 'Responsable Ciclo', documento: await doc(people.responsable), cargo: 'Coordinadora de laboratorio' },
-      audita: { nombre: 'Auditora Ciclo', documento: await doc(people.auditora), cargo: 'Profesional de Control Interno' },
+      entrega: { nombre: 'Entregador Ciclo', tipoDocumento: 'C.C.', documento: await doc(people.entrega), cargo: 'Almacenista' },
+      recibe: {
+        nombre: 'Responsable Ciclo',
+        tipoDocumento: 'C.C.',
+        documento: await doc(people.responsable),
+        cargo: 'Coordinadora de laboratorio',
+      },
+      audita: {
+        nombre: 'Auditora Ciclo',
+        tipoDocumento: 'C.C.',
+        documento: await doc(people.auditora),
+        cargo: 'Profesional de Control Interno',
+      },
     });
     expect(original?.data.firmantes).toHaveLength(3);
     const originalText = docxText(await storage.getFrom(original?.docx_driver ?? 'project', original?.docx_key ?? ''));
@@ -499,6 +518,7 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     const reissued = await data();
     expect(reissued?.data.firmante['entrega']).toEqual({
       nombre: 'Reemplazo Ciclo',
+      tipoDocumento: 'C.C.',
       documento: await doc(people.reemplazo),
       cargo: 'Auxiliar de almacén',
     });
@@ -508,5 +528,65 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     expect(reissuedText).toContain(`ENTREGA|Reemplazo Ciclo|${await doc(people.reemplazo)}|Auxiliar de almacén|`);
     expect(reissuedText).not.toContain('Entregador Ciclo');
     expect(reissuedText).toContain('AUDITA|Auditora Ciclo|');
+  });
+
+  it('cada firmante lleva la abreviatura de su tipo de documento; tipo desconocido → vacío, también al reasignar', async () => {
+    const storage = moduleRef.get(StorageService);
+    const tag = randomUUID().replace(/\D/g, '').slice(0, 8);
+    const withType = (first: string, type: string | null, doc: string) =>
+      scalar<string>(
+        dataSource,
+        `INSERT INTO person (first_name, last_name, email, document_type, document_number, position_title)
+         VALUES ($1, 'Tipo', $2, $3, $4, 'Cargo') RETURNING id`,
+        [first, `tipo.${doc}@unac.edu.co`, type, doc],
+      );
+    const sinTipo = await withType('Sin tipo', null, `81${tag}`);
+    const extranjera = await withType('Extranjera', 'CE', `82${tag}`);
+    const reemplazoSinTipo = await withType('Reemplazo sin tipo', null, `83${tag}`);
+    const document = await engine.generate(
+      { formatKey: ROLES_FORMAT, responsiblePersonId: sinTipo, signers: { ENTREGA: extranjera, AUDITA: people.auditora } },
+      director.id,
+    );
+    const read = async () =>
+      (
+        (await dataSource.query('SELECT data, docx_driver, docx_key FROM document WHERE id = $1', [document.id])) as Array<{
+          data: {
+            responsable: { tipoDocumento: string };
+            auditor: { tipoDocumento: string };
+            firmante: Record<string, { tipoDocumento: string; documento: string }>;
+            firmantes: Array<{ rol: string; tipoDocumento: string }>;
+          };
+          docx_driver: 'project';
+          docx_key: string;
+        }>
+      )[0];
+    const original = await read();
+    expect(original?.data.responsable.tipoDocumento).toBe('');
+    expect(original?.data.auditor.tipoDocumento).toBe('C.C.');
+    expect(original?.data.firmante['recibe']?.tipoDocumento).toBe('');
+    expect(original?.data.firmante['entrega']?.tipoDocumento).toBe('C.E.');
+    expect(original?.data.firmante['audita']?.tipoDocumento).toBe('C.C.');
+    expect(original?.data.firmantes.map((item) => [item.rol, item.tipoDocumento])).toEqual([
+      ['ENTREGA', 'C.E.'],
+      ['RECIBE', ''],
+      ['AUDITA', 'C.C.'],
+    ]);
+    const text = docxText(await storage.getFrom(original?.docx_driver ?? 'project', original?.docx_key ?? ''));
+    // Tipo desconocido: solo el número, nunca «C.C.» supuesto.
+    expect(text).toContain(`TIPO-recibe| 81${tag}|`);
+    expect(text).toContain(`TIPO-responsable| 81${tag}|`);
+    expect(text).toContain(`TIPO-entrega|C.E. 82${tag}|`);
+    expect(text).toContain('TIPO-auditor|C.C. ');
+
+    await engine.reassignSigner(document.id, 1, reemplazoSinTipo, 'Cambio de quien entrega', director, {
+      ipAddress: null,
+      userAgent: null,
+    });
+    const reissued = await read();
+    expect(reissued?.data.firmante['entrega']).toMatchObject({ tipoDocumento: '', documento: `83${tag}` });
+    expect(reissued?.data.firmante['audita']?.tipoDocumento).toBe('C.C.');
+    const reissuedText = docxText(await storage.getFrom(reissued?.docx_driver ?? 'project', reissued?.docx_key ?? ''));
+    expect(reissuedText).toContain(`TIPO-entrega| 83${tag}|`);
+    expect(reissuedText).not.toContain('C.E.');
   });
 });

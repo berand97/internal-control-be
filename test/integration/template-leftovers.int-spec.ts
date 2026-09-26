@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import PizZip from 'pizzip';
+import { readDocxPlaceholders, renderDocx } from '../../src/modules/document-templates/domain/docx-template.js';
 import {
   assertTemplateClean,
   findLeftovers,
@@ -29,10 +30,66 @@ const withParagraph = (runs: string, externalLink = false): Buffer => {
 };
 
 describe('Chequeo de restos del ejemplo en plantillas', () => {
-  it('la plantilla OCI-01-55 versionada no conserva nada del acta de ejemplo', () => {
-    expect(findLeftovers(readFileSync(TEMPLATE), OCI_01_55_SAMPLE)).toEqual([]);
-    expect(() => assertTemplateClean(readFileSync(TEMPLATE), OCI_01_55_SAMPLE)).not.toThrow();
+  it('la plantilla OCI-01-55 versionada no conserva nada del acta de ejemplo, tampoco el autor en los metadatos', () => {
+    expect(findLeftovers(readFileSync(TEMPLATE), OCI_01_55_SAMPLE, { metadata: true })).toEqual([]);
+    expect(() => assertTemplateClean(readFileSync(TEMPLATE), OCI_01_55_SAMPLE, { metadata: true })).not.toThrow();
+    const core = new PizZip(readFileSync(TEMPLATE)).file('docProps/core.xml')?.asText() ?? '';
+    expect(core).toContain('<dc:creator></dc:creator>');
+    expect(core).toContain('<cp:lastModifiedBy></cp:lastModifiedBy>');
   });
+
+  it('la plantilla OCI-01-55 tiene exactamente los marcadores del contrato, con el tipo de documento de cada firmante', () => {
+    expect([...readDocxPlaceholders(readFileSync(TEMPLATE))].sort()).toEqual(
+      [
+        'auditor.cargo',
+        'auditor.documento',
+        'auditor.nombre',
+        'auditor.tipoDocumento',
+        'centroCosto.codigo',
+        'centroCosto.nombre',
+        'codigo',
+        'descripcion',
+        'documento.fecha',
+        'documento.numero',
+        'estado',
+        'formato.codigo',
+        'formato.fechaVigencia',
+        'formato.version',
+        'idOrigen',
+        'indice',
+        'observacion',
+        'responsable.cargo',
+        'responsable.documento',
+        'responsable.nombre',
+        'responsable.tipoDocumento',
+        'totalElementos',
+        'unidades',
+      ].sort(),
+    );
+  });
+
+  it('OCI-01-55 imprime la abreviatura del tipo de cada firmante, y solo el número si el tipo se desconoce', () => {
+    const text = (responsableTipo: string) => {
+      const output = renderDocx(readFileSync(TEMPLATE), {
+        formato: { codigo: 'OCI-01-55', version: '2', fechaVigencia: '2026-09-08' },
+        documento: { numero: '2026-0001', fecha: '1 DE OCTUBRE DE 2026' },
+        centroCosto: { codigo: '4410', nombre: 'SISTEMAS' },
+        responsable: { nombre: 'ANA RUIZ', tipoDocumento: responsableTipo, documento: '71000111', cargo: 'DOCENTE' },
+        auditor: { nombre: 'SARA MONTOYA', tipoDocumento: 'C.E.', documento: '43000333', cargo: 'AUDITORA' },
+        activos: [],
+        totalElementos: 0,
+      });
+      const xml = new PizZip(output).file('word/document.xml')?.asText() ?? '';
+      return [...xml.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((match) => match[1]).join('');
+    };
+    const known = text('C.C.');
+    expect(known).toContain('C.C. 71000111');
+    expect(known).toContain('C.E. 43000333');
+    const unknown = text('');
+    expect(unknown).toContain(' 71000111');
+    expect(unknown).not.toContain('C.C');
+  });
+
 
   it('rechaza fragmentos del ejemplo aunque Word los haya partido en varios runs', () => {
     const cases: Array<[string, Buffer, RegExp]> = [

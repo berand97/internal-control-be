@@ -46,7 +46,7 @@ export class PersonDirectoryService {
       total: number;
     }>;
     const items = (await this.dataSource.query(
-      `SELECT p.id, trim(p.first_name || ' ' || p.last_name) AS name, p.document_number AS "documentNumber",
+      `SELECT p.id, trim(p.first_name || ' ' || p.last_name) AS name, p.document_type AS "documentType", p.document_number AS "documentNumber",
               p.position_title AS "positionTitle", p.email,
               (u.id IS NOT NULL) AS "hasActiveUser", coalesce(u.mfa_enabled, FALSE) AS "mfaEnabled"
        FROM person p

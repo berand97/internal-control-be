@@ -3,11 +3,13 @@
 // personales. Uso: node scripts/formats/build-oci-01-55-template.mjs <origen.docx> <destino.docx>
 import {
   cleanPackage,
+  clearAuthorMetadata,
   generateClean,
   PizZip,
   replaceAssetTable,
   replaceInParagraphs,
   replaceMergeFields,
+  replaceDocumentTypeLabels,
   replaceSgcHeader,
   replaceText,
   runCli,
@@ -65,13 +67,15 @@ export const build = (source) => {
     },
     (p) => replaceText(p, 'Control Interno', '{{auditor.cargo}}'),
   );
+  document = replaceDocumentTypeLabels(document, ['responsable', 'auditor']);
   zip.file('word/document.xml', document);
   zip.file(
     'word/header1.xml',
     replaceSgcHeader(zip.file('word/header1.xml').asText(), { code: 'OCI-01-55', date: 'Fecha: 2026-09-08' }),
   );
   cleanPackage(zip);
-  return { output: generateClean(zip, SAMPLE), tags: templateTags(zip) };
+  clearAuthorMetadata(zip);
+  return { output: generateClean(zip, SAMPLE, { metadata: true }), tags: templateTags(zip) };
 };
 
 await runCli(import.meta.url, 'build-oci-01-55-template.mjs', build);

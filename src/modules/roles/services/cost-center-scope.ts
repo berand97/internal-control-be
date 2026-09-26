@@ -6,7 +6,8 @@ import type { EffectivePermission } from '../types/effective-permission.type.js'
  * Por qué un usuario con el permiso acotado no alcanza ningún centro de costo.
  * - NO_COST_CENTER: no tiene ninguna asignación vigente con scope_type
  *   COST_CENTER para un rol que otorgue el permiso (incluye asignaciones GLOBAL
- *   de un rol que solo trae el permiso acotado).
+ *   de un rol que solo trae el permiso acotado) ni su persona dirige hoy
+ *   ningún centro (cost_center_head).
  * - ORG_UNIT_UNRESOLVED: tiene el permiso por una asignación ORG_UNIT, pero aún
  *   no está definido qué centros de costo cubre una unidad organizacional.
  */
@@ -41,11 +42,17 @@ export const GLOBAL_COST_CENTER_SCOPE: ReadableCostCenterScope = {
  *
  * El permiso :global gana con cualquier alcance de asignación, igual que en
  * PermissionsService.userHasPermission.
+ *
+ * `headedCostCenterIds` son los centros que la persona del usuario dirige hoy
+ * (cost_center_head vigente). El ROL sigue dando el permiso: sin el permiso
+ * acotado la jefatura no da acceso; con él, los centros alcanzados son los de
+ * las asignaciones COST_CENTER ∪ los que dirige.
  */
 export const resolveCostCenterScope = (
   permissions: ReadonlyArray<EffectivePermission>,
   globalCode: string,
   scopedCode: string,
+  headedCostCenterIds: ReadonlyArray<string> = [],
 ): CostCenterScope => {
   if (permissions.some((permission) => permission.permissionCode === globalCode)) {
     return { kind: 'GLOBAL' };
@@ -57,13 +64,14 @@ export const resolveCostCenterScope = (
     return { kind: 'DENIED' };
   }
   const costCenterIds = [
-    ...new Set(
-      scoped.flatMap((permission) =>
+    ...new Set([
+      ...scoped.flatMap((permission) =>
         permission.userScopeType === 'COST_CENTER' && permission.userScopeId
           ? [permission.userScopeId]
           : [],
       ),
-    ),
+      ...headedCostCenterIds,
+    ]),
   ].sort();
   if (costCenterIds.length > 0) {
     return { kind: 'COST_CENTERS', costCenterIds };
