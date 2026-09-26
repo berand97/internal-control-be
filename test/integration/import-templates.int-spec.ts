@@ -11,6 +11,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import type { ImportTarget } from '../../src/modules/staging/import/import-fields.js';
 import { readWorkbook } from '../../src/modules/staging/excel/read-workbook.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
+import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import {
   DATA_SHEET_NAME,
@@ -200,7 +201,7 @@ describe('Plantillas Excel de importación (PostgreSQL real)', () => {
       expect.arrayContaining([expect.objectContaining({ rowNumber: 2, code: 'TEMPLATE_EXAMPLE_ROW_IGNORED' })]),
     );
 
-    expect(await imports.confirm(preview.importId, actor.id)).toMatchObject({ inserted: 2 });
+    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 2 });
     const [ana] = (await dataSource.query(
       `SELECT p.document_type, p.document_number, cc.external_code FROM person p
        LEFT JOIN cost_center cc ON cc.id = p.cost_center_id WHERE p.document_number = $1`,
@@ -326,7 +327,7 @@ describe('Plantillas Excel de importación (PostgreSQL real)', () => {
     expect(issues.items).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: 'COLUMN_UNMAPPED', column: 'Sede', rowNumber: null })]),
     );
-    expect(await imports.confirm(preview.importId, actor.id)).toMatchObject({ inserted: 1 });
+    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 1 });
     const [asset] = (await dataSource.query(
       `SELECT a.internal_code, a.barcode, cc.external_code FROM asset a JOIN asset_import_origin o ON o.asset_id = a.id
        JOIN cost_center cc ON cc.id = a.current_cost_center_id WHERE o.legacy_asset_id = $1`,

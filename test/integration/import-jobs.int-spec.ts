@@ -492,6 +492,45 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     ).rejects.toThrow('El registro inicial solo aplica a activos sin movimientos');
   });
 
+  it('categoría y condición física del archivo se guardan sin sus marcas; si faltan, relleno y marcas como antes', async () => {
+    const t = tag();
+    const category = `AJ_CAT_${t}`;
+    await dataSource.query(`INSERT INTO asset_category (code, name, requires_photo) VALUES ($1, 'Categoría del archivo', FALSE)`, [category]);
+    const rows: Cell[][] = [
+      ['Id', 'Codigo', 'Descripcion', 'Centro', 'Fecha compra', 'Precio', 'Categoria', 'Condicion'],
+      [`AJC-${t}-1`, `CC-${t}-1`, 'Con categoría y condición', center, new Date('2021-05-01'), 500, category, 'good'],
+      [`AJC-${t}-2`, `CC-${t}-2`, 'Sin categoría ni condición', center, new Date('2021-05-01'), 500, null, null],
+    ];
+    const upload = await imports.upload(await workbook('Activos', rows), `categoria-${t}.xlsx`, actor.id);
+    const preview = await imports.preview(
+      upload.batchId,
+      { sheet: 'Activos', target: 'ASSETS', mapping: { ...ASSET_MAPPING, categoryCode: 'G', physicalCondition: 'H' } },
+      actor.id,
+    );
+    expect(preview.summary).toMatchObject({ toInsert: 2, quarantined: {} });
+    const job = await jobs.enqueue(preview.importId, actor.id);
+    expect(await jobs.processJob(job.id)).toBe('SUCCEEDED');
+    const stored = (await dataSource.query(
+      `SELECT o.legacy_asset_id, c.code AS category, a.physical_condition, a.data_quality_flags, m.to_physical_condition, a.id
+       FROM asset a JOIN asset_import_origin o ON o.asset_id = a.id JOIN asset_category c ON c.id = a.category_id
+       JOIN asset_movement m ON m.asset_id = a.id
+       WHERE o.import_id = $1 ORDER BY o.row_number`,
+      [preview.importId],
+    )) as Array<{ legacy_asset_id: string; category: string; physical_condition: string | null; data_quality_flags: string[]; to_physical_condition: string | null; id: string }>;
+    expect(stored).toHaveLength(2);
+    expect(stored[0]).toMatchObject({ category, physical_condition: 'GOOD', to_physical_condition: 'GOOD' });
+    expect(stored[0]?.data_quality_flags).not.toContain('CATEGORY_UNASSIGNED');
+    expect(stored[0]?.data_quality_flags).not.toContain('PHYSICAL_CONDITION_UNKNOWN');
+    expect(stored[0]?.data_quality_flags).toContain('ACQUISITION_TYPE_UNKNOWN');
+    expect(stored[1]).toMatchObject({ category: 'SIN_CLASIFICAR', physical_condition: null, to_physical_condition: null });
+    expect(stored[1]?.data_quality_flags).toEqual(
+      expect.arrayContaining(['CATEGORY_UNASSIGNED', 'PHYSICAL_CONDITION_UNKNOWN', 'ACQUISITION_TYPE_UNKNOWN']),
+    );
+    for (const row of stored) {
+      expect(await movements.verifyAssetChain(row.id)).toEqual([]);
+    }
+  });
+
   it('personas por el camino asíncrono: conteos exactos, aviso sin números de documento', async () => {
     const t = tag();
     const numbers = [`71${Date.now().toString().slice(-8)}`, `72${Date.now().toString().slice(-8)}`];

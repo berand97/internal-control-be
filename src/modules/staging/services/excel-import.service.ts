@@ -1128,9 +1128,13 @@ export class ExcelImportService {
            operational_status, physical_condition, current_cost_center_id, depreciation_method,
            useful_life_years, salvage_value, notes, created_by, updated_by, data_quality_flags)
          SELECT 'XLS-' || src.legacy_id, left(src.barcode, 50), left(src.serial, 100), left(src.description, 500),
-           left(src.model, 150), (SELECT id FROM asset_category WHERE code = $1),
+           left(src.model, 150),
+           -- Categoría y condición del archivo (ya validadas en la clasificación: fuera del catálogo va a cuarentena).
+           -- Sin valor: la categoría de relleno y la condición sin verificar, con sus marcas.
+           (SELECT id FROM asset_category WHERE code = coalesce(src.category_code, $1)),
            (SELECT id FROM acquisition_type WHERE code = $2), src.purchase_date,
-           left(src.document, 100), coalesce(src.price, 0), 'COP', 'IN_USE', NULL,
+           left(src.document, 100), coalesce(src.price, 0), 'COP', 'IN_USE',
+           src.physical_condition::asset_physical_condition,
            src.cost_center_id, 'STRAIGHT_LINE', src.useful_life, 0, src.notes, $3, $3,
            array_remove(ARRAY[
              CASE WHEN upper(src.barcode) = 'TEMP' THEN 'BARCODE_TEMP' END,
@@ -1140,9 +1144,9 @@ export class ExcelImportService {
              CASE WHEN src.purchase_raw IS NOT NULL AND src.purchase_date IS NULL THEN 'ACQUISITION_DATE_INVALID' END,
              CASE WHEN src.price = 0 THEN 'PRICE_ZERO' END,
              CASE WHEN src.price IS NULL THEN 'PRICE_MISSING' END,
-             'CATEGORY_UNASSIGNED',
+             CASE WHEN src.category_code IS NULL THEN 'CATEGORY_UNASSIGNED' END,
              'ACQUISITION_TYPE_UNKNOWN',
-             'PHYSICAL_CONDITION_UNKNOWN',
+             CASE WHEN src.physical_condition IS NULL THEN 'PHYSICAL_CONDITION_UNKNOWN' END,
              CASE WHEN src.center_not_in_catalog THEN 'COST_CENTER_NOT_IN_CATALOG' END
            ], NULL)::varchar(40)[]
          FROM src
