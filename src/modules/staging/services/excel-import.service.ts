@@ -675,7 +675,7 @@ export class ExcelImportService {
             WHEN 'FIELD_TOO_LONG' THEN 'Nombre (máx. 100) o cargo (máx. 150) demasiado largo'
           END AS detail
         FROM (
-          SELECT *,
+          SELECT row_number, doc_type, doc_type_raw, center_code,
             count(*) OVER (PARTITION BY doc_number) AS repeated,
             CASE
               WHEN is_blank THEN 'EMPTY_ROW'
