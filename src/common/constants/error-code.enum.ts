@@ -144,4 +144,6 @@ export enum ErrorCode {
 
   CostCenterHeadOverlap = 'COST_CENTER_HEAD_OVERLAP',
   CostCenterHeadEnded = 'COST_CENTER_HEAD_ENDED',
+
+  ImportJobNotRetryable = 'IMPORT_JOB_NOT_RETRYABLE',
 }

@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiAcceptedResponse,
   ApiBearerAuth,
   ApiConsumes,
   ApiExtraModels,
@@ -49,6 +50,8 @@ import {
   type UnknownCostCenterPolicy,
 } from './import/import-fields.js';
 import { ExcelImportService } from './services/excel-import.service.js';
+import { ImportJobsService } from './services/import-jobs.service.js';
+import { envelopedJobListSchema, ImportJobDto } from './dto/import-job.responses.js';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -117,11 +120,14 @@ export class IssuesQueryDto {
 
 @ApiTags(OpenApiTag.Assets)
 @ApiBearerAuth()
-@ApiExtraModels(ApiSuccessEnvelope, ImportPreviewResponseDto, ImportResultDto, ImportTargetFieldsDto, ImportQuarantineRowDto)
+@ApiExtraModels(ApiSuccessEnvelope, ImportPreviewResponseDto, ImportResultDto, ImportTargetFieldsDto, ImportQuarantineRowDto, ImportJobDto)
 @Feature('assets')
 @Controller('imports')
 export class ImportsController {
-  constructor(private readonly imports: ExcelImportService) {}
+  constructor(
+    private readonly imports: ExcelImportService,
+    private readonly jobs: ImportJobsService,
+  ) {}
 
   @Post()
   @RequirePermission('asset:create:global')
@@ -189,15 +195,19 @@ export class ImportsController {
   }
 
   @Post('previews/:importId/confirm')
-  @HttpCode(200)
+  @HttpCode(202)
   @RequirePermission('asset:create:global')
-  @ApiOperation({ summary: 'Confirmar: inserta solo lo nuevo y pone en cuarentena lo demás' })
-  @ApiOkResponse({ schema: envelopedSchema(ImportResultDto) })
+  @ApiOperation({
+    summary: 'Confirmar: encola la importación y responde de inmediato con el trabajo',
+    description:
+      'No escribe en el modelo dentro de la petición: un worker procesa el trabajo en segundo plano (toma trabajos cada 5 s). Consulte el avance con GET /imports/jobs/{id}. Idempotente: confirmar otra vez la misma importación devuelve el mismo trabajo, en el estado en que esté (si FAILED, use POST /imports/jobs/{id}/retry).',
+  })
+  @ApiAcceptedResponse({ schema: envelopedSchema(ImportJobDto) })
   confirm(
     @Param('importId', ParseUUIDPipe) importId: string,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.imports.confirm(importId, actor.id);
+    return this.jobs.enqueue(importId, actor.id);
   }
 
   @Get('previews/:importId/reconciliation')
@@ -212,5 +222,54 @@ export class ImportsController {
   @ApiOperation({ summary: 'Filas en cuarentena con motivo y fila original' })
   quarantine(@Param('importId', ParseUUIDPipe) importId: string) {
     return this.imports.quarantine(importId);
+  }
+
+  // ---------- Importación asíncrona: trabajos (bej-async-import) ----------
+
+  @Get('jobs')
+  @RequirePermission('asset:create:global')
+  @ApiOperation({
+    summary: 'Mis trabajos de importación más recientes (máx. 20)',
+    description: 'Para retomar el avance si se cerró la página: los trabajos siguen en el servidor.',
+  })
+  @ApiOkResponse({ schema: envelopedJobListSchema() })
+  listJobs(@CurrentUser() actor: AuthenticatedUser) {
+    return this.jobs.listMine(actor.id);
+  }
+
+  @Get('jobs/:jobId')
+  @RequirePermission('asset:create:global')
+  @ApiOperation({
+    summary: 'Estado de un trabajo de importación (fase, conteos, porcentaje)',
+    description: 'Para polling. 404 RESOURCE_NOT_FOUND si no existe.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(ImportJobDto) })
+  job(@Param('jobId', ParseUUIDPipe) jobId: string) {
+    return this.jobs.find(jobId);
+  }
+
+  @Post('jobs/:jobId/retry')
+  @HttpCode(202)
+  @RequirePermission('asset:create:global')
+  @ApiOperation({
+    summary: 'Reintentar un trabajo FAILED sin volver a subir el archivo',
+    description:
+      'Lo devuelve a la cola (QUEUED). No duplica: si la fase de filas ya había quedado escrita no se repite (sus conteos se conservan) y solo se escriben los movimientos que faltan. 409 IMPORT_JOB_NOT_RETRYABLE si no está FAILED; 404 si no existe.',
+  })
+  @ApiAcceptedResponse({ schema: envelopedSchema(ImportJobDto) })
+  retryJob(@Param('jobId', ParseUUIDPipe) jobId: string) {
+    return this.jobs.retry(jobId);
+  }
+
+  @Get('previews/:importId/job')
+  @RequirePermission('asset:create:global')
+  @ApiOperation({ summary: 'Trabajo de una importación ya confirmada', description: '404 si la importación no se ha confirmado.' })
+  @ApiOkResponse({ schema: envelopedSchema(ImportJobDto) })
+  async jobOfImport(@Param('importId', ParseUUIDPipe) importId: string) {
+    const job = await this.jobs.findByImport(importId);
+    if (!job) {
+      throw new ApiException(ErrorCode.ResourceNotFound, 'La importación no tiene trabajo: no se ha confirmado');
+    }
+    return job;
   }
 }

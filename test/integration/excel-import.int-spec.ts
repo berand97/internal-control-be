@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { DataSource } from 'typeorm';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
+import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { bootModules, createActor, scalar } from './helpers.js';
 
@@ -74,7 +75,7 @@ describe('Importación de Excel como funcionalidad (PostgreSQL real)', () => {
     expect(upload.sheets[0]).toMatchObject({ name: 'Centros', detectedHeaderRow: 1, columns: { A: 'Codigo', B: 'Nombre' } });
     const preview = await imports.preview(upload.batchId, { sheet: 'Centros', target: 'COST_CENTERS', mapping: { code: 'A', name: 'B' } }, actor.id);
     expect(preview.summary).toMatchObject({ rowsRead: 2, toInsert: 2, alreadyPresent: 0 });
-    expect(await imports.confirm(preview.importId, actor.id)).toMatchObject({ inserted: 2, skippedAlreadyPresent: 0 });
+    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 2, skippedAlreadyPresent: 0 });
   });
 
   it('previsualiza sin escribir, confirma con cuarentena y banderas, y no duplica al repetir', async () => {
@@ -113,7 +114,7 @@ describe('Importación de Excel como funcionalidad (PostgreSQL real)', () => {
       ]),
     );
 
-    const result = await imports.confirm(preview.importId, actor.id);
+    const result = await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id);
     expect(result).toMatchObject({ inserted: 7, skippedAlreadyPresent: 0, registrationMovements: 7 });
     const quarantine = await imports.quarantine(preview.importId);
     expect(quarantine).toEqual(
@@ -141,7 +142,7 @@ describe('Importación de Excel como funcionalidad (PostgreSQL real)', () => {
     const secondPreview = await imports.preview(again.batchId, { sheet: 'Hoja1', target: 'ASSETS', mapping: ASSET_MAPPING }, actor.id);
     expect(secondPreview.summary).toMatchObject({ toInsert: 0, alreadyPresent: 7 });
     const assetsAfterFirst = await count('SELECT count(*) FROM asset');
-    expect(await imports.confirm(secondPreview.importId, actor.id)).toMatchObject({ inserted: 0, skippedAlreadyPresent: 7 });
+    expect(await moduleRef.get(ImportJobsService).runNow(secondPreview.importId, actor.id)).toMatchObject({ inserted: 0, skippedAlreadyPresent: 7 });
     expect(await count('SELECT count(*) FROM asset')).toBe(assetsAfterFirst);
   });
 
@@ -155,7 +156,7 @@ describe('Importación de Excel como funcionalidad (PostgreSQL real)', () => {
     expect(upload.created).toBe(true);
     const preview = await imports.preview(upload.batchId, { sheet: 'Hoja1', target: 'ASSETS', mapping: ASSET_MAPPING }, actor.id);
     expect(preview.summary).toMatchObject({ toInsert: 1, alreadyPresent: 7 });
-    expect(await imports.confirm(preview.importId, actor.id)).toMatchObject({ inserted: 1, skippedAlreadyPresent: 7 });
+    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 1, skippedAlreadyPresent: 7 });
     expect(
       await scalar<string>(dataSource, `SELECT a.description FROM asset a JOIN asset_import_origin o ON o.asset_id = a.id WHERE o.legacy_asset_id = '1'`),
     ).toBe('Portátil');
@@ -174,7 +175,7 @@ describe('Importación de Excel como funcionalidad (PostgreSQL real)', () => {
     );
     expect(preview.summary).toMatchObject({ toInsert: 1, quarantined: {} });
     expect(await count(`SELECT count(*) FROM cost_center WHERE external_code = '8888'`)).toBe(0);
-    expect(await imports.confirm(preview.importId, actor.id)).toMatchObject({ inserted: 1, costCentersCreated: 1 });
+    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 1, costCentersCreated: 1 });
     expect(
       await scalar<boolean>(
         dataSource,

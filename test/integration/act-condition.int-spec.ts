@@ -19,6 +19,7 @@ import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pd
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { FeaturesModule } from '../../src/modules/features/features.module.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
+import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { createActor, scalar, useSharedStorage } from './helpers.js';
@@ -112,13 +113,13 @@ describe('El acta no afirma un estado físico que nadie verificó (PostgreSQL re
     });
     const upload = await imports.upload(Buffer.from(await book.xlsx.writeBuffer()), 'estado.xlsx', director.id);
     const centersPreview = await imports.preview(upload.batchId, { sheet: 'Centros', target: 'COST_CENTERS', mapping: { code: 'A', name: 'B' } }, director.id);
-    await imports.confirm(centersPreview.importId, director.id);
+    await moduleRef.get(ImportJobsService).runNow(centersPreview.importId, director.id);
     const assetsPreview = await imports.preview(
       upload.batchId,
       { sheet: 'Activos', target: 'ASSETS', mapping: { legacyAssetId: 'A', legacyCode: 'B', description: 'C', costCenterCode: 'D', acquisitionDate: 'E' } },
       director.id,
     );
-    await imports.confirm(assetsPreview.importId, director.id);
+    await moduleRef.get(ImportJobsService).runNow(assetsPreview.importId, director.id);
   }, 120_000);
 
   afterAll(async () => {

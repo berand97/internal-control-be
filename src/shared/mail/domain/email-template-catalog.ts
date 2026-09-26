@@ -6,6 +6,7 @@ export const EMAIL_TEMPLATE_TYPES = [
   'LOAN_STATUS_NOTIFICATION',
   'INVENTORY_ALERT',
   'SIGNATURE_LINK',
+  'IMPORT_FINISHED',
 ] as const;
 
 export type EmailTemplateType = (typeof EMAIL_TEMPLATE_TYPES)[number];
@@ -18,6 +19,7 @@ export const EMAIL_TEMPLATE_LABEL: Record<EmailTemplateType, string> = {
   LOAN_STATUS_NOTIFICATION: 'Aviso de préstamo',
   INVENTORY_ALERT: 'Alerta de toma física',
   SIGNATURE_LINK: 'Enlace para firmar un acta',
+  IMPORT_FINISHED: 'Fin de una importación desde Excel',
 };
 
 export interface EmailPlaceholderCatalog {
@@ -61,6 +63,10 @@ export const EMAIL_PLACEHOLDER_CATALOG: Record<
   SIGNATURE_LINK: {
     required: ['firma.url', 'firma.vence', 'acta.formato', 'acta.numero', 'contacto'],
     optional: ['firmante.nombre', 'firma.rol', 'app.name'],
+  },
+  IMPORT_FINISHED: {
+    required: ['importacion.estado', 'importacion.destino', 'importacion.resumen'],
+    optional: ['importacion.archivo', 'user.fullName', 'app.name', 'app.loginUrl'],
   },
 };
 
@@ -134,6 +140,20 @@ export const DEFAULT_EMAIL_TEMPLATES: Record<EmailTemplateType, EmailTemplateDra
         '{{app.name}}',
       ].join('\n'),
     },
+    IMPORT_FINISHED: {
+      subject: 'Importación de {{importacion.destino}}: {{importacion.estado}}',
+      body: [
+        'Hola {{user.fullName}},',
+        '',
+        'La importación de {{importacion.destino}} (archivo {{importacion.archivo}}) quedó {{importacion.estado}}.',
+        '',
+        '{{importacion.resumen}}',
+        '',
+        'El detalle está en {{app.loginUrl}}',
+        '',
+        '{{app.name}}',
+      ].join('\n'),
+    },
   };
 
 export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, string>> =
@@ -190,6 +210,15 @@ export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, stri
       'acta.formato': 'OCI-01-55 · Acta de entrega y asignación de activos fijos',
       'acta.numero': '0093',
       contacto: 'Carolina Gómez (carolina.gomez@unac.edu.co)',
+      'app.name': 'Control Interno UNAC',
+    },
+    IMPORT_FINISHED: {
+      'user.fullName': 'Juliana Pérez',
+      'importacion.estado': 'terminada',
+      'importacion.destino': 'activos',
+      'importacion.archivo': 'activos.xlsx · hoja ACTIVOS',
+      'importacion.resumen': 'Insertados: 8780\nOmitidos por ya existir: 0\nEn cuarentena: 161',
+      'app.loginUrl': 'http://localhost:4200',
       'app.name': 'Control Interno UNAC',
     },
   };

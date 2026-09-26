@@ -19,6 +19,7 @@ import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pd
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { FeaturesModule } from '../../src/modules/features/features.module.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
+import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { createActor, scalar, useSharedStorage } from './helpers.js';
@@ -236,7 +237,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
       },
       director.id,
     );
-    await imports.confirm(preview.importId, director.id);
+    await moduleRef.get(ImportJobsService).runNow(preview.importId, director.id);
     const idOf = (legacy: number) =>
       scalar<string>(dataSource, 'SELECT asset_id FROM asset_import_origin WHERE legacy_asset_id = $1', [String(legacy)]);
 
