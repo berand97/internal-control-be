@@ -84,7 +84,6 @@ import { LoanSignaturesAndHandoverCancel1767225690000 } from './migrations/17672
 import { ImportTemplates1767225710000 } from './migrations/1767225710000-import-templates.js';
 import { ImportJobsAndMailOutbox1767225720000 } from './migrations/1767225720000-import-jobs-and-mail-outbox.js';
 import { AdministrableDocumentFormats1767225730000 } from './migrations/1767225730000-administrable-document-formats.js';
-import { ImportTemplates1767225710000 } from './migrations/1767225710000-import-templates.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
