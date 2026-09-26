@@ -5,6 +5,7 @@ export const EMAIL_TEMPLATE_TYPES = [
   'SYSTEM_ALERT',
   'LOAN_STATUS_NOTIFICATION',
   'INVENTORY_ALERT',
+  'SIGNATURE_LINK',
 ] as const;
 
 export type EmailTemplateType = (typeof EMAIL_TEMPLATE_TYPES)[number];
@@ -16,6 +17,7 @@ export const EMAIL_TEMPLATE_LABEL: Record<EmailTemplateType, string> = {
   SYSTEM_ALERT: 'Alerta del sistema',
   LOAN_STATUS_NOTIFICATION: 'Aviso de préstamo',
   INVENTORY_ALERT: 'Alerta de toma física',
+  SIGNATURE_LINK: 'Enlace para firmar un acta',
 };
 
 export interface EmailPlaceholderCatalog {
@@ -55,6 +57,10 @@ export const EMAIL_PLACEHOLDER_CATALOG: Record<
   INVENTORY_ALERT: {
     required: ['user.email', 'inventario.nombre', 'alerta.mensaje'],
     optional: ['inventario.fecha', 'app.loginUrl'],
+  },
+  SIGNATURE_LINK: {
+    required: ['firma.url', 'firma.vence', 'acta.formato', 'acta.numero', 'contacto'],
+    optional: ['firmante.nombre', 'firma.rol', 'app.name'],
   },
 };
 
@@ -110,6 +116,24 @@ export const DEFAULT_EMAIL_TEMPLATES: Record<EmailTemplateType, EmailTemplateDra
       subject: 'Toma física: {{inventario.nombre}}',
       body: 'Hola {{user.email}},\n{{alerta.mensaje}}\n{{app.loginUrl}}',
     },
+    SIGNATURE_LINK: {
+      subject: 'Firma pendiente: {{acta.formato}} N.° {{acta.numero}}',
+      body: [
+        'Hola {{firmante.nombre}},',
+        '',
+        'Tiene pendiente la firma del documento {{acta.formato}} N.° {{acta.numero}}, como {{firma.rol}}.',
+        '',
+        'Para leerlo y firmarlo (o rechazarlo indicando el motivo) abra este enlace:',
+        '{{firma.url}}',
+        '',
+        'Antes de firmar se le pedirán los últimos 4 dígitos de su número de documento.',
+        'El enlace es personal, sirve una sola vez y vence el {{firma.vence}}. No lo reenvíe.',
+        '',
+        'Si tiene dudas, no reconoce este documento o el enlace venció, contacte a {{contacto}}.',
+        '',
+        '{{app.name}}',
+      ].join('\n'),
+    },
   };
 
 export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, string>> =
@@ -157,6 +181,16 @@ export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, stri
       'alerta.mensaje': 'Quedan ítems sin verificar.',
       'inventario.fecha': '2026-09-08',
       'app.loginUrl': 'http://localhost:4200/auth/login',
+    },
+    SIGNATURE_LINK: {
+      'firmante.nombre': 'Juliana Pérez',
+      'firma.url': 'http://localhost:4200/firmar/ejemplo',
+      'firma.vence': '28 de septiembre de 2026, 10:00 a. m.',
+      'firma.rol': 'Recibe',
+      'acta.formato': 'OCI-01-55 · Acta de entrega y asignación de activos fijos',
+      'acta.numero': '0093',
+      contacto: 'Carolina Gómez (carolina.gomez@unac.edu.co)',
+      'app.name': 'Control Interno UNAC',
     },
   };
 

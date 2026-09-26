@@ -78,6 +78,7 @@ import { DocumentLifecycle1767225635000 } from './migrations/1767225635000-docum
 import { AssetHandover1767225640000 } from './migrations/1767225640000-asset-handover.js';
 import { LoanDeliveryDocument1767225650000 } from './migrations/1767225650000-loan-delivery-document.js';
 import { MfaRecovery1767225660000 } from './migrations/1767225660000-mfa-recovery.js';
+import { SigningChannels1767225670000 } from './migrations/1767225670000-signing-channels.js';
 import { PersonsImportAndCostCenterHeads1767225680000 } from './migrations/1767225680000-persons-import-and-cost-center-heads.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
@@ -183,6 +184,7 @@ const dataSource = new DataSource({
     AssetHandover1767225640000,
     LoanDeliveryDocument1767225650000,
     MfaRecovery1767225660000,
+    SigningChannels1767225670000,
     PersonsImportAndCostCenterHeads1767225680000,
   ],
 });

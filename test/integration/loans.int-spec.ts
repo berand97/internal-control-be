@@ -203,7 +203,8 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     );
     const sessionId = randomUUID();
     await dataSource.query(
-      `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at) VALUES ($1, $2, $3, NOW() + interval '1 day')`,
+      `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at)
+       VALUES ($1, $2, $3, NOW() + interval '1 day', (SELECT CASE WHEN mfa_enabled THEN NOW() END FROM app_user WHERE id = $2))`,
       [sessionId, userId, randomUUID()],
     );
     for (const assignment of roles) {
@@ -352,6 +353,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       `DELETE FROM signature_envelope_signer WHERE envelope_id IN (SELECT id FROM signature_envelope WHERE document_id = ANY($1))`,
       [ids],
     );
+    await dataSource.query('DELETE FROM signature_signing_link WHERE document_id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM signature_envelope WHERE document_id = ANY($1)', [ids]);
     await dataSource.query(`DELETE FROM document_request WHERE payload->>'entityType' = 'LOAN'`);
     await dataSource.query('DELETE FROM document WHERE id = ANY($1)', [ids]);

@@ -18,6 +18,11 @@ import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { createActor, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
+const CLEANED_FORMATS = ['OCI-01-55', 'OCI-17-89', 'OCI-01-65'];
+const snapshot: {
+  templates: string[];
+  sequences: Array<{ format_key: string; period: string; current_value: string }>;
+} = { templates: [], sequences: [] };
 
 class FakePdfConverter implements PdfConverter {
   failNext = false;
@@ -90,6 +95,15 @@ describe('Motor de documentos (PostgreSQL real)', () => {
     engine = moduleRef.get(DocumentEngineService);
     stub = moduleRef.get(StubSignatureProvider);
     storageDir = await useSharedStorage(dataSource);
+    snapshot.templates = (
+      (await dataSource.query('SELECT id FROM document_template_version WHERE format_key = ANY($1)', [CLEANED_FORMATS])) as Array<{
+        id: string;
+      }>
+    ).map((row) => row.id);
+    snapshot.sequences = (await dataSource.query(
+      'SELECT format_key, period, current_value FROM document_sequence WHERE format_key = ANY($1)',
+      [CLEANED_FORMATS],
+    )) as typeof snapshot.sequences;
 
     director = await createActor(dataSource);
     await dataSource.query(
@@ -151,6 +165,35 @@ describe('Motor de documentos (PostgreSQL real)', () => {
   });
 
   afterAll(async () => {
+    // Deja la BD compartida como estaba (plantillas, actas y consecutivos de estos formatos): loans espera OCI-01-65
+    // sin plantilla y otros archivos esperan el consecutivo inicial de OCI-01-55, sea cual sea el orden de los archivos.
+    const templates = (
+      (await dataSource.query('SELECT id FROM document_template_version WHERE format_key = ANY($1) AND NOT (id = ANY($2))', [
+        CLEANED_FORMATS,
+        snapshot.templates,
+      ])) as Array<{ id: string }>
+    ).map((row) => row.id);
+    const ids = (
+      (await dataSource.query('SELECT id FROM document WHERE template_version_id = ANY($1)', [templates])) as Array<{ id: string }>
+    ).map((row) => row.id);
+    await dataSource.query('DELETE FROM document_signature_reassignment WHERE document_id = ANY($1)', [ids]);
+    await dataSource.query(
+      'DELETE FROM signature_envelope_signer WHERE envelope_id IN (SELECT id FROM signature_envelope WHERE document_id = ANY($1))',
+      [ids],
+    );
+    await dataSource.query('DELETE FROM signature_signing_link WHERE document_id = ANY($1)', [ids]);
+    await dataSource.query('DELETE FROM signature_envelope WHERE document_id = ANY($1)', [ids]);
+    await dataSource.query('DELETE FROM document_request WHERE document_id = ANY($1)', [ids]);
+    await dataSource.query('DELETE FROM document WHERE id = ANY($1)', [ids]);
+    await dataSource.query('DELETE FROM document_template_version WHERE id = ANY($1)', [templates]);
+    await dataSource.query('DELETE FROM document_sequence WHERE format_key = ANY($1)', [CLEANED_FORMATS]);
+    for (const sequence of snapshot.sequences) {
+      await dataSource.query('INSERT INTO document_sequence (format_key, period, current_value) VALUES ($1, $2, $3)', [
+        sequence.format_key,
+        sequence.period,
+        sequence.current_value,
+      ]);
+    }
     await moduleRef.close();
   });
 

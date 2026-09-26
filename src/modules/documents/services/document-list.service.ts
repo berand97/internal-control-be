@@ -11,6 +11,8 @@ export const DOCUMENT_LIST_STATUSES = [
   'PENDING_SIGNATURE',
   'SIGNED',
   'REJECTED',
+  'VOIDED',
+  'CANCELLED',
 ] as const;
 export type DocumentListStatus = (typeof DOCUMENT_LIST_STATUSES)[number];
 
@@ -43,9 +45,11 @@ export interface DocumentListItem {
   readonly attempts: number | null;
   readonly retriesAutomatically: boolean;
   readonly retryable: boolean;
+  readonly lifecycleError: string | null;
 }
 
 interface Row {
+  lifecycle_error: string | null;
   id: string;
   document_id: string | null;
   request_id: string | null;
@@ -68,15 +72,18 @@ const ITEMS_SQL = `
     SELECT d.id, d.id AS document_id, r.id AS request_id, d.format_key, d.number, d.status, d.created_at,
            coalesce(r.requested_by, d.created_by) AS requested_by, NULL::text AS error, r.attempts,
            (SELECT count(*)::int FROM document_asset da WHERE da.document_id = d.id) AS asset_count,
-           (SELECT min(da.asset_id::text) FROM document_asset da WHERE da.document_id = d.id) AS first_asset
+           (SELECT min(da.asset_id::text) FROM document_asset da WHERE da.document_id = d.id) AS first_asset,
+           d.lifecycle_error
     FROM document d
     LEFT JOIN document_request r ON r.document_id = d.id
     UNION ALL
     SELECT r.id, NULL, r.id, r.format_key, NULL,
-           CASE WHEN r.status = 'FAILED' THEN 'FAILED' ELSE 'PENDING_GENERATION' END,
-           r.created_at, r.requested_by, r.last_error, r.attempts,
+           CASE r.status WHEN 'FAILED' THEN 'FAILED' WHEN 'CANCELLED' THEN 'CANCELLED' ELSE 'PENDING_GENERATION' END,
+           r.created_at, r.requested_by, CASE WHEN r.status = 'CANCELLED' THEN r.cancel_reason ELSE r.last_error END,
+           r.attempts,
            CASE WHEN jsonb_typeof(r.payload->'assetIds') = 'array' THEN jsonb_array_length(r.payload->'assetIds') ELSE 0 END,
-           r.payload->'assetIds'->>0
+           r.payload->'assetIds'->>0,
+           NULL::text
     FROM document_request r
     WHERE r.document_id IS NULL
   ),
@@ -122,7 +129,7 @@ export class DocumentListService {
       `${ITEMS_SQL}
        SELECT f.id, f.document_id, f.request_id, f.format_key, f.number, f.status, f.created_at, f.requested_by,
               nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') AS requested_by_name,
-              f.error, f.attempts, f.asset_count,
+              f.error, f.attempts, f.asset_count, f.lifecycle_error,
               a.id AS asset_id,
               coalesce(
                 (SELECT value FROM asset_identifier i WHERE i.asset_id = a.id AND i.identifier_type = 'VISIBLE_CODE' AND i.valid_to IS NULL LIMIT 1),
@@ -161,7 +168,7 @@ export class DocumentListService {
     }
     const updated = (await this.dataSource.query(
       `WITH updated AS (
-         UPDATE document_request SET status = 'PENDING'
+         UPDATE document_request SET status = 'PENDING', attempts = 0
          WHERE id = $1 AND status = 'FAILED' AND document_id IS NULL RETURNING id
        ) SELECT id FROM updated`,
       [requestId],
@@ -208,10 +215,11 @@ export class DocumentListService {
           ? { id: row.asset_id, code: row.asset_code, description: row.asset_description ?? '' }
           : null,
       assetCount: row.asset_count,
-      error: row.status === 'FAILED' ? row.error : null,
+      error: row.status === 'FAILED' || row.status === 'CANCELLED' ? row.error : null,
       attempts: row.attempts,
       retriesAutomatically: row.status === 'FAILED' && (row.attempts ?? 0) < MAX_AUTOMATIC_ATTEMPTS,
       retryable: row.status === 'FAILED',
+      lifecycleError: row.lifecycle_error,
     };
   }
 }

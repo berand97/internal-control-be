@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger
 import type { SchemaObject } from '@nestjs/swagger';
 import { ApiSuccessEnvelope } from '../../../common/swagger/api-envelopes.js';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
+import { SIGNATURE_METHODS, TURN_BLOCKERS } from '../domain/signing-channel.js';
 import { DOCUMENT_LIST_STATUSES } from '../services/document-list.service.js';
 
 /**
@@ -9,11 +10,18 @@ import { DOCUMENT_LIST_STATUSES } from '../services/document-list.service.js';
  * (DocumentEngineService, DocumentListService, InternalSignatureProvider): cambiar un shape exige cambiar ambos.
  */
 
-export const DOCUMENT_STATUSES = ['PENDING_SIGNATURE', 'SIGNED', 'REJECTED'] as const;
+export const DOCUMENT_STATUSES = ['PENDING_SIGNATURE', 'SIGNED', 'REJECTED', 'VOIDED'] as const;
 export const SIGNATURE_STATUSES = ['PENDING', 'SIGNED', 'REJECTED'] as const;
 export const STORAGE_DRIVERS = ['project', 's3', 'google_drive', 'onedrive'] as const;
 export const SIGNER_SOURCES = ['RESPONSIBLE', 'REQUEST'] as const;
-export const ATTESTATION_STATUSES = ['PENDING', 'COMPLETED', 'REJECTED'] as const;
+export const ATTESTATION_STATUSES = ['PENDING', 'SIGNATURES_COLLECTED', 'COMPLETED', 'REJECTED', 'VOIDED'] as const;
+export const SIGNING_LINK_STATES = ['PENDING_SEND', 'SENT', 'SEND_FAILED', 'EXPIRED', 'CONSUMED', 'INVALIDATED'] as const;
+export const SIGNING_LINK_INVALIDATIONS = ['RESENT', 'ATTEMPTS_EXCEEDED', 'REASSIGNED', 'VOIDED', 'TURN_CHANGED'] as const;
+export const SIGNING_LINK_ACTIONS = ['SIGNED', 'REJECTED'] as const;
+export const PUBLIC_LINK_STATUSES = ['ACTIVE', 'EXPIRED', 'CONSUMED', 'INVALIDATED'] as const;
+
+const METHOD_DESCRIPTION =
+  'SESSION_MFA: sesión con verificación en dos pasos; SESSION: sesión; EMAIL_LINK: enlace de un solo uso enviado al correo institucional';
 export const ATTESTATION_INTEGRITIES = ['INTACT', 'ALTERED', 'UNAVAILABLE'] as const;
 
 /** Códigos que puede traer viewer.blockedBy (DocumentEngineService.signerBlocker). */
@@ -109,6 +117,14 @@ export class DocumentListItemDto {
 
   @ApiProperty({ description: 'FAILED: se puede reencolar con POST /documents/requests/:requestId/retry' })
   readonly retryable!: boolean;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description:
+      'Error del proceso que originó el acta al aplicar sus efectos; mientras exista el acta sigue PENDING_SIGNATURE y se reintenta. null en solicitudes sin documento',
+  })
+  readonly lifecycleError!: string | null;
 }
 
 export class DocumentListResponseDto {
@@ -267,6 +283,25 @@ export class DocumentCurrentTurnDto {
 
   @ApiProperty({ description: 'El turno tiene una persona asignada' })
   readonly assigned!: boolean;
+
+  @ApiProperty({
+    type: 'string',
+    enum: SIGNATURE_METHODS,
+    enumName: 'SignatureMethod',
+    nullable: true,
+    description: `Camino por el que firma la persona del turno. ${METHOD_DESCRIPTION}. null si el turno está bloqueado`,
+  })
+  readonly channel!: (typeof SIGNATURE_METHODS)[number] | null;
+
+  @ApiProperty({
+    type: 'string',
+    enum: TURN_BLOCKERS,
+    enumName: 'DocumentTurnBlocker',
+    nullable: true,
+    description:
+      'Por qué nadie puede firmar este turno ahora: SIGNATURE_SIGNER_UNASSIGNED, SIGNATURE_SIGNER_INACTIVE, SIGNATURE_NO_CHANNEL (sin usuario activo ni correo, o turno de Control Interno sin usuario activo), SIGNATURE_NO_IDENTITY_CHECK (sin usuario activo y sin número de documento para confirmar identidad), SIGNATURE_MFA_REQUIRED (turno de Control Interno con usuario sin MFA). Se resuelve reasignando el turno o completando los datos de la persona',
+  })
+  readonly blockedBy!: (typeof TURN_BLOCKERS)[number] | null;
 }
 
 export class DocumentViewerDto {
@@ -295,8 +330,16 @@ export class DocumentViewerDto {
   })
   readonly blockedBy!: (typeof SIGNER_BLOCKERS)[number] | null;
 
-  @ApiProperty({ description: 'Puede reasignar turnos: acta pendiente y permiso de generación del formato' })
+  @ApiProperty({
+    description: 'Puede reasignar turnos: acta pendiente, ningún turno firmado ni rechazado y permiso de generación del formato',
+  })
   readonly canReassign!: boolean;
+
+  @ApiProperty({
+    description:
+      'Puede reenviar el enlace de firma del turno actual (POST /documents/:id/signatures/:order/signing-link): permiso de generación del formato y turno actual por EMAIL_LINK',
+  })
+  readonly canResendLink!: boolean;
 }
 
 export class DocumentVerificationDto {
@@ -342,6 +385,57 @@ export class DocumentReassignmentDto {
   readonly newPdfSha256!: string | null;
 }
 
+export class DocumentSigningLinkDto {
+  @ApiProperty({
+    enum: SIGNING_LINK_STATES,
+    enumName: 'SigningLinkState',
+    description:
+      'PENDING_SEND: en cola de envío; SENT: enviado y vigente; SEND_FAILED: el correo falló (lastSendError), se reintenta solo hasta 3 veces y luego hay que reenviarlo; EXPIRED: venció (72 h); CONSUMED: se usó para firmar o rechazar; INVALIDATED: reemplazado, bloqueado por intentos, reasignado, turno cambiado o acta anulada (invalidatedReason)',
+  })
+  readonly status!: (typeof SIGNING_LINK_STATES)[number];
+
+  @ApiProperty({ description: 'Correo institucional al que se envía' })
+  readonly email!: string;
+
+  @ApiProperty({ type: 'integer' })
+  readonly sendAttempts!: number;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Último error de envío; solo si el envío falló' })
+  readonly lastSendError!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'date-time' })
+  readonly createdAt!: string;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  readonly sentAt!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true, description: 'null mientras no se ha emitido' })
+  readonly expiresAt!: string | null;
+
+  @ApiProperty({ type: 'integer', description: 'Intentos fallidos de confirmar identidad (al quinto se invalida)' })
+  readonly identityAttempts!: number;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  readonly identityConfirmedAt!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  readonly consumedAt!: string | null;
+
+  @ApiProperty({ type: 'string', enum: SIGNING_LINK_ACTIONS, enumName: 'SigningLinkAction', nullable: true })
+  readonly consumedAction!: (typeof SIGNING_LINK_ACTIONS)[number] | null;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  readonly invalidatedAt!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    enum: SIGNING_LINK_INVALIDATIONS,
+    enumName: 'SigningLinkInvalidation',
+    nullable: true,
+  })
+  readonly invalidatedReason!: (typeof SIGNING_LINK_INVALIDATIONS)[number] | null;
+}
+
 export class DocumentSignatureDto {
   @ApiProperty({ type: 'integer' })
   readonly order!: number;
@@ -363,6 +457,25 @@ export class DocumentSignatureDto {
 
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true, description: 'Cuándo firmó o rechazó' })
   readonly signedAt!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    enum: SIGNATURE_METHODS,
+    enumName: 'SignatureMethod',
+    nullable: true,
+    description: `Método con el que firmó o rechazó. ${METHOD_DESCRIPTION}. null mientras está pendiente`,
+  })
+  readonly method!: (typeof SIGNATURE_METHODS)[number] | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'El método en lenguaje claro' })
+  readonly methodLabel!: string | null;
+
+  @ApiProperty({
+    type: () => DocumentSigningLinkDto,
+    nullable: true,
+    description: 'Último enlace de firma por correo de este turno; null si nunca se emitió. Nunca trae el token',
+  })
+  readonly signingLink!: DocumentSigningLinkDto | null;
 }
 
 export class DocumentDetailResponseDto {
@@ -425,6 +538,20 @@ export class DocumentDetailResponseDto {
 
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
   readonly lifecycleFailedAt!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true, description: 'Solo con status VOIDED' })
+  readonly voidedAt!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'uuid',
+    nullable: true,
+    description: 'Usuario que anuló; null si no es VOIDED o si lo anuló un proceso sin usuario',
+  })
+  readonly voidedBy!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Motivo de la anulación (el proceso que originó el acta se canceló)' })
+  readonly voidReason!: string | null;
 }
 
 // ---------- GET /public/signatures/:code ----------
@@ -444,13 +571,35 @@ export class AttestationSignerDto {
 
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
   readonly signedAt!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    enum: SIGNATURE_METHODS,
+    enumName: 'SignatureMethod',
+    nullable: true,
+    description: `${METHOD_DESCRIPTION}. null mientras el turno está pendiente`,
+  })
+  readonly method!: (typeof SIGNATURE_METHODS)[number] | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    example: 'Enlace de un solo uso enviado al correo institucional',
+    description: 'El método en lenguaje claro',
+  })
+  readonly methodLabel!: string | null;
 }
 
 export class SignatureAttestationResponseDto {
   @ApiProperty({ description: 'El código de verificación consultado' })
   readonly reference!: string;
 
-  @ApiProperty({ enum: ATTESTATION_STATUSES, enumName: 'AttestationStatus' })
+  @ApiProperty({
+    enum: ATTESTATION_STATUSES,
+    enumName: 'AttestationStatus',
+    description:
+      'PENDING: faltan firmas. SIGNATURES_COLLECTED: están todas las firmas pero el acta aún no está cerrada (el proceso que la originó todavía no la acepta; se reintenta): NO es un acta firmada y vigente. COMPLETED: acta firmada y cerrada. REJECTED: un firmante la rechazó. VOIDED: el proceso que la originó la anuló',
+  })
   readonly status!: (typeof ATTESTATION_STATUSES)[number];
 
   @ApiProperty({ enum: ATTESTATION_INTEGRITIES, enumName: 'AttestationIntegrity' })
@@ -466,6 +615,81 @@ export class SignatureAttestationResponseDto {
   readonly checkedAt!: string;
 }
 
+// ---------- /public/signing-links/:token ----------
+
+export class SigningLinkDocumentDto {
+  @ApiProperty({ example: 'OCI-01-55' })
+  readonly sgcCode!: string;
+
+  @ApiProperty({ example: 'Acta de entrega y asignación de activos fijos' })
+  readonly formatName!: string;
+
+  @ApiProperty({ example: '0093' })
+  readonly number!: string;
+}
+
+export class SigningLinkTurnDto {
+  @ApiProperty({ type: 'integer' })
+  readonly order!: number;
+
+  @ApiProperty({ example: 'Recibe' })
+  readonly roleLabel!: string;
+}
+
+export class SigningLinkViewResponseDto {
+  @ApiProperty({
+    enum: PUBLIC_LINK_STATUSES,
+    enumName: 'PublicSigningLinkStatus',
+    description:
+      'ACTIVE: se puede leer, confirmar identidad y firmar o rechazar. EXPIRED: venció. CONSUMED: ya se usó (consumedAction). INVALIDATED: se reenvió otro, se agotaron los intentos, se reasignó el turno, el acta ya no está pendiente o se anuló',
+  })
+  readonly status!: (typeof PUBLIC_LINK_STATUSES)[number];
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  readonly expiresAt!: string | null;
+
+  @ApiProperty({ type: 'string', enum: SIGNING_LINK_ACTIONS, enumName: 'SigningLinkAction', nullable: true })
+  readonly consumedAction!: (typeof SIGNING_LINK_ACTIONS)[number] | null;
+
+  @ApiProperty({ type: 'integer', description: 'Intentos que quedan para confirmar identidad (de 5)' })
+  readonly identityAttemptsRemaining!: number;
+
+  @ApiProperty({ type: () => SigningLinkDocumentDto, nullable: true, description: 'Solo con status ACTIVE' })
+  readonly document!: SigningLinkDocumentDto | null;
+
+  @ApiProperty({ type: () => SigningLinkTurnDto, nullable: true, description: 'Solo con status ACTIVE' })
+  readonly turn!: SigningLinkTurnDto | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    example: 'Laura R. E.',
+    description: 'Nombre del firmante con los apellidos en iniciales; solo con status ACTIVE',
+  })
+  readonly signerName!: string | null;
+}
+
+export class SigningLinkIdentityResponseDto {
+  @ApiProperty({
+    description: 'Autorización para POST sign o reject de este enlace. No la guarde ni la registre',
+  })
+  readonly identityToken!: string;
+
+  @ApiProperty({ type: 'string', format: 'date-time', description: 'Vence a los 10 minutos' })
+  readonly expiresAt!: string;
+}
+
+export class SigningLinkResultResponseDto {
+  @ApiProperty({ enum: SIGNING_LINK_ACTIONS, enumName: 'SigningLinkAction' })
+  readonly action!: (typeof SIGNING_LINK_ACTIONS)[number];
+
+  @ApiProperty({ type: 'string', format: 'date-time' })
+  readonly at!: string;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'URL pública de verificación del acta (la del QR)' })
+  readonly verificationUrl!: string | null;
+}
+
 export const DOCUMENT_RESPONSE_MODELS = [
   ApiSuccessEnvelope,
   DocumentListResponseDto,
@@ -475,4 +699,7 @@ export const DOCUMENT_RESPONSE_MODELS = [
   GeneratedDocumentResponseDto,
   DocumentDetailResponseDto,
   SignatureAttestationResponseDto,
+  SigningLinkViewResponseDto,
+  SigningLinkIdentityResponseDto,
+  SigningLinkResultResponseDto,
 ] as const;

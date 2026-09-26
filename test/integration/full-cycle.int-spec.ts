@@ -59,6 +59,7 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
   let app: NestExpressApplication;
   let dataSource: DataSource;
   const log: Array<{ step: string; ok: boolean; detail: Record<string, unknown> }> = [];
+  const mailed: Array<{ to: string; url: string }> = [];
   const state: {
     director?: User;
     responsible?: User;
@@ -130,7 +131,8 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       }
       const sessionId = randomUUID();
       await dataSource.query(
-        `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at) VALUES ($1, $2, $3, NOW() + interval '1 day')`,
+        `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at)
+       VALUES ($1, $2, $3, NOW() + interval '1 day', (SELECT CASE WHEN mfa_enabled THEN NOW() END FROM app_user WHERE id = $2))`,
         [sessionId, userId, randomUUID()],
       );
       const token = tokens.signAccessToken({ id: userId, personId, username: `e2e.${tag}`, roles: role ? [role] : [], scopes: role ? [{ type: 'GLOBAL', id: null }] : [], mustChangePassword: false, sessionId });
@@ -138,7 +140,19 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     };
     state.director = await user('Carolina', 'Directora E2E', '1000000901', 'INTERNAL_CONTROL_DIRECTOR');
     state.auditor = state.director;
-    state.responsible = await user('Laura', 'Responsable E2E', '1000000902', null);
+    // La responsable no tiene usuario: firma por el enlace de un solo uso que le llega al correo institucional.
+    const [outsider] = (await dataSource.query(
+      `INSERT INTO person (first_name, last_name, email, document_type, document_number, position_title)
+       VALUES ('Laura', 'Responsable E2E', $1, 'CC', '1000000902', 'Coordinadora de Finanzas Estudiantiles') RETURNING id`,
+      [`e2e.${randomUUID().slice(0, 8)}@unac.edu.co`],
+    )) as Array<{ id: string }>;
+    state.responsible = { userId: '', personId: outsider?.id ?? '', token: '' };
+    // Sin SMTP en CI: el correo se captura aquí (el enlace es el mismo que se enviaría).
+    const { MailService } = await import('../../src/shared/mail/mail.service.js');
+    vi.spyOn(app.get(MailService), 'sendSigningLink').mockImplementation((to, context) => {
+      mailed.push({ to, url: context.url });
+      return Promise.resolve(true);
+    });
   }, 300_000);
 
   afterAll(async () => {
@@ -262,16 +276,27 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     const rubric = async (text: string) => `data:image/png;base64,${(await QRCode.toBuffer(text, { width: 160 })).toString('base64')}`;
     const detailFor = async (who: User | undefined) =>
       (await http().get(`/api/v1/documents/${state.documentId}`).set('Authorization', auth(who))).body.data;
-    const before = await detailFor(state.responsible);
+    const before = await detailFor(state.director);
     const early = await http()
       .post(`/api/v1/documents/${state.documentId}/signatures/2`)
       .set('Authorization', auth(state.auditor))
       .send({ rubric: await rubric('rubrica control interno') });
+    // Turno 1 por enlace: página pública, PDF para leer, identidad (últimos 4 dígitos) y firma.
+    const token = mailed.at(-1)?.url.split('/firmar/')[1] ?? '';
+    const linkView = await http().get(`/api/v1/public/signing-links/${token}`);
+    const linkPdf = await http().get(`/api/v1/public/signing-links/${token}/pdf`).buffer(true).parse((res, done) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => done(null, Buffer.concat(chunks)));
+    });
+    if (linkPdf.status === 200) {
+      await writeFile(join(OUTPUT, '2a-acta-para-firmar-por-enlace.pdf'), linkPdf.body as Buffer);
+    }
+    const identity = await http().post(`/api/v1/public/signing-links/${token}/identity`).send({ last4: '0902' });
     const first = await http()
-      .post(`/api/v1/documents/${state.documentId}/signatures/1`)
-      .set('Authorization', auth(state.responsible))
+      .post(`/api/v1/public/signing-links/${token}/sign`)
       .set('X-Forwarded-For', '181.49.10.20')
-      .send({ rubric: await rubric('rubrica responsable') });
+      .send({ identityToken: identity.body.data?.identityToken, rubric: await rubric('rubrica responsable') });
     const second = await http()
       .post(`/api/v1/documents/${state.documentId}/signatures/2`)
       .set('Authorization', auth(state.auditor))
@@ -290,7 +315,7 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     }
     const signedLeftovers = sampleLeftovers(signedText, OCI_01_55_SAMPLE, { numbers: false });
     const evidence = (await dataSource.query(
-      `SELECT s.sign_order, s.name, host(s.ip_address) AS ip, s.session_id IS NOT NULL AS session, s.mfa_enabled, s.pdf_sha256_before, s.pdf_sha256_after
+      `SELECT s.sign_order, s.name, host(s.ip_address) AS ip, s.session_id IS NOT NULL AS session, s.mfa_enabled, s.method, s.link_email IS NOT NULL AS link_email, s.identity_confirmed_at IS NOT NULL AS identity_confirmed, s.pdf_sha256_before, s.pdf_sha256_after
        FROM signature_envelope_signer s JOIN signature_envelope e ON e.id = s.envelope_id WHERE e.document_id = $1 ORDER BY s.sign_order`,
       [state.documentId],
     )) as Array<Record<string, unknown>>;
@@ -298,7 +323,10 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       turnBefore: before?.currentTurn,
       viewerBefore: before?.viewer,
       earlyAttempt: [early.status, early.body.error?.code],
-      first: [first.status, first.body.error?.code ?? first.body.data?.status],
+      linkView: [linkView.status, linkView.body.data?.status, linkView.body.data?.turn],
+      linkPdf: [linkPdf.status, linkPdf.header['content-type']],
+      identity: identity.status,
+      first: [first.status, first.body.error?.code ?? first.body.data?.action],
       second: [second.status, second.body.error?.code ?? second.body.data?.status],
       signedFile: signedPdf.header['content-disposition'],
       signedPages: signedPdf.status === 200 ? (await PDFDocument.load(signedPdf.body as Buffer)).getPageCount() : null,
@@ -307,17 +335,24 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     });
     expect(signedLeftovers).toEqual([]);
     expect(early.body.error?.code).toBe('SIGNATURE_OUT_OF_ORDER');
+    expect(linkView.body.data?.status).toBe('ACTIVE');
+    expect(linkPdf.status).toBe(200);
+    expect(identity.status).toBe(200);
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(second.body.data?.status).toBe('SIGNED');
+    expect(evidence.map((item) => item['method'])).toEqual(['EMAIL_LINK', 'SESSION_MFA']);
+    expect(signedText).toContain('Enlace de un solo uso enviado al correo');
   });
 
   it('5. la página pública atestigua la firma sin sesión', async () => {
     const response = await http().get(`/api/v1/public/signatures/${state.verificationCode}`);
     record('verificación pública', response.status === 200, { status: response.status, attestation: response.body.data });
+    await writeFile(join(OUTPUT, '3-atestacion-publica.json'), JSON.stringify(response.body.data, null, 2));
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({ status: 'COMPLETED', integrity: 'INTACT' });
     expect(response.body.data.signers.map((item: { name: string }) => item.name)).toEqual(['Laura Responsable E2E', 'Carolina Directora E2E']);
+    expect(response.body.data.signers.map((item: { method: string }) => item.method)).toEqual(['EMAIL_LINK', 'SESSION_MFA']);
   });
 
   it('6. alterar el PDF almacenado hace que la verificación reporte ALTERED', async () => {
