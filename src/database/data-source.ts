@@ -81,8 +81,10 @@ import { MfaRecovery1767225660000 } from './migrations/1767225660000-mfa-recover
 import { SigningChannels1767225670000 } from './migrations/1767225670000-signing-channels.js';
 import { PersonsImportAndCostCenterHeads1767225680000 } from './migrations/1767225680000-persons-import-and-cost-center-heads.js';
 import { LoanSignaturesAndHandoverCancel1767225690000 } from './migrations/1767225690000-loan-signatures-and-handover-cancel.js';
+import { ImportTemplates1767225710000 } from './migrations/1767225710000-import-templates.js';
 import { ImportJobsAndMailOutbox1767225720000 } from './migrations/1767225720000-import-jobs-and-mail-outbox.js';
 import { AdministrableDocumentFormats1767225730000 } from './migrations/1767225730000-administrable-document-formats.js';
+import { ImportTemplates1767225710000 } from './migrations/1767225710000-import-templates.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -190,8 +192,9 @@ const dataSource = new DataSource({
     SigningChannels1767225670000,
     PersonsImportAndCostCenterHeads1767225680000,
     LoanSignaturesAndHandoverCancel1767225690000,
+    ImportTemplates1767225710000,
     ImportJobsAndMailOutbox1767225720000,
-    AdministrableDocumentFormats1767225730000,
+    AdministrableDocumentFormats1767225730000,
   ],
 });
 
