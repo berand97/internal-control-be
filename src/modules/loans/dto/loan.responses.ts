@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ApiSuccessEnvelope } from '../../../common/swagger/api-envelopes.js';
+import { DOCUMENT_STATUSES } from '../../documents/dto/document.responses.js';
 import { LOAN_RETURN_CONDITIONS, LOAN_STATUSES } from '../enums/loan-status.js';
 
 /**
@@ -7,8 +8,34 @@ import { LOAN_RETURN_CONDITIONS, LOAN_STATUSES } from '../enums/loan-status.js';
  * ambos (test/integration/loans.int-spec.ts compara las llaves).
  */
 
-export const LOAN_DELIVERY_ACT_STATUSES = ['NONE', 'PENDING', 'FAILED', 'GENERATED', 'SIGNED', 'REJECTED'] as const;
+export const LOAN_DELIVERY_ACT_STATUSES = [
+  'NONE',
+  'PENDING',
+  'FAILED',
+  'GENERATED',
+  'SIGNED',
+  'REJECTED',
+  'VOIDED',
+  'CANCELLED',
+] as const;
 export type LoanDeliveryActStatus = (typeof LOAN_DELIVERY_ACT_STATUSES)[number];
+
+export const LOAN_RETURN_ACT_STATUSES = [
+  'PENDING_FORMAT',
+  'PENDING',
+  'FAILED',
+  'GENERATED',
+  'SIGNED',
+  'REJECTED',
+  'VOIDED',
+  'CANCELLED',
+] as const;
+export type LoanReturnActStatus = (typeof LOAN_RETURN_ACT_STATUSES)[number];
+
+export const LOAN_STATUS_DESCRIPTION =
+  'REQUESTED → APPROVED → PENDING_SIGNATURES (entregado: activos ON_LOAN, acta OCI-01-65 sin todas sus firmas) → ACTIVE (acta firmada) ' +
+  '→ OVERDUE → PENDING_RECEPTION → RETURNED | PARTIALLY_RETURNED (quedan activos fuera; admite otra devolución) | CLOSED_WITH_LOSSES ' +
+  '(todo resuelto, alguno perdido). REJECTED y CANCELLED (solicitud cancelada o entrega deshecha) son finales. IN_TRANSIT: heredado, sin uso.';
 
 export class LoanUsageDto {
   @ApiProperty({ type: 'integer' })
@@ -31,13 +58,16 @@ export class LoanSummaryDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
 
-  @ApiProperty({ enum: LOAN_STATUSES, enumName: 'LoanStatus' })
+  @ApiProperty({ enum: LOAN_STATUSES, enumName: 'LoanStatus', description: LOAN_STATUS_DESCRIPTION })
   readonly status!: (typeof LOAN_STATUSES)[number];
 
-  @ApiProperty({ format: 'uuid', description: 'Centro de costo de origen: dueño de los activos' })
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Centro de costo de origen: dueño de los activos. El acta usa este centro y el responsable de los activos no cambia',
+  })
   readonly sourceCostCenterId!: string;
 
-  @ApiProperty({ format: 'uuid' })
+  @ApiProperty({ format: 'uuid', description: 'Dependencia a la que se presta: el préstamo se otorga a ella, no a una persona' })
   readonly targetCostCenterId!: string;
 
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
@@ -47,7 +77,7 @@ export class LoanSummaryDto {
     type: 'string',
     format: 'uuid',
     nullable: true,
-    description: 'Persona de contacto en el destino (asset_loan.target_responsible_id); firma RECIBE del acta',
+    description: 'Persona de contacto en el destino (asset_loan.target_responsible_id); firma RECIBE del acta. No pasa a ser responsable de los activos',
   })
   readonly contactPersonId!: string | null;
 
@@ -84,7 +114,7 @@ export class LoanSummaryDto {
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
   readonly approvedAt!: string | null;
 
-  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true, description: 'Entrega física (los activos salieron)' })
   readonly deliveredAt!: string | null;
 
   @ApiProperty({
@@ -95,14 +125,19 @@ export class LoanSummaryDto {
   })
   readonly actualReturnDate!: string | null;
 
-  @ApiProperty({ type: 'string', format: 'date', nullable: true })
+  @ApiProperty({
+    type: 'string',
+    format: 'date',
+    nullable: true,
+    description: 'Extensión pedida por el solicitante y pendiente de aprobación (POST /loans/:id/extension/approve | reject)',
+  })
   readonly extensionRequestedDate!: string | null;
 
   @ApiProperty({
     type: 'string',
     format: 'uuid',
     nullable: true,
-    description: 'Acta OCI-01-65 de la entrega, una vez generada',
+    description: 'Acta OCI-01-65 vigente de la entrega (la última generada), una vez generada',
   })
   readonly deliveryDocumentId!: string | null;
 
@@ -123,7 +158,8 @@ export class LoanSummaryDto {
   @ApiProperty({
     type: 'integer',
     nullable: true,
-    description: 'Días de atraso (hoy en Bogotá − fecha estimada) para ACTIVE u OVERDUE; 0 si no ha vencido; null en otro estado',
+    description:
+      'Días de atraso (hoy en Bogotá − fecha estimada) para PENDING_SIGNATURES, ACTIVE, OVERDUE y PARTIALLY_RETURNED; 0 si no ha vencido; null en otro estado',
   })
   readonly daysOverdue!: number | null;
 
@@ -181,6 +217,17 @@ export class LoanItemDto {
 
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true, description: 'Fecha real de devolución del activo' })
   readonly returnedAt!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'date-time',
+    nullable: true,
+    description: 'Cuándo el origen recibió la devolución del activo (receive-return); null mientras no se recibe',
+  })
+  readonly receivedAt!: string | null;
+
+  @ApiProperty({ description: 'El activo salió y todavía no se resolvió (ni devuelto ni declarado perdido)' })
+  readonly outstanding!: boolean;
 }
 
 export class LoanEventDto {
@@ -193,7 +240,9 @@ export class LoanEventDto {
   @ApiProperty({
     example: 'DELIVERED',
     description:
-      'REQUESTED, APPROVED, REJECTED, DELIVERED, DELIVERY_ACT_GENERATED, DELIVERY_ACT_SIGNED, DELIVERY_ACT_REJECTED, RETURN_STARTED, RECEIVED, EXTENSION_REQUESTED, EXTENDED',
+      'REQUESTED, APPROVED, REJECTED, DELIVERED, DELIVERY_ACT_GENERATED, DELIVERY_ACT_SIGNED (payload.activated: el préstamo pasó a ACTIVE), ' +
+      'DELIVERY_ACT_REJECTED, DELIVERY_ACT_REGENERATED, DELIVERY_UNDONE, RETURN_STARTED, RECEIVED (payload.returnAct), RETURN_ACT_GENERATED, ' +
+      'RETURN_ACT_SIGNED, RETURN_ACT_REJECTED, EXTENSION_REQUESTED, EXTENDED, EXTENSION_REJECTED',
   })
   readonly eventType!: string;
 
@@ -230,12 +279,28 @@ export class LoanAttachmentDto {
   readonly createdBy!: string;
 }
 
+export class LoanActRecordDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly documentId!: string;
+
+  @ApiProperty({ example: '2026-0002' })
+  readonly number!: string;
+
+  @ApiProperty({ enum: DOCUMENT_STATUSES, enumName: 'DocumentStatus' })
+  readonly status!: (typeof DOCUMENT_STATUSES)[number];
+
+  @ApiProperty({ type: 'string', format: 'date-time' })
+  readonly createdAt!: string;
+}
+
 export class LoanDeliveryActDto {
   @ApiProperty({
     enum: LOAN_DELIVERY_ACT_STATUSES,
     enumName: 'LoanDeliveryActStatus',
     description:
-      'NONE: sin entrega. PENDING: en el outbox. FAILED: la generación falló (ver error; se reintenta con POST /documents/requests/:requestId/retry). GENERATED: pendiente de firma. SIGNED / REJECTED: estado final del acta.',
+      'NONE: sin entrega. PENDING: en el outbox. FAILED: la generación falló (ver error; se reintenta con POST /documents/requests/:requestId/retry). ' +
+      'GENERATED: pendiente de firma. SIGNED: firmada (el préstamo quedó ACTIVE). REJECTED: rechazada (el préstamo sigue PENDING_SIGNATURES; ' +
+      'POST /loans/:id/delivery-act/regenerate genera otra, o POST /loans/:id/undo-delivery deshace la entrega). VOIDED / CANCELLED: anulada al deshacer la entrega.',
   })
   readonly status!: LoanDeliveryActStatus;
 
@@ -266,6 +331,67 @@ export class LoanDeliveryActDto {
 
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
   readonly signedAt!: string | null;
+
+  @ApiProperty({ description: 'REJECTED y el préstamo PENDING_SIGNATURES: se puede generar una nueva acta (nuevo consecutivo)' })
+  readonly regenerable!: boolean;
+
+  @ApiProperty({
+    type: [LoanActRecordDto],
+    description: 'Actas de entrega anteriores del préstamo (rechazadas o anuladas), más recientes primero; quedan como registro',
+  })
+  readonly previous!: LoanActRecordDto[];
+}
+
+export class LoanReturnActFormatDto {
+  @ApiProperty({ example: 'LOAN_RETURN', description: 'Clave interna del formato' })
+  readonly formatKey!: string;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Código SGC; null mientras la universidad no lo emita' })
+  readonly sgcCode!: string | null;
+
+  @ApiProperty({ description: 'El motor puede generar el acta (código SGC y firmantes definidos)' })
+  readonly ready!: boolean;
+
+  @ApiProperty({ type: [String], description: 'Lo que falta definir; la UI lo muestra como "pendiente de formato institucional"' })
+  readonly pendingDecisions!: string[];
+}
+
+export class LoanReturnActDto {
+  @ApiProperty({
+    enum: LOAN_RETURN_ACT_STATUSES,
+    enumName: 'LoanReturnActStatus',
+    description:
+      'PENDING_FORMAT: la devolución se registró pero el acta no se generó porque el formato institucional no existe (ver returnActFormat). ' +
+      'PENDING / FAILED / GENERATED / SIGNED / REJECTED / VOIDED / CANCELLED: como el acta de entrega.',
+  })
+  readonly status!: LoanReturnActStatus;
+
+  @ApiProperty({ type: 'string', format: 'date-time', description: 'Recepción (receive-return) que originó el acta' })
+  readonly receivedAt!: string;
+
+  @ApiProperty({ type: [String], description: 'Activos (uuid) recibidos en esa recepción' })
+  readonly assetIds!: string[];
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
+  readonly requestId!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
+  readonly documentId!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true })
+  readonly number!: string | null;
+
+  @ApiProperty({ type: 'integer' })
+  readonly attempts!: number;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'FAILED: último error. PENDING_FORMAT: qué falta del formato' })
+  readonly error!: string | null;
+
+  @ApiProperty({ description: 'FAILED: se puede reencolar con POST /documents/requests/:requestId/retry' })
+  readonly retryable!: boolean;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  readonly signedAt!: string | null;
 }
 
 export class LoanDetailDto extends LoanSummaryDto {
@@ -275,11 +401,17 @@ export class LoanDetailDto extends LoanSummaryDto {
   @ApiProperty({ type: [LoanEventDto], description: 'En orden cronológico' })
   readonly events!: LoanEventDto[];
 
-  @ApiProperty({ type: [LoanAttachmentDto], description: 'Adjuntos del catálogo anterior; las actas nuevas están en deliveryAct' })
+  @ApiProperty({ type: [LoanAttachmentDto], description: 'Adjuntos del catálogo anterior; las actas nuevas están en deliveryAct y returnActs' })
   readonly attachments!: LoanAttachmentDto[];
 
   @ApiProperty({ type: () => LoanDeliveryActDto })
   readonly deliveryAct!: LoanDeliveryActDto;
+
+  @ApiProperty({ type: () => LoanReturnActFormatDto, description: 'Estado del formato del acta de devolución en el catálogo' })
+  readonly returnActFormat!: LoanReturnActFormatDto;
+
+  @ApiProperty({ type: [LoanReturnActDto], description: 'Un acta de devolución por recepción, en orden cronológico' })
+  readonly returnActs!: LoanReturnActDto[];
 }
 
 export const LOAN_RESPONSE_MODELS = [
@@ -290,6 +422,9 @@ export const LOAN_RESPONSE_MODELS = [
   LoanItemDto,
   LoanEventDto,
   LoanAttachmentDto,
+  LoanActRecordDto,
   LoanDeliveryActDto,
+  LoanReturnActFormatDto,
+  LoanReturnActDto,
   LoanDetailDto,
 ] as const;

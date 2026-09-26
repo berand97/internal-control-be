@@ -12,13 +12,14 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import { OPERATIONAL_STATUSES, OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import { DOCUMENT_STATUSES, SIGNATURE_STATUSES } from '../../documents/dto/document.responses.js';
 import { HANDOVER_STATUSES, type HandoverStatus } from '../domain/handover.js';
 
-export const DOCUMENT_GENERATION_STATUSES = ['NONE', 'PENDING', 'FAILED', 'GENERATED'] as const;
+export const DOCUMENT_GENERATION_STATUSES = ['NONE', 'PENDING', 'FAILED', 'GENERATED', 'CANCELLED'] as const;
 
 /** Tope técnico de activos por acta (tamaño del documento); no es una regla de negocio. */
 export const MAX_HANDOVER_ASSETS = 500;
@@ -57,6 +58,14 @@ export class CreateHandoverDto {
   @ApiProperty({ format: 'uuid', description: 'Persona de Control Interno que firma el turno AUDITA' })
   @IsUUID('all')
   readonly auditorPersonId!: string;
+}
+
+export class CancelHandoverDto {
+  @ApiProperty({ description: 'Motivo: queda en la entrega y en el acta anulada', minLength: 5, maxLength: 500 })
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  readonly reason!: string;
 }
 
 export class QueryHandoversDto {
@@ -239,8 +248,14 @@ export class HandoverDetailDto {
   @ApiProperty({ type: 'string', format: 'date-time' })
   readonly createdAt!: string;
 
-  @ApiProperty({ type: 'string', format: 'date-time', nullable: true, description: 'Cuándo quedó SIGNED o REJECTED' })
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true, description: 'Cuándo quedó SIGNED, REJECTED o CANCELLED' })
   readonly closedAt!: string | null;
+
+  @ApiProperty({ type: () => HandoverCreatorDto, nullable: true, description: 'Quién canceló la entrega; null si no está CANCELLED' })
+  readonly cancelledBy!: HandoverCreatorDto | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Motivo de la cancelación; null si no está CANCELLED' })
+  readonly cancelReason!: string | null;
 
   @ApiProperty({ type: [HandoverItemDto] })
   readonly items!: HandoverItemDto[];
