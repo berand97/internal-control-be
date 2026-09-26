@@ -295,7 +295,7 @@ export class SigningLinkService {
       const delivered = await this.mail.sendSigningLink(link.email, {
         url: this.signingUrl(token),
         expiresAt: bogotaDateTime(new Date(expiresAt)),
-        formatName: format ? `${format.sgcCode} · ${format.name}` : link.format_key,
+        formatName: format ? `${format.sgcCode ?? format.key} · ${format.name}` : link.format_key,
         number: link.number,
         signerName: link.signer_name ?? '',
         roleLabel: format?.signers.find((spec) => spec.role === link.role)?.label ?? link.role ?? '',

@@ -86,6 +86,50 @@ export class DeliverLoanDto {
   readonly assetNotes?: Record<string, string>;
 }
 
+export class RegenerateDeliveryActDto {
+  @ApiProperty({ format: 'uuid', description: 'Firma ENTREGA (turno 1) del acta nueva' })
+  @IsUUID('4')
+  readonly deliveredByPersonId!: string;
+
+  @ApiProperty({ format: 'uuid', description: 'Firma AUDITA (turno 3, Control Interno) del acta nueva' })
+  @IsUUID('4')
+  readonly controlInternoPersonId!: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Corrige la persona de contacto del destino (firma RECIBE, turno 2). Se guarda en el préstamo. Si se omite, sigue la actual',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  readonly contactPersonId?: string;
+
+  @ApiProperty({ description: 'Por qué se genera una nueva acta (queda en el evento del préstamo)', minLength: 5 })
+  @IsString()
+  @MinLength(5)
+  readonly reason!: string;
+}
+
+export class UndoDeliveryDto {
+  @ApiProperty({ description: 'Motivo: queda en el acta anulada, en el evento y en los movimientos de reversión', minLength: 5 })
+  @IsString()
+  @MinLength(5)
+  readonly reason!: string;
+}
+
+export class ReceiveReturnDto {
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'string', format: 'uuid' },
+    description:
+      'Firmantes del acta de devolución (LOAN_RETURN) por rol, { "<ROL>": "<personId>" }, para los turnos de origen REQUEST del catálogo. ' +
+      'Hoy el formato no tiene firmantes definidos: se ignora y el acta queda pendiente de formato institucional.',
+  })
+  @IsOptional()
+  @IsObject()
+  readonly returnActSigners?: Record<string, string>;
+}
+
 export class ReturnedAssetDto {
   @ApiProperty({ format: 'uuid' })
   @IsUUID('4')
@@ -120,7 +164,7 @@ export class ReturnLoanDto {
 }
 
 export class ExtendLoanDto {
-  @ApiProperty()
+  @ApiProperty({ type: 'string', format: 'date', description: 'Nueva fecha estimada de devolución: posterior a la vigente y no pasada' })
   @IsDateString()
   readonly expectedReturnDate!: string;
 
@@ -163,7 +207,8 @@ export class QueryLoansDto {
 
   @ApiPropertyOptional({
     enum: ['true', 'false'],
-    description: 'true: solo préstamos ACTIVE u OVERDUE con la fecha estimada de devolución ya pasada (hoy en Bogotá)',
+    description:
+      'true: solo préstamos con activos fuera y sin recepción en curso (PENDING_SIGNATURES, ACTIVE, OVERDUE, PARTIALLY_RETURNED) con la fecha estimada de devolución ya pasada (hoy en Bogotá)',
   })
   @IsOptional()
   @IsIn(['true', 'false'])
@@ -171,7 +216,7 @@ export class QueryLoansDto {
 
   @ApiPropertyOptional({
     enum: ['true', 'false'],
-    description: 'true: solo préstamos con los activos fuera (ACTIVE, OVERDUE, PENDING_RECEPTION)',
+    description: 'true: solo préstamos con activos fuera (PENDING_SIGNATURES, ACTIVE, OVERDUE, PENDING_RECEPTION, PARTIALLY_RETURNED)',
   })
   @IsOptional()
   @IsIn(['true', 'false'])

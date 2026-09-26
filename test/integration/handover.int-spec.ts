@@ -619,6 +619,60 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_handover_item WHERE asset_id = $1', [assetId])).toBe(1);
   });
 
+  it('cancelar: antes de generar (solicitud CANCELLED) y con acta pendiente (VOIDED); libera los activos; nunca una firmada', async () => {
+    const cancel = (id: string, reason: string, who: Actor = director) =>
+      http().post(`/api/v1/handovers/${id}/cancel`).set(auth(who)).send({ reason });
+
+    // 1. Acta aún en el outbox: la solicitud queda CANCELLED y el job ya no la genera.
+    const queuedAsset = await asset();
+    const queued = (await create([queuedAsset]).expect(201)).body.data;
+    expect((await cancel(queued.id, 'no', director).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
+    expect((await cancel(queued.id, 'Se entregó por error', outsider).expect(403)).body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
+    const cancelledQueued = await cancel(queued.id, 'Se entregó por error').expect(200);
+    expectConforms('post', '/api/v1/handovers/{id}/cancel', 200, cancelledQueued.body);
+    expect(cancelledQueued.body.data).toMatchObject({
+      status: 'CANCELLED',
+      cancelReason: 'Se entregó por error',
+      cancelledBy: { userId: director.userId },
+      document: { generation: 'CANCELLED', documentId: null },
+    });
+    expect(cancelledQueued.body.data.closedAt).not.toBeNull();
+    await drain();
+    expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM document WHERE entity_type = 'HANDOVER' AND entity_id = $1`, [queued.id])).toBe(0);
+    expect(
+      await scalar<string>(dataSource, 'SELECT status FROM document_request WHERE id = $1', [queued.document.requestId]),
+    ).toBe('CANCELLED');
+
+    // 2. Acta generada y pendiente de firma: queda VOIDED con el motivo y nadie puede firmarla.
+    const pendingAsset = await asset();
+    const pending = await generated([pendingAsset]);
+    const cancelled = await cancel(pending.id, 'El receptor ya no trabaja en el centro').expect(200);
+    expect(cancelled.body.data).toMatchObject({ status: 'CANCELLED', document: { documentId: pending.documentId, status: 'VOIDED' } });
+    const [voided] = (await dataSource.query('SELECT status, void_reason, voided_by FROM document WHERE id = $1', [
+      pending.documentId,
+    ])) as Array<{ status: string; void_reason: string; voided_by: string }>;
+    expect(voided).toEqual({ status: 'VOIDED', void_reason: 'El receptor ya no trabaja en el centro', voided_by: director.userId });
+    const late = await sign(pending.documentId, 1, receiver);
+    expect(late.status).toBe(406);
+    expect(await responsibleOf(pendingAsset)).toBeNull();
+    expect(await assignments(pendingAsset)).toEqual([]);
+    // Activos liberados: entran en otra entrega.
+    await create([queuedAsset, pendingAsset]).expect(201);
+    // Cancelar dos veces: estado inválido.
+    expect((await cancel(pending.id, 'Otra vez por error').expect(406)).body.error.code).toBe('INVALID_STATE');
+
+    // 3. Firmada: 409 DOCUMENT_ALREADY_SIGNED y nada cambia.
+    const signedAsset = await asset();
+    const signedHandover = await generated([signedAsset]);
+    await sign(signedHandover.documentId, 1, receiver).expect(200);
+    await sign(signedHandover.documentId, 2, auditor).expect(200);
+    const refused = await cancel(signedHandover.id, 'Demasiado tarde para cancelar').expect(409);
+    expect(refused.body.error.code).toBe('DOCUMENT_ALREADY_SIGNED');
+    expect(await detail(signedHandover.id)).toMatchObject({ status: 'SIGNED', cancelReason: null, cancelledBy: null });
+    expect(await responsibleOf(signedAsset)).toBe(receiver.personId);
+    await cancel(randomUUID(), 'No existe esta entrega').expect(404);
+  });
+
   it('la lista pagina y filtra por estado; leer exige asset:read:global', async () => {
     const page = (await http().get('/api/v1/handovers?page=1&pageSize=2').set(auth(director)).expect(200)).body;
     expectConforms('get', '/api/v1/handovers', 200, page);

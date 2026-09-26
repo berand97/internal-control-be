@@ -38,6 +38,10 @@ export class AssetLoanItem {
 
   @Column({ name: 'returned_at', type: 'timestamptz', nullable: true })
   returnedAt!: Date | null;
+
+  /** Cuándo el origen recibió la devolución (receive-return). null = el activo sigue fuera o aún no salió. */
+  @Column({ name: 'received_at', type: 'timestamptz', nullable: true })
+  receivedAt!: Date | null;
 }
 
 @Entity('asset_loan_event')

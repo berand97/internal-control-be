@@ -618,6 +618,26 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El activo está dado de baja o en préstamo y no se puede entregar',
   },
+  [ErrorCode.DocumentFormatNotReady]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message: 'El formato institucional de esta acta aún no está definido (código SGC o firmantes pendientes)',
+  },
+  [ErrorCode.LoanExtensionNotRequester]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Solo quien solicitó el préstamo puede pedir su extensión',
+  },
+  [ErrorCode.LoanNoPendingExtension]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El préstamo no tiene una extensión pendiente de aprobación',
+  },
+  [ErrorCode.LoanDeliveryActNotRejected]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Solo se genera una nueva acta de entrega cuando la anterior fue rechazada',
+  },
   [ErrorCode.InventoryScopeOverlap]: {
     httpStatus: 406,
     action: 'CANCEL',
