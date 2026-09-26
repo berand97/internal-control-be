@@ -9,6 +9,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import { PersonsModule } from '../../src/modules/persons/persons.module.js';
 import { PersonDirectoryService } from '../../src/modules/persons/services/person-directory.service.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
+import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { bootModules, createActor, scalar } from './helpers.js';
 
@@ -111,7 +112,7 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
     expect(metric('PERSONS_COST_CENTER_UNKNOWN_ROWS')?.value).toBe(1);
     expect(metric('PERSONS_COST_CENTER_UNKNOWN')).toMatchObject({ value: 1, detail: 'NO-EXISTE-1' });
 
-    const result = await imports.confirm(preview.importId, actor.id);
+    const result = await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id);
     expect(result).toMatchObject({ inserted: 0, skippedAlreadyPresent: 0, registrationMovements: 0 });
     expect(await count('SELECT count(*) FROM person')).toBe(before);
     const quarantine = (await imports.quarantine(preview.importId)) as Array<Record<string, unknown>>;
@@ -141,7 +142,7 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
       quarantined: {},
       flagged: { DOCUMENT_TYPE_UNKNOWN: 2, NAME_NOT_SPLIT: 2 },
     });
-    expect(await imports.confirm(preview.importId, actor.id)).toMatchObject({ inserted: 2, skippedAlreadyPresent: 0 });
+    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 2, skippedAlreadyPresent: 0 });
 
     const [stored] = (await dataSource.query(
       `SELECT p.document_type, p.first_name, p.last_name, p.position_title, p.data_quality_flags, p.cost_center_id,
@@ -176,7 +177,7 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
 
     const again = await imports.preview(upload.batchId, { sheet: 'Personas', target: 'PERSONS', mapping }, actor.id);
     expect(again.summary).toMatchObject({ toInsert: 0, alreadyPresent: 2 });
-    expect(await imports.confirm(again.importId, actor.id)).toMatchObject({ inserted: 0, skippedAlreadyPresent: 2 });
+    expect(await moduleRef.get(ImportJobsService).runNow(again.importId, actor.id)).toMatchObject({ inserted: 0, skippedAlreadyPresent: 2 });
     expect(await count('SELECT count(*) FROM person WHERE document_number = ANY($1)', [numbers])).toBe(2);
 
     // Protección de números sin tipo: la base rechaza otra persona sin tipo con el mismo número.
@@ -225,7 +226,7 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
       },
       flagged: {},
     });
-    expect(await imports.confirm(preview.importId, actor.id)).toMatchObject({ inserted: 1 });
+    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 1 });
     const [stored] = (await dataSource.query(
       `SELECT p.document_type, p.first_name, p.last_name, p.data_quality_flags, o.document_type_source
        FROM person p JOIN person_import_origin o ON o.person_id = p.id WHERE p.document_number = $1`,
@@ -266,7 +267,7 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
     expect(issues.items).toEqual([
       expect.objectContaining({ rowNumber: 4, code: 'DOCUMENT_TYPE_INVALID', rawValue: null, detail: 'Tipo de documento «XX» fuera del catálogo' }),
     ]);
-    await imports.confirm(preview.importId, actor.id);
+    await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id);
     const stored = (await dataSource.query(
       `SELECT p.document_type, o.document_type_source FROM person p JOIN person_import_origin o ON o.person_id = p.id
        WHERE p.document_number = ANY($1) ORDER BY p.document_number`,

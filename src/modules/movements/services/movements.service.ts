@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type EntityManager, Repository } from 'typeorm';
+import { type EntityManager, type QueryDeepPartialEntity, Repository } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig } from '../../../config/configuration.js';
@@ -14,6 +14,9 @@ import {
   signMovement,
 } from '../crypto/sign-movement.js';
 import { MovementVerificationLog } from '../entities/movement-verification-log.entity.js';
+
+/** Filas por INSERT en recordInitial: ~23 columnas por fila, lejos del límite de 65.535 parámetros. */
+const INITIAL_INSERT_CHUNK = 1000;
 
 export interface RecordMovementInput extends CreateMovementRecord {
   readonly loanId?: string | null;
@@ -69,7 +72,50 @@ export class MovementsService {
       )
       .orderBy('m.created_at', 'DESC')
       .getOne();
+    return movements.save(this.signed(movements, input, previous?.id ?? null, new Date()));
+  }
+
+  /**
+   * Registro inicial por conjuntos: el primer movimiento de cada activo (previous_movement_id NULL), firmado con el
+   * mismo esquema que record() (mismo constructor signed(), mismos campos, misma serialización, SIGNATURE_VERSION) y
+   * escrito con INSERT por lotes. Solo aplica a activos sin movimientos: si alguno ya tiene, lanza sin escribir.
+   * Quien llama debe tener bloqueados los activos (FOR UPDATE), igual que AssetStateService antes de record().
+   */
+  async recordInitial(
+    inputs: ReadonlyArray<RecordMovementInput>,
+    manager: EntityManager,
+  ): Promise<number> {
+    if (inputs.length === 0) {
+      return 0;
+    }
+    const [existing] = (await manager.query(
+      'SELECT asset_id FROM asset_movement WHERE asset_id = ANY($1::uuid[]) LIMIT 1',
+      [inputs.map((input) => input.assetId)],
+    )) as Array<{ asset_id: string }>;
+    if (existing) {
+      throw new Error('El registro inicial solo aplica a activos sin movimientos');
+    }
+    const movements = manager.getRepository(AssetMovement);
     const now = new Date();
+    const entities = inputs.map((input) => this.signed(movements, input, null, now));
+    for (let start = 0; start < entities.length; start += INITIAL_INSERT_CHUNK) {
+      await movements
+        .createQueryBuilder()
+        .insert()
+        .into(AssetMovement)
+        .values(entities.slice(start, start + INITIAL_INSERT_CHUNK) as QueryDeepPartialEntity<AssetMovement>[])
+        .updateEntity(false)
+        .execute();
+    }
+    return entities.length;
+  }
+
+  private signed(
+    movements: Repository<AssetMovement>,
+    input: RecordMovementInput,
+    previousMovementId: string | null,
+    now: Date,
+  ): AssetMovement {
     const entity = movements.create({
       ...input,
       loanId: input.loanId ?? null,
@@ -78,12 +124,12 @@ export class MovementsService {
         signedAt: now.toISOString(),
         signatureVersion: SIGNATURE_VERSION,
       },
-      previousMovementId: previous?.id ?? null,
+      previousMovementId,
       executedAt: input.executedAt ?? now,
       createdAt: now,
     });
     entity.eventSignature = this.signatureOf(entity);
-    return movements.save(entity);
+    return entity;
   }
 
   async list(query: MovementListQuery): Promise<{

@@ -9,6 +9,7 @@ import { DataSource } from 'typeorm';
 import dataSourceConfig from '../database/data-source.js';
 import { FeaturesModule } from '../modules/features/features.module.js';
 import { ExcelImportService } from '../modules/staging/services/excel-import.service.js';
+import { ImportJobsService } from '../modules/staging/services/import-jobs.service.js';
 import { isImportTarget, isUnknownCostCenterPolicy } from '../modules/staging/import/import-fields.js';
 import { AppConfigModule } from '../config/config.module.js';
 import { DatabaseModule } from '../database/database.module.js';
@@ -104,7 +105,8 @@ const run = async (): Promise<void> => {
         return;
       }
       const confirmStart = process.hrtime.bigint();
-      const result = await service.confirm(preview.importId, user.id);
+      // Mismo trabajo que encola POST confirm, pero procesado aquí mismo (la CLI no tiene worker).
+      const result = await context.get(ImportJobsService).runNow(preview.importId, user.id);
       console.log(`\nImportación confirmada (${seconds(confirmStart)} s)`);
       console.log(JSON.stringify(result, null, 2));
       const reconciliation = await service.reconcile(preview.importId);

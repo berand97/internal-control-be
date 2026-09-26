@@ -696,4 +696,9 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'La jefatura ya terminó',
   },
+  [ErrorCode.ImportJobNotRetryable]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Solo se reintenta una importación que falló; esta sigue en cola, en curso o ya terminó',
+  },
 };

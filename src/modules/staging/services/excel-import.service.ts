@@ -10,7 +10,9 @@ import {
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
-import { AssetStateService } from '../../assets/services/asset-state.service.js';
+import type { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
+import type { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
+import { MovementsService } from '../../movements/services/movements.service.js';
 import {
   type AssetColumn,
   diagnoseAssetSheet,
@@ -32,7 +34,8 @@ import { StagingLoaderService } from './staging-loader.service.js';
 export const PLACEHOLDER_CATEGORY = 'SIN_CLASIFICAR';
 export const PLACEHOLDER_ACQUISITION_TYPE = 'NO_REGISTRADO';
 const CHUNK_SIZE = 2000;
-const MOVEMENT_CHUNK = 500;
+/** Activos por transacción al registrar movimientos: acota bloqueos y da avance visible (movementsDone). */
+const MOVEMENT_CHUNK = 1000;
 
 export interface UploadedSheet {
   readonly name: string;
@@ -78,6 +81,25 @@ export interface ImportResult {
   readonly costCentersCreated: number;
   readonly registrationMovements: number;
   readonly seconds: { readonly rows: number; readonly movements: number };
+}
+
+/** Lo que dejó la fase de filas (writeRows). Se guarda en el trabajo para que un reintento no lo recalcule. */
+export interface ImportRowsResult {
+  readonly target: ImportTarget;
+  readonly inserted: number;
+  readonly skippedAlreadyPresent: number;
+  readonly quarantined: Record<string, number>;
+  readonly costCentersCreated: number;
+  /** ASSETS: activos de esta importación aún sin movimiento REGISTRATION. */
+  readonly pendingMovements: number;
+  readonly seconds: number;
+}
+
+export interface MovementChunkHooks {
+  /** Primera sentencia de la transacción de cada lote. */
+  readonly begin: (manager: EntityManager) => Promise<void>;
+  /** Última sentencia de la transacción de cada lote, con los movimientos escritos en él. */
+  readonly done: (manager: EntityManager, written: number) => Promise<void>;
 }
 
 interface ImportRow {
@@ -204,7 +226,7 @@ export class ExcelImportService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly loader: StagingLoaderService,
-    private readonly assetState: AssetStateService,
+    private readonly movements: MovementsService,
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
   ) {}
@@ -339,61 +361,68 @@ export class ExcelImportService {
     ) as Promise<ReadonlyArray<Record<string, unknown>>>;
   }
 
-  async confirm(importId: string, actorId: string): Promise<ImportResult> {
+  /**
+   * Fase de filas de una importación confirmada (la corre el worker de ImportJobsService, nunca la petición HTTP).
+   * Va dentro de la transacción de quien llama, que también registra el avance del trabajo: si algo falla no queda
+   * nada a medias. Idempotente: lo que ya existe se omite.
+   */
+  async writeRows(manager: EntityManager, importId: string, actorId: string): Promise<ImportRowsResult> {
     const job = await this.importRow(importId);
     const rowsStart = process.hrtime.bigint();
-    const written = await this.dataSource.transaction(async (manager) => {
-      const costCentersCreated = await this.prepareCatalogs(manager, job, actorId);
-      const classified = await this.classify(manager, job);
-      await manager.query('DELETE FROM staging_quarantine WHERE import_id = $1', [importId]);
-      await manager.query(
-        `INSERT INTO staging_quarantine (import_id, sheet_name, row_number, legacy_asset_id, reason, detail)
-         SELECT $1, $2, x.row_number, x.legacy_id, x.reason, x.detail
-         FROM jsonb_to_recordset($3::jsonb) AS x(row_number int, legacy_id text, reason text, detail text)`,
-        [importId, job.sheet_name, JSON.stringify(classified.reasons)],
-      );
-      const inserted =
-        job.target === 'ASSETS'
-          ? await this.insertAssets(manager, job, actorId)
-          : job.target === 'PERSONS'
-            ? await this.insertPersons(manager, job, actorId)
-            : await this.insertCostCenters(manager, job);
-      return { classified, inserted, costCentersCreated };
-    });
-    const rowsSeconds = seconds(rowsStart);
-
-    const movementsStart = process.hrtime.bigint();
-    const registrations = job.target === 'ASSETS' ? await this.registerMovements(job, actorId) : 0;
-    const movementsSeconds = seconds(movementsStart);
-
-    const result: ImportResult = {
-      inserted: written.inserted,
-      skippedAlreadyPresent: written.classified.alreadyPresent,
-      quarantined: written.classified.quarantined,
-      costCentersCreated: written.costCentersCreated,
-      registrationMovements: registrations,
-      seconds: { rows: rowsSeconds, movements: movementsSeconds },
+    const costCentersCreated = await this.prepareCatalogs(manager, job, actorId);
+    const classified = await this.classify(manager, job);
+    await manager.query('DELETE FROM staging_quarantine WHERE import_id = $1', [importId]);
+    await manager.query(
+      `INSERT INTO staging_quarantine (import_id, sheet_name, row_number, legacy_asset_id, reason, detail)
+       SELECT $1, $2, x.row_number, x.legacy_id, x.reason, x.detail
+       FROM jsonb_to_recordset($3::jsonb) AS x(row_number int, legacy_id text, reason text, detail text)`,
+      [importId, job.sheet_name, JSON.stringify(classified.reasons)],
+    );
+    const inserted =
+      job.target === 'ASSETS'
+        ? await this.insertAssets(manager, job, actorId)
+        : job.target === 'PERSONS'
+          ? await this.insertPersons(manager, job, actorId)
+          : await this.insertCostCenters(manager, job);
+    const [pending] =
+      job.target === 'ASSETS'
+        ? ((await manager.query(
+            `SELECT count(*)::int AS count FROM asset_import_origin o
+             WHERE o.import_id = $1 AND NOT EXISTS (SELECT 1 FROM asset_movement m WHERE m.asset_id = o.asset_id)`,
+            [importId],
+          )) as Array<{ count: number }>)
+        : [];
+    return {
+      target: job.target,
+      inserted,
+      skippedAlreadyPresent: classified.alreadyPresent,
+      quarantined: classified.quarantined,
+      costCentersCreated,
+      pendingMovements: pending?.count ?? 0,
+      seconds: seconds(rowsStart),
     };
-    await this.dataSource.transaction(async (manager) => {
-      await manager.query(
-        `UPDATE staging_import SET status = 'CONFIRMED', confirmed_at = coalesce(confirmed_at, NOW()), result = $2
-         WHERE id = $1`,
-        [importId, JSON.stringify(result)],
-      );
-      await this.auditLogsRepository.record(
-        {
-          action: AuditAction.AssetImported,
-          entityType: 'STAGING_IMPORT',
-          entityId: importId,
-          performedBy: actorId,
-          ipAddress: null,
-          userAgent: null,
-          changes: { target: job.target, ...result },
-        },
-        manager,
-      );
-    });
-    return result;
+  }
+
+  /** Cierre de la importación: CONFIRMED con su resultado y auditoría, en la transacción de quien llama. */
+  async markConfirmed(manager: EntityManager, importId: string, actorId: string, result: ImportResult): Promise<void> {
+    const job = await this.importRow(importId);
+    await manager.query(
+      `UPDATE staging_import SET status = 'CONFIRMED', confirmed_at = coalesce(confirmed_at, NOW()), result = $2
+       WHERE id = $1`,
+      [importId, JSON.stringify(result)],
+    );
+    await this.auditLogsRepository.record(
+      {
+        action: AuditAction.AssetImported,
+        entityType: 'STAGING_IMPORT',
+        entityId: importId,
+        performedBy: actorId,
+        ipAddress: null,
+        userAgent: null,
+        changes: { target: job.target, ...result },
+      },
+      manager,
+    );
   }
 
   async reconcile(importId: string): Promise<ReadonlyArray<ReconciliationRow>> {
@@ -915,48 +944,91 @@ export class ExcelImportService {
     return inserted.length;
   }
 
-  private async registerMovements(job: ImportRow, actorId: string): Promise<number> {
+  /**
+   * Movimiento REGISTRATION de cada activo importado que aún no tiene movimientos, por conjuntos: en cada lote bloquea
+   * los activos (FOR UPDATE, como AssetStateService.apply), relee su estado ya bloqueado, los firma con
+   * MovementsService.recordInitial (mismo esquema que record) y los inserta por lotes. Cada lote es una transacción;
+   * chunk.begin / chunk.done corren dentro de ella (quien llama verifica su arrendamiento y registra el avance).
+   * Idempotente: un reintento solo registra los activos que siguen sin movimiento.
+   */
+  async registerMovements(importId: string, actorId: string, chunk: MovementChunkHooks): Promise<number> {
+    const job = await this.importRow(importId);
     let registered = 0;
     for (;;) {
-      const pending = (await this.dataSource.query(
-        `SELECT a.id, to_char(a.acquisition_date, 'YYYY-MM-DD') AS acquisition_date, o.row_number, o.legacy_asset_id
-         FROM asset_import_origin o JOIN asset a ON a.id = o.asset_id
-         WHERE o.import_id = $1 AND NOT EXISTS (SELECT 1 FROM asset_movement m WHERE m.asset_id = a.id)
-         ORDER BY o.row_number LIMIT $2`,
-        [job.id, MOVEMENT_CHUNK],
-      )) as Array<{ id: string; acquisition_date: string | null; row_number: number; legacy_asset_id: string }>;
-      if (pending.length === 0) {
+      const { selected, written } = await this.dataSource.transaction(async (manager) => {
+        await chunk.begin(manager);
+        const locked = (await manager.query(
+          `SELECT a.id FROM asset_import_origin o JOIN asset a ON a.id = o.asset_id
+           WHERE o.import_id = $1 AND NOT EXISTS (SELECT 1 FROM asset_movement m WHERE m.asset_id = a.id)
+           ORDER BY o.row_number LIMIT $2
+           FOR UPDATE OF a`,
+          [job.id, MOVEMENT_CHUNK],
+        )) as Array<{ id: string }>;
+        if (locked.length === 0) {
+          return { selected: 0, written: 0 };
+        }
+        const ids = locked.map((row) => row.id);
+        const pending = (await manager.query(
+          `SELECT a.id, to_char(a.acquisition_date, 'YYYY-MM-DD') AS acquisition_date, o.row_number, o.legacy_asset_id,
+                  a.current_cost_center_id, a.current_location_id, a.current_responsible_id,
+                  a.operational_status, a.physical_condition
+           FROM asset_import_origin o JOIN asset a ON a.id = o.asset_id
+           WHERE a.id = ANY($1::uuid[]) AND NOT EXISTS (SELECT 1 FROM asset_movement m WHERE m.asset_id = a.id)
+           ORDER BY o.row_number`,
+          [ids],
+        )) as Array<{
+          id: string;
+          acquisition_date: string | null;
+          row_number: number;
+          legacy_asset_id: string;
+          current_cost_center_id: string;
+          current_location_id: string | null;
+          current_responsible_id: string | null;
+          operational_status: OperationalStatus;
+          physical_condition: PhysicalCondition | null;
+        }>;
+        // Lo mismo que hacía AssetStateService.apply con patch {}: deja constancia de quién tocó el activo.
+        await manager.query('UPDATE asset SET updated_by = $2, updated_at = $3 WHERE id = ANY($1::uuid[])', [
+          pending.map((asset) => asset.id),
+          actorId,
+          new Date(),
+        ]);
+        const count = await this.movements.recordInitial(
+          pending.map((asset) => ({
+            assetId: asset.id,
+            movementType: MovementType.Registration,
+            fromCostCenterId: null,
+            fromLocationId: null,
+            fromResponsibleId: null,
+            fromOperationalStatus: null,
+            fromPhysicalCondition: null,
+            toCostCenterId: asset.current_cost_center_id,
+            toLocationId: asset.current_location_id,
+            toResponsibleId: asset.current_responsible_id,
+            toOperationalStatus: asset.operational_status,
+            toPhysicalCondition: asset.physical_condition,
+            requestedBy: actorId,
+            authorizedBy: actorId,
+            reason: 'Importación desde Excel',
+            documentReference: `${job.file_name}#${job.sheet_name}!${asset.row_number}`.slice(0, 100),
+            ...(asset.acquisition_date ? { executedAt: new Date(`${asset.acquisition_date}T00:00:00.000Z`) } : {}),
+            metadata: {
+              source: 'EXCEL_IMPORT',
+              importId: job.id,
+              row: asset.row_number,
+              legacyAssetId: asset.legacy_asset_id,
+              executedAtKnown: asset.acquisition_date !== null,
+            },
+          })),
+          manager,
+        );
+        await chunk.done(manager, count);
+        return { selected: locked.length, written: count };
+      });
+      if (selected === 0) {
         return registered;
       }
-      await this.dataSource.transaction(async (manager) => {
-        for (const asset of pending) {
-          await this.assetState.apply(
-            {
-              assetId: asset.id,
-              actorId,
-              patch: {},
-              movement: {
-                type: MovementType.Registration,
-                initial: true,
-                reason: 'Importación desde Excel',
-                documentReference: `${job.file_name}#${job.sheet_name}!${asset.row_number}`.slice(0, 100),
-                ...(asset.acquisition_date
-                  ? { executedAt: new Date(`${asset.acquisition_date}T00:00:00.000Z`) }
-                  : {}),
-                metadata: {
-                  source: 'EXCEL_IMPORT',
-                  importId: job.id,
-                  row: asset.row_number,
-                  legacyAssetId: asset.legacy_asset_id,
-                  executedAtKnown: asset.acquisition_date !== null,
-                },
-              },
-            },
-            manager,
-          );
-        }
-      });
-      registered += pending.length;
+      registered += written;
     }
   }
 

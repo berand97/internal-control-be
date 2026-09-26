@@ -8,6 +8,7 @@ import { AssetsModule } from '../../src/modules/assets/assets.module.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { GLOBAL_COST_CENTER_SCOPE } from '../../src/modules/roles/services/cost-center-scope.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
+import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { bootModules, createActor } from './helpers.js';
 
@@ -42,7 +43,7 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
   const importAssets = async (file: Buffer, sheet: string, mapping: Record<string, string>) => {
     const upload = await imports.upload(file, `${sheet}.xlsx`, actor.id);
     const preview = await imports.preview(upload.batchId, { sheet, target: 'ASSETS', mapping }, actor.id);
-    return imports.confirm(preview.importId, actor.id);
+    return moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id);
   };
 
   beforeAll(async () => {
@@ -59,7 +60,7 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
       { sheet: 'Centros', target: 'COST_CENTERS', mapping: { code: 'A', name: 'B' } },
       actor.id,
     );
-    await imports.confirm(preview.importId, actor.id);
+    await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id);
 
     const rows = await workbook('Busqueda', [
       ['Id', 'Codigo', 'Descripcion', 'Centro', 'Fecha compra', 'Precio'],
@@ -171,7 +172,7 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
         { sheet: '2026', target: 'COST_CENTERS', mapping: { code: 'B', name: 'C' } },
         actor.id,
       );
-      await imports.confirm(centersPreview.importId, actor.id);
+      await moduleRef.get(ImportJobsService).runNow(centersPreview.importId, actor.id);
       const result = await importAssets(readFileSync(REAL_ASSETS), 'ACTIVOS', {
         legacyAssetId: 'A',
         legacyCode: 'B',
