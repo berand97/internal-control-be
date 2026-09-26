@@ -32,6 +32,13 @@ export class PersonDirectoryItemDto {
   @ApiProperty({ description: 'Nombres y apellidos' })
   readonly name!: string;
 
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Código del catálogo GET /persons/document-types; null si se desconoce (persona importada sin tipo)',
+  })
+  readonly documentType!: string | null;
+
   @ApiProperty({ type: 'string', nullable: true })
   readonly documentNumber!: string | null;
 

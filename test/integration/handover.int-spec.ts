@@ -651,6 +651,7 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect(byName.data.items.find((item: { id: string }) => item.id === withoutUser)).toEqual({
       id: withoutUser,
       name: 'Zacarías Sin Cuenta',
+      documentType: null,
       documentNumber: expect.any(String),
       positionTitle: null,
       email: expect.stringMatching(/^sin\.cuenta\./),

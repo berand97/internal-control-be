@@ -127,4 +127,7 @@ export enum ErrorCode {
 
   ScopeNoCostCenter = 'SCOPE_NO_COST_CENTER',
   ScopeOrgUnitUnresolved = 'SCOPE_ORG_UNIT_UNRESOLVED',
+
+  CostCenterHeadOverlap = 'COST_CENTER_HEAD_OVERLAP',
+  CostCenterHeadEnded = 'COST_CENTER_HEAD_ENDED',
 }

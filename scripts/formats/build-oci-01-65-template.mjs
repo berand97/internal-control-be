@@ -11,6 +11,7 @@ import {
   replaceAssetTable,
   replaceFields,
   replaceInParagraphs,
+  replaceDocumentTypeLabels,
   replaceMergeFields,
   replaceSgcHeader,
   replaceTextOrFail,
@@ -125,6 +126,9 @@ export const build = (source) => {
     throw new Error('No encontré el cargo del visto bueno');
   }
   document = auditCargo;
+
+  // «C.C» fijo antes de los documentos de quien recibe y quien entrega.
+  document = replaceDocumentTypeLabels(document, ['firmante.recibe', 'firmante.entrega']);
 
   zip.file('word/document.xml', document);
   zip.file(

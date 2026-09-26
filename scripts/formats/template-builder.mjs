@@ -214,6 +214,23 @@ export const cleanPackage = (zip) => {
   }
 };
 
+// El formato imprime «C.C» fijo antes de cada número de documento. El tipo es
+// un dato de la persona (tipoDocumento: abreviatura del catálogo, o vacío si se
+// desconoce), así que cada «C.C <marcador del número>» pasa a
+// «<marcador del tipo> <marcador del número>». `parties` son las rutas del
+// firmante (responsable, auditor, firmante.recibe, …). Falla si alguna no está
+// o si queda un «C.C» literal en el cuerpo.
+export const replaceDocumentTypeLabels = (xml, parties) => {
+  let result = xml;
+  for (const party of parties) {
+    result = replaceTextOrFail(result, `C.C {{${party}.documento}}`, `{{${party}.tipoDocumento}} {{${party}.documento}}`);
+  }
+  if (/C\.C\b/.test(plainText(result))) {
+    throw new Error('Queda un «C.C» literal en la plantilla');
+  }
+  return result;
+};
+
 // Autor y último editor del .docx son datos de una persona del ejemplo.
 export const clearAuthorMetadata = (zip) => {
   const core = zip.file('docProps/core.xml');

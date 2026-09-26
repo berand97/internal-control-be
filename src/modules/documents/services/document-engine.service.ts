@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
+import { identityDocumentAbbreviation } from '../../../common/identity/identity-document-types.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig, StorageDriver } from '../../../config/configuration.js';
@@ -112,14 +113,18 @@ interface PersonRow {
 
 /**
  * Cada firmante por su rol, para que la plantilla lo nombre donde corresponde: {{firmante.recibe.nombre}},
- * {{firmante.entrega.cargo}}, {{firmante.audita.documento}}... (rol en minúsculas: recibe, entrega, audita,
- * responsable, control_interno, contabilidad). Contrato fijo con las plantillas.
+ * {{firmante.entrega.cargo}}, {{firmante.audita.documento}}, {{firmante.recibe.tipoDocumento}}... (rol en
+ * minúsculas: recibe, entrega, audita, responsable, control_interno, contabilidad). Contrato fijo con las
+ * plantillas. tipoDocumento es la abreviatura del catálogo (C.C., C.E., …) o '' si el tipo se desconoce: el acta
+ * imprime entonces solo el número, nunca un tipo supuesto.
  */
-const signersByRole = (signers: ReadonlyArray<ActSigner>): Record<string, ActParty> =>
+const signersByRole = (
+  signers: ReadonlyArray<ActSigner & { readonly tipoDocumento?: string }>,
+): Record<string, ActParty & { tipoDocumento: string }> =>
   Object.fromEntries(
     signers.map((signer) => [
       signer.rol.toLowerCase(),
-      { nombre: signer.nombre, documento: signer.documento, cargo: signer.cargo },
+      { nombre: signer.nombre, tipoDocumento: signer.tipoDocumento ?? '', documento: signer.documento, cargo: signer.cargo },
     ]),
   );
 
@@ -636,21 +641,28 @@ export class DocumentEngineService {
     person: PersonRow,
   ): Promise<{ readonly pdf: Buffer; readonly pdfHash: string }> {
     const spec = format.signers.find((item) => item.order === order);
+    const [identity] = (await manager.query('SELECT document_type FROM person WHERE id = $1', [person.id])) as Array<{
+      document_type: string | null;
+    }>;
     const signer = {
       nombre: personName(person),
+      tipoDocumento: person.document_number ? identityDocumentAbbreviation(identity?.document_type) : '',
       documento: person.document_number ?? '',
       cargo: person.position_title ?? spec?.label ?? '',
     };
-    const firmantes = document.data.firmantes.map((item) =>
+    const firmantes: Array<ActSigner & { tipoDocumento?: string }> = document.data.firmantes.map((item) =>
       item.orden === order ? { ...item, personId: person.id, ...signer } : item,
     );
     const auditor = firmantes.find((item) => item.rol === 'AUDITA' || item.rol === 'CONTROL_INTERNO');
+    const auditorParty = auditor
+      ? { nombre: auditor.nombre, tipoDocumento: auditor.tipoDocumento ?? '', documento: auditor.documento, cargo: auditor.cargo }
+      : document.data.auditor;
     const data: ActContext = {
       ...document.data,
       firmantes,
       firmante: signersByRole(firmantes),
       ...(spec?.source === 'RESPONSIBLE' ? { responsable: signer } : {}),
-      auditor: auditor ? { nombre: auditor.nombre, documento: auditor.documento, cargo: auditor.cargo } : document.data.auditor,
+      auditor: auditorParty,
     };
     const [template] = (await manager.query(
       'SELECT storage_driver, storage_key FROM document_template_version WHERE id = $1',
@@ -924,10 +936,13 @@ export class DocumentEngineService {
     ].filter((id): id is string => Boolean(id));
     const persons = personIds.length
       ? ((await manager.query(
-          `SELECT id, first_name, last_name, document_number, position_title, email FROM person WHERE id = ANY($1)`,
+          `SELECT id, first_name, last_name, document_type, document_number, position_title, email FROM person WHERE id = ANY($1)`,
           [personIds],
-        )) as PersonRow[])
+        )) as Array<PersonRow & { document_type: string | null }>)
       : [];
+    // Abreviatura del tipo solo si hay número; tipo desconocido → '' (el acta imprime solo el número).
+    const documentType = (person: (typeof persons)[number] | undefined): string =>
+      person?.document_number ? identityDocumentAbbreviation(person.document_type) : '';
     const byId = new Map(persons.map((person) => [person.id, person]));
     const missing = personIds.filter((id) => !byId.has(id));
     if (missing.length > 0) {
@@ -979,6 +994,7 @@ export class DocumentEngineService {
         etiqueta: spec.label,
         personId,
         nombre: personName(person),
+        tipoDocumento: documentType(person),
         documento: person?.document_number ?? '',
         cargo: person?.position_title ?? spec.label,
       };
@@ -1004,12 +1020,13 @@ export class DocumentEngineService {
       centroCosto: { codigo: costCenter?.external_code ?? '', nombre: costCenter?.name ?? '' },
       responsable: {
         nombre: personName(responsible),
+        tipoDocumento: documentType(responsible),
         documento: responsible?.document_number ?? '',
         cargo: responsible?.position_title ?? '',
       },
       auditor: auditor
-        ? { nombre: auditor.nombre, documento: auditor.documento, cargo: auditor.cargo }
-        : { nombre: '', documento: '', cargo: '' },
+        ? { nombre: auditor.nombre, tipoDocumento: auditor.tipoDocumento, documento: auditor.documento, cargo: auditor.cargo }
+        : { nombre: '', tipoDocumento: '', documento: '', cargo: '' },
       firmantes: signers,
       firmante: signersByRole(signers),
       activos: ordered.map((asset, index) => ({

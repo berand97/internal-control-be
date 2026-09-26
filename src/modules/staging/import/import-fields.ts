@@ -1,7 +1,7 @@
 import type { RawRow } from '../excel/read-workbook.js';
 import type { AssetColumn } from '../diagnostics/asset-report-diagnostics.js';
 
-export const IMPORT_TARGETS = ['ASSETS', 'COST_CENTERS'] as const;
+export const IMPORT_TARGETS = ['ASSETS', 'COST_CENTERS', 'PERSONS'] as const;
 export type ImportTarget = (typeof IMPORT_TARGETS)[number];
 
 export const UNKNOWN_COST_CENTER_POLICIES = ['quarantine', 'create'] as const;
@@ -32,11 +32,31 @@ export const COST_CENTER_IMPORT_FIELDS = {
   name: { label: 'Nombre', required: true },
 } as const satisfies Record<string, ImportField>;
 
+/**
+ * Personas (funcionarios). Identidad por (tipo, número de documento). El nombre va en una sola columna
+ * (fullName, se guarda sin partir) o en dos (firstName + lastName), nunca ambas cosas.
+ */
+export const PERSON_IMPORT_FIELDS = {
+  documentNumber: { label: 'Número de documento', required: true },
+  documentType: { label: 'Tipo de documento (CC, CE, PA, PEP, PPT, TI o su abreviatura)', required: false },
+  fullName: { label: 'Nombre completo (una sola columna; se guarda sin partir)', required: false },
+  firstName: { label: 'Nombres', required: false },
+  lastName: { label: 'Apellidos', required: false },
+  positionTitle: { label: 'Cargo', required: false },
+  email: { label: 'Correo institucional (@unac.edu.co)', required: false },
+  costCenterCode: { label: 'Código del centro de costo de adscripción', required: false },
+} as const satisfies Record<string, ImportField>;
+
 export type AssetImportField = keyof typeof ASSET_IMPORT_FIELDS;
 export type CostCenterImportField = keyof typeof COST_CENTER_IMPORT_FIELDS;
 
-export const fieldsFor = (target: ImportTarget): Record<string, ImportField> =>
-  target === 'ASSETS' ? ASSET_IMPORT_FIELDS : COST_CENTER_IMPORT_FIELDS;
+const FIELDS_BY_TARGET: Record<ImportTarget, Record<string, ImportField>> = {
+  ASSETS: ASSET_IMPORT_FIELDS,
+  COST_CENTERS: COST_CENTER_IMPORT_FIELDS,
+  PERSONS: PERSON_IMPORT_FIELDS,
+};
+
+export const fieldsFor = (target: ImportTarget): Record<string, ImportField> => FIELDS_BY_TARGET[target];
 
 export const COLUMN_LETTER = /^[A-Z]{1,3}$/;
 

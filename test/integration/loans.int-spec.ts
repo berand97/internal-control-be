@@ -596,8 +596,9 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         expect(text, who).toContain(users[who]?.fullName);
         expect(text, who).toContain(users[who]?.title);
       }
-      expect(text).toContain(`C.C ${users['recibe']?.documentNumber}`);
-      expect(text).toContain(`C.C ${users['entrega']?.documentNumber}`);
+      // Personas con tipo CC: el acta imprime la abreviatura del catálogo.
+      expect(text).toContain(`C.C. ${users['recibe']?.documentNumber}`);
+      expect(text).toContain(`C.C. ${users['entrega']?.documentNumber}`);
       const deliveredDay = bogotaDate(new Date(loan.deliveredAt));
       const usage = usageBetween(deliveredDay, expectedReturnDate);
       expect(text).toContain(`Tiempo de uso estimado:${usage?.text}`);
