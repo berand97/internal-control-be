@@ -148,7 +148,7 @@ export class UpdateStorageSettingsDto {
     nullable: true,
     maxLength: 63,
     description:
-      'Bucket PÚBLICO (lectura anónima solo de email-assets/*) para las imágenes de las plantillas de correo, en el mismo proveedor S3. Distinto del bucket de documentos. Vacío = sin imágenes de correo',
+      'Bucket de las imágenes de las plantillas de correo (claves images/email/<uuid>.png|jpg), en el mismo proveedor S3. Puede ser el mismo bucket de documentos si su política anónima permite SOLO s3:GetObject en images/email/* (docs/DEPLOY.md §10.7); en producción se recomienda uno aparte. Vacío = sin imágenes de correo',
   })
   @IsOptional()
   @Transform(emptyToNull)
@@ -160,7 +160,7 @@ export class UpdateStorageSettingsDto {
     nullable: true,
     maxLength: 2048,
     description:
-      'URL pública base de ese bucket (https en producción), p. ej. https://minio-api.dominio/control-interno-public. La imagen queda en <base>/email-assets/<uuid>.png',
+      'URL pública base de ese bucket (https en producción), p. ej. https://minio-api.dominio/control-interno-public o, con el mismo bucket de documentos, https://minio-api.dominio/control-interno. La imagen queda en <base>/images/email/<uuid>.png',
   })
   @IsOptional()
   @Transform(emptyToNull)

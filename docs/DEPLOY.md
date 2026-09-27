@@ -120,8 +120,10 @@ Los secretos de almacenamiento (`s3_secret_key`, `google_client_secret`, `google
 
 ## 3. Volúmenes
 
-- `backend_storage` → `/data/storage` del `api`. Persistente; contiene `generated/`,
-  `attachments/` y `templates/` (el entrypoint los crea y ajusta permisos al usuario `node`).
+- `backend_storage` → `/data/storage` del `api`. Persistente; contiene las carpetas del almacenamiento
+  local (`documents/`, `signatures/`, `templates/`… ver §10.5; y las de versiones anteriores, como
+  `generated/`). El entrypoint crea `generated/`, `attachments/` y `templates/` y ajusta permisos al
+  usuario `node`; las demás las crea el backend al escribir.
   Inclúyalo en los respaldos junto con la base de datos: un acta firmada sin su PDF no se
   puede volver a mostrar.
 - Gotenberg no usa volúmenes.
@@ -438,8 +440,8 @@ fija `STORAGE_DRIVER=project` como valor inicial y no hace falta tocarlo. Orden:
    | Bucket (`s3Bucket`) | `control-interno` |
    | Access key / Secret key | las de `svc-control-interno`, **nunca** la raíz |
    | Path-style (`s3ForcePathStyle`) | **activado** (MinIO no usa subdominios por bucket) |
-   | Bucket público (`s3PublicAssetsBucket`) | `control-interno-public` (solo imágenes de correo, §10.7); vacío = sin imágenes |
-   | URL pública base (`s3PublicAssetsBaseUrl`) | `https://<dominio público de la API de MinIO>/control-interno-public` (§10.7) |
+   | Bucket de imágenes (`s3PublicAssetsBucket`) | `control-interno-public` (bucket aparte, recomendado en producción) **o** el mismo de documentos (p. ej. `control-interno-dev`) con la política de §10.7; vacío = sin imágenes |
+   | URL pública base (`s3PublicAssetsBaseUrl`) | `https://<dominio público de la API de MinIO>/<ese bucket>` (§10.7) |
 
    La clave secreta se guarda cifrada con `SETTINGS_ENCRYPTION_KEY`.
 4. **Guardar activa el driver de inmediato**: lo que se genere desde ese momento va a MinIO. Hágalo en un
@@ -448,6 +450,29 @@ fija `STORAGE_DRIVER=project` como valor inicial y no hace falta tocarlo. Orden:
    driver, pero solo mientras la configuración S3 se conserve.
 5. *Probar conexión* debe mostrar `ok: true`, con todas las comprobaciones `PASSED` y `VERSIONING` en
    `PASSED`. Luego genere un acta de prueba y descárguela, y abra un acta **anterior** al cambio.
+
+**Organización de las claves** (`src/shared/storage/storage-keys.ts`, igual en todos los drivers):
+
+```
+<bucket>/
+├── images/email/<uuid>.png|jpg                               ← ÚNICA carpeta pública (lectura anónima, §10.7)
+├── documents/<año>/<formato>/<número>.docx|.pdf               actas generadas (…-rN.docx|.pdf al reemitir)
+├── documents/<año>/<formato>/<número>-firmado.pdf             versión firmada
+├── signatures/<año>/<documentId>/<código>/v0.pdf, rubrica-N.png, vN.pdf …
+├── templates/documents/<formato>/<vigencia>-vN-<uuid>.docx    plantillas maestras (sin año)
+├── templates/imports/<destino>/<versión>/<hash>.xlsx
+└── health/…                                                   sondas de "Probar conexión"
+```
+
+- `<año>` es el año de **creación** del documento (`document.created_at`) en hora de Bogotá, y no cambia:
+  un acta creada en diciembre y firmada en enero queda en la carpeta del año de creación, y sus firmas
+  también.
+- Los objetos guardados antes de esta organización (`documents/<formato>/<periodo>/…`,
+  `signatures/<documentId>/…`, `document-templates/…`, `import-templates/…`, `templates/<tipo>/vN.docx`,
+  `generated/<año>/…`, `email-assets/…`) **no se mueven**: cada fila guarda su clave y se sigue leyendo con
+  ella. Solo lo nuevo usa esta estructura.
+- Ninguna clave de documento puede empezar por `images/` (el backend lo rechaza con
+  `STORAGE_KEY_INVALID`): por eso el bucket de imágenes puede ser el mismo de documentos (§10.7).
 
 *Probar conexión* (`POST /api/v1/storage/test`) comprueba, en orden:
 `CONFIGURATION` (bucket y claves), `DESTINATION` (BE-16), `ENDPOINT`, `CREDENTIALS`, `BUCKET`,
@@ -475,36 +500,50 @@ MinIO, verificar el SHA-256 contra el hash guardado en la fila (`file_hash`, `cu
 `rubric_sha256`…) y cambiar el driver de esa fila en una transacción. Recién con todo verificado se
 retira el volumen, siempre después de un respaldo.
 
-### 10.7 Bucket público para las imágenes de los correos
+### 10.7 Imágenes de los correos: la carpeta pública `images/email/`
 
 Las imágenes que se insertan en las plantillas de correo (bloque *Imagen*) **no** las sirve el backend ni
 van en la base: el backend las valida (PNG/JPEG por sus bytes, máximo 1 MB y 2000 × 2000 px), las
-re-codifica sin metadatos (EXIF/GPS) a lo sumo a 1200 px de ancho y las sube a un **bucket público
-dedicado** del mismo MinIO, con la clave `email-assets/<uuid>.<png|jpg>` (no adivinable, sin el nombre
-original), `Content-Type` y `Cache-Control: public, max-age=31536000, immutable`. El correo lleva la
-URL `<URL pública base>/email-assets/<uuid>.png` en el `<img src>` y el cliente de correo la descarga
+re-codifica sin metadatos (EXIF/GPS) a lo sumo a 1200 px de ancho y las sube al bucket de imágenes con la
+clave `images/email/<uuid>.<png|jpg>` (no adivinable, sin el nombre original), `Content-Type` y
+`Cache-Control: public, max-age=31536000, immutable`. El correo lleva la URL
+`<URL pública base>/images/email/<uuid>.png` en el `<img src>` y el cliente de correo la descarga
 directamente de MinIO. La tabla `email_asset` guarda la clave, la URL pública y los metadatos. Las
+imágenes subidas antes (clave `email-assets/<uuid>.<png|jpg>`) no se mueven y siguen funcionando. Las
 imágenes no se borran desde la aplicación: los correos ya enviados siguen apuntando a ellas.
 
-- **El bucket de documentos (`control-interno`) sigue privado**: nada de esta sección lo cambia.
+`images/email/` es la **única** carpeta que puede tener lectura anónima. El backend rechaza cualquier
+clave de documento, firma o plantilla que empiece por `images/` (`STORAGE_KEY_INVALID`), así que el bucket
+de imágenes puede ser:
+
+- **Un bucket aparte** (p. ej. `control-interno-public`). **Recomendado en producción**: un error en la
+  política pública no puede exponer actas.
+- **El mismo bucket de documentos** (p. ej. `control-interno-dev` en desarrollo), con la política
+  anónima limitada a `images/email/*`. Todo lo demás del bucket sigue privado.
+
+Requisitos comunes:
+
 - **El dominio de la API S3 de MinIO debe ser público y con HTTPS** (§10.2, opción 2 de §10.4): Gmail,
   Outlook y los demás clientes descargan la imagen desde internet y no cargan `http://` ni direcciones
   internas. Si el backend usa MinIO por la red interna (`http://minio:9000`), la **URL pública base**
   igual debe ser el dominio HTTPS público; el backend sube por el endpoint interno y el correo lee por
   el público.
-- Sin driver S3, sin bucket público o sin URL base, subir una imagen responde
+- Sin driver S3, sin bucket de imágenes o sin URL base, subir una imagen responde
   `409 PUBLIC_ASSETS_NOT_CONFIGURED`: nunca se guarda en otro sitio.
 
-Crear el bucket y darle lectura anónima **solo** de `s3:GetObject` sobre `email-assets/*` (sin
-`s3:ListBucket`: nadie puede listar su contenido):
+Son **dos políticas distintas**; no las mezcle.
+
+**1. Política del bucket (lectura anónima)**: lleva `Principal` y concede **solo** `s3:GetObject` sobre
+`images/email/*` (sin `s3:ListBucket`: nadie puede listar el contenido). Con el mismo bucket de
+documentos, `<bucket>` es ese bucket (p. ej. `control-interno-dev`):
 
 ```sh
-mc mb ci/control-interno-public
-mc anonymous set-json control-interno-public-read.json ci/control-interno-public
-mc anonymous get-json ci/control-interno-public     # debe mostrar solo el GetObject de abajo
+mc mb ci/control-interno-public                   # solo si usa un bucket aparte
+mc anonymous set-json images-email-read.json ci/<bucket>
+mc anonymous get-json ci/<bucket>                 # debe mostrar solo el GetObject de abajo
 ```
 
-`control-interno-public-read.json`:
+`images-email-read.json`:
 
 ```json
 {
@@ -514,33 +553,69 @@ mc anonymous get-json ci/control-interno-public     # debe mostrar solo el GetOb
       "Effect": "Allow",
       "Principal": { "AWS": ["*"] },
       "Action": ["s3:GetObject"],
-      "Resource": ["arn:aws:s3:::control-interno-public/email-assets/*"]
+      "Resource": ["arn:aws:s3:::<bucket>/images/email/*"]
     }
   ]
 }
 ```
 
-No use `mc anonymous set download`: además del `GetObject` concede `s3:ListBucket` sobre todo el bucket.
+> **Advertencia.** Nunca active acceso anónimo al bucket completo: ni `mc anonymous set download`
+> (concede además `s3:ListBucket`), ni `set public`, ni un `Resource` `arn:aws:s3:::<bucket>/*`. Con el
+> mismo bucket de documentos eso publicaría todas las actas, firmas y rúbricas.
 
-Agregue a `control-interno-app.json` (§10.3) el permiso de escribir y leer en ese prefijo y vuelva a
-crear la política (`mc admin policy create ci control-interno-app control-interno-app.json`). En S3
-`HeadObject` se autoriza con `s3:GetObject`; no hay una acción `s3:HeadObject`:
+**2. Política del usuario de la aplicación** (`control-interno-app.json` de §10.3): es de usuario, **sin
+`Principal`**. Con el mismo bucket, sustituya la de §10.3 por esta (lectura/escritura en todo el bucket;
+borrado solo de las sondas `health/*` y de `images/email/*`):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:GetBucketVersioning", "s3:GetBucketObjectLockConfiguration"],
+      "Resource": ["arn:aws:s3:::<bucket>"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": ["arn:aws:s3:::<bucket>/*"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:DeleteObject"],
+      "Resource": ["arn:aws:s3:::<bucket>/health/*", "arn:aws:s3:::<bucket>/images/email/*"]
+    }
+  ]
+}
+```
+
+Con un bucket aparte, conserve la política de §10.3 para el de documentos y agréguele este bloque:
 
 ```json
 {
   "Effect": "Allow",
-  "Action": ["s3:PutObject", "s3:GetObject"],
-  "Resource": ["arn:aws:s3:::control-interno-public/email-assets/*"]
+  "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+  "Resource": ["arn:aws:s3:::control-interno-public/images/email/*"]
 }
 ```
 
-La aplicación no tiene `DeleteObject` en ese bucket. Si dos personas suben la misma imagen a la vez,
-gana una y el objeto de la otra queda huérfano (el backend lo intenta borrar y, sin permiso, lo deja en el
-log); no afecta a nada.
+Vuelva a crear la política (`mc admin policy create ci control-interno-app control-interno-app.json`).
+En S3 `HeadObject` se autoriza con `s3:GetObject`; no hay una acción `s3:HeadObject`. El `DeleteObject` en
+`images/email/*` sirve para una sola cosa: si dos personas suben la misma imagen a la vez, gana una y el
+backend borra el objeto que subió la otra (si el borrado falla, solo lo deja en el log; la subida no falla
+y el objeto huérfano no lo usa ninguna fila).
 
-Luego, en *Almacenamiento* (§10.5), complete **Bucket público** (`control-interno-public`) y **URL
-pública base** (`https://<dominio público de la API de MinIO>/control-interno-public`, sin barra final
-ni parámetros; en producción solo `https`). También se pueden sembrar con
+Luego, en *Almacenamiento* (§10.5), complete **Bucket de imágenes** (`control-interno-public`, o el de
+documentos) y **URL pública base** (`https://<dominio público de la API de MinIO>/<bucket>`, sin barra
+final ni parámetros; en producción solo `https`). También se pueden sembrar con
 `STORAGE_S3_PUBLIC_ASSETS_BUCKET` y `STORAGE_S3_PUBLIC_ASSETS_BASE_URL` (un valor inválido detiene el
-arranque). Compruebe subiendo una imagen desde *Plantillas de correo* y abriendo su `url` en una
-ventana privada: debe verse sin iniciar sesión, y `<URL pública base>?list-type=2` debe responder 403.
+arranque).
+
+Comprobación (en una ventana privada o con `curl`, sin credenciales):
+
+1. Suba una imagen desde *Plantillas de correo* y abra su `url`: debe verse sin iniciar sesión (200).
+2. `curl -s -o /dev/null -w '%{http_code}' '<URL pública base>?list-type=2'` debe responder **403**
+   (nadie puede listar el bucket).
+3. Con el mismo bucket de documentos: la URL de cualquier objeto fuera de `images/email/` (por ejemplo
+   `<URL pública base>/documents/<año>/<formato>/<número>.pdf` o `…/health/x`) debe responder **403**.

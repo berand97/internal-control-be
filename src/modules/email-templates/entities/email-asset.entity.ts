@@ -5,8 +5,9 @@ export type EmailAssetMime = (typeof EMAIL_ASSET_MIMES)[number];
 
 /**
  * Imagen subida desde el editor de plantillas de correo (migración 1767225820000). Los bytes NO están en la BD: van,
- * ya re-codificados (sin metadatos EXIF/GPS, máximo 1200 px de ancho), al bucket PÚBLICO del proveedor S3
- * (storage_settings.s3_public_assets_bucket) en `email-assets/<uuid>.<png|jpg>`, y el correo los carga desde
+ * ya re-codificados (sin metadatos EXIF/GPS, máximo 1200 px de ancho), al bucket de imágenes del proveedor S3
+ * (storage_settings.s3_public_assets_bucket) en `images/email/<uuid>.<png|jpg>` (antes de 1767225830000:
+ * `email-assets/…`, que se conserva), y el correo los carga desde
  * `public_url`. No se borran desde la aplicación: los correos enviados siguen apuntando a ellas. sha256 (del
  * contenido guardado) es único: subir la misma imagen devuelve la existente.
  */
@@ -15,7 +16,7 @@ export class EmailAsset {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  /** Clave del objeto en el bucket público: email-assets/<uuid>.<png|jpg> (sin el nombre original). */
+  /** Clave del objeto: images/email/<uuid>.<png|jpg>, o email-assets/… en filas anteriores (sin el nombre original). */
   @Column({ name: 'storage_key', type: 'varchar', length: 200 })
   storageKey!: string;
 

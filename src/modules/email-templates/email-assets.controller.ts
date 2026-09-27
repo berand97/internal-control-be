@@ -56,7 +56,7 @@ export class EmailAssetsController {
   @ApiOperation({
     summary: 'Subir una imagen para las plantillas de correo',
     description:
-      'Se valida por los bytes (no por la extensión ni el tipo declarado): solo PNG o JPEG, máximo 1 MB (FILE_TOO_LARGE) y 2000 × 2000 px (EMAIL_ASSET_INVALID_IMAGE); otro formato (SVG, GIF, HTML renombrado...): FILE_TYPE_NOT_ALLOWED. Se re-codifica sin metadatos (EXIF/GPS) y a lo sumo 1200 px de ancho y se guarda en el bucket PÚBLICO del proveedor S3 (email-assets/<uuid>.<png|jpg>); url es su dirección pública. Sin almacenamiento S3 con bucket público y URL base configurados: 409 PUBLIC_ASSETS_NOT_CONFIGURED. La misma imagen (mismo contenido guardado) devuelve la existente. Las imágenes no se borran.',
+      'Se valida por los bytes (no por la extensión ni el tipo declarado): solo PNG o JPEG, máximo 1 MB (FILE_TOO_LARGE) y 2000 × 2000 px (EMAIL_ASSET_INVALID_IMAGE); otro formato (SVG, GIF, HTML renombrado...): FILE_TYPE_NOT_ALLOWED. Se re-codifica sin metadatos (EXIF/GPS) y a lo sumo 1200 px de ancho y se guarda en el bucket de imágenes del proveedor S3 (images/email/<uuid>.<png|jpg>, la única carpeta de lectura anónima); url es su dirección pública. Sin almacenamiento S3 con bucket de imágenes y URL base configurados: 409 PUBLIC_ASSETS_NOT_CONFIGURED. La misma imagen (mismo contenido guardado) devuelve la existente. Las imágenes no se borran.',
   })
   @ApiCreatedResponse({ schema: envelopedSchema(EmailAssetResponseDto) })
   @ApiBadRequestResponse({

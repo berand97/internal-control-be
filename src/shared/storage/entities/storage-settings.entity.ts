@@ -33,7 +33,10 @@ export class StorageSettings {
   @Column({ name: 's3_force_path_style', type: 'boolean', nullable: true })
   s3ForcePathStyle!: boolean | null;
 
-  /** Bucket público de imágenes de correo (migración 1767225820000; ver public-assets.ts). */
+  /**
+   * Bucket de imágenes de correo (images/email/*; puede ser el mismo de documentos). Migración 1767225820000; ver
+   * public-assets.ts.
+   */
   @Column({ name: 's3_public_assets_bucket', type: 'varchar', length: 63, nullable: true })
   s3PublicAssetsBucket!: string | null;
 

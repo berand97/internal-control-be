@@ -49,7 +49,7 @@ export class StorageStatusDto {
   @ApiProperty({
     type: 'string',
     nullable: true,
-    description: 'Bucket público de las imágenes de correo; null = no configurado (no se pueden subir imágenes)',
+    description: 'Bucket de las imágenes de correo (images/email/*; puede ser el mismo de documentos); null = no configurado (no se pueden subir imágenes)',
   })
   readonly s3PublicAssetsBucket!: string | null;
 

@@ -1,9 +1,10 @@
 /**
- * Bucket PÚBLICO para archivos que deben abrirse sin sesión desde fuera (hoy: las imágenes de las plantillas de
- * correo, que descargan los clientes de correo). Es un bucket distinto del de documentos, que sigue privado, en el
- * mismo proveedor S3 (mismo endpoint y credenciales). Ver docs/DEPLOY.md §10.7.
+ * Bucket de los archivos que deben abrirse sin sesión desde fuera (hoy: las imágenes de las plantillas de correo, que
+ * descargan los clientes de correo), siempre bajo images/email/ (storage-keys.ts). Mismo proveedor S3 (mismo endpoint
+ * y credenciales). Puede ser un bucket aparte (recomendado en producción) o el mismo de documentos con lectura anónima
+ * SOLO de images/email/*: ninguna clave de documento puede empezar por images/. Ver docs/DEPLOY.md §10.7.
  *
- * - publicAssetsBucket: nombre del bucket (p. ej. `control-interno-public`).
+ * - publicAssetsBucket: nombre del bucket (p. ej. `control-interno-public`, o `control-interno-dev` si es el mismo).
  * - publicAssetsBaseUrl: URL pública base desde la que se lee un objeto: `<base>/<clave>` (p. ej.
  *   `https://minio-api.dominio/control-interno-public`). En producción, https obligatorio.
  */

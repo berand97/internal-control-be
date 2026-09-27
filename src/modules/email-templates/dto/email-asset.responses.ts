@@ -37,7 +37,7 @@ export class EmailAssetResponseDto {
 
   @ApiProperty({
     description:
-      'URL pública absoluta del objeto en el bucket público (URL base + email-assets/<uuid>.<png|jpg>); la usan los correos y la vista previa',
+      'URL pública absoluta del objeto (URL base + images/email/<uuid>.<png|jpg>; email-assets/… en imágenes anteriores); la usan los correos y la vista previa',
   })
   readonly url!: string;
 
