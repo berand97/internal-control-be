@@ -81,6 +81,95 @@ export const EMAIL_PLACEHOLDER_CATALOG: Record<
   },
 };
 
+export const EMAIL_VARIABLE_KINDS = ['url', 'text'] as const;
+export type EmailVariableKind = (typeof EMAIL_VARIABLE_KINDS)[number];
+
+/**
+ * Qué es cada variable, para el editor. `url`: su valor es un enlace; en el diseño va como href de un enlace del
+ * párrafo, URL de un botón o enlace de una imagen, nunca como texto visible (url-variables-as-text.ts); `linkText`
+ * es el texto sugerido del enlace. `text`: se muestra tal cual.
+ */
+export interface EmailVariableSpec {
+  readonly name: string;
+  readonly label: string;
+  readonly kind: EmailVariableKind;
+  /** Solo kind = url; null en las de texto. */
+  readonly linkText: string | null;
+}
+
+const textVar = (label: string): Omit<EmailVariableSpec, 'name'> => ({ label, kind: 'text', linkText: null });
+const urlVar = (label: string, linkText: string): Omit<EmailVariableSpec, 'name'> => ({ label, kind: 'url', linkText });
+
+/**
+ * Significado de cada variable, tomado de quien la pone en el contexto: MailService (src/shared/mail/mail.service.ts:
+ * invitación, restablecimiento, enlace de firma), ImportJobsService.notify (importaciones) y MailOutboxService (agrega
+ * user.fullName). GENERIC_NOTIFICATION, SYSTEM_ALERT, LOAN_STATUS_NOTIFICATION e INVENTORY_ALERT aún no los envía
+ * ningún código: su significado sale de su diseño por defecto y sus datos de ejemplo. Una variable significa lo mismo
+ * en todos los tipos que la usan.
+ */
+const EMAIL_VARIABLES: Readonly<Record<string, Omit<EmailVariableSpec, 'name'>>> = {
+  'user.email': textVar('Correo del usuario'),
+  'user.username': textVar('Usuario con el que inicia sesión'),
+  'user.fullName': textVar('Nombre completo del usuario'),
+  'user.role': textVar('Rol asignado al usuario'),
+  'auth.temporaryPassword': textVar('Contraseña temporal'),
+  'auth.loginUrl': urlVar('Enlace para iniciar sesión', 'Iniciar sesión'),
+  'auth.resetUrl': urlVar('Enlace para restablecer la contraseña', 'Restablecer contraseña'),
+  'auth.expiresInHours': textVar('Horas de validez del enlace'),
+  'app.name': textVar('Nombre de la aplicación'),
+  'app.loginUrl': urlVar('Enlace para abrir Control Interno', 'Abrir Control Interno'),
+  'notification.title': textVar('Título del aviso'),
+  'notification.message': textVar('Mensaje del aviso'),
+  'alert.title': textVar('Título de la alerta'),
+  'alert.message': textVar('Mensaje de la alerta'),
+  'alert.severity': textVar('Gravedad de la alerta'),
+  'prestamo.estado': textVar('Estado del préstamo'),
+  'prestamo.justificacion': textVar('Justificación del préstamo'),
+  'origen.nombre': textVar('Origen del préstamo'),
+  'destino.nombre': textVar('Destino del préstamo'),
+  'inventario.nombre': textVar('Nombre de la toma física'),
+  'inventario.fecha': textVar('Fecha de la toma física'),
+  'alerta.mensaje': textVar('Mensaje de la alerta de la toma física'),
+  'firma.url': urlVar('Enlace para leer y firmar el documento', 'Abrir el documento'),
+  'firma.vence': textVar('Fecha y hora en que vence el enlace de firma'),
+  'firma.rol': textVar('Papel del firmante en el documento'),
+  'firmante.nombre': textVar('Nombre del firmante'),
+  'acta.formato': textVar('Formato del documento'),
+  'acta.numero': textVar('Número del documento'),
+  contacto: textVar('Persona de contacto para dudas'),
+  'importacion.estado': textVar('Resultado de la importación (terminada o fallida)'),
+  'importacion.destino': textVar('Qué se importó (por ejemplo, activos)'),
+  'importacion.archivo': textVar('Archivo y hoja importados'),
+  'importacion.resumen': textVar('Resumen de la importación'),
+};
+
+const variableSpec = (name: string): EmailVariableSpec => {
+  const spec = EMAIL_VARIABLES[name];
+  if (!spec) {
+    throw new Error(`La variable {{${name}}} del catálogo de correos no tiene descripción en EMAIL_VARIABLES`);
+  }
+  return { name, ...spec };
+};
+
+/** Variables de cada tipo con su descripción: primero las obligatorias, luego las opcionales. */
+const typeVariables = (type: EmailTemplateType): ReadonlyArray<EmailVariableSpec> =>
+  [...EMAIL_PLACEHOLDER_CATALOG[type].required, ...EMAIL_PLACEHOLDER_CATALOG[type].optional].map(variableSpec);
+
+export const EMAIL_TEMPLATE_VARIABLES: Record<EmailTemplateType, ReadonlyArray<EmailVariableSpec>> = {
+  USER_INVITATION: typeVariables('USER_INVITATION'),
+  PASSWORD_RESET: typeVariables('PASSWORD_RESET'),
+  GENERIC_NOTIFICATION: typeVariables('GENERIC_NOTIFICATION'),
+  SYSTEM_ALERT: typeVariables('SYSTEM_ALERT'),
+  LOAN_STATUS_NOTIFICATION: typeVariables('LOAN_STATUS_NOTIFICATION'),
+  INVENTORY_ALERT: typeVariables('INVENTORY_ALERT'),
+  SIGNATURE_LINK: typeVariables('SIGNATURE_LINK'),
+  IMPORT_FINISHED: typeVariables('IMPORT_FINISHED'),
+};
+
+/** Variables de enlace (kind = url) del tipo. */
+export const urlVariables = (type: EmailTemplateType): ReadonlyMap<string, EmailVariableSpec> =>
+  new Map(EMAIL_TEMPLATE_VARIABLES[type].filter((item) => item.kind === 'url').map((item) => [item.name, item]));
+
 export interface EmailTemplateDesign {
   readonly subject: string;
   readonly blocks: ReadonlyArray<EmailBlock>;

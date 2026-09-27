@@ -5,9 +5,12 @@ import {
   EMAIL_PLACEHOLDER_CATALOG,
   EMAIL_SAMPLE_CONTEXT,
   EMAIL_TEMPLATE_TYPES,
+  EMAIL_TEMPLATE_VARIABLES,
+  EMAIL_VARIABLE_KINDS,
   checkDesignPlaceholders,
   designPlaceholders,
   extractEmailPlaceholders,
+  urlVariables,
 } from './email-template-catalog.js';
 
 describe('email-template-catalog', () => {
@@ -47,6 +50,38 @@ describe('email-template-catalog', () => {
     const catalog = EMAIL_PLACEHOLDER_CATALOG[type];
     for (const token of catalog.required) {
       expect(EMAIL_SAMPLE_CONTEXT[type]).toHaveProperty([token]);
+    }
+  });
+
+  it.each(EMAIL_TEMPLATE_TYPES)('cada variable de %s tiene descripción, clase y (solo las de enlace) texto sugerido', (type) => {
+    const catalog = EMAIL_PLACEHOLDER_CATALOG[type];
+    const variables = EMAIL_TEMPLATE_VARIABLES[type];
+    expect(variables.map((item) => item.name)).toEqual([...catalog.required, ...catalog.optional]);
+    for (const variable of variables) {
+      expect(variable.label.trim()).not.toBe('');
+      expect(EMAIL_VARIABLE_KINDS).toContain(variable.kind);
+      if (variable.kind === 'url') {
+        expect(variable.linkText?.trim()).toBeTruthy();
+      } else {
+        expect(variable.linkText).toBeNull();
+      }
+    }
+  });
+
+  it('las variables de enlace son exactamente las que llevan un URL', () => {
+    const urls = [...new Set(EMAIL_TEMPLATE_TYPES.flatMap((type) => [...urlVariables(type).keys()]))].sort();
+    expect(urls).toEqual(['app.loginUrl', 'auth.loginUrl', 'auth.resetUrl', 'firma.url']);
+    expect(urlVariables('PASSWORD_RESET').get('auth.resetUrl')).toEqual({
+      name: 'auth.resetUrl',
+      label: 'Enlace para restablecer la contraseña',
+      kind: 'url',
+      linkText: 'Restablecer contraseña',
+    });
+    // Los datos de ejemplo de una variable de enlace son un URL http(s).
+    for (const type of EMAIL_TEMPLATE_TYPES) {
+      for (const name of urlVariables(type).keys()) {
+        expect(EMAIL_SAMPLE_CONTEXT[type][name]).toMatch(/^https?:\/\//);
+      }
     }
   });
 

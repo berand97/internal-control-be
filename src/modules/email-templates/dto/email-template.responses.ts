@@ -10,7 +10,12 @@ import {
   type EmailBlockFieldSpec,
   type EmailBlockSpec,
 } from '../domain/email-blocks.js';
-import { EMAIL_TEMPLATE_TYPES, type EmailTemplateType } from '../domain/email-template-catalog.js';
+import {
+  EMAIL_TEMPLATE_TYPES,
+  EMAIL_VARIABLE_KINDS,
+  type EmailTemplateType,
+  type EmailVariableKind,
+} from '../domain/email-template-catalog.js';
 import type { EmailTemplate } from '../entities/email-template.entity.js';
 import { MAIL_OUTBOX_STATUSES, type MailOutboxStatus } from '../../../shared/mail/mail-outbox-status.js';
 import { emailBlocksSchema } from './email-template.dto.js';
@@ -95,6 +100,30 @@ export class EmailDesignLimitsDto {
   @ApiProperty({ type: 'integer', description: 'Máximo de bloques image por correo' }) readonly maxImages!: number;
 }
 
+export class EmailTemplateVariableDto {
+  @ApiProperty({ description: 'Nombre de la variable, sin llaves (en el diseño va como {{name}})', example: 'auth.resetUrl' })
+  readonly name!: string;
+
+  @ApiProperty({ description: 'Qué es, en español llano', example: 'Enlace para restablecer la contraseña' })
+  readonly label!: string;
+
+  @ApiProperty({
+    enum: EMAIL_VARIABLE_KINDS,
+    enumName: 'EmailTemplateVariableKind',
+    description:
+      'url: su valor es un enlace; va como enlace del párrafo, URL de un botón o enlace de una imagen, nunca como texto visible (se rechaza con EMAIL_TEMPLATE_INVALID_DESIGN). text: se muestra tal cual',
+  })
+  readonly kind!: EmailVariableKind;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Solo kind = url: texto sugerido para el enlace o el botón. null en las de texto',
+    example: 'Restablecer contraseña',
+  })
+  readonly linkText!: string | null;
+}
+
 export class EmailTemplateTypeDto {
   @ApiProperty({ enum: EMAIL_TEMPLATE_TYPES, enumName: 'EmailTemplateType' })
   readonly templateType!: EmailTemplateType;
@@ -107,6 +136,12 @@ export class EmailTemplateTypeDto {
 
   @ApiProperty({ type: [String] })
   readonly optional!: ReadonlyArray<string>;
+
+  @ApiProperty({
+    type: [EmailTemplateVariableDto],
+    description: 'Todas las variables del tipo (las de required y luego las de optional) con su descripción y su clase',
+  })
+  readonly variables!: ReadonlyArray<EmailTemplateVariableDto>;
 
   @ApiProperty({ type: 'object', additionalProperties: { type: 'string' }, description: 'Datos de ejemplo de la vista previa' })
   readonly sampleContext!: Record<string, string>;
