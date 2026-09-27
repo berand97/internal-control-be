@@ -15,7 +15,8 @@ import type { DocumentNumberingPolicy } from '../../../config/configuration.js';
  * CÓDIGO (desarrollo):
  * - enchufar un formato a un proceso de negocio (que firmar el acta cambie un préstamo, una entrega...): el proceso
  *   registra su manejador en DocumentLifecycleRegistry y declara ahí mismo (formats) qué claves usa y qué firmantes
- *   necesita. Hoy: OCI-01-55 → entregas (handovers), OCI-01-65 y LOAN_RETURN → préstamos (loans).
+ *   necesita. Hoy: OCI-01-55 → entregas (handovers), OCI-01-65 y LOAN_RETURN → préstamos (loans), OCI-21-37 →
+ *   tomas físicas (inventories; marcadores en inventories/domain/inventory-act.ts, INVENTORY_ACT_PLACEHOLDERS).
  * - lo que significa un rol: AUDITA y CONTROL_INTERNO son turnos de Control Interno y firman siempre con sesión y
  *   MFA (signing-channel.ts); los demás roles son libres.
  * - el contrato de marcadores de cada plantilla (qué campos arma el proceso).
