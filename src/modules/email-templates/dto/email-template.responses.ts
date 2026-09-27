@@ -4,6 +4,7 @@ import { ApiSuccessEnvelope } from '../../../common/swagger/api-envelopes.js';
 import {
   CALLOUT_TONES,
   EMAIL_BLOCK_TYPES,
+  IMAGE_ALIGNS,
   SPACER_SIZES,
   type EmailBlock,
   type EmailBlockFieldSpec,
@@ -16,7 +17,7 @@ import { emailBlocksSchema } from './email-template.dto.js';
 
 // ---------- GET /email-templates/catalog ----------
 
-export const EMAIL_BLOCK_FIELD_KINDS = ['text', 'multiline', 'url', 'enum', 'items'] as const;
+export const EMAIL_BLOCK_FIELD_KINDS = ['text', 'multiline', 'url', 'enum', 'items', 'richText', 'image', 'integer'] as const;
 
 export class EmailBlockFieldSpecDto {
   @ApiProperty({ description: 'Nombre de la propiedad en el bloque' })
@@ -28,7 +29,8 @@ export class EmailBlockFieldSpecDto {
   @ApiProperty({
     enum: EMAIL_BLOCK_FIELD_KINDS,
     enumName: 'EmailBlockFieldKind',
-    description: 'items: lista de filas { label, value }',
+    description:
+      'items: lista de filas { label, value }. richText: documento Tiptap de esquema cerrado (EmailRichTextDocDto); maxLength = texto total. image: id de una imagen subida (selector: GET /email-templates/assets). integer: entero entre minValue y maxValue',
   })
   readonly kind!: EmailBlockFieldSpec['kind'];
 
@@ -49,6 +51,12 @@ export class EmailBlockFieldSpecDto {
 
   @ApiProperty({ type: 'integer', nullable: true, description: 'Solo kind = items' })
   readonly maxItems!: number | null;
+
+  @ApiProperty({ type: 'integer', nullable: true, description: 'Solo kind = integer' })
+  readonly minValue!: number | null;
+
+  @ApiProperty({ type: 'integer', nullable: true, description: 'Solo kind = integer' })
+  readonly maxValue!: number | null;
 }
 
 export class EmailBlockSpecDto {
@@ -70,7 +78,10 @@ export class EmailDesignLimitsDto {
   @ApiProperty({ type: 'integer' }) readonly minBlocks!: number;
   @ApiProperty({ type: 'integer' }) readonly maxBlocks!: number;
   @ApiProperty({ type: 'integer' }) readonly headingMaxLength!: number;
-  @ApiProperty({ type: 'integer' }) readonly paragraphMaxLength!: number;
+  @ApiProperty({ type: 'integer', description: 'Párrafo: caracteres de texto de todo el documento' })
+  readonly paragraphMaxLength!: number;
+  @ApiProperty({ type: 'integer', description: 'Párrafo: nodos del documento (párrafos, listas, ítems, textos, saltos)' })
+  readonly paragraphMaxNodes!: number;
   @ApiProperty({ type: 'integer' }) readonly buttonLabelMaxLength!: number;
   @ApiProperty({ type: 'integer' }) readonly urlMaxLength!: number;
   @ApiProperty({ type: 'integer' }) readonly keyValueMinItems!: number;
@@ -78,6 +89,10 @@ export class EmailDesignLimitsDto {
   @ApiProperty({ type: 'integer' }) readonly keyValueLabelMaxLength!: number;
   @ApiProperty({ type: 'integer' }) readonly keyValueValueMaxLength!: number;
   @ApiProperty({ type: 'integer' }) readonly calloutMaxLength!: number;
+  @ApiProperty({ type: 'integer' }) readonly imageAltMaxLength!: number;
+  @ApiProperty({ type: 'integer' }) readonly imageMinWidth!: number;
+  @ApiProperty({ type: 'integer' }) readonly imageMaxWidth!: number;
+  @ApiProperty({ type: 'integer', description: 'Máximo de bloques image por correo' }) readonly maxImages!: number;
 }
 
 export class EmailTemplateTypeDto {
@@ -121,6 +136,9 @@ export class EmailTemplateCatalogResponseDto {
 
   @ApiProperty({ enum: SPACER_SIZES, enumName: 'EmailSpacerSize', isArray: true })
   readonly spacerSizes!: ReadonlyArray<string>;
+
+  @ApiProperty({ enum: IMAGE_ALIGNS, enumName: 'EmailImageAlign', isArray: true })
+  readonly imageAligns!: ReadonlyArray<string>;
 }
 
 // ---------- Versiones ----------

@@ -27,12 +27,15 @@ export interface UploadLimits {
  * - COST_CENTER_CSV: 4 columnas y ~250 centros de costo; 1 MiB admite más de 10.000 filas.
  * - DOCX_TEMPLATE: las plantillas reales pesan 3–52 KiB; 10 MiB es el tope que ya aplicaba el servicio
  *   (document-templates.service MAX_BYTES) y la subida de formatos, ahora antes de bufferizar.
+ * - EMAIL_IMAGE: imágenes de las plantillas de correo (PNG/JPEG, email-image.ts), tope fijado por el desarrollador;
+ *   cada lector del correo descarga la imagen, así que se mantiene chico (un logo o una foto a 1200 px caben de sobra).
  */
 export const UPLOAD_LIMITS = {
   EXCEL_IMPORT: { maxFileBytes: 25 * MIB },
   ASSET_CSV: { maxFileBytes: 5 * MIB },
   COST_CENTER_CSV: { maxFileBytes: 1 * MIB },
   DOCX_TEMPLATE: { maxFileBytes: 10 * MIB },
+  EMAIL_IMAGE: { maxFileBytes: 1 * MIB },
 } as const satisfies Record<string, UploadLimits>;
 
 /**

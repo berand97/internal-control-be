@@ -8,15 +8,23 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { ErrorCode } from '../../common/constants/error-code.enum.js';
+import { ApiException } from '../../common/exceptions/api.exception.js';
+import { BoundedFileInterceptor, UPLOAD_LIMITS } from '../../shared/storage/uploads/bounded-file.interceptor.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
@@ -24,12 +32,14 @@ import {
   ApiErrorEnvelope,
   ApiSuccessEnvelope,
   envelopedSchema,
+  errorEnvelopeSchema,
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
 import {
   CreateEmailTemplateVersionDto,
   EMAIL_BLOCK_DTOS,
+  EMAIL_RICH_TEXT_DTOS,
   KeyValueItemDto,
   ListEmailTemplatesQueryDto,
   PreviewEmailTemplateDto,
@@ -46,6 +56,8 @@ import {
   EmailTestSendResponseDto,
   envelopedArraySchema,
 } from './dto/email-template.responses.js';
+import { EmailAssetResponseDto, ListEmailAssetsQueryDto } from './dto/email-asset.responses.js';
+import { EmailAssetsService, type EmailAssetUpload } from './email-assets.service.js';
 import { EmailTemplateTestSendService } from './email-template-test-send.service.js';
 import { EmailTemplatesService } from './email-templates.service.js';
 
@@ -62,6 +74,7 @@ const UUID_PIPE = new ParseUUIDPipe({ version: '4' });
   ApiSuccessEnvelope,
   ApiErrorEnvelope,
   ...EMAIL_BLOCK_DTOS,
+  ...EMAIL_RICH_TEXT_DTOS,
   KeyValueItemDto,
   EmailBlockFieldSpecDto,
   EmailBlockSpecDto,
@@ -71,6 +84,7 @@ const UUID_PIPE = new ParseUUIDPipe({ version: '4' });
   EmailTemplateVersionResponseDto,
   EmailPreviewResponseDto,
   EmailTestSendResponseDto,
+  EmailAssetResponseDto,
 )
 @Feature('mail')
 @Controller('email-templates')
@@ -78,6 +92,7 @@ export class EmailTemplatesController {
   constructor(
     private readonly templates: EmailTemplatesService,
     private readonly testSend: EmailTemplateTestSendService,
+    private readonly assets: EmailAssetsService,
   ) {}
 
   @Get('catalog')
@@ -105,7 +120,7 @@ export class EmailTemplatesController {
   @ApiOperation({
     summary: 'Guardar una versión nueva (queda activa)',
     description:
-      'Valida los bloques (catálogo cerrado, campos y longitudes), las variables del tipo (EMAIL_TEMPLATE_UNKNOWN_VARIABLE, EMAIL_TEMPLATE_MISSING_VARIABLE) y los URL de botón (variable o https://). Estructura inválida: EMAIL_TEMPLATE_INVALID_DESIGN con details[].field = blocks[i].campo.',
+      'Valida los bloques (catálogo cerrado, campos y longitudes; el párrafo es un documento Tiptap de esquema cerrado), que cada imagen exista, las variables del tipo (EMAIL_TEMPLATE_UNKNOWN_VARIABLE, EMAIL_TEMPLATE_MISSING_VARIABLE) y los URL de botón, enlace e imagen (variable o https://). Estructura inválida: EMAIL_TEMPLATE_INVALID_DESIGN con details[].field = ruta exacta (blocks[i].campo, blocks[i].content.content[j]..., blocks[i].assetId).',
   })
   @ApiCreatedResponse({ schema: envelopedSchema(EmailTemplateVersionResponseDto) })
   create(
@@ -123,7 +138,7 @@ export class EmailTemplatesController {
     description: 'Mismas validaciones que guardar. Devuelve el HTML completo (con el layout institucional) y el texto plano.',
   })
   @ApiOkResponse({ schema: envelopedSchema(EmailPreviewResponseDto) })
-  preview(@Body() dto: PreviewEmailTemplateDto): EmailPreviewResponseDto {
+  preview(@Body() dto: PreviewEmailTemplateDto): Promise<EmailPreviewResponseDto> {
     return this.templates.preview(dto.templateType, dto.subject, dto.blocks);
   }
 
@@ -141,6 +156,45 @@ export class EmailTemplatesController {
     @CurrentUser() actor: AuthenticatedUser,
   ): Promise<EmailTestSendResponseDto> {
     return this.testSend.send(actor.id, dto.templateType, dto.templateId ?? null);
+  }
+
+  @Post('assets')
+  @RequirePermission('email_template:manage:global')
+  @UseInterceptors(BoundedFileInterceptor('file', UPLOAD_LIMITS.EMAIL_IMAGE))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary', description: 'PNG o JPEG, máximo 1 MB y 2000 × 2000 px' } },
+    },
+  })
+  @ApiOperation({
+    summary: 'Subir una imagen para las plantillas de correo',
+    description:
+      'Se valida por los bytes (no por la extensión ni el tipo declarado): solo PNG o JPEG, máximo 1 MB (FILE_TOO_LARGE) y 2000 × 2000 px (EMAIL_ASSET_INVALID_IMAGE); otro formato (SVG, GIF, HTML renombrado...): FILE_TYPE_NOT_ALLOWED. Se re-codifica sin metadatos (EXIF/GPS) y a lo sumo 1200 px de ancho. La misma imagen (mismo contenido guardado) devuelve la existente. Las imágenes no se borran.',
+  })
+  @ApiCreatedResponse({ schema: envelopedSchema(EmailAssetResponseDto) })
+  @ApiBadRequestResponse({
+    description: 'FILE_TOO_LARGE, FILE_TYPE_NOT_ALLOWED, EMAIL_ASSET_INVALID_IMAGE',
+    schema: errorEnvelopeSchema(),
+  })
+  uploadAsset(
+    @UploadedFile() file: EmailAssetUpload | undefined,
+    @CurrentUser() actor: AuthenticatedUser,
+  ): Promise<EmailAssetResponseDto> {
+    if (!file?.buffer) {
+      throw new ApiException(ErrorCode.FileTypeNotAllowed, 'Adjunte la imagen en el campo file');
+    }
+    return this.assets.upload(file, actor.id);
+  }
+
+  @Get('assets')
+  @RequirePermission('email_template:read:global')
+  @ApiOperation({ summary: 'Imágenes subidas, de la más nueva a la más vieja (selector del editor)' })
+  @ApiOkResponse({ schema: envelopedArraySchema(EmailAssetResponseDto) })
+  listAssets(@Query() query: ListEmailAssetsQueryDto): Promise<ReadonlyArray<EmailAssetResponseDto>> {
+    return this.assets.list(query.limit);
   }
 
   @Get(':id/preview')

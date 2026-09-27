@@ -9,7 +9,9 @@ import {
   CALLOUT_TONES,
   EMAIL_BLOCK_CATALOG,
   EMAIL_DESIGN_LIMITS,
+  IMAGE_ALIGNS,
   SPACER_SIZES,
+  imageAssetIds,
   normalizeEmailBlocks,
   validateEmailBlocks,
   type EmailBlock,
@@ -32,6 +34,7 @@ import {
   type EmailTemplateCatalogResponseDto,
 } from './dto/email-template.responses.js';
 import { EmailTemplate } from './entities/email-template.entity.js';
+import { EmailAssetsService } from './email-assets.service.js';
 
 export interface ValidDesign extends EmailTemplateDesign {
   readonly placeholders: ReadonlyArray<string>;
@@ -48,6 +51,7 @@ export class EmailTemplatesService {
     private readonly templates: Repository<EmailTemplate>,
     private readonly dataSource: DataSource,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly assets: EmailAssetsService,
   ) {}
 
   async catalog(): Promise<EmailTemplateCatalogResponseDto> {
@@ -68,6 +72,7 @@ export class EmailTemplatesService {
       limits: EMAIL_DESIGN_LIMITS,
       calloutTones: CALLOUT_TONES,
       spacerSizes: SPACER_SIZES,
+      imageAligns: IMAGE_ALIGNS,
     };
   }
 
@@ -83,7 +88,7 @@ export class EmailTemplatesService {
     blocks: unknown,
     actorId: string,
   ): Promise<EmailTemplateVersionResponseDto> {
-    const design = this.validate(templateType, subject, blocks);
+    const design = await this.validate(templateType, subject, blocks);
     const saved = await this.dataSource.transaction(async (manager) => {
       await this.lockType(manager, templateType);
       const repo = manager.getRepository(EmailTemplate);
@@ -127,9 +132,9 @@ export class EmailTemplatesService {
   }
 
   /** Vista previa de un borrador con los datos de ejemplo del tipo. No guarda ni envía. */
-  preview(templateType: EmailTemplateType, subject: string, blocks: unknown): EmailPreviewResponseDto {
-    const design = this.validate(templateType, subject, blocks);
-    return renderEmail(design, EMAIL_SAMPLE_CONTEXT[templateType], this.brand());
+  async preview(templateType: EmailTemplateType, subject: string, blocks: unknown): Promise<EmailPreviewResponseDto> {
+    const design = await this.validate(templateType, subject, blocks);
+    return this.renderDesign(design, EMAIL_SAMPLE_CONTEXT[templateType]);
   }
 
   async previewVersion(id: string): Promise<EmailPreviewResponseDto> {
@@ -137,7 +142,7 @@ export class EmailTemplatesService {
     if (!row) {
       throw new ApiException(ErrorCode.ResourceNotFound);
     }
-    return renderEmail(row, EMAIL_SAMPLE_CONTEXT[row.templateType], this.brand());
+    return this.renderDesign(row, EMAIL_SAMPLE_CONTEXT[row.templateType]);
   }
 
   /**
@@ -150,7 +155,7 @@ export class EmailTemplatesService {
     templateId?: string | null,
   ): Promise<RenderedEmail> {
     const design = await this.resolveDesign(templateType, templateId ?? null);
-    return renderEmail(design, context, this.brand());
+    return this.renderDesign(design, context);
   }
 
   /** Id de la versión que se enviaría (null = diseño por defecto). 404 si templateId no es de ese tipo. */
@@ -166,8 +171,11 @@ export class EmailTemplatesService {
     return active?.id ?? null;
   }
 
-  /** Estructura (catálogo cerrado) y variables (catálogo del tipo). Devuelve el diseño normalizado. */
-  validate(templateType: EmailTemplateType, subject: string, blocks: unknown): ValidDesign {
+  /**
+   * Estructura (catálogo cerrado), imágenes (que cada assetId exista en email_asset) y variables (catálogo del
+   * tipo). Devuelve el diseño normalizado.
+   */
+  async validate(templateType: EmailTemplateType, subject: string, blocks: unknown): Promise<ValidDesign> {
     const issues = validateEmailBlocks(blocks);
     if (issues.length > 0) {
       throw new ApiException(ErrorCode.EmailTemplateInvalidDesign, undefined, [...issues]);
@@ -176,6 +184,18 @@ export class EmailTemplatesService {
       subject: subject.trim(),
       blocks: normalizeEmailBlocks(blocks as ReadonlyArray<EmailBlock>),
     };
+    const missingAssets = new Set(await this.assets.missing(imageAssetIds(design.blocks)));
+    if (missingAssets.size > 0) {
+      throw new ApiException(
+        ErrorCode.EmailTemplateInvalidDesign,
+        undefined,
+        design.blocks.flatMap((block, index) =>
+          block.type === 'image' && missingAssets.has(block.assetId)
+            ? [{ field: `blocks[${index}].assetId`, message: 'La imagen no existe; súbala de nuevo' }]
+            : [],
+        ),
+      );
+    }
     const check = checkDesignPlaceholders(templateType, design);
     if (check.unknown.length > 0) {
       throw new ApiException(
@@ -211,6 +231,12 @@ export class EmailTemplatesService {
   /** Serializa versionado y activación por tipo (dos guardados simultáneos no chocan en UNIQUE ni en la activa). */
   private async lockType(manager: EntityManager, templateType: EmailTemplateType): Promise<void> {
     await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`email_template:${templateType}`]);
+  }
+
+  /** Render con la marca configurada y las imágenes del diseño resueltas a su URL pública. */
+  private async renderDesign(design: EmailTemplateDesign, context: EmailContext): Promise<RenderedEmail> {
+    const assets = await this.assets.lookup(imageAssetIds(design.blocks));
+    return renderEmail(design, context, this.brand(), assets);
   }
 
   private brand(): EmailBrand {

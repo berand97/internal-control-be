@@ -4,6 +4,7 @@ import {
   parseTrustProxy,
   type TrustProxySetting,
 } from '../common/http/trust-proxy.js';
+import { apiPublicUrlWarning } from './api-public-url.js';
 import { guardDatabaseUrl } from './database-host-guard.js';
 import { dedicatedSecretWarnings, resolveDedicatedSecrets } from './dedicated-secrets.js';
 import { resolveGotenbergUrl } from './gotenberg-url.js';
@@ -280,6 +281,10 @@ const configuration = (): AppConfig => {
   const secrets = resolveDedicatedSecrets(process.env);
   for (const warning of dedicatedSecretWarnings(process.env)) {
     new Logger('Config').warn(warning);
+  }
+  const apiUrlWarning = apiPublicUrlWarning(process.env);
+  if (apiUrlWarning !== null) {
+    new Logger('Config').warn(apiUrlWarning);
   }
   return {
     port: readNumber('PORT', 3000),
