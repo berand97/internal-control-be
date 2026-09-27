@@ -62,15 +62,40 @@ describe('UsersService', () => {
   let activeLoans: ActiveLoansPort;
   let hashService: { hash: ReturnType<typeof vi.fn> };
   let mailService: { sendUserInvitation: ReturnType<typeof vi.fn> };
-  let permissionsService: Pick<PermissionsService, 'invalidate'>;
+  let permissionsService: Pick<PermissionsService, 'invalidate' | 'invalidateMany'>;
   let authUsersRepository: { findEffectivePermissions: ReturnType<typeof vi.fn> };
   let privilege: {
     assertCanAdminister: ReturnType<typeof vi.fn>;
+    assertCanAdministerUser: ReturnType<typeof vi.fn>;
     listAssignableFor: ReturnType<typeof vi.fn>;
   };
+  let sessions: { invalidate: ReturnType<typeof vi.fn> };
+  let mfaAccount: { resetByAdmin: ReturnType<typeof vi.fn> };
   let service: UsersService;
 
   beforeEach(() => {
+    const insertAssignment = async (record: {
+      userId: string;
+      roleId: string;
+      scopeType: string;
+      scopeId: string | null;
+      validFrom: Date;
+      validUntil: Date | null;
+      isDelegated: boolean;
+      delegatedFromUserId: string | null;
+    }) => {
+      const assignment = new UserRole();
+      assignment.id = 'ur-new';
+      assignment.userId = record.userId;
+      assignment.roleId = record.roleId;
+      assignment.scopeType = record.scopeType;
+      assignment.scopeId = record.scopeId;
+      assignment.validFrom = record.validFrom;
+      assignment.validUntil = record.validUntil;
+      assignment.isDelegated = record.isDelegated;
+      assignment.delegatedFromUserId = record.delegatedFromUserId;
+      return assignment;
+    };
     usersRepository = {
       findByIdWithPerson: vi.fn(),
       findByUsername: vi.fn().mockResolvedValue(null),
@@ -85,20 +110,9 @@ describe('UsersService', () => {
       findActiveRoles: vi.fn().mockResolvedValue([]),
       findUserRoleById: vi.fn(),
       findActiveRole: vi.fn().mockResolvedValue(buildRole()),
-      insertUserRole: vi.fn(async (record) => {
-        const assignment = new UserRole();
-        assignment.id = 'ur-new';
-        assignment.userId = record.userId;
-        assignment.roleId = record.roleId;
-        assignment.scopeType = record.scopeType;
-        assignment.scopeId = record.scopeId;
-        assignment.validFrom = record.validFrom;
-        assignment.validUntil = record.validUntil;
-        assignment.isDelegated = false;
-        assignment.delegatedFromUserId = null;
-        return assignment;
-      }),
-      revokeUserRole: vi.fn(),
+      insertUserRole: vi.fn(insertAssignment),
+      insertUserRoleWithinLimit: vi.fn(insertAssignment),
+      revokeUserRoleCascade: vi.fn().mockResolvedValue(['user-1']),
     };
     auditLogsRepository = {
       record: vi.fn().mockResolvedValue(undefined),
@@ -116,12 +130,21 @@ describe('UsersService', () => {
     };
     hashService = { hash: vi.fn().mockResolvedValue('hashed') };
     mailService = { sendUserInvitation: vi.fn().mockResolvedValue(true) };
-    permissionsService = { invalidate: vi.fn() };
+    permissionsService = { invalidate: vi.fn(), invalidateMany: vi.fn() };
+    sessions = { invalidate: vi.fn() };
+    mfaAccount = {
+      resetByAdmin: vi.fn().mockResolvedValue({
+        userId: 'user-1',
+        revokedSessions: 1,
+        recoveryCodesDeleted: 0,
+      }),
+    };
     authUsersRepository = {
       findEffectivePermissions: vi.fn().mockResolvedValue([]),
     };
     privilege = {
       assertCanAdminister: vi.fn().mockResolvedValue(undefined),
+      assertCanAdministerUser: vi.fn().mockResolvedValue(undefined),
       listAssignableFor: vi.fn().mockResolvedValue([]),
     };
     service = new UsersService(
@@ -147,6 +170,8 @@ describe('UsersService', () => {
         listActiveDefinitions: vi.fn().mockResolvedValue([]),
       } as never,
       privilege as never,
+      sessions as never,
+      mfaAccount as never,
     );
   });
 
@@ -167,6 +192,206 @@ describe('UsersService', () => {
     await service.deactivate('user-1', actor);
     expect(refreshTokenFamiliesRepository.revokeAllForUser).toHaveBeenCalled();
     expect(permissionsService.invalidate).toHaveBeenCalledWith('user-1');
+    expect(sessions.invalidate).toHaveBeenCalledWith('user-1');
+  });
+
+  describe('BE-07: rango sobre el usuario objetivo', () => {
+    const escalation = () =>
+      Object.assign(new Error('escalation'), {
+        code: ErrorCode.RolePrivilegeEscalation,
+      });
+
+    beforeEach(() => {
+      vi.mocked(usersRepository.findByIdWithPerson).mockImplementation(
+        async (id: string) => buildUser(id),
+      );
+      privilege.assertCanAdministerUser.mockRejectedValue(escalation());
+    });
+
+    it('desactivar a alguien de rango igual o superior se rechaza sin tocar su estado', async () => {
+      await expect(service.deactivate('user-1', actor)).rejects.toMatchObject({
+        code: ErrorCode.RolePrivilegeEscalation,
+      });
+      expect(usersRepository.updateStatus).not.toHaveBeenCalled();
+      expect(privilege.assertCanAdministerUser).toHaveBeenCalledWith(actor, 'user-1');
+    });
+
+    it('reactivar, revocar un rol, editar, reenviar la invitación y restablecer el MFA también', async () => {
+      const suspended = buildUser('user-1');
+      suspended.status = UserStatus.Suspended;
+      vi.mocked(usersRepository.findByIdWithPerson).mockResolvedValue(suspended);
+      const assignment = new UserRole();
+      assignment.id = 'ur-1';
+      assignment.userId = 'user-1';
+      assignment.revokedAt = null;
+      vi.mocked(usersRepository.findUserRoleById).mockResolvedValue(assignment);
+      const calls = [
+        service.reactivate('user-1', actor),
+        service.revokeRole('user-1', 'ur-1', actor),
+        service.update('user-1', { firstName: 'Otra' }, actor),
+        service.resendInvitation('user-1', actor),
+        service.resetMfa('user-1', 'Perdió el teléfono', actor, {
+          ipAddress: null,
+          userAgent: null,
+        }),
+      ];
+      for (const call of calls) {
+        await expect(call).rejects.toMatchObject({
+          code: ErrorCode.RolePrivilegeEscalation,
+        });
+      }
+      expect(usersRepository.updateStatus).not.toHaveBeenCalled();
+      expect(usersRepository.revokeUserRoleCascade).not.toHaveBeenCalled();
+      expect(usersRepository.updatePerson).not.toHaveBeenCalled();
+      expect(usersRepository.updateInvitationCredentials).not.toHaveBeenCalled();
+      expect(mfaAccount.resetByAdmin).not.toHaveBeenCalled();
+    });
+
+    it('con rango suficiente, restablecer el MFA delega en MfaAccountService', async () => {
+      privilege.assertCanAdministerUser.mockResolvedValue(undefined);
+      const context = { ipAddress: null, userAgent: null };
+      await service.resetMfa('user-1', 'Perdió el teléfono', actor, context);
+      expect(mfaAccount.resetByAdmin).toHaveBeenCalledWith(
+        actor,
+        'user-1',
+        'Perdió el teléfono',
+        context,
+      );
+    });
+  });
+
+  describe('reactivar', () => {
+    it('devuelve a ACTIVE una cuenta suspendida o inactiva e invalida la caché de sesión', async () => {
+      for (const status of [UserStatus.Suspended, UserStatus.Inactive]) {
+        const user = buildUser('user-1');
+        user.status = status;
+        vi.mocked(usersRepository.findByIdWithPerson).mockResolvedValue(user);
+        await service.reactivate('user-1', actor);
+      }
+      expect(usersRepository.updateStatus).toHaveBeenCalledTimes(2);
+      expect(usersRepository.updateStatus).toHaveBeenCalledWith(
+        'user-1',
+        UserStatus.Active,
+      );
+      expect(sessions.invalidate).toHaveBeenCalledWith('user-1');
+    });
+
+    it('rechaza una cuenta ACTIVE o pendiente de activación', async () => {
+      for (const status of [UserStatus.Active, UserStatus.PendingActivation]) {
+        const user = buildUser('user-1');
+        user.status = status;
+        vi.mocked(usersRepository.findByIdWithPerson).mockResolvedValue(user);
+        await expect(service.reactivate('user-1', actor)).rejects.toMatchObject({
+          code: ErrorCode.InvalidState,
+        });
+      }
+      expect(usersRepository.updateStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('BE-08: delegación', () => {
+    const future = (ms: number) => new Date(Date.now() + ms);
+    const source = (validUntil: Date | null) => {
+      const assignment = new UserRole();
+      assignment.id = 'ur-1';
+      assignment.userId = 'user-1';
+      assignment.roleId = 'role-viewer';
+      assignment.scopeType = 'GLOBAL';
+      assignment.scopeId = null;
+      assignment.validFrom = new Date(Date.now() - 60_000);
+      assignment.validUntil = validUntil;
+      assignment.revokedAt = null;
+      return assignment;
+    };
+
+    beforeEach(() => {
+      vi.mocked(usersRepository.findByIdWithPerson).mockImplementation(
+        async (id: string) => buildUser(id),
+      );
+    });
+
+    it('no puede durar más que la asignación de origen', async () => {
+      vi.mocked(usersRepository.findUserRoleById).mockResolvedValue(
+        source(future(86_400_000)),
+      );
+      await expect(
+        service.delegateRole(
+          'user-1',
+          'ur-1',
+          { toUserId: 'user-2', validUntil: future(2 * 86_400_000).toISOString() },
+          actor,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.DelegationExceedsSourceValidity });
+      expect(usersRepository.insertUserRoleWithinLimit).not.toHaveBeenCalled();
+    });
+
+    it('respeta isAssignable', async () => {
+      const role = buildRole();
+      role.isAssignable = false;
+      vi.mocked(usersRepository.findActiveRole).mockResolvedValue(role);
+      vi.mocked(usersRepository.findUserRoleById).mockResolvedValue(source(null));
+      await expect(
+        service.delegateRole(
+          'user-1',
+          'ur-1',
+          { toUserId: 'user-2', validUntil: future(86_400_000).toISOString() },
+          actor,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.RoleNotAssignable });
+    });
+
+    it('no se delega al propio titular', async () => {
+      await expect(
+        service.delegateRole(
+          'user-1',
+          'ur-1',
+          { toUserId: 'user-1', validUntil: future(86_400_000).toISOString() },
+          actor,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
+    });
+
+    it('inserta con el cupo del rol y marca la delegación', async () => {
+      const role = buildRole();
+      role.maxConcurrentUsers = 3;
+      vi.mocked(usersRepository.findActiveRole).mockResolvedValue(role);
+      vi.mocked(usersRepository.list).mockResolvedValue({ items: [], totalItems: 1 });
+      vi.mocked(usersRepository.findUserRoleById).mockResolvedValue(
+        source(future(2 * 86_400_000)),
+      );
+      await service.delegateRole(
+        'user-1',
+        'ur-1',
+        { toUserId: 'user-2', validUntil: future(86_400_000).toISOString() },
+        actor,
+      );
+      expect(usersRepository.insertUserRoleWithinLimit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-2',
+          isDelegated: true,
+          delegatedFromUserId: 'user-1',
+        }),
+        3,
+      );
+    });
+
+    it('revocar el origen revoca en cascada e invalida los permisos de todos los afectados', async () => {
+      vi.mocked(usersRepository.findUserRoleById).mockResolvedValue(source(null));
+      vi.mocked(usersRepository.revokeUserRoleCascade).mockResolvedValue([
+        'user-1',
+        'user-2',
+      ]);
+      await service.revokeRole('user-1', 'ur-1', actor);
+      expect(usersRepository.revokeUserRoleCascade).toHaveBeenCalledWith(
+        'ur-1',
+        actor.id,
+        expect.any(Date),
+        null,
+      );
+      expect(permissionsService.invalidateMany).toHaveBeenCalledWith(
+        expect.arrayContaining(['user-1', 'user-2']),
+      );
+    });
   });
 
   it('rechaza asignar un rol no asignable', async () => {
@@ -185,7 +410,7 @@ describe('UsersService', () => {
     await expect(
       service.assignRole(actor.id, { roleId: 'role-x' }, actor),
     ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
-    expect(usersRepository.insertUserRole).not.toHaveBeenCalled();
+    expect(usersRepository.insertUserRoleWithinLimit).not.toHaveBeenCalled();
   });
 
   it('nadie se delega a sí mismo el rol de otro', async () => {
@@ -198,7 +423,7 @@ describe('UsersService', () => {
         actor,
       ),
     ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
-    expect(usersRepository.insertUserRole).not.toHaveBeenCalled();
+    expect(usersRepository.insertUserRoleWithinLimit).not.toHaveBeenCalled();
   });
 
   it('exige vencimiento al delegar', async () => {
@@ -257,14 +482,16 @@ describe('UsersService', () => {
         username: 'ana.ruiz@unac.edu.co',
         status: UserStatus.PendingActivation,
         mustChangePassword: true,
+        invitationExpiresAt: expect.any(Date),
       }),
     );
-    expect(usersRepository.insertUserRole).toHaveBeenCalledWith(
+    expect(usersRepository.insertUserRoleWithinLimit).toHaveBeenCalledWith(
       expect.objectContaining({
         roleId: 'role-viewer',
         scopeType: 'ORG_UNIT',
         scopeId: 'ou-1',
       }),
+      null,
     );
     expect(mailService.sendUserInvitation).toHaveBeenCalledWith(
       'ana.ruiz@unac.edu.co',
@@ -325,7 +552,13 @@ describe('UsersService', () => {
     expect(usersRepository.updateInvitationCredentials).toHaveBeenCalledWith(
       'user-1',
       'hashed',
+      expect.any(Date),
     );
+    // BE-14: el reenvío renueva el plazo de 72 h.
+    const expiresAt = vi.mocked(usersRepository.updateInvitationCredentials).mock
+      .calls[0]?.[2] as Date;
+    expect(expiresAt.getTime() - Date.now()).toBeGreaterThan(71 * 3_600_000);
+    expect(expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(72 * 3_600_000);
     expect(refreshTokenFamiliesRepository.revokeAllForUser).toHaveBeenCalled();
     expect(mailService.sendUserInvitation).toHaveBeenCalledWith(
       'ana.ruiz@unac.edu.co',
@@ -379,7 +612,7 @@ describe('UsersService', () => {
       buildUser('user-1'),
     );
     vi.mocked(usersRepository.findActiveRole).mockResolvedValue(role);
-    vi.mocked(usersRepository.insertUserRole).mockResolvedValue(assignment);
+    vi.mocked(usersRepository.insertUserRoleWithinLimit).mockResolvedValue(assignment);
     const result = await service.assignRole(
       'user-1',
       { roleId: role.id },
@@ -405,7 +638,7 @@ describe('UsersService', () => {
     await expect(
       service.assignRole('user-1', { roleId: role.id }, actor),
     ).rejects.toMatchObject({ code: ErrorCode.RolePrivilegeEscalation });
-    expect(usersRepository.insertUserRole).not.toHaveBeenCalled();
+    expect(usersRepository.insertUserRoleWithinLimit).not.toHaveBeenCalled();
   });
 
   it('rechaza asignación que viola SoD', async () => {
@@ -414,7 +647,7 @@ describe('UsersService', () => {
       buildUser('user-1'),
     );
     vi.mocked(usersRepository.findActiveRole).mockResolvedValue(role);
-    vi.mocked(usersRepository.insertUserRole).mockRejectedValue(
+    vi.mocked(usersRepository.insertUserRoleWithinLimit).mockRejectedValue(
       new QueryFailedError(
         'INSERT',
         [],

@@ -24,16 +24,23 @@ const role = (code: string, hierarchyLevel: number): Role => {
 
 describe('RolePrivilegePolicy', () => {
   let policy: RolePrivilegePolicy;
-  let rolesRepository: Pick<RolesRepository, 'findAllActive'>;
+  let rolesRepository: Pick<RolesRepository, 'findAllActive' | 'findRolesHeldBy'>;
+  /** Roles vigentes en BD por usuario: la política ya no mira actor.roles (BE-09). */
+  let held: Record<string, ReadonlyArray<Role>>;
   let permissionsService: Pick<PermissionsService, 'getEffectivePermissions'>;
 
   beforeEach(() => {
+    held = {
+      'director-1': [role('INTERNAL_CONTROL_DIRECTOR', 1)],
+      'admin-1': [role('SUPER_ADMIN', 0)],
+    };
     rolesRepository = {
       findAllActive: vi.fn().mockResolvedValue([
         role('SUPER_ADMIN', 0),
         role('INTERNAL_CONTROL_DIRECTOR', 1),
         role('AUDITOR', 2),
       ]),
+      findRolesHeldBy: vi.fn(async (userId: string) => held[userId] ?? []),
     };
     permissionsService = {
       getEffectivePermissions: vi.fn().mockResolvedValue([
@@ -72,15 +79,54 @@ describe('RolePrivilegePolicy', () => {
     expect(listed.map((item) => item.code)).toEqual(['AUDITOR']);
   });
 
-  it('solo el super admin reorganiza la jerarquía', () => {
-    const admin: AuthenticatedUser = { ...actor, roles: ['SUPER_ADMIN'] };
-    expect(() => policy.assertCanReorganize(admin)).not.toThrow();
-    try {
-      policy.assertCanReorganize(actor);
-      throw new Error('expected reorganize to fail');
-    } catch (err) {
-      expect(err).toMatchObject({ code: ErrorCode.InsufficientPermissions });
-    }
+  it('solo el super admin reorganiza la jerarquía', async () => {
+    const admin: AuthenticatedUser = { ...actor, id: 'admin-1', roles: ['SUPER_ADMIN'] };
+    await expect(policy.assertCanReorganize(admin)).resolves.toBeUndefined();
+    await expect(policy.assertCanReorganize(actor)).rejects.toMatchObject({
+      code: ErrorCode.InsufficientPermissions,
+    });
+  });
+
+  it('BE-09: el rango sale de la BD, no del token', async () => {
+    // El token todavía dice SUPER_ADMIN, pero en BD ya no lo tiene: no reorganiza ni administra como tal.
+    const stale: AuthenticatedUser = { ...actor, roles: ['SUPER_ADMIN'] };
+    await expect(policy.isSuperAdmin(stale)).resolves.toBe(false);
+    await expect(policy.assertCanReorganize(stale)).rejects.toMatchObject({
+      code: ErrorCode.InsufficientPermissions,
+    });
+    // Sin roles vigentes no tiene rango alguno.
+    held['director-1'] = [];
+    await expect(policy.actorRank(actor)).rejects.toMatchObject({
+      code: ErrorCode.InsufficientPermissions,
+    });
+  });
+
+  describe('BE-07: administrar a otro usuario', () => {
+    it('rechaza a un usuario de rango igual o superior', async () => {
+      held['peer'] = [role('INTERNAL_CONTROL_DIRECTOR', 1)];
+      held['boss'] = [role('AUDITOR', 2), role('SUPER_ADMIN', 0)];
+      for (const target of ['peer', 'boss']) {
+        await expect(policy.assertCanAdministerUser(actor, target)).rejects.toMatchObject({
+          code: ErrorCode.RolePrivilegeEscalation,
+        });
+      }
+    });
+
+    it('permite a un usuario de rango inferior o sin roles vigentes', async () => {
+      held['below'] = [role('AUDITOR', 2)];
+      await expect(policy.assertCanAdministerUser(actor, 'below')).resolves.toBeUndefined();
+      await expect(policy.assertCanAdministerUser(actor, 'nobody')).resolves.toBeUndefined();
+    });
+
+    it('SUPER_ADMIN administra a todos, también a otro SUPER_ADMIN', async () => {
+      const admin: AuthenticatedUser = { ...actor, id: 'admin-1', roles: ['SUPER_ADMIN'] };
+      held['other-admin'] = [role('SUPER_ADMIN', 0)];
+      await expect(policy.assertCanAdministerUser(admin, 'other-admin')).resolves.toBeUndefined();
+    });
+
+    it('sobre sí mismo no aplica (cada acción tiene su propia regla)', async () => {
+      await expect(policy.assertCanAdministerUser(actor, actor.id)).resolves.toBeUndefined();
+    });
   });
 
   it('impide conceder un permiso que el actor no tiene', async () => {

@@ -43,7 +43,6 @@ import { UserDetailResponseDto } from './dto/responses/user-detail.response.dto.
 import { UserMfaResetResponseDto } from './dto/responses/user-mfa-reset.response.dto.js';
 import { UserRoleResponseDto } from './dto/responses/user-role.response.dto.js';
 import { UsersPageResponseDto } from './dto/responses/users-page.response.dto.js';
-import { MfaAccountService } from '../auth/services/mfa-account.service.js';
 import { UsersService } from './services/users.service.js';
 
 @ApiTags(OpenApiTag.Users)
@@ -62,7 +61,6 @@ import { UsersService } from './services/users.service.js';
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
-    private readonly mfaAccount: MfaAccountService,
   ) {}
 
   @Get()
@@ -105,7 +103,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Crear usuario e invitarlo por correo',
     description:
-      'Crea la persona y la cuenta en PENDING_ACTIVATION, genera una contraseña temporal y envía la invitación. El usuario de acceso es el correo institucional. No se devuelve la contraseña en la respuesta.',
+      'Crea la persona y la cuenta en PENDING_ACTIVATION, genera una contraseña temporal y envía la invitación. El usuario de acceso es el correo institucional. No se devuelve la contraseña en la respuesta. La contraseña temporal vence a las 72 horas (después, el login responde 403 INVITATION_EXPIRED y hay que reenviar la invitación).',
   })
   @ApiResponse({ status: 201, schema: envelopedSchema(UserDetailResponseDto) })
   create(
@@ -121,11 +119,16 @@ export class UsersController {
   @ApiOperation({
     summary: 'Reenviar invitación con una nueva contraseña temporal',
     description:
-      'Sólo para cuentas pendientes de activación o que aún deben cambiar la contraseña temporal. Revoca sesiones previas.',
+      'Sólo para cuentas pendientes de activación o que aún deben cambiar la contraseña temporal. Revoca sesiones previas. La nueva contraseña temporal vence a las 72 horas.',
   })
   @ApiResponse({
     status: 200,
     schema: { $ref: getSchemaPath(ApiSuccessEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'El actor no puede administrar a ese usuario: su rol de mayor rango no está por debajo del rango del actor (ROLE_PRIVILEGE_ESCALATION). SUPER_ADMIN administra a todos.',
+    schema: errorEnvelopeSchema(),
   })
   @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
   @ApiResponse({ status: 406, schema: errorEnvelopeSchema() })
@@ -140,6 +143,11 @@ export class UsersController {
   @RequirePermission('user:manage:global')
   @ApiOperation({ summary: 'Actualizar datos no sensibles de la persona' })
   @ApiResponse({ status: 200, schema: envelopedSchema(UserDetailResponseDto) })
+  @ApiResponse({
+    status: 403,
+    description: 'El actor no puede administrar a ese usuario: su rol de mayor rango no está por debajo del rango del actor (ROLE_PRIVILEGE_ESCALATION). SUPER_ADMIN administra a todos.',
+    schema: errorEnvelopeSchema(),
+  })
   update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateUserDto,
@@ -151,10 +159,19 @@ export class UsersController {
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('user:manage:global')
-  @ApiOperation({ summary: 'Desactivar usuario y revocar sesiones' })
+  @ApiOperation({
+    summary: 'Desactivar usuario y revocar sesiones',
+    description:
+      'Revoca todas sus sesiones: sus access tokens dejan de servir de inmediato (401 SESSION_REVOKED).',
+  })
   @ApiResponse({
     status: 200,
     schema: { $ref: getSchemaPath(ApiSuccessEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'El actor no puede administrar a ese usuario: su rol de mayor rango no está por debajo del rango del actor (ROLE_PRIVILEGE_ESCALATION). SUPER_ADMIN administra a todos.',
+    schema: errorEnvelopeSchema(),
   })
   deactivate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -166,10 +183,24 @@ export class UsersController {
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('user:manage:global')
-  @ApiOperation({ summary: 'Reactivar usuario' })
+  @ApiOperation({
+    summary: 'Reactivar usuario',
+    description:
+      'Solo desde INACTIVE o SUSPENDED. Una cuenta ACTIVE o PENDING_ACTIVATION responde 406 INVALID_STATE.',
+  })
   @ApiResponse({
     status: 200,
     schema: { $ref: getSchemaPath(ApiSuccessEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'El actor no puede administrar a ese usuario: su rol de mayor rango no está por debajo del rango del actor (ROLE_PRIVILEGE_ESCALATION). SUPER_ADMIN administra a todos.',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 406,
+    description: 'La cuenta no está INACTIVE ni SUSPENDED (INVALID_STATE)',
+    schema: errorEnvelopeSchema(),
   })
   reactivate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -198,7 +229,7 @@ export class UsersController {
   @ApiResponse({
     status: 403,
     description:
-      'Sin permiso user:manage:global (INSUFFICIENT_PERMISSIONS), sesión sin MFA (MFA_SESSION_REQUIRED, action REAUTH) o intento sobre sí mismo (MFA_SELF_RESET_FORBIDDEN)',
+      'Sin permiso user:manage:global (INSUFFICIENT_PERMISSIONS), sesión sin MFA (MFA_SESSION_REQUIRED, action REAUTH), intento sobre sí mismo (MFA_SELF_RESET_FORBIDDEN) o usuario de rango igual o superior al del actor (ROLE_PRIVILEGE_ESCALATION)',
     schema: errorEnvelopeSchema(),
   })
   @ApiResponse({
@@ -213,7 +244,7 @@ export class UsersController {
     @Ip() ipAddress: string,
     @Headers('user-agent') userAgent: string | undefined,
   ): Promise<UserMfaResetResponseDto> {
-    const outcome = await this.mfaAccount.resetByAdmin(user, id, dto.reason, {
+    const outcome = await this.usersService.resetMfa(id, dto.reason, user, {
       ipAddress,
       userAgent: userAgent ?? null,
     });
@@ -235,10 +266,19 @@ export class UsersController {
   @Delete(':id/roles/:userRoleId')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('role:assign:global')
-  @ApiOperation({ summary: 'Revocar asignación de rol' })
+  @ApiOperation({
+    summary: 'Revocar asignación de rol',
+    description:
+      'Revoca también, en la misma transacción, las delegaciones hechas desde esa asignación (y las que se delegaron desde ellas).',
+  })
   @ApiResponse({
     status: 200,
     schema: { $ref: getSchemaPath(ApiSuccessEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'El actor no puede administrar a ese usuario: su rol de mayor rango no está por debajo del rango del actor (ROLE_PRIVILEGE_ESCALATION). SUPER_ADMIN administra a todos.',
+    schema: errorEnvelopeSchema(),
   })
   revokeRole(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -251,8 +291,30 @@ export class UsersController {
 
   @Post(':id/roles/:userRoleId/delegate')
   @RequirePermission('role:assign:global')
-  @ApiOperation({ summary: 'Delegar un rol activo a otro usuario' })
+  @ApiOperation({
+    summary: 'Delegar un rol activo a otro usuario',
+    description:
+      'Aplica las mismas reglas que asignar: el rol debe ser asignable (ROLE_NOT_ASSIGNABLE), administrable por el actor (ROLE_PRIVILEGE_ESCALATION) y con cupo (ROLE_MAX_USERS_REACHED; el titular ocupa un cupo). validUntil no puede superar el vencimiento de la asignación de origen (400 DELEGATION_EXCEEDS_SOURCE_VALIDITY). Revocar el origen revoca la delegación.',
+  })
   @ApiResponse({ status: 201, schema: envelopedSchema(UserRoleResponseDto) })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Sin vencimiento o vencido (DELEGATION_REQUIRES_EXPIRY) o posterior al vencimiento del origen (DELEGATION_EXCEEDS_SOURCE_VALIDITY)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Autodelegación (ROLE_SELF_ASSIGNMENT_FORBIDDEN) o rol de rango igual o superior al del actor (ROLE_PRIVILEGE_ESCALATION)',
+    schema: errorEnvelopeSchema(),
+  })
+  @ApiResponse({
+    status: 406,
+    description:
+      'Rol no asignable (ROLE_NOT_ASSIGNABLE), sin cupo (ROLE_MAX_USERS_REACHED), destinatario = titular (INVALID_STATE) o asignación de origen no vigente (CANNOT_DELEGATE_ROLE_NOT_HELD)',
+    schema: errorEnvelopeSchema(),
+  })
   delegateRole(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Param('userRoleId', new ParseUUIDPipe({ version: '4' }))

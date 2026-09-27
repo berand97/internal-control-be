@@ -58,6 +58,29 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'RETRY',
     message: 'Demasiados intentos; espera antes de reintentar',
   },
+  [ErrorCode.AccountTemporarilyLocked]: {
+    httpStatus: 429,
+    action: 'RETRY',
+    message:
+      'Demasiados intentos fallidos; el acceso a esta cuenta está bloqueado temporalmente, espera antes de reintentar',
+  },
+  [ErrorCode.SessionRevoked]: {
+    httpStatus: 401,
+    action: 'REAUTH',
+    message:
+      'La sesión se cerró o la cuenta ya no está activa; inicia sesión de nuevo',
+  },
+  [ErrorCode.InvitationExpired]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'La invitación venció; pide a un administrador que la reenvíe',
+  },
+  [ErrorCode.DelegationExceedsSourceValidity]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message:
+      'La delegación no puede vencer después que la asignación de origen',
+  },
   [ErrorCode.ExternalServiceFailure]: {
     httpStatus: 424,
     action: 'RETRY',

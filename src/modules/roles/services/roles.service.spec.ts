@@ -66,6 +66,15 @@ describe('RolesService', () => {
       findAllActive: vi.fn(),
       findActiveById: vi.fn(),
       findActiveByCode: vi.fn(),
+      // Roles vigentes en BD por usuario (BE-09: la política ya no lee actor.roles del JWT).
+      findRolesHeldBy: vi.fn(async (userId: string) => {
+        const held: Record<string, ReadonlyArray<string>> = {
+          'admin-1': ['SUPER_ADMIN'],
+          'director-1': ['INTERNAL_CONTROL_DIRECTOR'],
+        };
+        const all = await rolesRepository.findAllActive();
+        return all.filter((role) => (held[userId] ?? []).includes(role.code));
+      }),
       findChildren: vi.fn().mockResolvedValue([]),
       insert: vi.fn(),
       update: vi.fn(),
@@ -283,6 +292,7 @@ describe('RolesService', () => {
   it('impide reorganizar la jerarquía si no es super admin', async () => {
     const director: AuthenticatedUser = {
       ...actor,
+      id: 'director-1',
       roles: ['INTERNAL_CONTROL_DIRECTOR'],
     };
     vi.mocked(rolesRepository.findActiveById).mockResolvedValue(customRole());
@@ -415,6 +425,7 @@ describe('RolesService', () => {
     it('no deja heredar de un rol de nivel igual o superior al actor', async () => {
       const directorActor: AuthenticatedUser = {
         ...actor,
+        id: 'director-1',
         roles: ['INTERNAL_CONTROL_DIRECTOR'],
       };
       vi.mocked(rolesRepository.findAllActive).mockResolvedValue([
@@ -447,6 +458,7 @@ describe('RolesService', () => {
     it('un actor no super admin crea el rol un nivel por debajo del suyo', async () => {
       const directorActor: AuthenticatedUser = {
         ...actor,
+        id: 'director-1',
         roles: ['INTERNAL_CONTROL_DIRECTOR'],
       };
       vi.mocked(rolesRepository.findAllActive).mockResolvedValue([
