@@ -60,6 +60,19 @@ const ENTITY_TYPE = 'ASSET';
 const MAX_IMPORT_ROWS = 5000;
 const IMPORT_TTL_MS = 30 * 60 * 1000;
 
+/** Cómo queda el movimiento REGISTRATION de un alta hecha por otro proceso (AssetsService.createWithin). */
+export interface AssetRegistration {
+  readonly reason: string;
+  /** undefined: el documento de adquisición del activo, como en create(). */
+  readonly documentReference?: string | null;
+  readonly requestedBy?: string | null;
+  readonly metadata?: Record<string, unknown>;
+  /** Se suman a la auditoría ASSET_CREATED (sin datos personales). */
+  readonly auditChanges?: Record<string, unknown>;
+}
+
+const REGISTRATION_DEFAULTS: AssetRegistration = { reason: 'Alta de activo' };
+
 @Injectable()
 export class AssetsService {
   constructor(
@@ -528,6 +541,50 @@ export class AssetsService {
     actor: AuthenticatedUser,
     afterInsert?: (asset: Asset, manager: EntityManager) => Promise<void>,
   ): Promise<Asset> {
+    const prepared = await this.prepareNew(dto);
+    try {
+      return await this.dataSource.transaction((manager) =>
+        this.insertNew(manager, dto, actor, prepared, REGISTRATION_DEFAULTS, afterInsert),
+      );
+    } catch (error) {
+      this.rethrowUnique(error);
+    }
+  }
+
+  /**
+   * Alta de un activo dentro de la transacción de quien llama (p. ej. el sobrante de una toma que se vuelve activo):
+   * las mismas validaciones y escrituras que create() (activo, identificadores, campos, foto, movimiento REGISTRATION
+   * y auditoría ASSET_CREATED), con el motivo y la referencia del movimiento que dé el proceso. Si algo falla, lanza y
+   * la transacción del llamador se revierte entera.
+   */
+  async createWithin(
+    manager: EntityManager,
+    dto: CreateAssetDto,
+    actor: AuthenticatedUser,
+    registration: AssetRegistration,
+  ): Promise<Asset> {
+    const prepared = await this.prepareNew(dto);
+    try {
+      return await this.insertNew(manager, dto, actor, prepared, registration, (created, tx) =>
+        this.auditLogsRepository.record(
+          {
+            action: AuditAction.AssetCreated,
+            entityType: ENTITY_TYPE,
+            entityId: created.id,
+            performedBy: actor.id,
+            ipAddress: null,
+            userAgent: null,
+            changes: { internalCode: created.internalCode, ...(registration.auditChanges ?? {}) },
+          },
+          tx,
+        ),
+      );
+    } catch (error) {
+      this.rethrowUnique(error);
+    }
+  }
+
+  private async prepareNew(dto: CreateAssetDto) {
     const category = await this.requireCategory(dto.categoryId);
     await this.requireCostCenter(dto.costCenterId);
     if (dto.locationId) {
@@ -550,95 +607,104 @@ export class AssetsService {
     );
     const writes = this.buildCustomWrites(fields, dto.customValues ?? {});
     const year = new Date(dto.acquisitionDate).getFullYear();
-    try {
-      return await this.dataSource.transaction(async (manager) => {
-        const internalCode =
-          dto.internalCode ??
-          (await this.assetsRepository.nextInternalCode(year, manager));
-        const asset = await this.assetsRepository.insert({
-          internalCode,
-          barcode: dto.barcode || null,
-          serialNumber: dto.serialNumber || null,
-          description: dto.description,
-          model: dto.model ?? null,
-          categoryId: dto.categoryId,
-          acquisitionTypeId: dto.acquisitionTypeId,
-          acquisitionDate: dto.acquisitionDate.slice(0, 10),
-          acquisitionDocument: dto.acquisitionDocument ?? null,
-          acquisitionPrice: String(dto.acquisitionPrice ?? 0),
-          currency: 'COP',
-          operationalStatus: OperationalStatus.InUse,
-          physicalCondition: dto.physicalCondition ?? PhysicalCondition.New,
-          costCenterId: dto.costCenterId,
-          locationId: dto.locationId ?? null,
-          responsibleId: dto.responsibleId ?? null,
-          depreciationMethod: category.depreciationMethod,
-          usefulLifeYears: category.depreciationYears,
-          salvageValue: '0',
-          notes: dto.notes ?? null,
-          createdBy: actor.id,
-        }, manager);
-        await this.assetsRepository.insertIdentifiers(
-          asset.id,
-          [
-            {
-              type: AssetIdentifierType.VisibleCode,
-              value: internalCode,
-              origin: dto.internalCode
-                ? AssetIdentifierOrigin.Manual
-                : AssetIdentifierOrigin.Generated,
-            },
-            {
-              type: AssetIdentifierType.OpaqueId,
-              value: randomUUID(),
-              origin: AssetIdentifierOrigin.Generated,
-            },
-            ...(dto.barcode
-              ? [
-                  {
-                    type: AssetIdentifierType.LegacyCode,
-                    value: dto.barcode,
-                    origin: AssetIdentifierOrigin.Manual,
-                  },
-                ]
-              : []),
-          ],
-          actor.id,
-          manager,
-        );
-        await this.assetsRepository.replaceCustomValues(asset.id, writes, manager);
-        if (dto.photoUrl) {
-          await this.assetsRepository.insertPhoto(
-            asset.id,
-            dto.photoUrl,
-            actor.id,
-            manager,
-          );
-        }
-        await this.movementsService.record({
-          assetId: asset.id,
-          movementType: MovementType.Registration,
-          fromCostCenterId: null,
-          fromLocationId: null,
-          fromResponsibleId: null,
-          fromOperationalStatus: null,
-          fromPhysicalCondition: null,
-          toCostCenterId: asset.costCenterId,
-          toLocationId: asset.locationId,
-          toResponsibleId: asset.responsibleId,
-          toOperationalStatus: asset.operationalStatus,
-          toPhysicalCondition: asset.physicalCondition,
-          requestedBy: actor.id,
-          authorizedBy: actor.id,
-          reason: 'Alta de activo',
-          documentReference: dto.acquisitionDocument ?? null,
-        }, manager);
-        await afterInsert?.(asset, manager);
-        return asset;
-      });
-    } catch (error) {
-      this.rethrowUnique(error);
+    return { category, writes, year };
+  }
+
+  private async insertNew(
+    manager: EntityManager,
+    dto: CreateAssetDto,
+    actor: AuthenticatedUser,
+    { category, writes, year }: Awaited<ReturnType<AssetsService['prepareNew']>>,
+    registration: AssetRegistration,
+    afterInsert?: (asset: Asset, manager: EntityManager) => Promise<void>,
+  ): Promise<Asset> {
+    const internalCode =
+      dto.internalCode ??
+      (await this.assetsRepository.nextInternalCode(year, manager));
+    const asset = await this.assetsRepository.insert({
+      internalCode,
+      barcode: dto.barcode || null,
+      serialNumber: dto.serialNumber || null,
+      description: dto.description,
+      model: dto.model ?? null,
+      categoryId: dto.categoryId,
+      acquisitionTypeId: dto.acquisitionTypeId,
+      acquisitionDate: dto.acquisitionDate.slice(0, 10),
+      acquisitionDocument: dto.acquisitionDocument ?? null,
+      acquisitionPrice: String(dto.acquisitionPrice ?? 0),
+      currency: 'COP',
+      operationalStatus: OperationalStatus.InUse,
+      physicalCondition: dto.physicalCondition ?? PhysicalCondition.New,
+      costCenterId: dto.costCenterId,
+      locationId: dto.locationId ?? null,
+      responsibleId: dto.responsibleId ?? null,
+      depreciationMethod: category.depreciationMethod,
+      usefulLifeYears: category.depreciationYears,
+      salvageValue: '0',
+      notes: dto.notes ?? null,
+      createdBy: actor.id,
+    }, manager);
+    await this.assetsRepository.insertIdentifiers(
+      asset.id,
+      [
+        {
+          type: AssetIdentifierType.VisibleCode,
+          value: internalCode,
+          origin: dto.internalCode
+            ? AssetIdentifierOrigin.Manual
+            : AssetIdentifierOrigin.Generated,
+        },
+        {
+          type: AssetIdentifierType.OpaqueId,
+          value: randomUUID(),
+          origin: AssetIdentifierOrigin.Generated,
+        },
+        ...(dto.barcode
+          ? [
+              {
+                type: AssetIdentifierType.LegacyCode,
+                value: dto.barcode,
+                origin: AssetIdentifierOrigin.Manual,
+              },
+            ]
+          : []),
+      ],
+      actor.id,
+      manager,
+    );
+    await this.assetsRepository.replaceCustomValues(asset.id, writes, manager);
+    if (dto.photoUrl) {
+      await this.assetsRepository.insertPhoto(
+        asset.id,
+        dto.photoUrl,
+        actor.id,
+        manager,
+      );
     }
+    await this.movementsService.record({
+      assetId: asset.id,
+      movementType: MovementType.Registration,
+      fromCostCenterId: null,
+      fromLocationId: null,
+      fromResponsibleId: null,
+      fromOperationalStatus: null,
+      fromPhysicalCondition: null,
+      toCostCenterId: asset.costCenterId,
+      toLocationId: asset.locationId,
+      toResponsibleId: asset.responsibleId,
+      toOperationalStatus: asset.operationalStatus,
+      toPhysicalCondition: asset.physicalCondition,
+      requestedBy: registration.requestedBy ?? actor.id,
+      authorizedBy: actor.id,
+      reason: registration.reason,
+      documentReference:
+        registration.documentReference === undefined
+          ? (dto.acquisitionDocument ?? null)
+          : registration.documentReference,
+      ...(registration.metadata ? { metadata: registration.metadata } : {}),
+    }, manager);
+    await afterInsert?.(asset, manager);
+    return asset;
   }
 
   private buildCustomWrites(
