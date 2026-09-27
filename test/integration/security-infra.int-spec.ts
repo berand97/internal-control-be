@@ -145,6 +145,8 @@ describe('Endurecimiento BE-10/11/12/15/16/17 (HTTP real + PostgreSQL real)', ()
       await resign(movementId, 'clave-que-nadie-configuro');
       const bad = await http().get(`/api/v1/movements/${movementId}/verify`).set(auth('director'));
       expect(bad.body.error.code).toBe('MOVEMENT_TAMPERED');
+      // La BD de integración es compartida (verifySample de movement-signature recorre activos al azar): se deja íntegra.
+      await resign(movementId, PREVIOUS_MOVEMENT_SECRET);
     });
 
     it('los movimientos nuevos se firman con la clave actual, no con la anterior', async () => {

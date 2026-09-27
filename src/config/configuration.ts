@@ -248,7 +248,11 @@ const readList = (key: string): ReadonlyArray<string> =>
     .filter((item) => item !== '');
 
 const configuration = (): AppConfig => {
-  // Primero: sin claves propias en producción el backend no arranca (BE-12).
+  // SIGNATURE_VERIFY_URL se valida antes que GOTENBERG_URL y que las claves propias (BE-12): si faltan varias en
+  // producción, el primer error es el de la URL que queda impresa en las actas.
+  const signatureVerifyUrl = resolveSignatureVerifyUrl(process.env);
+  const gotenbergUrl = resolveGotenbergUrl(process.env);
+  // Sin claves propias en producción el backend no arranca (BE-12).
   const secrets = resolveDedicatedSecrets(process.env);
   for (const warning of dedicatedSecretWarnings(process.env)) {
     new Logger('Config').warn(warning);
@@ -338,10 +342,8 @@ const configuration = (): AppConfig => {
       overrides: readFeatureOverrides(),
     },
     documents: {
-      // SIGNATURE_VERIFY_URL se valida antes que GOTENBERG_URL: si faltan las dos en
-      // producción, el primer error es el de la URL que queda impresa en las actas.
-      signatureVerifyUrl: resolveSignatureVerifyUrl(process.env),
-      gotenbergUrl: resolveGotenbergUrl(process.env),
+      signatureVerifyUrl,
+      gotenbergUrl,
       numberingPolicy: readNumberingPolicy(),
       signatureProvider: readSignatureProvider(),
     },
