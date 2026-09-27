@@ -17,8 +17,8 @@ import { StorageService } from '../../src/shared/storage/storage.service.js';
  * bucket privado con versionado y un usuario con la política mínima (DeleteObject solo en health/*).
  *   S3_TEST_ENDPOINT=http://127.0.0.1:19000 S3_TEST_BUCKET=control-interno
  *   S3_TEST_ACCESS_KEY=<usuario de servicio> S3_TEST_SECRET_KEY=<su clave>
- * Imágenes de correo (§10.7), opcional: bucket público con lectura anónima solo de email-assets/* y la política de la
- * aplicación que permite escribir ahí.
+ * Imágenes de correo (§10.7), opcional: bucket público (o el mismo de documentos) con lectura anónima solo de
+ * images/email/* y la política de la aplicación que permite escribir y borrar ahí.
  *   S3_TEST_PUBLIC_BUCKET=control-interno-public [S3_TEST_PUBLIC_BASE_URL=<endpoint>/control-interno-public]
  */
 const endpoint = process.env['S3_TEST_ENDPOINT'] ?? '';
@@ -219,9 +219,9 @@ describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
       'base64',
     );
 
-    it('putPublicAsset sube a email-assets/ del bucket público y la URL se abre sin firma con sus cabeceras', async () => {
+    it('putPublicAsset sube a images/email/ del bucket de imágenes y la URL se abre sin firma con sus cabeceras', async () => {
       const service = serviceWith(s3Row({ s3PublicAssetsBucket: publicBucket, s3PublicAssetsBaseUrl: publicBaseUrl }), DEV);
-      const key = `email-assets/${crypto.randomUUID()}.png`;
+      const key = `images/email/${crypto.randomUUID()}.png`;
       const stored = await service.putPublicAsset({
         key,
         body: png,
@@ -244,7 +244,7 @@ describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
     it('sin bucket público configurado: PUBLIC_ASSETS_NOT_CONFIGURED', async () => {
       await expect(
         serviceWith(s3Row(), DEV).putPublicAsset({
-          key: `email-assets/${crypto.randomUUID()}.png`,
+          key: `images/email/${crypto.randomUUID()}.png`,
           body: png,
           contentType: 'image/png',
           cacheControl: 'public, max-age=31536000, immutable',

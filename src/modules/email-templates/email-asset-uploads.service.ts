@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { ErrorCode } from '../../common/constants/error-code.enum.js';
 import { ApiException } from '../../common/exceptions/api.exception.js';
+import { emailImageKey } from '../../shared/storage/storage-keys.js';
 import { StorageService } from '../../shared/storage/storage.service.js';
 import {
   EMAIL_IMAGE_LIMITS,
@@ -19,23 +20,23 @@ export interface EmailAssetUpload {
   readonly buffer: Buffer;
 }
 
-/** Prefijo de las imágenes en el bucket público: es lo único que la política anónima deja leer. */
-export const EMAIL_ASSET_KEY_PREFIX = 'email-assets';
-
 /** Inmutables: la clave lleva un uuid nuevo por imagen y nunca se reescribe. */
 export const EMAIL_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 const EXTENSION: Record<EmailAssetMime, 'png' | 'jpg'> = { 'image/png': 'png', 'image/jpeg': 'jpg' };
 
-/** Clave no adivinable y sin el nombre original: email-assets/<uuid>.<png|jpg>. */
-export const emailAssetKey = (id: string, mime: EmailAssetMime): string =>
-  `${EMAIL_ASSET_KEY_PREFIX}/${id}.${EXTENSION[mime]}`;
+/**
+ * Clave no adivinable y sin el nombre original: images/email/<uuid>.<png|jpg>, lo único que la política anónima deja
+ * leer (storage-keys.ts). Las filas anteriores conservan su clave email-assets/<uuid>.<png|jpg>.
+ */
+export const emailAssetKey = (id: string, mime: EmailAssetMime): string => emailImageKey(id, EXTENSION[mime]);
 
 /**
  * Subida de imágenes de las plantillas de correo: valida por bytes mágicos, re-codifica (sin EXIF/GPS, ≤ 1200 px),
- * deduplica por sha256 y guarda los bytes en el bucket PÚBLICO del proveedor S3 (StorageService.putPublicAsset).
- * En la BD solo quedan clave, URL pública y metadatos. Sin bucket público configurado: 409
- * PUBLIC_ASSETS_NOT_CONFIGURED; nunca se guarda en otro sitio.
+ * deduplica por sha256 y guarda los bytes en el bucket de imágenes públicas del proveedor S3
+ * (StorageService.putPublicAsset; puede ser el mismo bucket de documentos, ver docs/DEPLOY.md §10.7). En la BD solo
+ * quedan clave, URL pública y metadatos. Sin bucket de imágenes configurado: 409 PUBLIC_ASSETS_NOT_CONFIGURED; nunca
+ * se guarda en otro sitio.
  */
 @Injectable()
 export class EmailAssetUploadsService {
@@ -89,7 +90,9 @@ export class EmailAssetUploadsService {
       ],
     )) as Array<{ id: string }>;
     if (inserted.length === 0) {
-      // Otra subida de la misma imagen ganó la carrera: se intenta borrar el objeto duplicado y se devuelve la existente.
+      // Otra subida de la misma imagen ganó la carrera: se borra el objeto duplicado (la política de la aplicación
+      // permite DeleteObject en images/email/*, §10.7) y se devuelve la existente. Si el borrado falla solo se
+      // registra: el objeto huérfano no lo referencia ninguna fila y la subida no debe fallar por eso.
       await this.storage
         .deletePublicAsset(key)
         .catch(() => this.logger.warn(`No se pudo borrar el objeto duplicado ${key}`));

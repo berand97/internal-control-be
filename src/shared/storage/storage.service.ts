@@ -44,6 +44,7 @@ import {
   publicAssetUrl,
 } from './public-assets.js';
 import { assertSafeStorageKey } from './storage-key.js';
+import { EMAIL_IMAGE_KEY_PREFIX, isPublicKey } from './storage-keys.js';
 import type { PutObjectInput, StoragePort, StoredObject } from './storage.port.js';
 
 export type OauthProvider = 'google_drive' | 'onedrive';
@@ -112,6 +113,22 @@ const mask = (value: string | null): string | null => {
   return `${value.slice(0, 2)}****${value.slice(-2)}`;
 };
 
+/** Clave válida fuera de la carpeta pública images/. */
+const assertPrivateKey = (key: string): void => {
+  assertSafeStorageKey(key);
+  if (isPublicKey(key)) {
+    throw new ApiException(ErrorCode.StorageKeyInvalid);
+  }
+};
+
+/** Clave válida dentro de images/email/, lo único que se sube o borra como archivo público. */
+const assertEmailImageKey = (key: string): void => {
+  assertSafeStorageKey(key);
+  if (!key.startsWith(EMAIL_IMAGE_KEY_PREFIX)) {
+    throw new ApiException(ErrorCode.StorageKeyInvalid);
+  }
+};
+
 @Injectable()
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
@@ -125,8 +142,10 @@ export class StorageService {
   ) {}
 
   // Toda clave se valida aquí, antes de elegir el driver: ninguna puede salir de su carpeta o prefijo.
+  // Los documentos nunca van bajo images/: esa carpeta puede tener lectura anónima si el bucket de imágenes de correo
+  // es el mismo de documentos (docs/DEPLOY.md §10.7).
   async put(input: PutObjectInput): Promise<StoredObject> {
-    assertSafeStorageKey(input.key);
+    assertPrivateKey(input.key);
     return (await this.resolveAdapter()).put(input);
   }
 
@@ -141,7 +160,7 @@ export class StorageService {
   }
 
   async delete(key: string): Promise<void> {
-    assertSafeStorageKey(key);
+    assertPrivateKey(key);
     return (await this.resolveAdapter()).delete(key);
   }
 
@@ -675,12 +694,13 @@ export class StorageService {
   }
 
   /**
-   * Sube un archivo público (imágenes de correo) al bucket público del proveedor S3 activo, con el mismo endpoint y
-   * credenciales que el bucket de documentos. Sin driver s3, sin bucket público o sin URL base responde
-   * PUBLIC_ASSETS_NOT_CONFIGURED: nunca se guarda en otro sitio.
+   * Sube un archivo público (imágenes de correo, solo claves images/email/…) al bucket de imágenes del proveedor S3
+   * activo, con el mismo endpoint y credenciales que el de documentos. Puede ser un bucket aparte o el mismo de
+   * documentos con lectura anónima solo de images/email/* (docs/DEPLOY.md §10.7). Sin driver s3, sin bucket de
+   * imágenes o sin URL base responde PUBLIC_ASSETS_NOT_CONFIGURED: nunca se guarda en otro sitio.
    */
   async putPublicAsset(input: PublicAssetInput): Promise<StoredPublicAsset> {
-    assertSafeStorageKey(input.key);
+    assertEmailImageKey(input.key);
     const resolved = await this.resolvedConfig();
     const { publicAssetsBucket, publicAssetsBaseUrl } = resolved.s3;
     if (
@@ -705,9 +725,9 @@ export class StorageService {
     return { key: input.key, publicUrl: publicAssetUrl(publicAssetsBaseUrl, input.key) };
   }
 
-  /** Borra un objeto del bucket público (solo para deshacer una subida que perdió la carrera por el mismo sha256). */
+  /** Borra una imagen de correo (images/email/…) del bucket de imágenes: solo para deshacer una subida que perdió la carrera por el mismo sha256. */
   async deletePublicAsset(key: string): Promise<void> {
-    assertSafeStorageKey(key);
+    assertEmailImageKey(key);
     const resolved = await this.resolvedConfig();
     if (resolved.driver !== 's3' || !resolved.s3.publicAssetsBucket) {
       return;

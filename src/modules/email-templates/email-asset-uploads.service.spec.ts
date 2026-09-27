@@ -1,10 +1,11 @@
+import { Logger } from '@nestjs/common';
 import sharp from 'sharp';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode } from '../../common/constants/error-code.enum.js';
 import { ApiException } from '../../common/exceptions/api.exception.js';
 import { EMAIL_ASSET_CACHE_CONTROL, EmailAssetUploadsService, emailAssetKey } from './email-asset-uploads.service.js';
 
-const KEY = /^email-assets\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.png$/;
+const KEY = /^images\/email\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.png$/;
 
 describe('EmailAssetUploadsService.upload', () => {
   let storage: { putPublicAsset: ReturnType<typeof vi.fn>; deletePublicAsset: ReturnType<typeof vi.fn> };
@@ -38,7 +39,7 @@ describe('EmailAssetUploadsService.upload', () => {
     service = new EmailAssetUploadsService(repo as never, storage as never);
   });
 
-  it('sube al bucket público con clave email-assets/<uuid>.png (sin el nombre original), Content-Type y caché inmutable', async () => {
+  it('sube al bucket público con clave images/email/<uuid>.png (sin el nombre original), Content-Type y caché inmutable', async () => {
     await service.upload({ buffer: png, originalname: 'Mi logo secreto.png' }, 'actor');
     expect(storage.putPublicAsset).toHaveBeenCalledTimes(1);
     const input = storage.putPublicAsset.mock.calls[0]?.[0] as { key: string; contentType: string; cacheControl: string; body: Buffer };
@@ -49,7 +50,7 @@ describe('EmailAssetUploadsService.upload', () => {
     const params = repo.query.mock.calls[0]?.[1] as ReadonlyArray<unknown>;
     expect(params[1]).toBe(input.key);
     expect(params[2]).toBe(`https://cdn.test/b/${input.key}`);
-    expect(params[0]).toBe(input.key.slice('email-assets/'.length, -'.png'.length));
+    expect(params[0]).toBe(input.key.slice('images/email/'.length, -'.png'.length));
     expect(params[8]).toBe('Mi logo secreto.png');
   });
 
@@ -67,6 +68,21 @@ describe('EmailAssetUploadsService.upload', () => {
     expect(storage.deletePublicAsset).toHaveBeenCalledWith(key);
   });
 
+  it('carrera por el mismo sha256 y el borrado del duplicado falla: solo se registra y se devuelve la ganadora', async () => {
+    repo.query.mockResolvedValueOnce([]);
+    storage.deletePublicAsset.mockRejectedValueOnce(new Error('AccessDenied'));
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const result = await service.upload({ buffer: png }, 'actor');
+      expect(result.id).toBe('x');
+      expect(storage.deletePublicAsset).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toMatch(/^No se pudo borrar el objeto duplicado images\/email\//);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('sin bucket público: el error de configuración sale tal cual y no se inserta nada', async () => {
     storage.putPublicAsset.mockRejectedValueOnce(new ApiException(ErrorCode.PublicAssetsNotConfigured));
     await expect(service.upload({ buffer: png }, 'actor')).rejects.toMatchObject({ code: ErrorCode.PublicAssetsNotConfigured });
@@ -81,6 +97,7 @@ describe('EmailAssetUploadsService.upload', () => {
   });
 
   it('emailAssetKey: .jpg para JPEG', () => {
-    expect(emailAssetKey('abc', 'image/jpeg')).toBe('email-assets/abc.jpg');
+    const id = '3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b';
+    expect(emailAssetKey(id, 'image/jpeg')).toBe(`images/email/${id}.jpg`);
   });
 });

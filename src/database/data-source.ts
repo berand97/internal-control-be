@@ -95,6 +95,7 @@ import { StorageSecretsAndOauthState1767225780000 } from './migrations/176722578
 import { EmailTemplateBlocks1767225800000 } from './migrations/1767225800000-email-template-blocks.js';
 import { EmailTemplatesSuperAdmin1767225810000 } from './migrations/1767225810000-email-templates-super-admin.js';
 import { EmailRichParagraphAndAssets1767225820000 } from './migrations/1767225820000-email-rich-paragraph-and-assets.js';
+import { EmailAssetImagesPrefix1767225830000 } from './migrations/1767225830000-email-asset-images-prefix.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -216,6 +217,7 @@ const dataSource = new DataSource({
     EmailTemplateBlocks1767225800000,
     EmailTemplatesSuperAdmin1767225810000,
     EmailRichParagraphAndAssets1767225820000,
+    EmailAssetImagesPrefix1767225830000,
   ],
 });
 

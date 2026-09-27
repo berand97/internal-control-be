@@ -17,6 +17,7 @@ import {
   EmailRichParagraphAndAssets1767225820000,
   docToText,
 } from '../../src/database/migrations/1767225820000-email-rich-paragraph-and-assets.js';
+import { EmailAssetImagesPrefix1767225830000 } from '../../src/database/migrations/1767225830000-email-asset-images-prefix.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { FeatureFlagsService } from '../../src/modules/features/services/feature-flags.service.js';
@@ -291,6 +292,43 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         expect(await runner.query(`SELECT to_regclass('email_asset') AS t`)).toEqual([{ t: null }]);
         await migration.up(runner);
         expect(await snapshot(runner)).toEqual(before);
+      } finally {
+        await runner.rollbackTransaction();
+        await runner.release();
+      }
+    });
+
+    it('1767225830000: el CHECK acepta images/email/ y email-assets/; down() falla si hay claves nuevas y si no, restaura', async () => {
+      const runner = dataSource.createQueryRunner();
+      await runner.connect();
+      await runner.startTransaction();
+      const insert = (key: string) =>
+        runner.query(
+          `INSERT INTO email_asset (id, storage_key, public_url, mime, byte_size, width, height, sha256, original_name, created_by)
+           VALUES ($1, $2, 'https://cdn.test/x', 'image/png', 1, 1, 1, $3, 'x.png', NULL)`,
+          [key.split('/').at(-1)?.slice(0, 36), key, createHash('sha256').update(key).digest('hex')],
+        );
+      const rejected = async (key: string) => {
+        await runner.query('SAVEPOINT chk');
+        await expect(insert(key)).rejects.toMatchObject({ constraint: 'chk_email_asset_storage_key' });
+        await runner.query('ROLLBACK TO SAVEPOINT chk');
+      };
+      try {
+        const migration = new EmailAssetImagesPrefix1767225830000();
+        const fresh = `images/email/${randomUUID()}.png`;
+        await insert(fresh);
+        await insert(`email-assets/${randomUUID()}.jpg`);
+        await rejected(`images/otra/${randomUUID()}.png`);
+        await rejected(`documents/${randomUUID()}.png`);
+
+        await expect(migration.down(runner)).rejects.toThrow(/imagen\(es\) de correo usan claves images\/email\//);
+        await runner.query('DELETE FROM email_asset WHERE storage_key LIKE $1', ['images/email/%']);
+        await migration.down(runner);
+        await rejected(`images/email/${randomUUID()}.png`);
+        await insert(`email-assets/${randomUUID()}.png`);
+
+        await migration.up(runner);
+        await insert(`images/email/${randomUUID()}.jpg`);
       } finally {
         await runner.rollbackTransaction();
         await runner.release();

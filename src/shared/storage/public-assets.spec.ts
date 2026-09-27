@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { ConfigService } from '@nestjs/config';
 import type { Repository } from 'typeorm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -64,7 +64,7 @@ const build = (row: Partial<StorageSettings>) => {
 };
 
 const INPUT = {
-  key: 'email-assets/3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b.png',
+  key: 'images/email/3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b.png',
   body: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
   contentType: 'image/png',
   cacheControl: 'public, max-age=31536000, immutable',
@@ -98,7 +98,7 @@ describe('bucket público de imágenes: validación', () => {
   });
 
   it('URL pública = base + clave (segmentos codificados)', () => {
-    expect(publicAssetUrl('https://h/b/', 'email-assets/a b.png')).toBe('https://h/b/email-assets/a%20b.png');
+    expect(publicAssetUrl('https://h/b/', 'images/email/a b.png')).toBe('https://h/b/images/email/a%20b.png');
   });
 });
 
@@ -136,6 +136,66 @@ describe('StorageService.putPublicAsset (cliente S3 simulado)', () => {
     const { service } = build(row);
     await expect(service.putPublicAsset(INPUT)).rejects.toMatchObject({ code: ErrorCode.PublicAssetsNotConfigured });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('mismo bucket que documentos: la imagen va a images/email/ de ese bucket', async () => {
+    const send = vi.spyOn(S3Client.prototype, 'send').mockResolvedValue({} as never);
+    const { service } = build({
+      ...S3_ROW,
+      s3PublicAssetsBucket: 'control-interno',
+      s3PublicAssetsBaseUrl: 'https://minio-api.unac.edu.co/control-interno',
+    });
+    const stored = await service.putPublicAsset(INPUT);
+    expect(stored.publicUrl).toBe(`https://minio-api.unac.edu.co/control-interno/${INPUT.key}`);
+    const command = send.mock.calls[0]?.[0] as PutObjectCommand;
+    expect(command.input).toMatchObject({ Bucket: 'control-interno', Key: INPUT.key });
+  });
+
+  it.each([
+    ['fuera de images/email/', 'documents/2026/OCI-01-55/2026-0001.pdf'],
+    ['otra carpeta de images/', 'images/otra/x.png'],
+    ['prefijo anterior', 'email-assets/3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b.png'],
+  ])('putPublicAsset y deletePublicAsset rechazan una clave %s', async (_label, key) => {
+    const send = vi.spyOn(S3Client.prototype, 'send').mockResolvedValue({} as never);
+    const { service } = build(S3_ROW);
+    await expect(service.putPublicAsset({ ...INPUT, key })).rejects.toMatchObject({ code: ErrorCode.StorageKeyInvalid });
+    await expect(service.deletePublicAsset(key)).rejects.toMatchObject({ code: ErrorCode.StorageKeyInvalid });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('deletePublicAsset borra de images/email/ en el bucket de imágenes', async () => {
+    const send = vi.spyOn(S3Client.prototype, 'send').mockResolvedValue({} as never);
+    const { service } = build(S3_ROW);
+    await service.deletePublicAsset(INPUT.key);
+    const command = send.mock.calls[0]?.[0] as DeleteObjectCommand;
+    expect(command).toBeInstanceOf(DeleteObjectCommand);
+    expect(command.input).toMatchObject({ Bucket: 'control-interno-public', Key: INPUT.key });
+  });
+
+  it('put/delete de documentos rechazan claves bajo images/ (carpeta que puede ser pública)', async () => {
+    const send = vi.spyOn(S3Client.prototype, 'send').mockResolvedValue({} as never);
+    const { service } = build(S3_ROW);
+    const body = Buffer.from('x');
+    await expect(service.put({ key: INPUT.key, body, contentType: 'application/pdf' })).rejects.toMatchObject({
+      code: ErrorCode.StorageKeyInvalid,
+    });
+    await expect(service.put({ key: 'images/x.pdf', body, contentType: 'application/pdf' })).rejects.toMatchObject({
+      code: ErrorCode.StorageKeyInvalid,
+    });
+    await expect(service.delete(INPUT.key)).rejects.toMatchObject({ code: ErrorCode.StorageKeyInvalid });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('una clave antigua guardada en la BD (email-assets/, document-templates/…) se sigue leyendo tal cual', async () => {
+    const send = vi.spyOn(S3Client.prototype, 'send').mockResolvedValue({
+      Body: { transformToByteArray: async () => new Uint8Array([1, 2, 3]) },
+    } as never);
+    const { service } = build(S3_ROW);
+    const read = await service.getFrom('s3', 'document-templates/OCI-01-55/2026-09-02-v2-3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b.docx');
+    expect([...read]).toEqual([1, 2, 3]);
+    const command = send.mock.calls[0]?.[0] as GetObjectCommand;
+    expect(command).toBeInstanceOf(GetObjectCommand);
+    expect(command.input.Key).toBe('document-templates/OCI-01-55/2026-09-02-v2-3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b.docx');
   });
 
   it('una falla del proveedor responde STORAGE_UNAVAILABLE', async () => {
