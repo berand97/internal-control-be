@@ -39,6 +39,21 @@ export class InventoryItemDto {
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'null: sobrante sin activo registrado' })
   readonly assetId!: string | null;
 
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description:
+      'Código del activo (visible vigente, si no el heredado, si no el interno), del ítem o, en un sobrante resuelto, ' +
+      'del creado. null: sobrante sin activo',
+  })
+  readonly assetCode!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true })
+  readonly assetDescription!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Código heredado (placa anterior) o código de barras' })
+  readonly assetLegacyCode!: string | null;
+
   @ApiProperty({ enum: VERIFICATION_RESULTS, enumName: 'VerificationResult', description: RESULT_DESCRIPTION })
   readonly result!: VerificationResult;
 

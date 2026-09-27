@@ -12,6 +12,15 @@ export interface AssetValuation {
   readonly bookValueSource: BookValueSource | null;
 }
 
+/** Cómo se muestra el activo de un ítem (el mismo código que usan las actas y las entregas). */
+export interface AssetIdentity {
+  /** Código visible vigente, si no el código heredado, si no el código interno. */
+  readonly code: string;
+  readonly description: string;
+  /** Código heredado (placa del sistema anterior) vigente, o el código de barras; null si no tiene. */
+  readonly legacyCode: string | null;
+}
+
 export const NO_VALUATION: AssetValuation = {
   acquisitionPrice: null,
   priceIsZero: false,

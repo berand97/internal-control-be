@@ -117,7 +117,9 @@ describe('InventoriesService', () => {
     permissionsService = { userHasPermission: vi.fn() };
     auditLogsRepository = { record: vi.fn() };
     valuation = {
-      viewContext: vi.fn().mockResolvedValue({ categories: [], causeLabels: new Map(), valuations: new Map() }),
+      viewContext: vi
+        .fn()
+        .mockResolvedValue({ categories: [], causeLabels: new Map(), valuations: new Map(), assets: new Map() }),
       basis: vi.fn().mockResolvedValue({ kind: 'SYSTEM_SNAPSHOT' }),
     };
     act = { state: vi.fn().mockResolvedValue({ generation: 'NONE' }), enqueueOnApproval: vi.fn() };

@@ -1,7 +1,7 @@
 import { type SuggestibleCategory, suggestFindingCategory } from '../domain/finding-suggestion.js';
 import type { PhysicalInventoryItem } from '../entities/physical-inventory-item.entity.js';
 import { VerificationResult } from '../enums/verification-result.js';
-import { type AssetValuation, NO_VALUATION } from '../domain/inventory-valuation.js';
+import { type AssetIdentity, type AssetValuation, NO_VALUATION } from '../domain/inventory-valuation.js';
 
 /**
  * Serialización de ítems, progreso y reporte de una toma (InventoryItemDto, InventoryProgressDto e
@@ -15,13 +15,19 @@ export interface CatalogViewContext {
 export interface ItemViewContext extends CatalogViewContext {
   /** Valoración por activo (InventoryValuationService); el activo del ítem o, en un sobrante resuelto, el creado. */
   readonly valuations: ReadonlyMap<string, AssetValuation>;
+  /** Código y descripción de esos mismos activos. */
+  readonly assets: ReadonlyMap<string, AssetIdentity>;
 }
 
 /** Lo que siempre sale en vivo, aunque el reporte se haya congelado al cerrar. */
 const liveItemFields = (item: PhysicalInventoryItem, context: ItemViewContext) => {
   const valuedAsset = item.assetId ?? item.resolvedAssetId ?? null;
   const valuation = (valuedAsset ? context.valuations.get(valuedAsset) : undefined) ?? NO_VALUATION;
+  const identity = valuedAsset ? context.assets.get(valuedAsset) : undefined;
   return {
+    assetCode: identity?.code ?? null,
+    assetDescription: identity?.description ?? null,
+    assetLegacyCode: identity?.legacyCode ?? null,
     acquisitionPrice: valuation.acquisitionPrice,
     priceIsZero: valuation.priceIsZero,
     bookValue: valuation.bookValue,

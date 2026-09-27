@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
 import { bogotaDate } from '../domain/inventory-schedule.js';
-import { type AssetValuation, type ReconciliationBasis, valuationOf } from '../domain/inventory-valuation.js';
+import {
+  type AssetIdentity,
+  type AssetValuation,
+  type ReconciliationBasis,
+  valuationOf,
+} from '../domain/inventory-valuation.js';
 import type { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 import type { PhysicalInventoryItem } from '../entities/physical-inventory-item.entity.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
@@ -91,7 +96,40 @@ export class InventoryValuationService {
   ): Promise<ItemViewContext> {
     const base = await this.catalogs.viewContext();
     const assetIds = items.flatMap((item) => [item.assetId, item.resolvedAssetId]).filter((id): id is string => !!id);
-    return { ...base, valuations: await this.valuations(inventory, assetIds, manager) };
+    return {
+      ...base,
+      valuations: await this.valuations(inventory, assetIds, manager),
+      assets: await this.identities(assetIds, manager),
+    };
+  }
+
+  /** Código (visible > heredado > interno), descripción y código heredado (o de barras) de cada activo. */
+  async identities(assetIds: ReadonlyArray<string>, manager?: EntityManager): Promise<Map<string, AssetIdentity>> {
+    const ids = [...new Set(assetIds)];
+    if (ids.length === 0) {
+      return new Map();
+    }
+    const rows = (await (manager ?? this.dataSource).query(
+      `
+      SELECT a.id, a.description,
+             coalesce(visible.value, legacy.value, a.internal_code) AS code,
+             coalesce(legacy.value, a.barcode) AS legacy_code
+      FROM unnest($1::uuid[]) AS x(id)
+      JOIN asset a ON a.id = x.id
+      LEFT JOIN LATERAL (
+        SELECT i.value FROM asset_identifier i
+        WHERE i.asset_id = a.id AND i.identifier_type = 'VISIBLE_CODE' AND i.valid_to IS NULL LIMIT 1
+      ) visible ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT i.value FROM asset_identifier i
+        WHERE i.asset_id = a.id AND i.identifier_type = 'LEGACY_CODE' AND i.valid_to IS NULL ORDER BY i.created_at LIMIT 1
+      ) legacy ON TRUE
+      `,
+      [ids],
+    )) as Array<{ id: string; description: string; code: string; legacy_code: string | null }>;
+    return new Map(
+      rows.map((row) => [row.id, { code: row.code, description: row.description, legacyCode: row.legacy_code }]),
+    );
   }
 
   private async cut(id: string, manager?: EntityManager): Promise<CutRow | undefined> {
