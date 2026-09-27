@@ -116,6 +116,7 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
       ['/documents', 'file-text'],
       ['/storage', 'hard-drive'],
       ['/mail', 'circle'],
+      ['/email-templates', 'mail'],
       ['/features', 'panels-top-left'],
       ['/navigation', 'list-tree'],
     ]);
