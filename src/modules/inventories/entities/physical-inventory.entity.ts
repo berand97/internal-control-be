@@ -81,6 +81,32 @@ export class PhysicalInventory {
   @Column({ name: 'cancelled_by', type: 'uuid', nullable: true })
   cancelledBy!: string | null;
 
+  /** Corte contable contra el que se concilia; NULL = contra la foto del sistema. */
+  @Column({ name: 'accounting_cut_id', type: 'uuid', nullable: true })
+  accountingCutId!: string | null;
+
+  /** Instante en que start() congeló la foto; NULL en tomas iniciadas antes de guardarlo. */
+  @Column({ name: 'snapshot_taken_at', type: 'timestamptz', nullable: true })
+  snapshotTakenAt!: Date | null;
+
+  /** Solicitud del outbox del acta OCI-21-37, encolada al aprobar la conciliación. */
+  @Column({ name: 'act_request_id', type: 'uuid', nullable: true })
+  actRequestId!: string | null;
+
+  /** Acta OCI-21-37 generada (la guarda onGenerated). */
+  @Column({ name: 'act_document_id', type: 'uuid', nullable: true })
+  actDocumentId!: string | null;
+
+  /** Por qué el acta no se encoló (FORMAT_NOT_READY, RESPONSIBLE_WITHOUT_PERSON, APPROVER_WITHOUT_PERSON). */
+  @Column({ name: 'act_blocked_code', type: 'varchar', length: 40, nullable: true })
+  actBlockedCode!: string | null;
+
+  @Column({ name: 'act_blocked_message', type: 'text', nullable: true })
+  actBlockedMessage!: string | null;
+
+  @Column({ name: 'act_blocked_at', type: 'timestamptz', nullable: true })
+  actBlockedAt!: Date | null;
+
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

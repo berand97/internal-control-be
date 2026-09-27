@@ -110,6 +110,14 @@ export class InventorySummaryDto {
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly cancelledBy!: string | null;
 
+  @ApiProperty({
+    type: 'string',
+    format: 'uuid',
+    nullable: true,
+    description: 'Corte contable asociado; null = se compara contra la foto del sistema',
+  })
+  readonly accountingCutId!: string | null;
+
   @ApiProperty({ format: 'date-time' })
   readonly createdAt!: string;
 

@@ -68,6 +68,8 @@ describe('InventoriesService', () => {
   let assetState: { apply: ReturnType<typeof vi.fn> };
   let permissionsService: { userHasPermission: ReturnType<typeof vi.fn> };
   let auditLogsRepository: { record: ReturnType<typeof vi.fn> };
+  let valuation: { viewContext: ReturnType<typeof vi.fn>; basis: ReturnType<typeof vi.fn> };
+  let act: { state: ReturnType<typeof vi.fn>; enqueueOnApproval: ReturnType<typeof vi.fn> };
   let service: InventoriesService;
 
   beforeEach(() => {
@@ -114,6 +116,11 @@ describe('InventoriesService', () => {
     assetState = { apply: vi.fn() };
     permissionsService = { userHasPermission: vi.fn() };
     auditLogsRepository = { record: vi.fn() };
+    valuation = {
+      viewContext: vi.fn().mockResolvedValue({ categories: [], causeLabels: new Map(), valuations: new Map() }),
+      basis: vi.fn().mockResolvedValue({ kind: 'SYSTEM_SNAPSHOT' }),
+    };
+    act = { state: vi.fn().mockResolvedValue({ generation: 'NONE' }), enqueueOnApproval: vi.fn() };
     service = new InventoriesService(
       inventories as never,
       items as never,
@@ -129,6 +136,8 @@ describe('InventoriesService', () => {
       assetState as never,
       actorPolicy as never,
       catalogs as never,
+      valuation as never,
+      act as never,
     );
   });
 

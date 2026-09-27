@@ -37,7 +37,9 @@ import { InventoryStatus } from '../enums/inventory-status.js';
 import { VerificationResult } from '../enums/verification-result.js';
 import { InventoryActorPolicy } from './inventory-actor-policy.service.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
-import { type ItemViewContext, toItemView, toProgressView, toReportView } from './inventory-item-view.js';
+import { InventoryActService } from './inventory-act.service.js';
+import { type ItemViewContext, mergeFrozenReport, toItemView, toProgressView, toReportView } from './inventory-item-view.js';
+import { InventoryValuationService } from './inventory-valuation.service.js';
 import { inventorySummary } from './inventory-summary.js';
 
 const ENTITY_TYPE = 'INVENTORY';
@@ -80,6 +82,8 @@ export class InventoriesService {
     private readonly assetState: AssetStateService,
     private readonly actorPolicy: InventoryActorPolicy,
     private readonly catalogs: InventoryCatalogsService,
+    private readonly valuation: InventoryValuationService,
+    private readonly act: InventoryActService,
   ) {}
 
   async list(query: QueryInventoriesDto) {
@@ -113,12 +117,14 @@ export class InventoriesService {
       where: { inventoryId: id },
       order: { verificationResult: 'ASC' },
     });
-    const context = await this.catalogs.viewContext();
+    const context = await this.valuation.viewContext(inventory, items);
     return {
       ...this.toSummary(inventory),
       items: items.map((item) => toItemView(item, context)),
       progress: toProgressView(items),
       report: this.frozenOrLiveReport(inventory, items, context),
+      reconciliationBasis: await this.valuation.basis(inventory),
+      act: await this.act.state(inventory),
     };
   }
 
@@ -168,6 +174,7 @@ export class InventoriesService {
       }
       inventory.status = InventoryStatus.InProgress;
       inventory.actualStartDate = bogotaDate(now);
+      inventory.snapshotTakenAt = now;
       await manager.getRepository(PhysicalInventory).save(inventory);
       await this.auditLogsRepository.record(
         {
@@ -249,7 +256,7 @@ export class InventoriesService {
         await manager.getRepository(PhysicalInventoryItem).save(item);
       },
     });
-    return toItemView(item, await this.catalogs.viewContext());
+    return toItemView(item, await this.valuation.viewContext(inventory, [item]));
   }
 
   async reportNotFound(
@@ -276,7 +283,7 @@ export class InventoriesService {
     item.verifiedAt = new Date();
     item.verifiedBy = actor.id;
     await this.items.save(item);
-    return toItemView(item, await this.catalogs.viewContext());
+    return toItemView(item, await this.valuation.viewContext(inventory, [item]));
   }
 
   async reportUnexpected(
@@ -323,7 +330,7 @@ export class InventoriesService {
         photoUrl: null,
       }),
     );
-    return toItemView(item, await this.catalogs.viewContext());
+    return toItemView(item, await this.valuation.viewContext(inventory, [item]));
   }
 
   async progress(id: string) {
@@ -357,7 +364,7 @@ export class InventoriesService {
         throw new ApiException(ErrorCode.InsufficientPermissions);
       }
     }
-    const context = await this.catalogs.viewContext();
+    const context = await this.valuation.viewContext(inventory, []);
     await this.dataSource.transaction(async (manager) => {
       await manager.query(
         `UPDATE physical_inventory_item SET verification_result = $2
@@ -397,18 +404,23 @@ export class InventoriesService {
       inventoryId: inventory.id,
       code: inventory.code,
       status: inventory.status,
-      ...this.frozenOrLiveReport(inventory, items, await this.catalogs.viewContext()),
+      ...this.frozenOrLiveReport(inventory, items, await this.valuation.viewContext(inventory, items)),
+      reconciliationBasis: await this.valuation.basis(inventory),
     };
   }
 
-  /** Con la toma cerrada prevalece lo congelado al cerrar; los campos que no existían entonces salen en vivo. */
+  /**
+   * Con la toma cerrada prevalece lo congelado al cerrar; los campos que no existían entonces, la valoración y la
+   * resolución de sobrantes salen en vivo (mergeFrozenReport).
+   */
   private frozenOrLiveReport(
     inventory: PhysicalInventory,
     items: ReadonlyArray<PhysicalInventoryItem>,
     context: ItemViewContext,
   ) {
-    const live = toReportView(items, context);
-    return inventory.discrepancyReport ? { ...live, ...inventory.discrepancyReport } : live;
+    return inventory.discrepancyReport
+      ? mergeFrozenReport(inventory.discrepancyReport, items, context)
+      : toReportView(items, context);
   }
 
   async requestReconcile(id: string, actor: AuthenticatedUser) {
@@ -465,6 +477,8 @@ export class InventoriesService {
       inventory.status = InventoryStatus.Reconciled;
       inventory.reconcileApprovedAt = new Date();
       inventory.reconcileApprovedBy = actor.id;
+      // El acta OCI-21-37 se encola aquí; si no se puede, la conciliación sigue y el motivo queda en la toma.
+      await this.act.enqueueOnApproval(manager, inventory, actor);
       await manager.getRepository(PhysicalInventory).save(inventory);
       await this.auditLogsRepository.record(
         {

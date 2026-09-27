@@ -1,6 +1,21 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PHYSICAL_CONDITIONS, PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
+import {
+  BOOK_VALUE_SOURCES,
+  type BookValueSource,
+  RECONCILIATION_BASIS_KINDS,
+  type ReconciliationBasisKind,
+} from '../domain/inventory-valuation.js';
 import { INVENTORY_CORRECTION_KINDS, type InventoryCorrectionKind } from '../entities/inventory-item-correction.entity.js';
+import { SURPLUS_RESOLUTIONS, type SurplusResolution } from '../entities/physical-inventory-item.entity.js';
+import {
+  INVENTORY_ACT_GENERATIONS,
+  INVENTORY_ACT_REASONS,
+  INVENTORY_ACT_RETRY_ACTIONS,
+  type InventoryActGeneration,
+  type InventoryActReason,
+  type InventoryActRetryAction,
+} from '../domain/inventory-act.js';
 import { INVENTORY_STATUSES, InventoryStatus } from '../enums/inventory-status.js';
 import { VERIFICATION_RESULTS, VerificationResult } from '../enums/verification-result.js';
 import { SUGGESTIBLE_RESULTS } from './inventory-catalog.dto.js';
@@ -89,6 +104,138 @@ export class InventoryItemDto {
 
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
   readonly voidedAt!: string | null;
+
+  @ApiProperty({
+    type: 'number',
+    nullable: true,
+    description:
+      'Precio de compra registrado del activo (del ítem o, en un sobrante resuelto, del creado). null: sin activo. ' +
+      '0 es un precio registrado (ver priceIsZero)',
+  })
+  readonly acquisitionPrice!: number | null;
+
+  @ApiProperty({ description: 'El precio de compra registrado es 0' })
+  readonly priceIsZero!: boolean;
+
+  @ApiProperty({
+    type: 'number',
+    nullable: true,
+    description:
+      'Valor en libros: la línea del corte contable asociado o, si no trae valor, la última depreciación calculada ' +
+      'hasta la fecha de valoración. null = sin dato (nunca un 0 inventado)',
+  })
+  readonly bookValue!: number | null;
+
+  @ApiProperty({ enum: BOOK_VALUE_SOURCES, enumName: 'BookValueSource', nullable: true })
+  readonly bookValueSource!: BookValueSource | null;
+
+  @ApiProperty({
+    enum: SURPLUS_RESOLUTIONS,
+    enumName: 'SurplusResolution',
+    nullable: true,
+    description: 'Solo sobrantes sin activo, con la toma cerrada: CREATE_ASSET (activo creado) o LEAVE_UNRESOLVED',
+  })
+  readonly surplusResolution!: SurplusResolution | null;
+
+  @ApiProperty({ type: 'string', nullable: true })
+  readonly surplusResolutionReason!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Activo creado a partir del sobrante' })
+  readonly resolvedAssetId!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  readonly resolvedAt!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
+  readonly resolvedBy!: string | null;
+}
+
+export class InventoryReconciliationBasisDto {
+  @ApiProperty({
+    enum: RECONCILIATION_BASIS_KINDS,
+    enumName: 'ReconciliationBasisKind',
+    description: 'ACCOUNTING_CUT: contra el corte contable asociado; SYSTEM_SNAPSHOT: contra la foto del sistema',
+  })
+  readonly kind!: ReconciliationBasisKind;
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
+  readonly cutId!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'date', nullable: true })
+  readonly cutDate!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true })
+  readonly sourceLabel!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'date-time',
+    nullable: true,
+    description: 'Instante de la foto al iniciar; null si no ha iniciado o se inició antes de guardarlo',
+  })
+  readonly snapshotAt!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'date', nullable: true, description: 'Fecha (Bogotá) de la foto' })
+  readonly snapshotDate!: string | null;
+
+  @ApiProperty({
+    format: 'date',
+    description: 'Fecha hasta la que se lee la depreciación: la del corte, la de la foto o, sin foto, hoy',
+  })
+  readonly valuationDate!: string;
+}
+
+export class InventoryActStateDto {
+  @ApiProperty({
+    enum: INVENTORY_ACT_GENERATIONS,
+    enumName: 'InventoryActGeneration',
+    description:
+      'NONE: sin conciliar; NOT_ENQUEUED: la conciliación no pudo encolarla (ver reason); PENDING: en cola; ' +
+      'FAILED: el motor no pudo generarla (ver reason); GENERATED: acta emitida',
+  })
+  readonly generation!: InventoryActGeneration;
+
+  @ApiProperty({ enum: INVENTORY_ACT_REASONS, enumName: 'InventoryActReason', nullable: true })
+  readonly reason!: InventoryActReason | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Explicación para mostrar' })
+  readonly message!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
+  readonly requestId!: string | null;
+
+  @ApiProperty({ type: 'integer' })
+  readonly attempts!: number;
+
+  @ApiProperty({ description: 'FAILED con reintentos automáticos pendientes (el job lo intenta cada minuto)' })
+  readonly retriesAutomatically!: boolean;
+
+  @ApiProperty()
+  readonly retryable!: boolean;
+
+  @ApiProperty({
+    enum: INVENTORY_ACT_RETRY_ACTIONS,
+    enumName: 'InventoryActRetryAction',
+    nullable: true,
+    description:
+      'ENQUEUE: POST /inventories/{id}/act/enqueue; RETRY_REQUEST: POST /documents/requests/{requestId}/retry',
+  })
+  readonly retryAction!: InventoryActRetryAction | null;
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
+  readonly documentId!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true })
+  readonly number!: string | null;
+
+  @ApiProperty({ type: 'string', enum: ['PENDING_SIGNATURE', 'SIGNED', 'REJECTED'], nullable: true })
+  readonly status!: 'PENDING_SIGNATURE' | 'SIGNED' | 'REJECTED' | null;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  readonly signedAt!: string | null;
+
+  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
+  readonly blockedAt!: string | null;
 }
 
 export class InventoryProgressDto {
@@ -155,6 +302,9 @@ export class InventoryReportResponseDto extends InventoryReportDto {
   @ApiProperty({ format: 'uuid' })
   readonly inventoryId!: string;
 
+  @ApiProperty({ type: () => InventoryReconciliationBasisDto })
+  readonly reconciliationBasis!: InventoryReconciliationBasisDto;
+
   @ApiProperty({ example: 'TF-2026-014' })
   readonly code!: string;
 
@@ -171,9 +321,66 @@ export class InventoryDetailResponseDto extends InventorySummaryDto {
 
   @ApiProperty({
     type: () => InventoryReportDto,
-    description: 'Calculado en vivo; con la toma cerrada, lo congelado al cerrar (discrepancy_report) prevalece',
+    description:
+      'Calculado en vivo; con la toma cerrada, lo congelado al cerrar (discrepancy_report) prevalece, salvo valoración ' +
+      'y resolución de sobrantes, que salen siempre en vivo',
   })
   readonly report!: InventoryReportDto;
+
+  @ApiProperty({ type: () => InventoryReconciliationBasisDto, description: 'Contra qué se compara la toma' })
+  readonly reconciliationBasis!: InventoryReconciliationBasisDto;
+
+  @ApiProperty({ type: () => InventoryActStateDto, description: 'Acta OCI-21-37 de la toma' })
+  readonly act!: InventoryActStateDto;
+}
+
+// ---------- Corte contable ----------
+
+export class AccountingCutDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly id!: string;
+
+  @ApiProperty({ format: 'date' })
+  readonly cutDate!: string;
+
+  @ApiProperty()
+  readonly sourceLabel!: string;
+
+  @ApiProperty({
+    type: 'string',
+    enum: ['MANUAL', 'IMPORT'],
+    description: 'MANUAL: fecha y fuente registradas a mano; IMPORT: con líneas importadas (aún no disponible)',
+  })
+  readonly sourceKind!: 'MANUAL' | 'IMPORT';
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
+  readonly stagingImportId!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true })
+  readonly notes!: string | null;
+
+  @ApiProperty({ format: 'uuid' })
+  readonly createdBy!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  readonly createdAt!: string;
+
+  @ApiProperty({ type: 'integer', description: 'Líneas (activos con valor) del corte' })
+  readonly lineCount!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Tomas asociadas' })
+  readonly inventoryCount!: number;
+}
+
+export class InventoryAccountingCutResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly inventoryId!: string;
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
+  readonly accountingCutId!: string | null;
+
+  @ApiProperty({ type: () => InventoryReconciliationBasisDto })
+  readonly reconciliationBasis!: InventoryReconciliationBasisDto;
 }
 
 export class InventoryListResponseDto {

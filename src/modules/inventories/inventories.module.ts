@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module.js';
 import { AppUser } from '../auth/entities/app-user.entity.js';
 import { AssetsModule } from '../assets/assets.module.js';
+import { DocumentsModule } from '../documents/documents.module.js';
 import { Asset } from '../assets/entities/asset.entity.js';
 import { CostCenter } from '../cost-centers/entities/cost-center.entity.js';
 import { Location } from '../locations/entities/location.entity.js';
@@ -17,10 +18,15 @@ import { InventoryMissingCause } from './entities/inventory-missing-cause.entity
 import { PhysicalInventoryItem } from './entities/physical-inventory-item.entity.js';
 import { PhysicalInventoryScope } from './entities/physical-inventory-scope.entity.js';
 import { PhysicalInventory } from './entities/physical-inventory.entity.js';
+import { AccountingCutsController } from './accounting-cuts.controller.js';
 import { InventoriesController } from './inventories.controller.js';
 import { InventoryCatalogsController } from './inventory-catalogs.controller.js';
 import { InventoryRemindersJob } from './jobs/inventory-reminders.job.js';
+import { AccountingCutsService } from './services/accounting-cuts.service.js';
 import { InventoriesService } from './services/inventories.service.js';
+import { InventoryActService } from './services/inventory-act.service.js';
+import { InventorySurplusService } from './services/inventory-surplus.service.js';
+import { InventoryValuationService } from './services/inventory-valuation.service.js';
 import { InventoryActorPolicy } from './services/inventory-actor-policy.service.js';
 import { InventoryCatalogsService } from './services/inventory-catalogs.service.js';
 import { InventoryCorrectionsService } from './services/inventory-corrections.service.js';
@@ -34,6 +40,7 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
   imports: [
     AuthModule,
     AssetsModule,
+    DocumentsModule,
     MovementsModule,
     MailModule,
     NotificationsModule,
@@ -53,7 +60,7 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
     ]),
   ],
   // El de catálogos va primero: sus rutas fijas (/inventories/catalogs/...) no deben caer en /inventories/:id.
-  controllers: [InventoryCatalogsController, InventoriesController],
+  controllers: [InventoryCatalogsController, InventoriesController, AccountingCutsController],
   providers: [
     InventoriesService,
     InventoryActorPolicy,
@@ -65,6 +72,10 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
     InventorySchedulesService,
     InventoryPlanningService,
     InventoryRemindersJob,
+    InventoryValuationService,
+    InventoryActService,
+    InventorySurplusService,
+    AccountingCutsService,
   ],
   exports: [InventoriesService, InventorySchedulesService, InventoryRemindersService, InventoryPlanningService],
 })

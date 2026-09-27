@@ -23,6 +23,7 @@ import { VerificationResult } from '../enums/verification-result.js';
 import { InventoryActorPolicy } from './inventory-actor-policy.service.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
 import { toItemView } from './inventory-item-view.js';
+import { InventoryValuationService } from './inventory-valuation.service.js';
 
 const ENTITY_TYPE = 'INVENTORY';
 
@@ -62,6 +63,7 @@ export class InventoryCorrectionsService {
     private readonly dataSource: DataSource,
     private readonly actorPolicy: InventoryActorPolicy,
     private readonly catalogs: InventoryCatalogsService,
+    private readonly valuation: InventoryValuationService,
     @Inject('AuditLogsRepository')
     private readonly auditLogs: AuditLogsRepository,
   ) {}
@@ -86,7 +88,7 @@ export class InventoryCorrectionsService {
       throw invalid('result', 'La corrección no cambia nada del ítem');
     }
     const correction = await this.persist(inventory, item, 'CORRECT', before, after, dto.reason, actor);
-    return { item: toItemView(item, await this.catalogs.viewContext()), correction: this.toCorrection(correction) };
+    return { item: toItemView(item, await this.valuation.viewContext(inventory, [item])), correction: this.toCorrection(correction) };
   }
 
   async voidSurplus(id: string, itemId: string, dto: VoidInventoryItemDto, actor: AuthenticatedUser) {
@@ -101,7 +103,7 @@ export class InventoryCorrectionsService {
     item.findingCategoryCode = null;
     const after = snapshot(item);
     const correction = await this.persist(inventory, item, 'VOID', before, after, dto.reason, actor);
-    return { item: toItemView(item, await this.catalogs.viewContext()), correction: this.toCorrection(correction) };
+    return { item: toItemView(item, await this.valuation.viewContext(inventory, [item])), correction: this.toCorrection(correction) };
   }
 
   async setFindingCategory(id: string, itemId: string, dto: SetFindingCategoryDto, actor: AuthenticatedUser) {
@@ -129,7 +131,7 @@ export class InventoryCorrectionsService {
         manager,
       );
     });
-    return toItemView(item, await this.catalogs.viewContext());
+    return toItemView(item, await this.valuation.viewContext(inventory, [item]));
   }
 
   async listCorrections(id: string, itemId: string) {

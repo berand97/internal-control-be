@@ -31,6 +31,7 @@ export const inventorySummary = (inventory: PhysicalInventory) => ({
   cancelReason: inventory.cancelReason ?? null,
   cancelledAt: inventory.cancelledAt ?? null,
   cancelledBy: inventory.cancelledBy ?? null,
+  accountingCutId: inventory.accountingCutId ?? null,
   createdAt: inventory.createdAt,
   createdBy: inventory.createdBy,
 });

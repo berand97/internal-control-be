@@ -14,7 +14,7 @@ import type {
 } from '../dto/inventory-catalog.dto.js';
 import { InventoryFindingCategory } from '../entities/inventory-finding-category.entity.js';
 import { InventoryMissingCause } from '../entities/inventory-missing-cause.entity.js';
-import type { ItemViewContext } from './inventory-item-view.js';
+import type { CatalogViewContext } from './inventory-item-view.js';
 
 const ENTITY_TYPE = 'INVENTORY_CATALOG';
 const OTHER_USAGE_LIMIT = 200;
@@ -36,7 +36,7 @@ export class InventoryCatalogsService {
   ) {}
 
   /** Lo que necesita la serialización de ítems: categorías (para sugerir) y etiquetas de causas. */
-  async viewContext(): Promise<ItemViewContext> {
+  async viewContext(): Promise<CatalogViewContext> {
     const [categories, causes] = await Promise.all([this.categories.find(), this.causes.find()]);
     return {
       categories,

@@ -2,6 +2,9 @@ import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 import { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
 import { VerificationResult } from '../enums/verification-result.js';
 
+export const SURPLUS_RESOLUTIONS = ['CREATE_ASSET', 'LEAVE_UNRESOLVED'] as const;
+export type SurplusResolution = (typeof SURPLUS_RESOLUTIONS)[number];
+
 @Entity('physical_inventory_item')
 export class PhysicalInventoryItem {
   @PrimaryGeneratedColumn('uuid')
@@ -80,4 +83,21 @@ export class PhysicalInventoryItem {
   /** Sobrante anulado por error (queda en el historial de correcciones). */
   @Column({ name: 'voided_at', type: 'timestamptz', nullable: true })
   voidedAt!: Date | null;
+
+  /** Qué se decidió con un sobrante sin activo con la toma cerrada (CREATE_ASSET o LEAVE_UNRESOLVED). */
+  @Column({ name: 'surplus_resolution', type: 'varchar', length: 20, nullable: true })
+  surplusResolution!: SurplusResolution | null;
+
+  @Column({ name: 'surplus_resolution_reason', type: 'text', nullable: true })
+  surplusResolutionReason!: string | null;
+
+  /** Activo creado a partir del sobrante (solo CREATE_ASSET). */
+  @Column({ name: 'resolved_asset_id', type: 'uuid', nullable: true })
+  resolvedAssetId!: string | null;
+
+  @Column({ name: 'resolved_at', type: 'timestamptz', nullable: true })
+  resolvedAt!: Date | null;
+
+  @Column({ name: 'resolved_by', type: 'uuid', nullable: true })
+  resolvedBy!: string | null;
 }

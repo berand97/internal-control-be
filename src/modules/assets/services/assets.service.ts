@@ -574,7 +574,7 @@ export class AssetsService {
             performedBy: actor.id,
             ipAddress: null,
             userAgent: null,
-            changes: { internalCode: created.internalCode, ...(registration.auditChanges ?? {}) },
+            changes: { internalCode: created.internalCode, ...registration.auditChanges },
           },
           tx,
         ),

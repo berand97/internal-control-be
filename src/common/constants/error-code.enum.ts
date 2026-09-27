@@ -154,6 +154,8 @@ export enum ErrorCode {
   InventoryCatalogEntryUnavailable = 'INVENTORY_CATALOG_ENTRY_UNAVAILABLE',
   InventoryCatalogEntryInUse = 'INVENTORY_CATALOG_ENTRY_IN_USE',
   InventoryCatalogEntryExists = 'INVENTORY_CATALOG_ENTRY_EXISTS',
+  InventorySurplusWasLost = 'INVENTORY_SURPLUS_WAS_LOST',
+  InventorySurplusNotResolvable = 'INVENTORY_SURPLUS_NOT_RESOLVABLE',
   DepreciationInvalidPeriod = 'DEPRECIATION_INVALID_PERIOD',
 
   ModuleUnavailable = 'MODULE_UNAVAILABLE',

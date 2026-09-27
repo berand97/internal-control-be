@@ -49,7 +49,10 @@ import {
   InventoryScheduleResponseDto,
   InventorySummaryDto,
 } from './dto/inventory-schedule.responses.js';
+import { ResolveSurplusDto, SetInventoryAccountingCutDto } from './dto/inventory-reconciliation.dto.js';
 import {
+  InventoryAccountingCutResponseDto,
+  InventoryActStateDto,
   InventoryDetailResponseDto,
   InventoryItemCorrectionDto,
   InventoryItemCorrectionResultDto,
@@ -59,7 +62,10 @@ import {
   InventoryReportResponseDto,
 } from './dto/inventory.responses.js';
 import { envelopedArraySchema } from '../documents/dto/document.responses.js';
+import { AccountingCutsService } from './services/accounting-cuts.service.js';
 import { InventoriesService } from './services/inventories.service.js';
+import { InventoryActService } from './services/inventory-act.service.js';
+import { InventorySurplusService } from './services/inventory-surplus.service.js';
 import { InventoryCorrectionsService } from './services/inventory-corrections.service.js';
 import { InventoryPlanningService } from './services/inventory-planning.service.js';
 import { InventorySchedulesService } from './services/inventory-schedules.service.js';
@@ -85,6 +91,8 @@ const ACTOR_RULE =
   InventoryReportResponseDto,
   InventoryItemCorrectionDto,
   InventoryItemCorrectionResultDto,
+  InventoryAccountingCutResponseDto,
+  InventoryActStateDto,
 )
 @Feature('inventories')
 @Controller('inventories')
@@ -94,6 +102,9 @@ export class InventoriesController {
     private readonly schedules: InventorySchedulesService,
     private readonly planning: InventoryPlanningService,
     private readonly corrections: InventoryCorrectionsService,
+    private readonly cuts: AccountingCutsService,
+    private readonly surplus: InventorySurplusService,
+    private readonly act: InventoryActService,
   ) {}
 
   @Get()
@@ -376,7 +387,9 @@ export class InventoriesController {
     summary: 'Aprobar reconciliación (doble firma; distinto al responsable)',
     description:
       'MISPLACED actualiza la ubicación; MISSING marca LOST; FOUND y MISPLACED con condición distinta actualizan la ' +
-      'condición. NOT_VERIFIED y los sobrantes (incluidos los de activos LOST) no cambian nada.',
+      'condición. NOT_VERIFIED y los sobrantes (incluidos los de activos LOST) no cambian nada. En la misma ' +
+      'transacción encola el acta OCI-21-37; si el formato no está listo o falta la persona de un firmante, la ' +
+      'conciliación sigue y el acta queda NOT_ENQUEUED con su motivo (act en la respuesta).',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   approveReconcile(
@@ -384,5 +397,63 @@ export class InventoriesController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.inventoriesService.approveReconcile(id, actor);
+  }
+
+  @Put(':id/accounting-cut')
+  @RequirePermission('inventory:create:global')
+  @ApiOperation({
+    summary: 'Asociar o desasociar el corte contable de una toma',
+    description:
+      'Solo tomas PLANNED o IN_PROGRESS (406 INVALID_STATE después de cerrar). Con corte, la toma se compara contra ' +
+      'él (valor en libros de sus líneas y, si no traen, depreciación hasta la fecha del corte); sin corte, contra la ' +
+      'foto del sistema.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryAccountingCutResponseDto) })
+  setAccountingCut(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetInventoryAccountingCutDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.cuts.setForInventory(id, dto, actor);
+  }
+
+  @Post(':id/items/:itemId/resolve-surplus')
+  @RequirePermission('inventory:execute:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resolver un sobrante sin activo (toma cerrada, antes de aprobar la conciliación)',
+    description:
+      `${ACTOR_RULE} CREATE_ASSET exige además asset:create:global y los datos del activo: se crea en el centro de la ` +
+      'toma (alcance COST_CENTER) o en costCenterId (otros alcances), con movimiento REGISTRATION que cita la toma, y ' +
+      'se enlaza al ítem en una transacción. LEAVE_UNRESOLVED deja el motivo y admite cambiar luego a CREATE_ASSET. ' +
+      'Un sobrante de un activo LOST responde 406 INVENTORY_SURPLUS_WAS_LOST; uno con activo registrado, anulado o ya ' +
+      'creado, 406 INVENTORY_SURPLUS_NOT_RESOLVABLE.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryItemDto) })
+  resolveSurplus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: ResolveSurplusDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.surplus.resolve(id, itemId, dto, actor);
+  }
+
+  @Post(':id/act/enqueue')
+  @RequirePermission('inventory:create:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Encolar el acta OCI-21-37 que la conciliación no pudo encolar',
+    description:
+      'Solo tomas RECONCILED con acta NOT_ENQUEUED. Firman el responsable de la toma (RESPONSABLE) y quien aprobó la ' +
+      'conciliación (AUDITA). Si el formato sigue sin código SGC o firmantes: 409 DOCUMENT_FORMAT_NOT_READY; si falta ' +
+      'la persona de un firmante: 406 INVALID_STATE (errors[0].message = reason).',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryActStateDto) })
+  enqueueAct(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.act.retryEnqueue(id, actor);
   }
 }

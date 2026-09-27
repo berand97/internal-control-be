@@ -768,6 +768,18 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Ya existe una opción con ese código o nombre en el catálogo',
   },
+  [ErrorCode.InventorySurplusWasLost]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message:
+      'El sobrante es un activo que estaba perdido: cómo se recupera aún no está definido y no se resuelve desde la toma',
+  },
+  [ErrorCode.InventorySurplusNotResolvable]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message:
+      'Solo se resuelve un sobrante vigente sin activo registrado, con la toma cerrada y sin conciliar, y una sola vez como activo',
+  },
   [ErrorCode.DepreciationInvalidPeriod]: {
     httpStatus: 400,
     action: 'CANCEL',
