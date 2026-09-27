@@ -1,11 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'node:crypto';
 import { type EntityManager, Repository } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
+import { documentFileKey, documentTemplateKey } from '../../../shared/storage/storage-keys.js';
 import { StorageService } from '../../../shared/storage/storage.service.js';
 import { readDocxPlaceholders, renderDocx } from '../domain/docx-template.js';
 import {
@@ -98,7 +100,8 @@ export class DocumentTemplatesService {
     });
     const version = (latest?.version ?? 0) + 1;
     const stored = await this.storageService.put({
-      key: `templates/${documentType}/v${version}.docx`,
+      // Sin fecha de vigencia en este módulo: templates/documents/<tipo>/v<versión>-<uuid>.docx.
+      key: documentTemplateKey({ formatKey: documentType, version, id: randomUUID() }),
       body: file.buffer,
       contentType: DOCX_MIME,
     });
@@ -174,8 +177,9 @@ export class DocumentTemplatesService {
         'acta.numero': actNumber,
         'acta.fecha': new Date().toISOString().slice(0, 10),
       });
+      const createdAt = new Date();
       const stored = await this.storageService.put({
-        key: `generated/${new Date().getFullYear()}/${input.documentType}/${actNumber}.docx`,
+        key: documentFileKey({ createdAt, formatKey: input.documentType, number: actNumber, extension: 'docx' }),
         body: rendered,
         contentType: DOCX_MIME,
       });
@@ -190,7 +194,7 @@ export class DocumentTemplatesService {
           actNumber,
           entityType: input.entityType,
           entityId: input.entityId,
-          createdAt: new Date(),
+          createdAt,
           createdBy: input.actorId,
         }),
       );

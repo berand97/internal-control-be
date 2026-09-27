@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import type { StorageDriver } from '../../../config/configuration.js';
 import { IDENTITY_DOCUMENT_TYPE_CODES, IDENTITY_DOCUMENT_TYPES } from '../../../common/identity/identity-document-types.js';
 import { PHYSICAL_CONDITIONS } from '../../assets/enums/physical-condition.enum.js';
+import { importTemplateKey } from '../../../shared/storage/storage-keys.js';
 import { StorageService } from '../../../shared/storage/storage.service.js';
 import type { RawCellValue } from '../excel/read-workbook.js';
 import { IMPORT_TARGETS, type ImportTarget, isImportTarget, type TemplateCatalog } from '../import/import-fields.js';
@@ -177,7 +178,7 @@ export class ImportTemplateService {
         this.logger.warn(`Plantilla ${target} ${existing.version}: el archivo guardado no está o cambió; se regenera`);
       }
       const built = await buildTemplate({ target, catalogs, generatedAt: new Date() });
-      const key = `import-templates/${target}/${built.version}/${built.contentHash.slice(0, 16)}.xlsx`;
+      const key = importTemplateKey({ target, version: built.version, contentHash: built.contentHash });
       const stored = await this.storage.put({ key, body: built.body, contentType: XLSX_MIME });
       await manager.query(
         `INSERT INTO import_template (target, version, definition_hash, content_hash, file_name, storage_driver,

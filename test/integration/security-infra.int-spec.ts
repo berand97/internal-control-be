@@ -398,7 +398,7 @@ describe('Endurecimiento BE-10/11/12/15/16/17 (HTTP real + PostgreSQL real)', ()
         'SELECT storage_key, file_hash FROM document_template_version WHERE id = $1',
         [first.body.data.id],
       )) as Array<{ storage_key: string; file_hash: string }>;
-      expect(row?.storage_key).toMatch(/^document-templates\/OCI-01-55\/2026-09-02-v2-[0-9a-f-]{36}\.docx$/);
+      expect(row?.storage_key).toMatch(/^templates\/documents\/OCI-01-55\/2026-09-02-v2-[0-9a-f-]{36}\.docx$/);
       // Misma fecha y versión con otro archivo: antes la clave era idéntica y el archivo se sobrescribía antes de que
       // la BD rechazara la fila (uq_document_template_version). Ahora el archivo registrado queda intacto.
       const second = await upload('templates/formats/OCI-01-65-v2.docx');

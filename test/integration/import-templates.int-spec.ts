@@ -123,7 +123,7 @@ describe('Plantillas Excel de importación (PostgreSQL real)', () => {
       `SELECT storage_key, storage_driver, file_name FROM import_template WHERE target = 'PERSONS' ORDER BY generated_at DESC LIMIT 1`,
     )) as Array<{ storage_key: string; storage_driver: string; file_name: string }>;
     expect(row).toMatchObject({ storage_driver: 'project', file_name: a.fileName });
-    expect(row?.storage_key).toMatch(new RegExp(`^import-templates/PERSONS/${templateVersion('PERSONS')}/`));
+    expect(row?.storage_key).toMatch(new RegExp(`^templates/imports/PERSONS/${templateVersion('PERSONS')}/`));
 
     // Un centro nuevo cambia el catálogo: otro archivo, misma versión. COST_CENTERS no usa ese catálogo: no cambia.
     await dataSource.query(`INSERT INTO cost_center (external_code, name) VALUES ($1, 'Centro nuevo')`, [`V${tag().slice(0, 5)}`]);
