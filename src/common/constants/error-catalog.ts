@@ -716,7 +716,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
   [ErrorCode.InventoryScopeOverlap]: {
     httpStatus: 406,
     action: 'CANCEL',
-    message: 'Ya hay una toma física abierta que se solapa con este alcance',
+    message: 'Ya hay una toma física en curso que comparte activos con este alcance',
   },
   [ErrorCode.InventoryUnverifiedExceedsThreshold]: {
     httpStatus: 406,

@@ -99,11 +99,11 @@ export class InventoryRemindersService {
     )) as ReminderView[];
   }
 
-  /** Procesa hasta `limit` recordatorios vencidos, uno por transacción. */
-  async processDue(limit = 50): Promise<Record<ReminderOutcome, number>> {
+  /** Procesa hasta `limit` recordatorios vencidos a `now`, uno por transacción. */
+  async processDue(limit = 50, now: Date = new Date()): Promise<Record<ReminderOutcome, number>> {
     const totals: Record<ReminderOutcome, number> = { SENT: 0, NO_RECIPIENT: 0, SKIPPED: 0, SUPERSEDED: 0 };
     for (let index = 0; index < limit; index += 1) {
-      const outcome = await this.processOne();
+      const outcome = await this.processOne(now);
       if (outcome === null) {
         break;
       }
