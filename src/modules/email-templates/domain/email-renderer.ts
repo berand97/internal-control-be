@@ -1,4 +1,4 @@
-import { buttonUrlToken, isHttpsLiteral, type EmailBlock } from './email-blocks.js';
+import { EMAIL_DESIGN_LIMITS, buttonUrlToken, isHttpsLiteral, type EmailBlock, type ImageBlock } from './email-blocks.js';
 import {
   DEFAULT_EMAIL_BRAND,
   EMAIL_COLORS as C,
@@ -7,13 +7,16 @@ import {
   EMAIL_FOOTER_TEXT,
   type EmailBrand,
 } from './email-layout.js';
+import type { RichTextDoc, RichTextInline, RichTextParagraph } from './rich-text.js';
 
 /**
  * Renderizador propio bloques → HTML para correo (tablas y estilos en línea, 600 px, sin <script>, sin CSS externo,
  * sin formularios) y su versión en texto plano.
  *
  * Seguridad: TODO texto, literal o de una variable, se escapa; el único marcado es el que escribe este archivo. Los
- * URL de botón que vienen de una variable se aceptan solo si son http(s) absolutos; si no, el botón se omite.
+ * URL de botón, de los enlaces del párrafo y de las imágenes que vienen de una variable se aceptan solo si son
+ * http(s) absolutos; si no, el botón se omite y el enlace o la imagen quedan sin enlace. El `src` de una imagen lo
+ * arma el servicio (URL pública del backend + id del asset), nunca el diseño.
  */
 
 const TOKEN_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
@@ -25,6 +28,18 @@ export interface RenderedEmail {
   readonly html: string;
   readonly text: string;
 }
+
+/** Imagen subida lista para el correo: URL pública absoluta y tamaño natural en px. */
+export interface EmailImageAsset {
+  readonly url: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Imágenes del diseño por id (minúsculas). Una imagen que no está se omite del correo. */
+export type EmailAssetLookup = ReadonlyMap<string, EmailImageAsset>;
+
+const NO_ASSETS: EmailAssetLookup = new Map();
 
 export const escapeHtml = (value: string): string =>
   value
@@ -47,11 +62,14 @@ const htmlText = (template: string, context: EmailContext): string =>
 // Saltos de línea, incluidos U+2028 y U+2029 (construidos con fromCharCode: el literal rompe el analizador).
 const LINE_BREAKS = new RegExp(`[\\r\\n${String.fromCharCode(0x2028, 0x2029)}]+`, 'g');
 
+/** Una sola línea: los saltos de línea de una variable se vuelven espacios. */
+const singleLine = (value: string): string => value.replace(LINE_BREAKS, ' ').replace(/\s{2,}/g, ' ').trim();
+
 /** El asunto es una sola línea: los saltos de línea de una variable se vuelven espacios. */
 export const renderSubject = (subject: string, context: EmailContext): string =>
-  substitute(subject, context).replace(LINE_BREAKS, ' ').replace(/\s{2,}/g, ' ').trim();
+  singleLine(substitute(subject, context));
 
-/** URL final de un botón, o null si no es un http(s) absoluto seguro. */
+/** URL final de un botón (o de un enlace o imagen), o null si no es un http(s) absoluto seguro. */
 export const resolveButtonUrl = (url: string, context: EmailContext): string | null => {
   const token = buttonUrlToken(url);
   if (token === null) {
@@ -74,16 +92,130 @@ const SPACER_PX = { sm: 8, md: 16, lg: 32 } as const;
 const row = (inner: string, padding = '0 32px 16px'): string =>
   `<tr><td style="padding:${padding};">${inner}</td></tr>`;
 
-const blockHtml = (block: EmailBlock, context: EmailContext): string => {
+// ---------- Texto enriquecido (párrafo) ----------
+
+const TEXT_STYLE = `font-family:${EMAIL_FONT_STACK};font-size:15px;line-height:23px;color:${C.text};`;
+const LINK_STYLE = `color:${C.accent};text-decoration:underline;`;
+/** Separación entre los párrafos y listas de un mismo bloque. */
+const RICH_BLOCK_GAP = '12px';
+
+const inlineHtml = (node: RichTextInline, context: EmailContext): string => {
+  if (node.type === 'hardBreak') {
+    return '<br>';
+  }
+  let html = htmlText(node.text, context);
+  const marks = new Set((node.marks ?? []).map((mark) => mark.type));
+  // Orden fijo de anidado, sin importar el orden en que lleguen las marcas.
+  if (marks.has('underline')) {
+    html = `<u>${html}</u>`;
+  }
+  if (marks.has('italic')) {
+    html = `<em>${html}</em>`;
+  }
+  if (marks.has('bold')) {
+    html = `<strong>${html}</strong>`;
+  }
+  const link = node.marks?.find((mark) => mark.type === 'link');
+  if (link?.type === 'link') {
+    const href = resolveButtonUrl(link.attrs.href, context);
+    if (href !== null) {
+      html = `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="${LINK_STYLE}">${html}</a>`;
+    }
+  }
+  return html;
+};
+
+const paragraphInlineHtml = (paragraph: RichTextParagraph, context: EmailContext): string => {
+  const html = (paragraph.content ?? []).map((node) => inlineHtml(node, context)).join('');
+  return html === '' ? '&nbsp;' : html;
+};
+
+export const richTextHtml = (doc: RichTextDoc, context: EmailContext): string =>
+  doc.content
+    .map((block, index) => {
+      const margin = index === 0 ? '0' : `${RICH_BLOCK_GAP} 0 0`;
+      if (block.type === 'paragraph') {
+        return `<p style="margin:${margin};${TEXT_STYLE}">${paragraphInlineHtml(block, context)}</p>`;
+      }
+      const tag = block.type === 'orderedList' ? 'ol' : 'ul';
+      const items = block.content
+        .map(
+          (item, itemIndex) =>
+            `<li style="margin:${itemIndex === block.content.length - 1 ? '0' : '0 0 4px'};">` +
+            item.content.map((paragraph) => paragraphInlineHtml(paragraph, context)).join('<br>') +
+            `</li>`,
+        )
+        .join('');
+      return `<${tag} style="margin:${margin};padding:0 0 0 24px;${TEXT_STYLE}">${items}</${tag}>`;
+    })
+    .join('');
+
+const inlineText = (node: RichTextInline, context: EmailContext): string => {
+  if (node.type === 'hardBreak') {
+    return '\n';
+  }
+  const text = normalizeNewlines(substitute(node.text, context));
+  const link = node.marks?.find((mark) => mark.type === 'link');
+  if (link?.type !== 'link') {
+    return text;
+  }
+  const href = resolveButtonUrl(link.attrs.href, context);
+  return href === null || href === text.trim() ? text : `${text} (${href})`;
+};
+
+const paragraphText = (paragraph: RichTextParagraph, context: EmailContext): string =>
+  (paragraph.content ?? []).map((node) => inlineText(node, context)).join('');
+
+/** Texto plano: párrafos separados por línea en blanco, ítems "- " o "1. ", enlaces "texto (url)". */
+export const richTextPlain = (doc: RichTextDoc, context: EmailContext): string =>
+  doc.content
+    .map((block) =>
+      block.type === 'paragraph'
+        ? paragraphText(block, context)
+        : block.content
+            .map(
+              (item, index) =>
+                `${block.type === 'orderedList' ? `${index + 1}.` : '-'} ` +
+                item.content.map((paragraph) => paragraphText(paragraph, context)).join('\n'),
+            )
+            .join('\n'),
+    )
+    .join('\n\n')
+    .trim();
+
+// ---------- Imagen ----------
+
+/** Ancho final: el pedido, o el natural limitado al máximo; alto proporcional. */
+export const imageBox = (block: ImageBlock, asset: EmailImageAsset): { width: number; height: number } => {
+  const width = block.width ?? Math.min(asset.width, EMAIL_DESIGN_LIMITS.imageMaxWidth);
+  return { width, height: Math.max(1, Math.round((width * asset.height) / asset.width)) };
+};
+
+const imageHtml = (block: ImageBlock, context: EmailContext, assets: EmailAssetLookup): string => {
+  const asset = assets.get(block.assetId.toLowerCase());
+  if (!asset) {
+    return '';
+  }
+  const { width, height } = imageBox(block, asset);
+  const centered = block.align === 'center';
+  const img =
+    `<img src="${escapeHtml(asset.url)}" alt="${escapeHtml(singleLine(substitute(block.alt, context)))}" ` +
+    `width="${width}" height="${height}" border="0" ` +
+    `style="display:block;width:${width}px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;${centered ? 'margin:0 auto;' : ''}">`;
+  const href = block.href === undefined ? null : resolveButtonUrl(block.href, context);
+  const inner =
+    href === null ? img : `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="text-decoration:none;">${img}</a>`;
+  return `<tr><td align="${centered ? 'center' : 'left'}" style="padding:0 32px 16px;">${inner}</td></tr>`;
+};
+
+const blockHtml = (block: EmailBlock, context: EmailContext, assets: EmailAssetLookup): string => {
   switch (block.type) {
     case 'heading':
       return row(
         `<h1 style="margin:0;font-family:${EMAIL_FONT_STACK};font-size:22px;line-height:30px;font-weight:bold;color:${C.text};">${htmlText(block.text, context)}</h1>`,
       );
     case 'paragraph':
-      return row(
-        `<p style="margin:0;font-family:${EMAIL_FONT_STACK};font-size:15px;line-height:23px;color:${C.text};">${htmlText(block.text, context)}</p>`,
-      );
+      return row(richTextHtml(block.content, context));
     case 'button': {
       const href = resolveButtonUrl(block.url, context);
       if (href === null) {
@@ -125,6 +257,8 @@ const blockHtml = (block: EmailBlock, context: EmailContext): string => {
     }
     case 'spacer':
       return `<tr><td style="height:${SPACER_PX[block.size]}px;font-size:0;line-height:0;">&nbsp;</td></tr>`;
+    case 'image':
+      return imageHtml(block, context, assets);
   }
 };
 
@@ -145,8 +279,9 @@ export const renderEmailHtml = (
   blocks: ReadonlyArray<EmailBlock>,
   context: EmailContext,
   brand: EmailBrand = DEFAULT_EMAIL_BRAND,
+  assets: EmailAssetLookup = NO_ASSETS,
 ): string => {
-  const content = blocks.map((block) => blockHtml(block, context)).join('');
+  const content = blocks.map((block) => blockHtml(block, context, assets)).join('');
   return (
     `<!DOCTYPE html>` +
     `<html lang="es"><head>` +
@@ -169,12 +304,13 @@ export const renderEmailHtml = (
   );
 };
 
-const blockText = (block: EmailBlock, context: EmailContext): string | null => {
+const blockText = (block: EmailBlock, context: EmailContext, assets: EmailAssetLookup): string | null => {
   const plain = (value: string): string => normalizeNewlines(substitute(value, context)).trim();
   switch (block.type) {
     case 'heading':
-    case 'paragraph':
       return plain(block.text);
+    case 'paragraph':
+      return richTextPlain(block.content, context);
     case 'callout':
       return plain(block.text);
     case 'button': {
@@ -187,6 +323,14 @@ const blockText = (block: EmailBlock, context: EmailContext): string | null => {
       return block.items.map((item) => `${plain(item.label)}: ${plain(item.value)}`).join('\n');
     case 'spacer':
       return null;
+    case 'image': {
+      if (!assets.has(block.assetId.toLowerCase())) {
+        return null;
+      }
+      const href = block.href === undefined ? null : resolveButtonUrl(block.href, context);
+      const label = `[Imagen: ${singleLine(substitute(block.alt, context))}]`;
+      return href === null ? label : `${label} (${href})`;
+    }
   }
 };
 
@@ -194,9 +338,10 @@ export const renderEmailPlainText = (
   blocks: ReadonlyArray<EmailBlock>,
   context: EmailContext,
   brand: EmailBrand = DEFAULT_EMAIL_BRAND,
+  assets: EmailAssetLookup = NO_ASSETS,
 ): string => {
   const parts = blocks
-    .map((block) => blockText(block, context))
+    .map((block) => blockText(block, context, assets))
     .filter((part): part is string => part !== null && part !== '');
   return [...parts, `-- \n${EMAIL_FOOTER_TEXT(brand.name)}`].join('\n\n');
 };
@@ -205,8 +350,9 @@ export const renderEmail = (
   design: { readonly subject: string; readonly blocks: ReadonlyArray<EmailBlock> },
   context: EmailContext,
   brand: EmailBrand = DEFAULT_EMAIL_BRAND,
+  assets: EmailAssetLookup = NO_ASSETS,
 ): RenderedEmail => ({
   subject: renderSubject(design.subject, context),
-  html: renderEmailHtml(design.subject, design.blocks, context, brand),
-  text: renderEmailPlainText(design.blocks, context, brand),
+  html: renderEmailHtml(design.subject, design.blocks, context, brand, assets),
+  text: renderEmailPlainText(design.blocks, context, brand, assets),
 });

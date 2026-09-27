@@ -109,6 +109,7 @@ export enum ErrorCode {
   EmailTemplateInvalidDesign = 'EMAIL_TEMPLATE_INVALID_DESIGN',
   EmailTemplateUnknownVariable = 'EMAIL_TEMPLATE_UNKNOWN_VARIABLE',
   EmailTemplateMissingVariable = 'EMAIL_TEMPLATE_MISSING_VARIABLE',
+  EmailAssetInvalidImage = 'EMAIL_ASSET_INVALID_IMAGE',
   AssetAlreadyLoaned = 'ASSET_ALREADY_LOANED',
   InvalidLoanStateTransition = 'INVALID_LOAN_STATE_TRANSITION',
   LoanSodViolation = 'LOAN_SOD_VIOLATION',

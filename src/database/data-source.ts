@@ -21,6 +21,7 @@ import { AssetMovement } from '../modules/assets/entities/asset-movement.entity.
 import { AssetPhoto } from '../modules/assets/entities/asset-photo.entity.js';
 import { QrTokenRotationLog } from '../modules/qr-tokens/entities/qr-token-rotation-log.entity.js';
 import { EmailTemplate } from '../modules/email-templates/entities/email-template.entity.js';
+import { EmailAsset } from '../modules/email-templates/entities/email-asset.entity.js';
 import { MailSettings } from '../shared/mail/entities/mail-settings.entity.js';
 import { StorageSettings } from '../shared/storage/entities/storage-settings.entity.js';
 import { DocumentTemplate, GeneratedDocument } from '../modules/document-templates/entities/document-template.entity.js';
@@ -93,6 +94,7 @@ import { EncryptMfaSecrets1767225771000 } from './migrations/1767225771000-encry
 import { StorageSecretsAndOauthState1767225780000 } from './migrations/1767225780000-storage-secrets-and-oauth-state.js';
 import { EmailTemplateBlocks1767225800000 } from './migrations/1767225800000-email-template-blocks.js';
 import { EmailTemplatesSuperAdmin1767225810000 } from './migrations/1767225810000-email-templates-super-admin.js';
+import { EmailRichParagraphAndAssets1767225820000 } from './migrations/1767225820000-email-rich-paragraph-and-assets.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -143,6 +145,7 @@ const dataSource = new DataSource({
     StorageSettings,
     MailSettings,
     EmailTemplate,
+    EmailAsset,
     DocumentTemplate,
     GeneratedDocument,
     MovementVerificationLog,
@@ -212,6 +215,7 @@ const dataSource = new DataSource({
     StorageSecretsAndOauthState1767225780000,
     EmailTemplateBlocks1767225800000,
     EmailTemplatesSuperAdmin1767225810000,
+    EmailRichParagraphAndAssets1767225820000,
   ],
 });
 

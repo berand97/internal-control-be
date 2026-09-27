@@ -537,6 +537,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Faltan variables obligatorias en el correo',
   },
+  [ErrorCode.EmailAssetInvalidImage]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'La imagen no se puede usar: está dañada o supera el tamaño permitido',
+  },
   [ErrorCode.AssetAlreadyLoaned]: {
     httpStatus: 406,
     action: 'CANCEL',

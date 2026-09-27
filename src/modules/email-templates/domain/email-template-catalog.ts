@@ -1,4 +1,5 @@
-import { blockTexts, type EmailBlock } from './email-blocks.js';
+import { blockTexts, type EmailBlock, type ParagraphBlock } from './email-blocks.js';
+import { textToRichText } from './rich-text.js';
 
 /**
  * Catálogo de los correos que el sistema YA envía (tipos fijos en código) y de sus variables.
@@ -85,6 +86,9 @@ export interface EmailTemplateDesign {
   readonly blocks: ReadonlyArray<EmailBlock>;
 }
 
+/** Párrafo de texto simple (sin formato) para los diseños por defecto. */
+const paragraph = (text: string): ParagraphBlock => ({ type: 'paragraph', content: textToRichText(text) });
+
 /**
  * Diseño por defecto de cada tipo: se usa mientras el tipo no tenga versión activa en BD. Mismo texto que las
  * plantillas de texto anteriores, organizado en bloques (datos en lista, enlace como botón).
@@ -94,7 +98,7 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
     subject: 'Invitación a {{app.name}}',
     blocks: [
       { type: 'heading', text: 'Invitación a {{app.name}}' },
-      { type: 'paragraph', text: 'Se creó su cuenta en {{app.name}}.' },
+      paragraph('Se creó su cuenta en {{app.name}}.'),
       {
         type: 'keyValueList',
         items: [
@@ -104,15 +108,15 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
           { label: 'Contraseña temporal', value: '{{auth.temporaryPassword}}' },
         ],
       },
-      { type: 'paragraph', text: 'Inicie sesión y cambie la contraseña.' },
+      paragraph('Inicie sesión y cambie la contraseña.'),
       { type: 'button', label: 'Iniciar sesión', url: '{{auth.loginUrl}}' },
     ],
   },
   PASSWORD_RESET: {
     subject: 'Restablecer contraseña — {{app.name}}',
     blocks: [
-      { type: 'paragraph', text: 'Hola {{user.email}},' },
-      { type: 'paragraph', text: 'Use este enlace para restablecer su contraseña:' },
+      paragraph('Hola {{user.email}},'),
+      paragraph('Use este enlace para restablecer su contraseña:'),
       { type: 'button', label: 'Restablecer contraseña', url: '{{auth.resetUrl}}' },
       { type: 'callout', tone: 'info', text: 'El enlace vence en {{auth.expiresInHours}} horas.' },
     ],
@@ -121,8 +125,8 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
     subject: '{{notification.title}} — {{app.name}}',
     blocks: [
       { type: 'heading', text: '{{notification.title}}' },
-      { type: 'paragraph', text: 'Hola {{user.email}},' },
-      { type: 'paragraph', text: '{{notification.message}}' },
+      paragraph('Hola {{user.email}},'),
+      paragraph('{{notification.message}}'),
       { type: 'button', label: 'Abrir {{app.name}}', url: '{{app.loginUrl}}' },
     ],
   },
@@ -136,8 +140,8 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
   LOAN_STATUS_NOTIFICATION: {
     subject: 'Préstamo {{prestamo.estado}}',
     blocks: [
-      { type: 'paragraph', text: 'Hola {{user.email}},' },
-      { type: 'paragraph', text: 'El préstamo cambió a {{prestamo.estado}}.' },
+      paragraph('Hola {{user.email}},'),
+      paragraph('El préstamo cambió a {{prestamo.estado}}.'),
       { type: 'keyValueList', items: [{ label: 'Justificación', value: '{{prestamo.justificacion}}' }] },
       { type: 'button', label: 'Abrir Control Interno', url: '{{app.loginUrl}}' },
     ],
@@ -145,7 +149,7 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
   INVENTORY_ALERT: {
     subject: 'Toma física: {{inventario.nombre}}',
     blocks: [
-      { type: 'paragraph', text: 'Hola {{user.email}},' },
+      paragraph('Hola {{user.email}},'),
       { type: 'callout', tone: 'info', text: '{{alerta.mensaje}}' },
       { type: 'button', label: 'Abrir Control Interno', url: '{{app.loginUrl}}' },
     ],
@@ -153,15 +157,9 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
   SIGNATURE_LINK: {
     subject: 'Firma pendiente: {{acta.formato}} N.° {{acta.numero}}',
     blocks: [
-      { type: 'paragraph', text: 'Hola {{firmante.nombre}},' },
-      {
-        type: 'paragraph',
-        text: 'Tiene pendiente la firma del documento {{acta.formato}} N.° {{acta.numero}}, como {{firma.rol}}.',
-      },
-      {
-        type: 'paragraph',
-        text: 'Para leerlo y firmarlo (o rechazarlo indicando el motivo) abra este enlace:',
-      },
+      paragraph('Hola {{firmante.nombre}},'),
+      paragraph('Tiene pendiente la firma del documento {{acta.formato}} N.° {{acta.numero}}, como {{firma.rol}}.'),
+      paragraph('Para leerlo y firmarlo (o rechazarlo indicando el motivo) abra este enlace:'),
       { type: 'button', label: 'Abrir el documento', url: '{{firma.url}}' },
       {
         type: 'callout',
@@ -170,24 +168,18 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
           'Antes de firmar se le pedirán los últimos 4 dígitos de su número de documento.\n' +
           'El enlace es personal, sirve una sola vez y vence el {{firma.vence}}. No lo reenvíe.',
       },
-      {
-        type: 'paragraph',
-        text: 'Si tiene dudas, no reconoce este documento o el enlace venció, contacte a {{contacto}}.',
-      },
-      { type: 'paragraph', text: '{{app.name}}' },
+      paragraph('Si tiene dudas, no reconoce este documento o el enlace venció, contacte a {{contacto}}.'),
+      paragraph('{{app.name}}'),
     ],
   },
   IMPORT_FINISHED: {
     subject: 'Importación de {{importacion.destino}}: {{importacion.estado}}',
     blocks: [
-      { type: 'paragraph', text: 'Hola {{user.fullName}},' },
-      {
-        type: 'paragraph',
-        text: 'La importación de {{importacion.destino}} (archivo {{importacion.archivo}}) quedó {{importacion.estado}}.',
-      },
+      paragraph('Hola {{user.fullName}},'),
+      paragraph('La importación de {{importacion.destino}} (archivo {{importacion.archivo}}) quedó {{importacion.estado}}.'),
       { type: 'callout', tone: 'info', text: '{{importacion.resumen}}' },
       { type: 'button', label: 'Ver el detalle', url: '{{app.loginUrl}}' },
-      { type: 'paragraph', text: '{{app.name}}' },
+      paragraph('{{app.name}}'),
     ],
   },
 };
