@@ -2,14 +2,14 @@ import sharp from 'sharp';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode } from '../../common/constants/error-code.enum.js';
 import { ApiException } from '../../common/exceptions/api.exception.js';
-import { EMAIL_ASSET_CACHE_CONTROL, EmailAssetsService, emailAssetKey } from './email-assets.service.js';
+import { EMAIL_ASSET_CACHE_CONTROL, EmailAssetUploadsService, emailAssetKey } from './email-asset-uploads.service.js';
 
 const KEY = /^email-assets\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.png$/;
 
-describe('EmailAssetsService.upload', () => {
+describe('EmailAssetUploadsService.upload', () => {
   let storage: { putPublicAsset: ReturnType<typeof vi.fn>; deletePublicAsset: ReturnType<typeof vi.fn> };
   let repo: { findOneBy: ReturnType<typeof vi.fn>; findOneByOrFail: ReturnType<typeof vi.fn>; query: ReturnType<typeof vi.fn> };
-  let service: EmailAssetsService;
+  let service: EmailAssetUploadsService;
   let png: Buffer;
 
   beforeEach(async () => {
@@ -35,7 +35,7 @@ describe('EmailAssetsService.upload', () => {
       })),
       query: vi.fn(async (_sql: string, params: ReadonlyArray<unknown>) => [{ id: params[0] }]),
     };
-    service = new EmailAssetsService(repo as never, storage as never);
+    service = new EmailAssetUploadsService(repo as never, storage as never);
   });
 
   it('sube al bucket público con clave email-assets/<uuid>.png (sin el nombre original), Content-Type y caché inmutable', async () => {
