@@ -58,13 +58,17 @@ export const BoundedFileInterceptor = (
   });
   const maxMib = Math.round((limits.maxFileBytes / MIB) * 10) / 10;
 
-  class BoundedInterceptor extends Base {
-    override async intercept(
+  // Composición y no herencia: la clase de FileInterceptor inyecta MULTER_MODULE_OPTIONS como opcional y Nest no
+  // hereda esa marca a una subclase. La app no registra MulterModule, así que las opciones globales son {}.
+  class BoundedInterceptor implements NestInterceptor {
+    private readonly inner = new Base({});
+
+    async intercept(
       context: ExecutionContext,
       next: CallHandler,
     ): Promise<Observable<unknown>> {
       try {
-        return await super.intercept(context, next);
+        return await this.inner.intercept(context, next);
       } catch (error) {
         if (error instanceof PayloadTooLargeException) {
           throw new ApiException(
