@@ -1,5 +1,10 @@
-import { connect as netConnect, type Socket } from 'node:net';
+import { connect as netConnect, type LookupFunction, type Socket } from 'node:net';
 import { connect as tlsConnect, type TLSSocket } from 'node:tls';
+import {
+  assertHostShapeAllowed,
+  guardedLookup,
+  type OutboundPolicy,
+} from '../net/outbound-destination.js';
 import {
   encodeHeaderWord,
   isValidMailbox,
@@ -13,6 +18,8 @@ export interface SmtpAuthOptions {
   readonly secure: boolean;
   readonly username?: string | null;
   readonly password?: string | null;
+  /** Política de destinos salientes (BE-16). Sin ella no se filtra (solo pruebas unitarias del protocolo). */
+  readonly outbound?: OutboundPolicy;
 }
 
 export interface SmtpSendOptions extends SmtpAuthOptions {
@@ -47,9 +54,14 @@ export async function sendSmtpMail(options: SmtpSendOptions): Promise<void> {
 }
 
 async function openSession(options: SmtpAuthOptions): Promise<SmtpSocket> {
+  // IP literal o nombre interno: se rechaza sin abrir el socket. Los nombres se validan al resolverlos (lookup).
+  const lookup = options.outbound ? guardedLookup(options.outbound) : undefined;
+  if (options.outbound) {
+    assertHostShapeAllowed(options.host, options.outbound);
+  }
   let socket: SmtpSocket = options.secure
-    ? await connectTls(options.host, options.port)
-    : await connectTcp(options.host, options.port);
+    ? await connectTls(options.host, options.port, lookup)
+    : await connectTcp(options.host, options.port, lookup);
   await expectCode(socket, 220);
   if (!options.secure) {
     await command(socket, 'EHLO control-interno', 250);
@@ -116,9 +128,9 @@ async function deliver(socket: SmtpSocket, message: SmtpMessage): Promise<void> 
   await command(socket, 'QUIT', 221);
 }
 
-function connectTcp(host: string, port: number): Promise<Socket> {
+function connectTcp(host: string, port: number, lookup: LookupFunction | undefined): Promise<Socket> {
   return new Promise((resolve, reject) => {
-    const socket = netConnect({ host, port }, () => resolve(socket));
+    const socket = netConnect({ host, port, ...(lookup ? { lookup } : {}) }, () => resolve(socket));
     socket.setTimeout(12_000, () => {
       socket.destroy();
       reject(new Error('Tiempo de espera agotado al conectar con el SMTP'));
@@ -127,9 +139,9 @@ function connectTcp(host: string, port: number): Promise<Socket> {
   });
 }
 
-function connectTls(host: string, port: number): Promise<TLSSocket> {
+function connectTls(host: string, port: number, lookup: LookupFunction | undefined): Promise<TLSSocket> {
   return new Promise((resolve, reject) => {
-    const socket = tlsConnect({ host, port, servername: host }, () =>
+    const socket = tlsConnect({ host, port, servername: host, ...(lookup ? { lookup } : {}) }, () =>
       resolve(socket),
     );
     socket.setTimeout(12_000, () => {

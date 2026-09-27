@@ -60,3 +60,22 @@ export const parseFrom = (from: string): ParsedFrom => {
 /** Palabra codificada RFC 2047 (UTF-8, base64): el nombre visible nunca se escribe en crudo en la cabecera. */
 export const encodeHeaderWord = (value: string): string =>
   `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
+
+/**
+ * Correo enmascarado para logs (Ley 1581): primera letra del usuario y el dominio, `a***@unac.edu.co`.
+ * Lo que no parece un correo se reemplaza entero.
+ */
+export const maskEmail = (value: string | null | undefined): string => {
+  const text = (value ?? '').trim();
+  const at = text.lastIndexOf('@');
+  if (at <= 0 || at === text.length - 1 || hasControlChars(text)) {
+    return '***';
+  }
+  return `${text.slice(0, 1)}***@${text.slice(at + 1)}`;
+};
+
+const EMAIL_IN_TEXT = /[A-Za-z0-9._%+'-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)/g;
+
+/** Enmascara los correos que aparezcan en un texto libre (respuesta del SMTP, pila de un error) antes del log. */
+export const redactEmails = (text: string): string =>
+  text.replace(EMAIL_IN_TEXT, (match) => maskEmail(match));

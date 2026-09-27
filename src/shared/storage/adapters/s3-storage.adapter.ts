@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { Agent as HttpAgent } from 'node:http';
+import { Agent as HttpsAgent } from 'node:https';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -10,6 +12,11 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { S3Provider, StorageDriver } from '../../../config/configuration.js';
+import {
+  assertHostShapeAllowed,
+  guardedLookup,
+  type OutboundPolicy,
+} from '../../net/outbound-destination.js';
 import { S3_PROVIDER_PRESETS } from '../s3-provider.presets.js';
 import type {
   PutObjectInput,
@@ -42,12 +49,37 @@ export class S3StorageAdapter implements StoragePort {
   readonly driver: StorageDriver = 's3';
   private readonly client: S3Client;
 
-  constructor(private readonly config: S3AdapterConfig) {
+  /**
+   * Con `outbound` (BE-16) el endpoint no puede apuntar a la red interna: la IP literal o el nombre interno se
+   * rechazan aquí (OutboundDestinationError) y cada conexión resuelve el DNS a través de guardedLookup.
+   */
+  constructor(
+    private readonly config: S3AdapterConfig,
+    outbound?: OutboundPolicy,
+  ) {
     const preset = S3_PROVIDER_PRESETS[config.provider];
     const endpoint = config.endpoint ?? preset.defaultEndpoint(config.region);
+    if (outbound && endpoint) {
+      let hostname: string;
+      try {
+        hostname = new URL(endpoint).hostname;
+      } catch {
+        throw new ApiException(ErrorCode.StorageNotConfigured, 'El endpoint S3 no es una URL válida');
+      }
+      assertHostShapeAllowed(hostname, outbound);
+    }
+    const lookup = outbound ? guardedLookup(outbound) : undefined;
     this.client = new S3Client({
       region: config.region,
       ...(endpoint ? { endpoint } : {}),
+      ...(lookup
+        ? {
+            requestHandler: {
+              httpAgent: new HttpAgent({ keepAlive: true, lookup }),
+              httpsAgent: new HttpsAgent({ keepAlive: true, lookup }),
+            },
+          }
+        : {}),
       forcePathStyle: config.forcePathStyle || preset.forcePathStyle,
       credentials: {
         accessKeyId: config.accessKey,

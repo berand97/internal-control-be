@@ -747,4 +747,10 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'La dirección o una cabecera del correo no es válida',
   },
+  [ErrorCode.OutboundDestinationForbidden]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message:
+      'El servidor indicado está en una red privada o interna. Use un host público o pida que se habilite al desplegar (OUTBOUND_ALLOWED_HOSTS)',
+  },
 };
