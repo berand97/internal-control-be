@@ -18,7 +18,7 @@ import { AssetsService } from '../../src/modules/assets/services/assets.service.
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { MovementsService } from '../../src/modules/movements/services/movements.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
-import { createActor, scalar, SHARED_STORAGE_DIR, useSharedStorage } from './helpers.js';
+import { createActor, openTestSession, scalar, SHARED_STORAGE_DIR, useSharedStorage } from './helpers.js';
 
 const PREVIOUS_MOVEMENT_SECRET = 'integration-previous-movement-secret';
 
@@ -59,7 +59,7 @@ describe('Endurecimiento BE-10/11/12/15/16/17 (HTTP real + PostgreSQL real)', ()
         [user.id, role],
       );
       actors[name] = user.id;
-      tokens[name] = app.get(TokenService).signAccessToken({ ...user, sessionId: randomUUID() });
+      tokens[name] = app.get(TokenService).signAccessToken({ ...user, sessionId: await openTestSession(dataSource, user.id) });
     }
   });
 
@@ -137,17 +137,30 @@ describe('Endurecimiento BE-10/11/12/15/16/17 (HTTP real + PostgreSQL real)', ()
       }
     };
 
+    // La BD de integración es compartida (verifySample de movement-signature recorre activos al azar y allí no hay
+    // clave anterior configurada): todo movimiento re-firmado aquí vuelve a la clave actual, falle o no la prueba.
+    const resigned = new Set<string>();
+    const restoreCurrentSignatures = async () => {
+      for (const movementId of resigned) {
+        await resign(movementId, process.env['MOVEMENT_SIGNING_SECRET'] ?? '');
+        resigned.delete(movementId);
+      }
+    };
+    afterAll(restoreCurrentSignatures);
+
     it('un movimiento firmado con MOVEMENT_SIGNING_SECRET_PREVIOUS sigue verificando; con otra clave no', async () => {
       const { movementId } = await assetWithMovement(`Rotación ${randomUUID()}`, 'ROT-1');
-      await resign(movementId, PREVIOUS_MOVEMENT_SECRET);
-      const ok = await http().get(`/api/v1/movements/${movementId}/verify`).set(auth('director')).expect(200);
-      expect(ok.body.data).toMatchObject({ valid: true, unsigned: false });
-      await resign(movementId, 'clave-que-nadie-configuro');
-      const bad = await http().get(`/api/v1/movements/${movementId}/verify`).set(auth('director'));
-      expect(bad.body.error.code).toBe('MOVEMENT_TAMPERED');
-      // La BD de integración es compartida (verifySample de movement-signature recorre activos al azar y allí no hay
-      // clave anterior configurada): se deja firmado con la clave actual.
-      await resign(movementId, process.env['MOVEMENT_SIGNING_SECRET'] ?? '');
+      resigned.add(movementId);
+      try {
+        await resign(movementId, PREVIOUS_MOVEMENT_SECRET);
+        const ok = await http().get(`/api/v1/movements/${movementId}/verify`).set(auth('director')).expect(200);
+        expect(ok.body.data).toMatchObject({ valid: true, unsigned: false });
+        await resign(movementId, 'clave-que-nadie-configuro');
+        const bad = await http().get(`/api/v1/movements/${movementId}/verify`).set(auth('director'));
+        expect(bad.body.error.code).toBe('MOVEMENT_TAMPERED');
+      } finally {
+        await restoreCurrentSignatures();
+      }
     });
 
     it('los movimientos nuevos se firman con la clave actual, no con la anterior', async () => {
