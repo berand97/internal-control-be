@@ -92,6 +92,7 @@ import { InvitationExpiryAndTotpStep1767225770000 } from './migrations/176722577
 import { EncryptMfaSecrets1767225771000 } from './migrations/1767225771000-encrypt-mfa-secrets.js';
 import { StorageSecretsAndOauthState1767225780000 } from './migrations/1767225780000-storage-secrets-and-oauth-state.js';
 import { EmailTemplateBlocks1767225800000 } from './migrations/1767225800000-email-template-blocks.js';
+import { EmailTemplatesSuperAdmin1767225810000 } from './migrations/1767225810000-email-templates-super-admin.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -210,6 +211,7 @@ const dataSource = new DataSource({
     EncryptMfaSecrets1767225771000,
     StorageSecretsAndOauthState1767225780000,
     EmailTemplateBlocks1767225800000,
+    EmailTemplatesSuperAdmin1767225810000,
   ],
 });
 

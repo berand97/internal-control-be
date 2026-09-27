@@ -7,9 +7,10 @@ import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swag
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { DataSource } from 'typeorm';
+import { DataSource, type QueryRunner } from 'typeorm';
 import { vi } from 'vitest';
 import { AppModule } from '../../src/app.module.js';
+import { EmailTemplatesSuperAdmin1767225810000 } from '../../src/database/migrations/1767225810000-email-templates-super-admin.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { FeatureFlagsService } from '../../src/modules/features/services/feature-flags.service.js';
@@ -254,7 +255,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       expect(invitation?.blocks[1]?.text).toContain('Contraseña temporal: {{auth.temporaryPassword}}');
     });
 
-    it('permisos nuevos con etiqueta en español, solo para INTERNAL_CONTROL_DIRECTOR; SUPER_ADMIN no los tiene', async () => {
+    it('permisos nuevos con etiqueta en español, para INTERNAL_CONTROL_DIRECTOR y (1767225810000) SUPER_ADMIN', async () => {
       const rows = (await dataSource.query(
         `SELECT p.code, p.module, p.resource_label, p.action,
                 COALESCE((SELECT array_agg(r.code ORDER BY r.code) FROM role_permission rp JOIN role r ON r.id = rp.role_id
@@ -262,9 +263,42 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
          FROM permission p WHERE p.resource_type = 'email_template' ORDER BY p.action`,
       )) as Array<{ code: string; module: string; resource_label: string; action: string; roles: string[] }>;
       expect(rows).toEqual([
-        { code: 'email_template:manage:global', module: 'SYSTEM', resource_label: 'Plantillas de correo', action: 'manage', roles: ['INTERNAL_CONTROL_DIRECTOR'] },
-        { code: 'email_template:read:global', module: 'SYSTEM', resource_label: 'Plantillas de correo', action: 'read', roles: ['INTERNAL_CONTROL_DIRECTOR'] },
+        { code: 'email_template:manage:global', module: 'SYSTEM', resource_label: 'Plantillas de correo', action: 'manage', roles: ['INTERNAL_CONTROL_DIRECTOR', 'SUPER_ADMIN'] },
+        { code: 'email_template:read:global', module: 'SYSTEM', resource_label: 'Plantillas de correo', action: 'read', roles: ['INTERNAL_CONTROL_DIRECTOR', 'SUPER_ADMIN'] },
       ]);
+    });
+
+    it('1767225810000: down() retira los permisos solo de SUPER_ADMIN y up() es idempotente', async () => {
+      const holders = async (runner: QueryRunner) =>
+        (
+          (await runner.query(
+            `SELECT r.code || ' ' || p.code AS grant FROM role_permission rp
+             JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id
+             WHERE p.resource_type = 'email_template' AND r.code NOT LIKE 'IT\\_%' ORDER BY 1`,
+          )) as Array<{ grant: string }>
+        ).map((row) => row.grant);
+      const runner = dataSource.createQueryRunner();
+      await runner.connect();
+      await runner.startTransaction();
+      try {
+        const migration = new EmailTemplatesSuperAdmin1767225810000();
+        await migration.down(runner);
+        expect(await holders(runner)).toEqual([
+          'INTERNAL_CONTROL_DIRECTOR email_template:manage:global',
+          'INTERNAL_CONTROL_DIRECTOR email_template:read:global',
+        ]);
+        await migration.up(runner);
+        await migration.up(runner);
+        expect(await holders(runner)).toEqual([
+          'INTERNAL_CONTROL_DIRECTOR email_template:manage:global',
+          'INTERNAL_CONTROL_DIRECTOR email_template:read:global',
+          'SUPER_ADMIN email_template:manage:global',
+          'SUPER_ADMIN email_template:read:global',
+        ]);
+      } finally {
+        await runner.rollbackTransaction();
+        await runner.release();
+      }
     });
 
     it('una sola versión activa por tipo: la BD rechaza una segunda activa', async () => {
@@ -278,7 +312,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
   });
 
   describe('menú', () => {
-    it('"Plantillas de correo" sembrado con ícono mail; lo ve el director y no el viewer ni el superadmin', async () => {
+    it('"Plantillas de correo" sembrado con ícono mail; lo ven el director y el superadmin, no el viewer', async () => {
       const row = (await dataSource.query(
         `SELECT module, module_label, resource, label, required_action, sort_order, icon FROM navigation_item WHERE path = '/email-templates'`,
       )) as Array<Record<string, unknown>>;
@@ -289,7 +323,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         ((await http().get('/api/v1/auth/me').set(auth(actor)).expect(200)).body.data.navigation as Array<{ path: string; icon: string | null }>);
       expect((await menu(director)).find((item) => item.path === '/email-templates')).toMatchObject({ icon: 'mail' });
       expect((await menu(viewer)).find((item) => item.path === '/email-templates')).toBeUndefined();
-      expect((await menu(superAdmin)).find((item) => item.path === '/email-templates')).toBeUndefined();
+      expect((await menu(superAdmin)).find((item) => item.path === '/email-templates')).toMatchObject({ icon: 'mail' });
     });
 
     it('con el módulo Correo apagado, /auth/me no sirve el ítem y la API responde MODULE_UNAVAILABLE', async () => {
@@ -310,22 +344,22 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
   });
 
   describe('permisos', () => {
-    it('director sí; viewer y superadmin reciben 403; las rutas viejas /mail/templates ya no existen', async () => {
+    it('director y superadmin sí; viewer recibe 403; las rutas viejas /mail/templates ya no existen', async () => {
       const catalog = await http().get('/api/v1/email-templates/catalog').set(auth(director)).expect(200);
       expectConforms('get', '/api/v1/email-templates/catalog', 200, catalog.body);
       expect(catalog.body.data.types).toHaveLength(8);
       expect(catalog.body.data.blocks.map((block: { type: string }) => block.type)).toEqual([
         'heading', 'paragraph', 'button', 'divider', 'keyValueList', 'callout', 'spacer',
       ]);
-      for (const actor of [viewer, superAdmin]) {
-        const denied = await http().get('/api/v1/email-templates/catalog').set(auth(actor));
-        expect(denied.status).toBe(403);
-        expect(denied.body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
-      }
+      const superCatalog = await http().get('/api/v1/email-templates/catalog').set(auth(superAdmin)).expect(200);
+      expectConforms('get', '/api/v1/email-templates/catalog', 200, superCatalog.body);
+      const denied = await http().get('/api/v1/email-templates/catalog').set(auth(viewer));
+      expect(denied.status).toBe(403);
+      expect(denied.body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
       expect((await http().get('/api/v1/mail/templates/catalog').set(auth(director))).status).toBe(404);
     });
 
-    it('el director delega solo lectura a un rol inferior (cascada); ese rol lee pero no guarda; el superadmin no puede conceder lo que no tiene', async () => {
+    it('el director delega solo lectura a un rol inferior (cascada); ese rol lee pero no guarda; el superadmin también la concede; quien administra roles sin tenerla no', async () => {
       // Seed: el director no administra roles; aquí se simula que un superadmin le delegó role:create/manage.
       const delegator = await createActor(['INTERNAL_CONTROL_DIRECTOR'], ['role:create:global', 'role:manage:global']);
       const readId = await scalar<string>(dataSource, `SELECT id FROM permission WHERE code = 'email_template:read:global'`);
@@ -347,11 +381,20 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         .send({ templateType: 'SYSTEM_ALERT', subject: design.subject, blocks: design.blocks });
       expect(write.status).toBe(403);
 
+      // 1767225810000: SUPER_ADMIN ya tiene email_template:*, así que puede concederlo.
       const superWithRoles = await createActor(['SUPER_ADMIN']);
-      const refused = await http()
+      const granted = await http()
         .post('/api/v1/roles')
         .set(auth(superWithRoles))
-        .send({ code: `${code}_SA`, name: 'Intento del superadmin', permissionIds: [readId] });
+        .send({ code: `${code}_SA`, name: 'Lector concedido por el superadmin', permissionIds: [readId] });
+      expect(granted.status).toBe(201);
+
+      // Quien administra roles pero no tiene email_template:* no puede concederlo.
+      const roleAdminOnly = await createActor([], ['role:create:global', 'role:manage:global']);
+      const refused = await http()
+        .post('/api/v1/roles')
+        .set(auth(roleAdminOnly))
+        .send({ code: `${code}_RA`, name: 'Intento sin el permiso', permissionIds: [readId] });
       expect(refused.status).toBe(403);
       expect(refused.body.error.code).toBe('PERMISSION_NOT_HELD');
     });
