@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode } from '../../common/constants/error-code.enum.js';
 import { SecretCipherService } from '../crypto/secret-cipher.service.js';
@@ -107,6 +108,32 @@ describe('MailService', () => {
     expect(result.username).toBe('noreply@unac.edu.co');
     expect(result.hasPassword).toBe(true);
     expect(result).not.toHaveProperty('password');
+  });
+
+  it('un destinatario con salto de línea responde MAIL_ADDRESS_INVALID sin conectar ni dejar la dirección en el log', async () => {
+    await service.updateSettings(
+      { host: '127.0.0.1', port: 9, fromEmail: 'noreply@unac.edu.co', enabled: true },
+      'actor',
+    );
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    await expect(
+      service.sendSigningLink('a@x.com>\nRCPT TO:<b@unac.edu.co', {
+        url: 'http://localhost/firma/token',
+        expiresAt: '',
+        formatName: '',
+        number: 'ACT-1',
+        signerName: '',
+        roleLabel: '',
+        contact: '',
+      }),
+    ).rejects.toMatchObject({ code: ErrorCode.MailAddressInvalid });
+    const logged = [...warn.mock.calls, ...error.mock.calls].flat().join(' ');
+    expect(logged).toContain('unsafe to');
+    expect(logged).not.toContain('a@x.com');
+    expect(logged).not.toContain('b@unac.edu.co');
+    warn.mockRestore();
+    error.mockRestore();
   });
 
   it('sella un SMTP legado en texto plano la primera vez que se lee', async () => {

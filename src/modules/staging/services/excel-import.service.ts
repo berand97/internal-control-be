@@ -43,6 +43,11 @@ import { StagingLoaderService } from './staging-loader.service.js';
 export const PLACEHOLDER_CATEGORY = 'SIN_CLASIFICAR';
 export const PLACEHOLDER_ACQUISITION_TYPE = 'NO_REGISTRADO';
 const CHUNK_SIZE = 2000;
+/**
+ * Correo institucional completo (BE-06): dot-atom sin espacios ni caracteres de control y dominio exacto. El
+ * anterior '@unac\.edu\.co$' solo miraba el final, así que "x@otro.com<LF>RCPT TO:<y@unac.edu.co" pasaba.
+ */
+const INSTITUTIONAL_MAILBOX_SQL = String.raw`'^[A-Za-z0-9_%+-]+(\.[A-Za-z0-9_%+-]+)*@unac\.edu\.co$'`;
 /** Activos por transacción al registrar movimientos: acota bloqueos y da avance visible (movementsDone). */
 const MOVEMENT_CHUNK = 1000;
 
@@ -946,9 +951,12 @@ export class ExcelImportService {
                 ELSE 'Ya existe una persona con ese número sin tipo de documento; complete su tipo antes de importar' END
             WHEN 'COST_CENTER_UNKNOWN' THEN 'Centro de costo ' || center_code
             WHEN 'FIELD_TOO_LONG' THEN 'Nombre (máx. 100) o cargo (máx. 150) demasiado largo'
+            WHEN 'EMAIL_NOT_INSTITUTIONAL' THEN
+              CASE WHEN email ~* '@unac\\.edu\\.co$'
+                THEN 'El correo no es una dirección válida: tiene espacios, saltos de línea u otros caracteres no permitidos' END
           END AS detail
         FROM (
-          SELECT row_number, doc_type, doc_type_raw, center_code,
+          SELECT row_number, doc_type, doc_type_raw, center_code, email,
             count(*) OVER (PARTITION BY doc_number) AS repeated,
             CASE
               WHEN is_blank THEN 'EMPTY_ROW'
@@ -969,7 +977,7 @@ export class ExcelImportService {
                 AND NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = import_src.center_code)
                 THEN 'COST_CENTER_UNKNOWN'
               WHEN email IS NULL THEN 'EMAIL_MISSING'
-              WHEN email !~* '@unac\\.edu\\.co$' THEN 'EMAIL_NOT_INSTITUTIONAL'
+              WHEN email !~* ${INSTITUTIONAL_MAILBOX_SQL} THEN 'EMAIL_NOT_INSTITUTIONAL'
             END AS reason
           FROM import_src) x) c
       WHERE s.row_number = c.row_number`);
