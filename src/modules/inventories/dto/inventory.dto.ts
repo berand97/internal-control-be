@@ -7,6 +7,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -25,6 +26,7 @@ import {
 } from '../domain/inventory-schedule.js';
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
+import { CORRECTABLE_RESULTS, type CorrectableResult } from '../enums/verification-result.js';
 
 export class CreateInventoryDto {
   @ApiProperty({ example: 'Toma física Talento Humano 2026' })
@@ -155,15 +157,115 @@ export class VerifyInventoryAssetDto {
   readonly notes?: string;
 }
 
+const trimmed = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
+
 export class ReportNotFoundDto {
   @ApiProperty({ format: 'uuid' })
   @IsUUID('4')
   readonly assetId!: string;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Causa del catálogo (activa). Exactamente uno de causeId u otherCause.',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  readonly causeId?: string;
+
+  @ApiPropertyOptional({
+    minLength: 3,
+    maxLength: 500,
+    description: 'Causa "Otra" en texto libre. Exactamente uno de causeId u otherCause.',
+  })
+  @IsOptional()
+  @IsString()
+  @Transform(trimmed)
+  @MinLength(3)
+  @MaxLength(500)
+  readonly otherCause?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   readonly notes?: string;
+}
+
+export class CorrectInventoryItemDto {
+  @ApiProperty({ enum: CORRECTABLE_RESULTS, enumName: 'InventoryCorrectableResult' })
+  @IsIn(CORRECTABLE_RESULTS)
+  readonly result!: CorrectableResult;
+
+  @ApiPropertyOptional({
+    enum: PhysicalCondition,
+    enumName: 'PhysicalCondition',
+    description: 'Obligatoria con FOUND y MISPLACED',
+  })
+  @IsOptional()
+  @IsEnum(PhysicalCondition)
+  readonly actualCondition?: PhysicalCondition;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Ubicación observada. FOUND: igual a la esperada (o vacía); MISPLACED: obligatoria y distinta de la esperada',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  readonly actualLocationId?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Con MISSING: causa del catálogo (o otherCause)' })
+  @IsOptional()
+  @IsUUID('4')
+  readonly causeId?: string;
+
+  @ApiPropertyOptional({ minLength: 3, maxLength: 500, description: 'Con MISSING: causa "Otra" (o causeId)' })
+  @IsOptional()
+  @IsString()
+  @Transform(trimmed)
+  @MinLength(3)
+  @MaxLength(500)
+  readonly otherCause?: string;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    nullable: true,
+    maxLength: 10,
+    description: 'Código de categoría de hallazgo; null la quita; sin el campo se conserva (PENDING siempre la quita)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  readonly findingCategory?: string | null;
+
+  @ApiProperty({ minLength: 3, maxLength: 500, example: 'Se escaneó el activo equivocado' })
+  @IsString()
+  @Transform(trimmed)
+  @MinLength(3)
+  @MaxLength(500)
+  readonly reason!: string;
+}
+
+export class VoidInventoryItemDto {
+  @ApiProperty({ minLength: 3, maxLength: 500, example: 'Sobrante registrado dos veces' })
+  @IsString()
+  @Transform(trimmed)
+  @MinLength(3)
+  @MaxLength(500)
+  readonly reason!: string;
+}
+
+export class SetFindingCategoryDto {
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    maxLength: 10,
+    example: 'AU',
+    description: 'Código de una categoría activa y definida; null quita la categoría',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  readonly code!: string | null;
 }
 
 export class ReportUnexpectedDto {

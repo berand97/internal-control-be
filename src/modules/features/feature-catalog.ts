@@ -132,7 +132,7 @@ export const FEATURE_CATALOG: ReadonlyArray<FeatureDefinition> = [
     code: 'inventories',
     label: 'Tomas físicas',
     core: false,
-    resourceTypes: ['physical_inventory'],
+    resourceTypes: ['physical_inventory', 'inventory_catalog'],
     pathPrefixes: ['/inventories'],
   },
   {

@@ -192,7 +192,7 @@ export class InventoryPlanningService {
          SELECT count(*) FILTER (WHERE x.expected_cost_center_id = c.id AND x.verification_result <> 'SURPLUS')::int AS expected,
                 count(*) FILTER (WHERE x.expected_cost_center_id = c.id AND x.verification_result = 'MISSING')::int AS not_found,
                 count(*) FILTER (WHERE x.expected_cost_center_id = c.id AND x.verification_result = 'MISPLACED')::int AS misplaced,
-                count(*) FILTER (WHERE x.verification_result = 'SURPLUS')::int AS unexpected
+                count(*) FILTER (WHERE x.verification_result = 'SURPLUS' AND x.voided_at IS NULL)::int AS unexpected
          FROM physical_inventory_item x WHERE x.inventory_id = l.id
        ) r ON l.id IS NOT NULL`,
     )) as CoverageRow[];

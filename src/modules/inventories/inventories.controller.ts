@@ -7,6 +7,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import {
@@ -30,23 +31,42 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-user.ty
 import {
   CancelInventoryDto,
   CloseInventoryDto,
+  CorrectInventoryItemDto,
   CreateInventoryDto,
   InventoryCalendarQueryDto,
   QueryInventoriesDto,
   ReportNotFoundDto,
   ReportUnexpectedDto,
   RescheduleInventoryDto,
+  SetFindingCategoryDto,
   VerifyInventoryAssetDto,
+  VoidInventoryItemDto,
 } from './dto/inventory.dto.js';
 import {
   InventoryCalendarResponseDto,
   InventoryCancelResponseDto,
   InventoryCoverageResponseDto,
   InventoryScheduleResponseDto,
+  InventorySummaryDto,
 } from './dto/inventory-schedule.responses.js';
+import {
+  InventoryDetailResponseDto,
+  InventoryItemCorrectionDto,
+  InventoryItemCorrectionResultDto,
+  InventoryItemDto,
+  InventoryListResponseDto,
+  InventoryProgressResponseDto,
+  InventoryReportResponseDto,
+} from './dto/inventory.responses.js';
+import { envelopedArraySchema } from '../documents/dto/document.responses.js';
 import { InventoriesService } from './services/inventories.service.js';
+import { InventoryCorrectionsService } from './services/inventory-corrections.service.js';
 import { InventoryPlanningService } from './services/inventory-planning.service.js';
 import { InventorySchedulesService } from './services/inventory-schedules.service.js';
+
+const ACTOR_RULE =
+  'Solo el responsable de la toma o quien tenga inventory:create:global (403 INVENTORY_ACTOR_NOT_ALLOWED), y nunca un ' +
+  'jefe vigente de un centro auditado ni el custodio de activos del alcance (403 INVENTORY_CONFLICT_OF_INTEREST).';
 
 @ApiTags(OpenApiTag.Inventories)
 @ApiBearerAuth()
@@ -57,6 +77,14 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
   InventoryCancelResponseDto,
   InventoryCalendarResponseDto,
   InventoryCoverageResponseDto,
+  InventorySummaryDto,
+  InventoryDetailResponseDto,
+  InventoryListResponseDto,
+  InventoryItemDto,
+  InventoryProgressResponseDto,
+  InventoryReportResponseDto,
+  InventoryItemCorrectionDto,
+  InventoryItemCorrectionResultDto,
 )
 @Feature('inventories')
 @Controller('inventories')
@@ -65,11 +93,13 @@ export class InventoriesController {
     private readonly inventoriesService: InventoriesService,
     private readonly schedules: InventorySchedulesService,
     private readonly planning: InventoryPlanningService,
+    private readonly corrections: InventoryCorrectionsService,
   ) {}
 
   @Get()
   @RequirePermission('inventory:read:global')
   @ApiOperation({ summary: 'Listar tomas físicas' })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryListResponseDto) })
   list(@Query() query: QueryInventoriesDto) {
     return this.inventoriesService.list(query);
   }
@@ -103,6 +133,7 @@ export class InventoriesController {
   @Get(':id/progress')
   @RequirePermission('inventory:read:global')
   @ApiOperation({ summary: 'Progreso de verificación' })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryProgressResponseDto) })
   progress(@Param('id', ParseUUIDPipe) id: string) {
     return this.inventoriesService.progress(id);
   }
@@ -110,6 +141,7 @@ export class InventoriesController {
   @Get(':id/report')
   @RequirePermission('inventory:read:global')
   @ApiOperation({ summary: 'Reporte de discrepancias' })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryReportResponseDto) })
   report(@Param('id', ParseUUIDPipe) id: string) {
     return this.inventoriesService.report(id);
   }
@@ -117,6 +149,7 @@ export class InventoriesController {
   @Get(':id')
   @RequirePermission('inventory:read:global')
   @ApiOperation({ summary: 'Detalle de una toma física' })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   getById(@Param('id', ParseUUIDPipe) id: string) {
     return this.inventoriesService.getById(id);
   }
@@ -177,7 +210,11 @@ export class InventoriesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Iniciar toma y congelar snapshot de activos esperados',
+    description:
+      `${ACTOR_RULE} La foto excluye activos dados de baja y marca expectedCodeTemporary en los que tienen código TEMP. ` +
+      'actualStartDate es la fecha de Bogotá.',
   })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   start(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() actor: AuthenticatedUser,
@@ -188,7 +225,8 @@ export class InventoriesController {
   @Post(':id/verify-asset')
   @RequirePermission('inventory:execute:global')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Verificar un activo (escaneo QR)' })
+  @ApiOperation({ summary: 'Verificar un activo (escaneo QR)', description: ACTOR_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryItemDto) })
   verifyAsset(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: VerifyInventoryAssetDto,
@@ -200,7 +238,13 @@ export class InventoriesController {
   @Post(':id/report-not-found')
   @RequirePermission('inventory:execute:global')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Declarar un activo esperado como no encontrado' })
+  @ApiOperation({
+    summary: 'Declarar un activo esperado como no encontrado',
+    description:
+      `${ACTOR_RULE} Exige exactamente una causa: causeId (del catálogo, activa) u otherCause (texto 3..500); si no, ` +
+      '400 INVENTORY_MISSING_CAUSE_REQUIRED.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryItemDto) })
   reportNotFound(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ReportNotFoundDto,
@@ -212,7 +256,13 @@ export class InventoriesController {
   @Post(':id/report-unexpected')
   @RequirePermission('inventory:execute:global')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Registrar un activo fuera del alcance' })
+  @ApiOperation({
+    summary: 'Registrar un activo fuera del alcance',
+    description:
+      `${ACTOR_RULE} Un activo dado de baja responde 406 INVENTORY_ASSET_WRITTEN_OFF; uno LOST se registra con ` +
+      'wasLost = true y la conciliación no lo recupera.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryItemDto) })
   reportUnexpected(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ReportUnexpectedDto,
@@ -221,12 +271,82 @@ export class InventoriesController {
     return this.inventoriesService.reportUnexpected(id, dto, actor);
   }
 
+  @Put(':id/items/:itemId/finding-category')
+  @RequirePermission('inventory:execute:global')
+  @ApiOperation({
+    summary: 'Fijar o quitar la categoría de hallazgo de un ítem',
+    description:
+      `${ACTOR_RULE} Solo tomas en curso e ítems ya verificados y vigentes. La categoría debe estar activa y definida ` +
+      '(406 INVENTORY_CATALOG_ENTRY_UNAVAILABLE). La sugerida (suggestedCategory) nunca se asigna sola.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryItemDto) })
+  setFindingCategory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: SetFindingCategoryDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.corrections.setFindingCategory(id, itemId, dto, actor);
+  }
+
+  @Post(':id/items/:itemId/correct')
+  @RequirePermission('inventory:execute:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Corregir el resultado de un ítem esperado (con motivo)',
+    description:
+      `${ACTOR_RULE} Solo tomas en curso. FOUND/MISPLACED exigen actualCondition; MISPLACED, una ubicación distinta ` +
+      'de la esperada; MISSING, una causa; PENDING vuelve el ítem a sin verificar. Guarda antes/después en el ' +
+      'historial. Un sobrante no se corrige: se anula.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryItemCorrectionResultDto) })
+  correct(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: CorrectInventoryItemDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.corrections.correct(id, itemId, dto, actor);
+  }
+
+  @Post(':id/items/:itemId/void')
+  @RequirePermission('inventory:execute:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Anular un sobrante registrado por error (con motivo)',
+    description: `${ACTOR_RULE} Solo tomas en curso. El ítem queda voided y en el historial; deja de contar.`,
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryItemCorrectionResultDto) })
+  voidSurplus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: VoidInventoryItemDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.corrections.voidSurplus(id, itemId, dto, actor);
+  }
+
+  @Get(':id/items/:itemId/corrections')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Historial de correcciones y anulaciones de un ítem' })
+  @ApiOkResponse({ schema: envelopedArraySchema(InventoryItemCorrectionDto) })
+  listCorrections(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+  ) {
+    return this.corrections.listCorrections(id, itemId);
+  }
+
   @Post(':id/close')
   @RequirePermission('inventory:execute:global')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Cerrar la toma y generar el reporte de discrepancias',
+    description:
+      `${ACTOR_RULE} Con más del 5 % pendiente exige allowUnverified e inventory:create:global. Los pendientes pasan a ` +
+      'NOT_VERIFIED (no son faltantes; la conciliación no los toca). actualEndDate es la fecha de Bogotá.',
   })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   close(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CloseInventoryDto,
@@ -241,6 +361,7 @@ export class InventoriesController {
   @ApiOperation({
     summary: 'Solicitar reconciliación (solo el responsable de la toma)',
   })
+  @ApiOkResponse({ schema: envelopedSchema(InventorySummaryDto) })
   requestReconcile(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() actor: AuthenticatedUser,
@@ -253,7 +374,11 @@ export class InventoriesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Aprobar reconciliación (doble firma; distinto al responsable)',
+    description:
+      'MISPLACED actualiza la ubicación; MISSING marca LOST; FOUND y MISPLACED con condición distinta actualizan la ' +
+      'condición. NOT_VERIFIED y los sobrantes (incluidos los de activos LOST) no cambian nada.',
   })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   approveReconcile(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() actor: AuthenticatedUser,

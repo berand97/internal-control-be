@@ -11,12 +11,19 @@ import { MovementsModule } from '../movements/movements.module.js';
 import { NotificationsModule } from '../notifications/notifications.module.js';
 import { OrganizationalUnit } from '../organizational-units/entities/organizational-unit.entity.js';
 import { RolesModule } from '../roles/roles.module.js';
+import { InventoryFindingCategory } from './entities/inventory-finding-category.entity.js';
+import { InventoryItemCorrection } from './entities/inventory-item-correction.entity.js';
+import { InventoryMissingCause } from './entities/inventory-missing-cause.entity.js';
 import { PhysicalInventoryItem } from './entities/physical-inventory-item.entity.js';
 import { PhysicalInventoryScope } from './entities/physical-inventory-scope.entity.js';
 import { PhysicalInventory } from './entities/physical-inventory.entity.js';
 import { InventoriesController } from './inventories.controller.js';
+import { InventoryCatalogsController } from './inventory-catalogs.controller.js';
 import { InventoryRemindersJob } from './jobs/inventory-reminders.job.js';
 import { InventoriesService } from './services/inventories.service.js';
+import { InventoryActorPolicy } from './services/inventory-actor-policy.service.js';
+import { InventoryCatalogsService } from './services/inventory-catalogs.service.js';
+import { InventoryCorrectionsService } from './services/inventory-corrections.service.js';
 import { InventoryConflictsService } from './services/inventory-conflicts.service.js';
 import { InventoryNoticesService } from './services/inventory-notices.service.js';
 import { InventoryPlanningService } from './services/inventory-planning.service.js';
@@ -35,6 +42,9 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
       PhysicalInventory,
       PhysicalInventoryItem,
       PhysicalInventoryScope,
+      InventoryFindingCategory,
+      InventoryMissingCause,
+      InventoryItemCorrection,
       Asset,
       AppUser,
       CostCenter,
@@ -42,9 +52,13 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
       OrganizationalUnit,
     ]),
   ],
-  controllers: [InventoriesController],
+  // El de catálogos va primero: sus rutas fijas (/inventories/catalogs/...) no deben caer en /inventories/:id.
+  controllers: [InventoryCatalogsController, InventoriesController],
   providers: [
     InventoriesService,
+    InventoryActorPolicy,
+    InventoryCatalogsService,
+    InventoryCorrectionsService,
     InventoryConflictsService,
     InventoryNoticesService,
     InventoryRemindersService,

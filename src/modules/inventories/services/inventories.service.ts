@@ -20,6 +20,7 @@ import {
   assertInventoryTransition,
   exceedsUnverifiedThreshold,
 } from '../domain/inventory-transitions.js';
+import { bogotaDate } from '../domain/inventory-schedule.js';
 import { scopeSql } from '../domain/inventory-scope-sql.js';
 import {
   CloseInventoryDto,
@@ -34,9 +35,15 @@ import { PhysicalInventoryScope } from '../entities/physical-inventory-scope.ent
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
 import { VerificationResult } from '../enums/verification-result.js';
+import { InventoryActorPolicy } from './inventory-actor-policy.service.js';
+import { InventoryCatalogsService } from './inventory-catalogs.service.js';
+import { type ItemViewContext, toItemView, toProgressView, toReportView } from './inventory-item-view.js';
 import { inventorySummary } from './inventory-summary.js';
 
 const ENTITY_TYPE = 'INVENTORY';
+
+/** Marca de importación de un activo cuyo código de barras era "TEMP" (excel-import.service.ts, insertAssets). */
+const TEMPORARY_CODE_FLAG = 'BARCODE_TEMP';
 
 interface ScopeAssetRow {
   readonly id: string;
@@ -44,6 +51,7 @@ interface ScopeAssetRow {
   readonly physical_condition: PhysicalCondition;
   readonly current_cost_center_id: string;
   readonly operational_status: OperationalStatus;
+  readonly code_temporary: boolean;
 }
 
 @Injectable()
@@ -70,6 +78,8 @@ export class InventoriesService {
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
     private readonly assetState: AssetStateService,
+    private readonly actorPolicy: InventoryActorPolicy,
+    private readonly catalogs: InventoryCatalogsService,
   ) {}
 
   async list(query: QueryInventoriesDto) {
@@ -103,17 +113,19 @@ export class InventoriesService {
       where: { inventoryId: id },
       order: { verificationResult: 'ASC' },
     });
+    const context = await this.catalogs.viewContext();
     return {
       ...this.toSummary(inventory),
-      items: items.map((item) => this.toItem(item)),
-      progress: this.toProgress(items),
-      report: this.toReport(items),
+      items: items.map((item) => toItemView(item, context)),
+      progress: toProgressView(items),
+      report: this.frozenOrLiveReport(inventory, items, context),
     };
   }
 
   async start(id: string, actor: AuthenticatedUser) {
     const inventory = await this.requireInventory(id);
     assertInventoryTransition(inventory.status, InventoryStatus.InProgress);
+    await this.actorPolicy.assertCanOperate(inventory, actor);
     await this.assertNoRunningOverlap(
       inventory.scopeType,
       inventory.scopeId,
@@ -134,6 +146,12 @@ export class InventoriesService {
         expectedCondition: asset.physical_condition,
         actualCondition: null,
         expectedCostCenterId: asset.current_cost_center_id,
+        expectedCodeTemporary: asset.code_temporary === true,
+        wasLost: false,
+        voidedAt: null,
+        findingCategoryCode: null,
+        missingCauseId: null,
+        missingCauseOther: null,
         isOnLoan: asset.operational_status === OperationalStatus.OnLoan,
         verifiedAt: null,
         verifiedBy: null,
@@ -143,20 +161,29 @@ export class InventoriesService {
         photoUrl: null,
       }),
     );
-    for (let index = 0; index < rows.length; index += 500) {
-      await this.items.save(rows.slice(index, index + 500));
-    }
-    inventory.status = InventoryStatus.InProgress;
-    inventory.actualStartDate = isoDate(now);
-    await this.inventories.save(inventory);
-    await this.auditLogsRepository.record({
-      action: AuditAction.InventoryStarted,
-      entityType: ENTITY_TYPE,
-      entityId: inventory.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { expectedAssets: assets.length },
+    await this.dataSource.transaction(async (manager) => {
+      const itemRepository = manager.getRepository(PhysicalInventoryItem);
+      for (let index = 0; index < rows.length; index += 500) {
+        await itemRepository.save(rows.slice(index, index + 500));
+      }
+      inventory.status = InventoryStatus.InProgress;
+      inventory.actualStartDate = bogotaDate(now);
+      await manager.getRepository(PhysicalInventory).save(inventory);
+      await this.auditLogsRepository.record(
+        {
+          action: AuditAction.InventoryStarted,
+          entityType: ENTITY_TYPE,
+          entityId: inventory.id,
+          performedBy: actor.id,
+          ipAddress: null,
+          userAgent: null,
+          changes: {
+            expectedAssets: assets.length,
+            temporaryCode: assets.filter((asset) => asset.code_temporary === true).length,
+          },
+        },
+        manager,
+      );
     });
     return this.getById(inventory.id);
   }
@@ -167,6 +194,7 @@ export class InventoriesService {
     actor: AuthenticatedUser,
   ) {
     const inventory = await this.requireInProgress(id);
+    await this.actorPolicy.assertCanOperate(inventory, actor);
     const item = await this.items.findOne({
       where: {
         inventoryId: inventory.id,
@@ -221,7 +249,7 @@ export class InventoriesService {
         await manager.getRepository(PhysicalInventoryItem).save(item);
       },
     });
-    return this.toItem(item);
+    return toItemView(item, await this.catalogs.viewContext());
   }
 
   async reportNotFound(
@@ -230,6 +258,7 @@ export class InventoriesService {
     actor: AuthenticatedUser,
   ) {
     const inventory = await this.requireInProgress(id);
+    await this.actorPolicy.assertCanOperate(inventory, actor);
     const item = await this.items.findOne({
       where: { inventoryId: inventory.id, assetId: dto.assetId },
     });
@@ -239,12 +268,15 @@ export class InventoriesService {
     if (item.verificationResult !== VerificationResult.Pending) {
       throw new ApiException(ErrorCode.InvalidState);
     }
+    const cause = await this.catalogs.resolveMissingCause(dto.causeId, dto.otherCause);
     item.verificationResult = VerificationResult.Missing;
+    item.missingCauseId = cause.missingCauseId;
+    item.missingCauseOther = cause.missingCauseOther;
     item.notes = dto.notes ?? item.notes;
     item.verifiedAt = new Date();
     item.verifiedBy = actor.id;
     await this.items.save(item);
-    return this.toItem(item);
+    return toItemView(item, await this.catalogs.viewContext());
   }
 
   async reportUnexpected(
@@ -253,17 +285,20 @@ export class InventoriesService {
     actor: AuthenticatedUser,
   ) {
     const inventory = await this.requireInProgress(id);
+    await this.actorPolicy.assertCanOperate(inventory, actor);
+    let wasLost = false;
     if (dto.assetId) {
       const existing = await this.items.findOne({
         where: { inventoryId: inventory.id, assetId: dto.assetId },
       });
-      if (existing && existing.verificationResult !== VerificationResult.Surplus) {
+      if (existing && !existing.voidedAt) {
         throw new ApiException(ErrorCode.InvalidState);
       }
-      if (existing) {
-        throw new ApiException(ErrorCode.InvalidState);
+      const asset = await this.requireAsset(dto.assetId);
+      if (asset.operationalStatus === OperationalStatus.WrittenOff) {
+        throw new ApiException(ErrorCode.InventoryAssetWrittenOff);
       }
-      await this.requireAsset(dto.assetId);
+      wasLost = asset.operationalStatus === OperationalStatus.Lost;
     }
     const item = await this.items.save(
       this.items.create({
@@ -275,6 +310,12 @@ export class InventoriesService {
         expectedCondition: null,
         actualCondition: dto.condition ?? null,
         expectedCostCenterId: null,
+        expectedCodeTemporary: null,
+        wasLost,
+        voidedAt: null,
+        findingCategoryCode: null,
+        missingCauseId: null,
+        missingCauseOther: null,
         isOnLoan: false,
         verifiedAt: new Date(),
         verifiedBy: actor.id,
@@ -282,7 +323,7 @@ export class InventoriesService {
         photoUrl: null,
       }),
     );
-    return this.toItem(item);
+    return toItemView(item, await this.catalogs.viewContext());
   }
 
   async progress(id: string) {
@@ -291,16 +332,20 @@ export class InventoriesService {
     return {
       inventoryId: inventory.id,
       status: inventory.status,
-      ...this.toProgress(items),
+      ...toProgressView(items),
     };
   }
 
+  /**
+   * Cierra la toma: los ítems que siguen PENDING pasan a NOT_VERIFIED (no son faltantes y la conciliación no los
+   * toca) y se congela el reporte. Todo en una transacción.
+   */
   async close(id: string, dto: CloseInventoryDto, actor: AuthenticatedUser) {
     const inventory = await this.requireInventory(id);
     assertInventoryTransition(inventory.status, InventoryStatus.Closed);
-    const items = await this.items.find({ where: { inventoryId: inventory.id } });
-    const progress = this.toProgress(items);
-    if (exceedsUnverifiedThreshold(progress.pending, progress.expected)) {
+    await this.actorPolicy.assertCanOperate(inventory, actor);
+    const before = toProgressView(await this.items.find({ where: { inventoryId: inventory.id } }));
+    if (exceedsUnverifiedThreshold(before.pending, before.expected)) {
       if (dto.allowUnverified !== true) {
         throw new ApiException(ErrorCode.InventoryUnverifiedExceedsThreshold);
       }
@@ -312,21 +357,35 @@ export class InventoriesService {
         throw new ApiException(ErrorCode.InsufficientPermissions);
       }
     }
-    const report = this.toReport(items);
-    inventory.status = InventoryStatus.Closed;
-    inventory.actualEndDate = isoDate();
-    inventory.closedAt = new Date();
-    inventory.closedBy = actor.id;
-    inventory.discrepancyReport = report;
-    await this.inventories.save(inventory);
-    await this.auditLogsRepository.record({
-      action: AuditAction.InventoryClosed,
-      entityType: ENTITY_TYPE,
-      entityId: inventory.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: report,
+    const context = await this.catalogs.viewContext();
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `UPDATE physical_inventory_item SET verification_result = $2
+         WHERE inventory_id = $1 AND verification_result = $3`,
+        [inventory.id, VerificationResult.NotVerified, VerificationResult.Pending],
+      );
+      const items = await manager.getRepository(PhysicalInventoryItem).find({ where: { inventoryId: inventory.id } });
+      const report = toReportView(items, context);
+      const now = new Date();
+      inventory.status = InventoryStatus.Closed;
+      inventory.actualEndDate = bogotaDate(now);
+      inventory.closedAt = now;
+      inventory.closedBy = actor.id;
+      inventory.discrepancyReport = report;
+      await manager.getRepository(PhysicalInventory).save(inventory);
+      // Solo conteos: el reporte completo (con notas y causas en texto libre) queda en la toma, no en la auditoría.
+      await this.auditLogsRepository.record(
+        {
+          action: AuditAction.InventoryClosed,
+          entityType: ENTITY_TYPE,
+          entityId: inventory.id,
+          performedBy: actor.id,
+          ipAddress: null,
+          userAgent: null,
+          changes: { ...toProgressView(items), allowUnverified: dto.allowUnverified === true },
+        },
+        manager,
+      );
     });
     return this.getById(inventory.id);
   }
@@ -338,8 +397,18 @@ export class InventoriesService {
       inventoryId: inventory.id,
       code: inventory.code,
       status: inventory.status,
-      ...(inventory.discrepancyReport ?? this.toReport(items)),
+      ...this.frozenOrLiveReport(inventory, items, await this.catalogs.viewContext()),
     };
+  }
+
+  /** Con la toma cerrada prevalece lo congelado al cerrar; los campos que no existían entonces salen en vivo. */
+  private frozenOrLiveReport(
+    inventory: PhysicalInventory,
+    items: ReadonlyArray<PhysicalInventoryItem>,
+    context: ItemViewContext,
+  ) {
+    const live = toReportView(items, context);
+    return inventory.discrepancyReport ? { ...live, ...inventory.discrepancyReport } : live;
   }
 
   async requestReconcile(id: string, actor: AuthenticatedUser) {
@@ -382,8 +451,10 @@ export class InventoriesService {
         if (item.verificationResult === VerificationResult.Missing) {
           await this.applyLost(inventory, item, actor, manager);
         }
+        // NOT_VERIFIED y los sobrantes no cambian nada: no verificar no es un faltante.
         if (
-          item.verificationResult === VerificationResult.Found &&
+          (item.verificationResult === VerificationResult.Found ||
+            item.verificationResult === VerificationResult.Misplaced) &&
           item.actualCondition &&
           item.expectedCondition &&
           item.actualCondition !== item.expectedCondition
@@ -631,12 +702,13 @@ export class InventoriesService {
     const rows: unknown = await this.dataSource.query(
       `
       SELECT a.id, a.current_location_id, a.physical_condition,
-             a.current_cost_center_id, a.operational_status
+             a.current_cost_center_id, a.operational_status,
+             ($${scoped.params.length + 1} = ANY(a.data_quality_flags)) AS code_temporary
       FROM asset a
       WHERE a.operational_status <> 'WRITTEN_OFF'
         AND (${scoped.sql})
       `,
-      scoped.params,
+      [...scoped.params, TEMPORARY_CODE_FLAG],
     );
     if (!Array.isArray(rows)) {
       return [];
@@ -699,88 +771,4 @@ export class InventoriesService {
   private toSummary(inventory: PhysicalInventory) {
     return inventorySummary(inventory);
   }
-
-  private toItem(item: PhysicalInventoryItem) {
-    return {
-      id: item.id,
-      assetId: item.assetId,
-      result: item.verificationResult,
-      expectedLocationId: item.expectedLocationId,
-      actualLocationId: item.actualLocationId,
-      expectedCondition: item.expectedCondition,
-      actualCondition: item.actualCondition,
-      expectedCostCenterId: item.expectedCostCenterId,
-      isOnLoan: item.isOnLoan,
-      verifiedAt: item.verifiedAt,
-      verifiedBy: item.verifiedBy,
-      notes: item.notes,
-    };
-  }
-
-  private toProgress(items: ReadonlyArray<PhysicalInventoryItem>) {
-    const expected = items.filter(
-      (item) => item.verificationResult !== VerificationResult.Surplus,
-    );
-    const pending = expected.filter(
-      (item) => item.verificationResult === VerificationResult.Pending,
-    ).length;
-    const verified = expected.filter(
-      (item) =>
-        item.verificationResult === VerificationResult.Found ||
-        item.verificationResult === VerificationResult.Misplaced,
-    ).length;
-    const notFound = expected.filter(
-      (item) => item.verificationResult === VerificationResult.Missing,
-    ).length;
-    const misplaced = expected.filter(
-      (item) => item.verificationResult === VerificationResult.Misplaced,
-    ).length;
-    const unexpected = items.filter(
-      (item) => item.verificationResult === VerificationResult.Surplus,
-    ).length;
-    const onLoan = expected.filter((item) => item.isOnLoan).length;
-    return {
-      expected: expected.length,
-      pending,
-      verified,
-      notFound,
-      misplaced,
-      unexpected,
-      onLoan,
-      percentVerified:
-        expected.length === 0
-          ? 100
-          : Math.round((verified / expected.length) * 10000) / 100,
-    };
-  }
-
-  private toReport(items: ReadonlyArray<PhysicalInventoryItem>) {
-    const progress = this.toProgress(items);
-    return {
-      ...progress,
-      verifiedItems: items
-        .filter(
-          (item) =>
-            item.verificationResult === VerificationResult.Found ||
-            item.verificationResult === VerificationResult.Misplaced,
-        )
-        .map((item) => this.toItem(item)),
-      notFoundItems: items
-        .filter((item) => item.verificationResult === VerificationResult.Missing)
-        .map((item) => this.toItem(item)),
-      locationDiscrepancies: items
-        .filter((item) => item.verificationResult === VerificationResult.Misplaced)
-        .map((item) => this.toItem(item)),
-      unexpectedItems: items
-        .filter((item) => item.verificationResult === VerificationResult.Surplus)
-        .map((item) => this.toItem(item)),
-    };
-  }
 }
-
-const isoDate = (value: Date = new Date()): string => {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  const day = String(value.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};

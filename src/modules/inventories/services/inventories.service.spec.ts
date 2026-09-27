@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '../../../common/types/authenticated-user
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
 import { VerificationResult } from '../enums/verification-result.js';
+import { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 import { InventoriesService } from './inventories.service.js';
 
 const actor: AuthenticatedUser = {
@@ -61,7 +62,9 @@ describe('InventoriesService', () => {
   let costCenters: { findOne: ReturnType<typeof vi.fn> };
   let locations: { findOne: ReturnType<typeof vi.fn> };
   let orgUnits: { findOne: ReturnType<typeof vi.fn> };
-  let dataSource: { query: ReturnType<typeof vi.fn> };
+  let dataSource: { query: ReturnType<typeof vi.fn>; transaction: ReturnType<typeof vi.fn> };
+  let actorPolicy: { assertCanOperate: ReturnType<typeof vi.fn> };
+  let catalogs: { viewContext: ReturnType<typeof vi.fn> };
   let assetState: { apply: ReturnType<typeof vi.fn> };
   let permissionsService: { userHasPermission: ReturnType<typeof vi.fn> };
   let auditLogsRepository: { record: ReturnType<typeof vi.fn> };
@@ -99,7 +102,15 @@ describe('InventoriesService', () => {
     orgUnits = { findOne: vi.fn() };
     dataSource = {
       query: vi.fn().mockResolvedValue([{ current_value: 1, padding_length: 3, prefix: 'TF-' }]),
+      transaction: vi.fn(async (work: (manager: unknown) => Promise<unknown>) =>
+        work({
+          query: dataSource.query,
+          getRepository: (entity: unknown) => (entity === PhysicalInventory ? inventories : items),
+        }),
+      ),
     };
+    actorPolicy = { assertCanOperate: vi.fn().mockResolvedValue(undefined) };
+    catalogs = { viewContext: vi.fn().mockResolvedValue({ categories: [], causeLabels: new Map() }) };
     assetState = { apply: vi.fn() };
     permissionsService = { userHasPermission: vi.fn() };
     auditLogsRepository = { record: vi.fn() };
@@ -116,6 +127,8 @@ describe('InventoriesService', () => {
       permissionsService as never,
       auditLogsRepository as never,
       assetState as never,
+      actorPolicy as never,
+      catalogs as never,
     );
   });
 
@@ -140,6 +153,7 @@ describe('InventoriesService', () => {
       },
     ]);
     await service.start('inv-1', actor);
+    expect(actorPolicy.assertCanOperate).toHaveBeenCalled();
     expect(items.save).toHaveBeenCalled();
     expect(inventories.save).toHaveBeenCalledWith(
       expect.objectContaining({ status: InventoryStatus.InProgress }),
