@@ -21,7 +21,7 @@ import { NotificationsService } from '../../src/modules/notifications/services/n
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { MailOutboxService } from '../../src/shared/mail/mail-outbox.service.js';
-import { createActor, scalar } from './helpers.js';
+import { createActor, scalar, openTestSession } from './helpers.js';
 
 type Cell = string | number | Date | null;
 
@@ -115,7 +115,7 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
       `INSERT INTO user_role (user_id, role_id, scope_type, scope_id) SELECT $1, id, 'GLOBAL', NULL FROM role WHERE code = 'INTERNAL_CONTROL_DIRECTOR'`,
       [actor.id],
     );
-    token = app.get(TokenService).signAccessToken({ ...actor, sessionId: randomUUID() });
+    token = app.get(TokenService).signAccessToken({ ...actor, sessionId: await openTestSession(dataSource, actor.id) });
     // Sin SMTP: los correos del outbox deben quedar FAILED y visibles.
     await dataSource.query('UPDATE mail_settings SET enabled = FALSE');
 
@@ -250,7 +250,7 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
 
     // Otro usuario no ve ni marca las ajenas.
     const other = await createActor(dataSource);
-    const otherToken = app.get(TokenService).signAccessToken({ ...other, sessionId: randomUUID() });
+    const otherToken = app.get(TokenService).signAccessToken({ ...other, sessionId: await openTestSession(dataSource, other.id) });
     const foreign = await http()
       .post(`/api/v1/notifications/${notification?.['id']}/read`)
       .set({ Authorization: `Bearer ${otherToken}` });

@@ -3,14 +3,13 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import ExcelJS from 'exceljs';
-import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { templateVersion, XLSX_MIME } from '../../src/modules/staging/templates/import-template.js';
-import { createActor, useSharedStorage } from './helpers.js';
+import { createActor, useSharedStorage, openTestSession } from './helpers.js';
 
 const binary = (res: request.Response, done: (error: Error | null, body: Buffer) => void): void => {
   const chunks: Buffer[] = [];
@@ -44,7 +43,7 @@ describe('Plantillas de importación por HTTP (HTTP real + PostgreSQL real)', ()
           [user.id, role],
         );
       }
-      tokens[name] = app.get(TokenService).signAccessToken({ ...user, sessionId: randomUUID() });
+      tokens[name] = app.get(TokenService).signAccessToken({ ...user, sessionId: await openTestSession(dataSource, user.id) });
     }
   });
 

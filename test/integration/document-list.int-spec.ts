@@ -77,15 +77,16 @@ describe('GET /documents y reintento por el outbox (HTTP real + PostgreSQL real)
     return totals;
   };
 
+  // withSession: sesión con MFA verificado si el usuario lo tiene (firma). Sin ella, igual hay una sesión activa
+  // (el guard JWT la exige desde BE-09), pero sin segundo factor.
   const tokenFor = async (user: AuthenticatedUser, withSession: boolean) => {
     const sessionId = randomUUID();
-    if (withSession) {
-      await dataSource.query(
-        `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at)
-       VALUES ($1, $2, $3, NOW() + interval '1 day', (SELECT CASE WHEN mfa_enabled THEN NOW() END FROM app_user WHERE id = $2))`,
-        [sessionId, user.id, randomUUID()],
-      );
-    }
+    await dataSource.query(
+      `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at)
+       VALUES ($1, $2, $3, NOW() + interval '1 day',
+               CASE WHEN $4::boolean THEN (SELECT CASE WHEN mfa_enabled THEN NOW() END FROM app_user WHERE id = $2) END)`,
+      [sessionId, user.id, randomUUID(), withSession],
+    );
     return { token: app.get(TokenService).signAccessToken({ ...user, sessionId }), sessionId };
   };
 

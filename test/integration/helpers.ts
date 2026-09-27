@@ -69,3 +69,21 @@ export const useSharedStorage = async (dataSource: DataSource): Promise<string> 
   await dataSource.query('UPDATE storage_settings SET driver = $1, project_path = $2', ['project', SHARED_STORAGE_DIR]);
   return SHARED_STORAGE_DIR;
 };
+
+/**
+ * Abre una sesión real (familia de refresh ACTIVE) para un usuario de prueba y devuelve su id, que va en el claim
+ * sid del access token. Desde BE-09 el guard JWT exige que esa sesión exista y siga activa.
+ */
+export const openTestSession = async (
+  dataSource: DataSource,
+  userId: string,
+  options: { readonly mfaVerified?: boolean } = {},
+): Promise<string> => {
+  const sessionId = randomUUID();
+  await dataSource.query(
+    `INSERT INTO refresh_token_family (id, user_id, current_jti, expires_at, mfa_verified_at)
+     VALUES ($1, $2, $3, NOW() + interval '1 day', CASE WHEN $4::boolean THEN NOW() END)`,
+    [sessionId, userId, randomUUID(), options.mfaVerified === true],
+  );
+  return sessionId;
+};

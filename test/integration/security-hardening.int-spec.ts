@@ -16,7 +16,7 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { UPLOAD_LIMITS } from '../../src/shared/storage/uploads/bounded-file.interceptor.js';
-import { createActor, scalar, SHARED_STORAGE_DIR, useSharedStorage } from './helpers.js';
+import { createActor, scalar, SHARED_STORAGE_DIR, useSharedStorage, openTestSession } from './helpers.js';
 
 describe('Endurecimiento BE-01 / BE-05 / BE-06 (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
@@ -44,7 +44,7 @@ describe('Endurecimiento BE-01 / BE-05 / BE-06 (HTTP real + PostgreSQL real)', (
         [user.id, role],
       );
       actors[name] = user.id;
-      tokens[name] = app.get(TokenService).signAccessToken({ ...user, sessionId: randomUUID() });
+      tokens[name] = app.get(TokenService).signAccessToken({ ...user, sessionId: await openTestSession(dataSource, user.id) });
     }
   });
 

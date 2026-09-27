@@ -120,12 +120,14 @@ export class AuthController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Cuenta suspendida o inactiva (USER_SUSPENDED, USER_INACTIVE)',
+    description:
+      'Solo con la contraseña correcta (con una incorrecta siempre es 401 INVALID_CREDENTIALS): cuenta suspendida o inactiva (USER_SUSPENDED, USER_INACTIVE) o contraseña temporal de invitación vencida (INVITATION_EXPIRED)',
     schema: errorEnvelopeSchema(),
   })
   @ApiResponse({
     status: 429,
-    description: 'Demasiados intentos (TOO_MANY_ATTEMPTS)',
+    description:
+      'Cuenta bloqueada temporalmente por intentos fallidos (ACCOUNT_TEMPORARILY_LOCKED, con cabecera Retry-After en segundos; igual para una cuenta inexistente) o demasiados intentos desde la IP (TOO_MANY_ATTEMPTS)',
     schema: errorEnvelopeSchema(),
   })
   async login(
@@ -178,7 +180,8 @@ export class AuthController {
   })
   @ApiResponse({
     status: 429,
-    description: 'Demasiados intentos (TOO_MANY_ATTEMPTS)',
+    description:
+      'Cuenta bloqueada temporalmente por intentos fallidos (ACCOUNT_TEMPORARILY_LOCKED, con cabecera Retry-After en segundos; igual para una cuenta inexistente) o demasiados intentos desde la IP (TOO_MANY_ATTEMPTS)',
     schema: errorEnvelopeSchema(),
   })
   async verifyMfa(
@@ -228,7 +231,8 @@ export class AuthController {
   })
   @ApiResponse({
     status: 429,
-    description: 'Demasiados intentos (TOO_MANY_ATTEMPTS)',
+    description:
+      'Cuenta bloqueada temporalmente por intentos fallidos (ACCOUNT_TEMPORARILY_LOCKED, con cabecera Retry-After en segundos; igual para una cuenta inexistente) o demasiados intentos desde la IP (TOO_MANY_ATTEMPTS)',
     schema: errorEnvelopeSchema(),
   })
   async verifyRecoveryCode(
@@ -350,7 +354,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Cerrar sesión',
     description:
-      'Revoca todas las familias de refresh tokens activas del usuario y limpia la cookie. El access token sigue vigente hasta su expiración natural (JWT stateless).',
+      'Revoca todas las familias de refresh tokens activas del usuario y limpia la cookie. Los access tokens de esas sesiones dejan de servir de inmediato: cualquier petición con ellos responde 401 SESSION_REVOKED.',
   })
   @ApiResponse({
     status: 200,

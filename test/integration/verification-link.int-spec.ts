@@ -1,6 +1,5 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
-import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { PDFDocument } from 'pdf-lib';
 import { SchedulerRegistry } from '@nestjs/schedule';
@@ -12,7 +11,7 @@ import { resolveSignatureVerifyUrl } from '../../src/config/signature-verify-url
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
-import { createActor, useSharedStorage } from './helpers.js';
+import { createActor, useSharedStorage, openTestSession } from './helpers.js';
 
 class BlankPdfConverter implements PdfConverter {
   async toPdf(): Promise<Buffer> {
@@ -62,12 +61,12 @@ describe('Enlace de verificación del documento', () => {
       director.id,
     );
     const document = await engine.generate({ formatKey: 'OCI-17-90-INFORME', signers: { AUDITA: director.personId } }, director.id);
-    const token = (userId: string, personId: string) =>
-      app.get(TokenService).signAccessToken({ id: userId, personId, username: 'x', roles: [], scopes: [], sessionId: randomUUID() });
+    const token = async (userId: string, personId: string) =>
+      app.get(TokenService).signAccessToken({ id: userId, personId, username: 'x', roles: [], scopes: [], sessionId: await openTestSession(dataSource, userId) });
 
     const detail = await request(app.getHttpServer())
       .get(`/api/v1/documents/${document.id}`)
-      .set('Authorization', `Bearer ${token(director.id, director.personId)}`);
+      .set('Authorization', `Bearer ${await token(director.id, director.personId)}`);
     expect(detail.status).toBe(200);
     const verification = detail.body.data.verification as { code: string; url: string };
     expect(verification.code).toMatch(/^[A-Za-z0-9_-]{32}$/);
@@ -80,7 +79,7 @@ describe('Enlace de verificación del documento', () => {
     const outsider = await createActor(dataSource);
     const hidden = await request(app.getHttpServer())
       .get(`/api/v1/documents/${document.id}`)
-      .set('Authorization', `Bearer ${token(outsider.id, outsider.personId)}`);
+      .set('Authorization', `Bearer ${await token(outsider.id, outsider.personId)}`);
     expect(hidden.status).toBe(403);
     expect(JSON.stringify(hidden.body)).not.toContain(verification.code);
   });

@@ -9,7 +9,7 @@ import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { createActor, scalar } from './helpers.js';
+import { createActor, scalar, openTestSession } from './helpers.js';
 
 describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
@@ -36,7 +36,7 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
       );
     }
     users[name] = user;
-    tokens[name] = app.get(TokenService).signAccessToken({ ...user, sessionId: randomUUID() });
+    tokens[name] = app.get(TokenService).signAccessToken({ ...user, sessionId: await openTestSession(dataSource, user.id) });
   };
 
   beforeAll(async () => {

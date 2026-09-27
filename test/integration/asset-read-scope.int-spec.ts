@@ -8,7 +8,7 @@ import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { createActor, scalar } from './helpers.js';
+import { createActor, scalar, openTestSession } from './helpers.js';
 
 interface ListBody {
   items: Array<{ id: string; internalCode: string }>;
@@ -36,8 +36,8 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
     return response.body.data as ListBody;
   };
 
-  const tokenFor = (user: AuthenticatedUser) =>
-    app.get(TokenService).signAccessToken({ ...user, sessionId: randomUUID() });
+  const tokenFor = async (user: AuthenticatedUser) =>
+    app.get(TokenService).signAccessToken({ ...user, sessionId: await openTestSession(dataSource, user.id) });
 
   /** Crea un usuario con las asignaciones dadas (SQL directo sobre user_role). */
   const userWith = async (
@@ -57,7 +57,7 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
         [user.id, assignment.scopeType, assignment.scopeId ?? null, assignment.role],
       );
     }
-    tokens[name] = tokenFor(user);
+    tokens[name] = await tokenFor(user);
   };
 
   beforeAll(async () => {
