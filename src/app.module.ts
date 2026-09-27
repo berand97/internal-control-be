@@ -12,6 +12,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AppConfigModule } from './config/config.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { MailModule } from './shared/mail/mail.module.js';
+import { EmailTemplatesModule } from './modules/email-templates/email-templates.module.js';
 import { StorageModule } from './shared/storage/storage.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { BuildingsModule } from './modules/buildings/buildings.module.js';
@@ -62,6 +63,7 @@ const nestObserveImports =
     ScheduleModule.forRoot(),
     StorageModule,
     MailModule,
+    EmailTemplatesModule,
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     AuthModule,
     RolesModule,

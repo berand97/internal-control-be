@@ -12,8 +12,8 @@ import {
   MailVerifyResponseDto,
 } from './dto/mail-settings.response.dto.js';
 import type { UpdateMailSettingsDto } from './dto/update-mail-settings.dto.js';
-import type { EmailTemplateType } from './domain/email-template-catalog.js';
-import { EmailTemplatesService } from './email-templates.service.js';
+import type { EmailTemplateType } from '../../modules/email-templates/domain/email-template-catalog.js';
+import { EmailTemplatesService } from '../../modules/email-templates/email-templates.service.js';
 import { MailSettings } from './entities/mail-settings.entity.js';
 import {
   assertDestinationAllowed,
@@ -201,23 +201,16 @@ export class MailService {
     to: string,
     context: Record<string, string>,
     fallbackLog: string,
-  ): Promise<boolean> {
-    const rendered = await this.templates.render(templateType, context);
-    return this.sendOrLog(to, rendered.subject, rendered.text, fallbackLog);
-  }
-
-  private async sendOrLog(
-    to: string,
-    subject: string,
-    text: string,
-    fallbackLog: string,
+    /** Versión concreta de la plantilla (correo de prueba); sin ella, la activa o el diseño por defecto. */
+    templateId?: string | null,
   ): Promise<boolean> {
     const row = await this.loadSettings();
     if (!this.isReady(row)) {
       this.logger.warn(`smtp not configured; ${fallbackLog}`);
       return false;
     }
-    await this.dispatch(row, to, subject, text);
+    const rendered = await this.templates.render(templateType, context, templateId);
+    await this.dispatch(row, to, rendered.subject, rendered.text, rendered.html);
     return true;
   }
 
@@ -226,6 +219,7 @@ export class MailService {
     to: string,
     subject: string,
     text: string,
+    html?: string,
   ): Promise<void> {
     const from = row.fromName
       ? `${row.fromName} <${row.fromEmail}>`
@@ -241,6 +235,7 @@ export class MailService {
         to,
         subject,
         text,
+        ...(html !== undefined ? { html } : {}),
         outbound: this.outboundPolicy(),
       });
     } catch (error) {

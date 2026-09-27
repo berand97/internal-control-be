@@ -1,0 +1,47 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`snapshot estable > SIGNATURE_LINK por defecto con datos de ejemplo 1`] = `
+{
+  "html": "<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>Firma pendiente: OCI-01-55 · Acta de entrega y asignación de activos fijos N.° 0093</title></head><body style="margin:0;padding:0;background-color:#f3f7fc;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f7fc" style="background-color:#f3f7fc;"><tr><td align="center" style="padding:24px 12px;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#ffffff;border:1px solid #cadded;"><tr><td style="padding:20px 32px;background-color:#233e57;" bgcolor="#233e57"><span style="font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:20px;line-height:28px;font-weight:bold;color:#ffffff;">Control Interno UNAC</span></td></tr><tr><td style="height:24px;font-size:0;line-height:0;">&nbsp;</td></tr><tr><td style="padding:0 32px 16px;"><p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:23px;color:#17283a;">Hola Juliana Pérez,</p></td></tr><tr><td style="padding:0 32px 16px;"><p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:23px;color:#17283a;">Tiene pendiente la firma del documento OCI-01-55 · Acta de entrega y asignación de activos fijos N.° 0093, como Recibe.</p></td></tr><tr><td style="padding:0 32px 16px;"><p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:23px;color:#17283a;">Para leerlo y firmarlo (o rechazarlo indicando el motivo) abra este enlace:</p></td></tr><tr><td style="padding:8px 32px 24px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#306999" style="border-radius:4px;background-color:#306999;"><a href="http://localhost:4200/firmar/ejemplo" target="_blank" rel="noopener" style="display:inline-block;padding:12px 24px;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:4px;">Abrir el documento</a></td></tr></table></td></tr><tr><td style="padding:0 32px 16px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:12px 16px;background-color:#fdf3e1;border-left:4px solid #c98a1a;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:14px;line-height:21px;color:#17283a;">Antes de firmar se le pedirán los últimos 4 dígitos de su número de documento.<br>El enlace es personal, sirve una sola vez y vence el 28 de septiembre de 2026, 10:00 a. m.. No lo reenvíe.</td></tr></table></td></tr><tr><td style="padding:0 32px 16px;"><p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:23px;color:#17283a;">Si tiene dudas, no reconoce este documento o el enlace venció, contacte a Carolina Gómez (carolina.gomez@unac.edu.co).</p></td></tr><tr><td style="padding:0 32px 16px;"><p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:23px;color:#17283a;">Control Interno UNAC</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #cadded;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:12px;line-height:18px;color:#2a5983;">Mensaje automático enviado por Control Interno UNAC.</td></tr></table></td></tr></table></body></html>",
+  "subject": "Firma pendiente: OCI-01-55 · Acta de entrega y asignación de activos fijos N.° 0093",
+  "text": "Hola Juliana Pérez,
+
+Tiene pendiente la firma del documento OCI-01-55 · Acta de entrega y asignación de activos fijos N.° 0093, como Recibe.
+
+Para leerlo y firmarlo (o rechazarlo indicando el motivo) abra este enlace:
+
+Abrir el documento: http://localhost:4200/firmar/ejemplo
+
+Antes de firmar se le pedirán los últimos 4 dígitos de su número de documento.
+El enlace es personal, sirve una sola vez y vence el 28 de septiembre de 2026, 10:00 a. m.. No lo reenvíe.
+
+Si tiene dudas, no reconoce este documento o el enlace venció, contacte a Carolina Gómez (carolina.gomez@unac.edu.co).
+
+Control Interno UNAC
+
+-- 
+Mensaje automático enviado por Control Interno UNAC.",
+}
+`;
+
+exports[`snapshot estable > USER_INVITATION por defecto con datos de ejemplo 1`] = `
+{
+  "html": "<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>Invitación a Control Interno UNAC</title></head><body style="margin:0;padding:0;background-color:#f3f7fc;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f7fc" style="background-color:#f3f7fc;"><tr><td align="center" style="padding:24px 12px;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#ffffff;border:1px solid #cadded;"><tr><td style="padding:20px 32px;background-color:#233e57;" bgcolor="#233e57"><span style="font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:20px;line-height:28px;font-weight:bold;color:#ffffff;">Control Interno UNAC</span></td></tr><tr><td style="height:24px;font-size:0;line-height:0;">&nbsp;</td></tr><tr><td style="padding:0 32px 16px;"><h1 style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:22px;line-height:30px;font-weight:bold;color:#17283a;">Invitación a Control Interno UNAC</h1></td></tr><tr><td style="padding:0 32px 16px;"><p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:23px;color:#17283a;">Se creó su cuenta en Control Interno UNAC.</p></td></tr><tr><td style="padding:0 32px 16px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td valign="top" style="padding:6px 12px 6px 0;width:40%;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#2a5983;border-bottom:1px solid #cadded;">Rol</td><td valign="top" style="padding:6px 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:14px;line-height:20px;color:#17283a;border-bottom:1px solid #cadded;">Consulta</td></tr><tr><td valign="top" style="padding:6px 12px 6px 0;width:40%;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#2a5983;border-bottom:1px solid #cadded;">Correo</td><td valign="top" style="padding:6px 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:14px;line-height:20px;color:#17283a;border-bottom:1px solid #cadded;">juliana.perez@unac.edu.co</td></tr><tr><td valign="top" style="padding:6px 12px 6px 0;width:40%;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#2a5983;border-bottom:1px solid #cadded;">Usuario</td><td valign="top" style="padding:6px 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:14px;line-height:20px;color:#17283a;border-bottom:1px solid #cadded;">juliana.perez@unac.edu.co</td></tr><tr><td valign="top" style="padding:6px 12px 6px 0;width:40%;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#2a5983;border-bottom:1px solid #cadded;">Contraseña temporal</td><td valign="top" style="padding:6px 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:14px;line-height:20px;color:#17283a;border-bottom:1px solid #cadded;">Temp.Ejemplo1</td></tr></table></td></tr><tr><td style="padding:0 32px 16px;"><p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:23px;color:#17283a;">Inicie sesión y cambie la contraseña.</p></td></tr><tr><td style="padding:8px 32px 24px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#306999" style="border-radius:4px;background-color:#306999;"><a href="http://localhost:4200/auth/login" target="_blank" rel="noopener" style="display:inline-block;padding:12px 24px;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:4px;">Iniciar sesión</a></td></tr></table></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #cadded;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:12px;line-height:18px;color:#2a5983;">Mensaje automático enviado por Control Interno UNAC.</td></tr></table></td></tr></table></body></html>",
+  "subject": "Invitación a Control Interno UNAC",
+  "text": "Invitación a Control Interno UNAC
+
+Se creó su cuenta en Control Interno UNAC.
+
+Rol: Consulta
+Correo: juliana.perez@unac.edu.co
+Usuario: juliana.perez@unac.edu.co
+Contraseña temporal: Temp.Ejemplo1
+
+Inicie sesión y cambie la contraseña.
+
+Iniciar sesión: http://localhost:4200/auth/login
+
+-- 
+Mensaje automático enviado por Control Interno UNAC.",
+}
+`;

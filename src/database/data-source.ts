@@ -20,7 +20,7 @@ import { AssetImportBatch } from '../modules/assets/entities/asset-import-batch.
 import { AssetMovement } from '../modules/assets/entities/asset-movement.entity.js';
 import { AssetPhoto } from '../modules/assets/entities/asset-photo.entity.js';
 import { QrTokenRotationLog } from '../modules/qr-tokens/entities/qr-token-rotation-log.entity.js';
-import { EmailTemplate } from '../shared/mail/entities/email-template.entity.js';
+import { EmailTemplate } from '../modules/email-templates/entities/email-template.entity.js';
 import { MailSettings } from '../shared/mail/entities/mail-settings.entity.js';
 import { StorageSettings } from '../shared/storage/entities/storage-settings.entity.js';
 import { DocumentTemplate, GeneratedDocument } from '../modules/document-templates/entities/document-template.entity.js';
@@ -91,6 +91,7 @@ import { PersonEmailSingleLine1767225760000 } from './migrations/1767225760000-p
 import { InvitationExpiryAndTotpStep1767225770000 } from './migrations/1767225770000-invitation-expiry-and-totp-step.js';
 import { EncryptMfaSecrets1767225771000 } from './migrations/1767225771000-encrypt-mfa-secrets.js';
 import { StorageSecretsAndOauthState1767225780000 } from './migrations/1767225780000-storage-secrets-and-oauth-state.js';
+import { EmailTemplateBlocks1767225800000 } from './migrations/1767225800000-email-template-blocks.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -208,6 +209,7 @@ const dataSource = new DataSource({
     InvitationExpiryAndTotpStep1767225770000,
     EncryptMfaSecrets1767225771000,
     StorageSecretsAndOauthState1767225780000,
+    EmailTemplateBlocks1767225800000,
   ],
 });
 

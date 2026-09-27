@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
-import type { EmailTemplateType } from './domain/email-template-catalog.js';
+import type { EmailTemplateType } from '../../modules/email-templates/domain/email-template-catalog.js';
+import { MAIL_OUTBOX_STATUSES, type MailOutboxStatus } from './mail-outbox-status.js';
 import { MailService } from './mail.service.js';
 
 /** Intentos de envío de un correo del outbox antes de dejarlo FAILED definitivo. */
@@ -8,8 +9,7 @@ export const MAX_OUTBOX_SEND_ATTEMPTS = 3;
 /** Minutos antes de reintentar un envío FAILED (o uno que quedó a medias porque el proceso cayó). */
 export const OUTBOX_RETRY_MINUTES = 5;
 
-export const MAIL_OUTBOX_STATUSES = ['PENDING_SEND', 'SENT', 'FAILED'] as const;
-export type MailOutboxStatus = (typeof MAIL_OUTBOX_STATUSES)[number];
+export { MAIL_OUTBOX_STATUSES, type MailOutboxStatus };
 
 export interface MailOutboxEntry {
   readonly templateType: EmailTemplateType;
@@ -18,6 +18,8 @@ export interface MailOutboxEntry {
   readonly context: Record<string, string>;
   readonly entityType: string | null;
   readonly entityId: string | null;
+  /** Versión de plantilla a usar (correo de prueba de una versión). Sin ella, la activa al momento de enviar. */
+  readonly templateVersionId?: string | null;
 }
 
 export interface MailOutboxState {
@@ -44,11 +46,34 @@ export class MailOutboxService {
 
   async enqueue(manager: EntityManager, entry: MailOutboxEntry): Promise<string> {
     const [row] = (await manager.query(
-      `INSERT INTO mail_outbox (template_type, recipient_user_id, context, entity_type, entity_id)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [entry.templateType, entry.recipientUserId, JSON.stringify(entry.context), entry.entityType, entry.entityId],
+      `INSERT INTO mail_outbox (template_type, recipient_user_id, context, entity_type, entity_id, template_version_id)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [
+        entry.templateType,
+        entry.recipientUserId,
+        JSON.stringify(entry.context),
+        entry.entityType,
+        entry.entityId,
+        entry.templateVersionId ?? null,
+      ],
     )) as Array<{ id: string }>;
     return row?.id ?? '';
+  }
+
+  /** Estado de una fila concreta del outbox; null si no existe. */
+  async stateOf(id: string): Promise<MailOutboxState | null> {
+    const [row] = (await this.dataSource.query(
+      `SELECT delivery_status, send_attempts, last_send_error, sent_at FROM mail_outbox WHERE id = $1`,
+      [id],
+    )) as Array<{ delivery_status: MailOutboxStatus; send_attempts: number; last_send_error: string | null; sent_at: Date | null }>;
+    return row
+      ? { status: row.delivery_status, attempts: row.send_attempts, lastError: row.last_send_error, sentAt: row.sent_at }
+      : null;
+  }
+
+  /** Intenta enviar ya una fila recién encolada (fuera de transacción), con el mismo reclamo que el worker. */
+  async dispatchNow(id: string): Promise<'SENT' | 'FAILED' | 'SKIPPED'> {
+    return this.dispatchOne(id);
   }
 
   /** Estado del último correo encolado para una entidad; null si no hay. */
@@ -87,7 +112,7 @@ export class MailOutboxService {
   private async dispatchOne(id: string): Promise<'SENT' | 'FAILED' | 'SKIPPED'> {
     const claimed = await this.dataSource.transaction(async (manager) => {
       const [mail] = (await manager.query(
-        `SELECT o.template_type, o.context, p.email,
+        `SELECT o.template_type, o.context, o.template_version_id, p.email,
                 nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') AS full_name
          FROM mail_outbox o
          JOIN app_user u ON u.id = o.recipient_user_id
@@ -97,7 +122,13 @@ export class MailOutboxService {
            AND (o.send_started_at IS NULL OR o.send_started_at < NOW() - make_interval(mins => $3))
          FOR UPDATE OF o SKIP LOCKED`,
         [id, MAX_OUTBOX_SEND_ATTEMPTS, OUTBOX_RETRY_MINUTES],
-      )) as Array<{ template_type: EmailTemplateType; context: Record<string, string>; email: string | null; full_name: string | null }>;
+      )) as Array<{
+        template_type: EmailTemplateType;
+        context: Record<string, string>;
+        template_version_id: string | null;
+        email: string | null;
+        full_name: string | null;
+      }>;
       if (!mail) {
         return null;
       }
@@ -120,6 +151,7 @@ export class MailOutboxService {
           claimed.email,
           { 'user.fullName': claimed.full_name ?? '', ...claimed.context },
           `mail-outbox id=${id} template=${claimed.template_type}`,
+          claimed.template_version_id,
         );
         if (!delivered) {
           error = 'El correo saliente (SMTP) no está configurado o está deshabilitado';

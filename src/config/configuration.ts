@@ -105,12 +105,20 @@ export interface AppConfig {
   readonly outbound: OutboundConfig;
   readonly features: FeaturesConfig;
   readonly documents: DocumentsConfig;
+  readonly emailBrand: EmailBrandConfig;
 }
 
 /** Destinos salientes configurables (SMTP, S3): ver src/shared/net/outbound-destination.ts (BE-16). */
 export interface OutboundConfig {
   readonly allowPrivateNetworks: boolean;
   readonly allowedHosts: ReadonlyArray<string>;
+}
+
+/** Identidad de los correos (layout de src/modules/email-templates/domain/email-layout.ts). */
+export interface EmailBrandConfig {
+  readonly name: string;
+  /** https, PNG o JPG (Gmail y Outlook no muestran SVG). Un valor que no sea https se ignora con un aviso. */
+  readonly logoUrl: string | null;
 }
 
 export type DocumentNumberingPolicy = 'continue' | 'restart';
@@ -247,6 +255,22 @@ const readList = (key: string): ReadonlyArray<string> =>
     .map((item) => item.trim())
     .filter((item) => item !== '');
 
+const readBrandLogoUrl = (): string | null => {
+  const raw = readString('MAIL_BRAND_LOGO_URL', '').trim();
+  if (raw === '') {
+    return null;
+  }
+  try {
+    if (new URL(raw).protocol === 'https:' && !/\s/.test(raw)) {
+      return raw;
+    }
+  } catch {
+    // se ignora abajo
+  }
+  new Logger('Config').warn('MAIL_BRAND_LOGO_URL no es un URL https válido; los correos muestran el nombre de la marca');
+  return null;
+};
+
 const configuration = (): AppConfig => {
   // SIGNATURE_VERIFY_URL se valida antes que GOTENBERG_URL y que las claves propias (BE-12): si faltan varias en
   // producción, el primer error es el de la URL que queda impresa en las actas.
@@ -346,6 +370,10 @@ const configuration = (): AppConfig => {
       gotenbergUrl,
       numberingPolicy: readNumberingPolicy(),
       signatureProvider: readSignatureProvider(),
+    },
+    emailBrand: {
+      name: readString('MAIL_BRAND_NAME', 'Control Interno UNAC').trim(),
+      logoUrl: readBrandLogoUrl(),
     },
   };
 };

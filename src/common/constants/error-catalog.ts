@@ -522,6 +522,21 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'No hay plantilla activa para este tipo de documento',
   },
+  [ErrorCode.EmailTemplateInvalidDesign]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El diseño del correo no es válido: revise los bloques señalados',
+  },
+  [ErrorCode.EmailTemplateUnknownVariable]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El correo usa una variable que no pertenece a este tipo de correo',
+  },
+  [ErrorCode.EmailTemplateMissingVariable]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'Faltan variables obligatorias en el correo',
+  },
   [ErrorCode.AssetAlreadyLoaned]: {
     httpStatus: 406,
     action: 'CANCEL',
