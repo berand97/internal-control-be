@@ -7,14 +7,19 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  *   documento Tiptap/ProseMirror (src/modules/email-templates/domain/rich-text.ts). Cada línea en blanco separa
  *   párrafos y cada salto simple es un `hardBreak`; texto y variables {{...}} quedan intactos (sin pérdida: la vuelta
  *   da el mismo texto). Los demás bloques no cambian.
- * - email_asset: imágenes PNG/JPEG subidas desde el editor, en la BD (bytea) y servidas por el endpoint público
- *   GET /api/v1/public/email-assets/:id. Sin borrado desde la aplicación: los correos ya enviados siguen apuntando a
- *   ellas. sha256 único: subir la misma imagen devuelve la existente.
+ * - email_asset: metadatos de las imágenes PNG/JPEG subidas desde el editor. Los bytes NO están en la BD: van al
+ *   bucket público del proveedor S3 (clave email-assets/<uuid>.<png|jpg>) y el correo usa public_url. Sin borrado
+ *   desde la aplicación: los correos ya enviados siguen apuntando a ellas. sha256 único: la misma imagen devuelve la
+ *   existente.
+ * - storage_settings.s3_public_assets_bucket y s3_public_assets_base_url: bucket público (distinto del de
+ *   documentos, que sigue privado) y su URL pública base. Mismo endpoint y credenciales del proveedor S3; sin
+ *   secretos nuevos.
  *
  * down() (con pérdida, documentado): cada `paragraph { content }` vuelve a `paragraph { text }` sin marcas (negrita,
  * cursiva, subrayado); cada ítem de lista queda como una línea "- " o "1. " y cada enlace como "texto (href)". Cada
- * bloque `image` pasa a un párrafo "[Imagen: alt]" (el diseño anterior no conoce imágenes) y la tabla email_asset se
- * elimina con sus imágenes: los correos ya enviados que las muestran dejan de verlas.
+ * bloque `image` pasa a un párrafo "[Imagen: alt]" (el diseño anterior no conoce imágenes); la tabla email_asset y
+ * las dos columnas de storage_settings se eliminan. Los objetos del bucket público NO se borran (down() no toca el
+ * almacenamiento): los correos ya enviados siguen mostrando sus imágenes.
  *
  * Las conversiones están copiadas aquí (una migración no importa código vivo); rich-text.spec.ts prueba las vivas y
  * legacy-text-migration.spec.ts estas. TypeORM corre cada migración en una transacción (CLI: 'all'; tests: 'each').
@@ -126,9 +131,11 @@ export class EmailRichParagraphAndAssets1767225820000 implements MigrationInterf
     await queryRunner.query(`
       CREATE TABLE email_asset (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        storage_key VARCHAR(200) NOT NULL CONSTRAINT uq_email_asset_storage_key UNIQUE
+          CONSTRAINT chk_email_asset_storage_key CHECK (storage_key ~ '^email-assets/[0-9a-f-]{36}[.](png|jpg)$'),
+        public_url TEXT NOT NULL CONSTRAINT chk_email_asset_public_url CHECK (public_url ~ '^https?://'),
         mime VARCHAR(20) NOT NULL CONSTRAINT chk_email_asset_mime CHECK (mime IN ('image/png', 'image/jpeg')),
-        content BYTEA NOT NULL,
-        byte_size INTEGER NOT NULL CONSTRAINT chk_email_asset_byte_size CHECK (byte_size > 0 AND byte_size = octet_length(content)),
+        byte_size INTEGER NOT NULL CONSTRAINT chk_email_asset_byte_size CHECK (byte_size > 0),
         width INTEGER NOT NULL CONSTRAINT chk_email_asset_width CHECK (width BETWEEN 1 AND 2000),
         height INTEGER NOT NULL CONSTRAINT chk_email_asset_height CHECK (height BETWEEN 1 AND 2000),
         sha256 CHAR(64) NOT NULL CONSTRAINT uq_email_asset_sha256 UNIQUE,
@@ -138,11 +145,21 @@ export class EmailRichParagraphAndAssets1767225820000 implements MigrationInterf
       )
     `);
     await queryRunner.query(`CREATE INDEX idx_email_asset_created_at ON email_asset (created_at DESC)`);
+    await queryRunner.query(`
+      ALTER TABLE storage_settings
+        ADD COLUMN s3_public_assets_bucket VARCHAR(63) NULL,
+        ADD COLUMN s3_public_assets_base_url TEXT NULL
+    `);
     await convertAll(queryRunner, upgradeBlocks);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await convertAll(queryRunner, downgradeBlocks);
+    await queryRunner.query(`
+      ALTER TABLE storage_settings
+        DROP COLUMN IF EXISTS s3_public_assets_base_url,
+        DROP COLUMN IF EXISTS s3_public_assets_bucket
+    `);
     await queryRunner.query(`DROP TABLE IF EXISTS email_asset`);
   }
 }

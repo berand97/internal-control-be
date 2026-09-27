@@ -297,7 +297,7 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
   it('OpenAPI documenta los 403 de alcance y el 404 indistinguible', () => {
     const document = SwaggerModule.createDocument(app, new DocumentBuilder().build());
     const paths = Object.entries(document.paths);
-    const read = (suffix: string) => paths.find(([path]) => path.endsWith(suffix))?.[1].get;
+    const read = (suffix: string) => paths.find(([path]) => path === `/api/v1${suffix}` || path === suffix)?.[1].get;
     for (const suffix of ['/assets', '/assets/{id}', '/assets/{id}/timeline']) {
       const forbidden = read(suffix)?.responses['403'] as
         | { description: string; content: { 'application/json': { examples: Record<string, { value: { error: { code: string } } }> } } }

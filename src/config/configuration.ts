@@ -4,11 +4,11 @@ import {
   parseTrustProxy,
   type TrustProxySetting,
 } from '../common/http/trust-proxy.js';
-import { apiPublicUrlWarning } from './api-public-url.js';
 import { guardDatabaseUrl } from './database-host-guard.js';
 import { dedicatedSecretWarnings, resolveDedicatedSecrets } from './dedicated-secrets.js';
 import { resolveGotenbergUrl } from './gotenberg-url.js';
 import { resolveSignatureVerifyUrl } from './signature-verify-url.js';
+import { normalizePublicAssetsBaseUrl, normalizePublicAssetsBucket } from '../shared/storage/public-assets.js';
 
 export interface DatabaseConfig {
   readonly url: string;
@@ -64,6 +64,10 @@ export interface StorageConfig {
     readonly accessKey: string | null;
     readonly secretKey: string | null;
     readonly forcePathStyle: boolean;
+    /** Bucket público de imágenes de correo (shared/storage/public-assets.ts); null = no configurado. */
+    readonly publicAssetsBucket: string | null;
+    /** URL pública base de ese bucket; null = no configurada. */
+    readonly publicAssetsBaseUrl: string | null;
   };
   readonly google: {
     readonly clientId: string | null;
@@ -256,6 +260,17 @@ const readList = (key: string): ReadonlyArray<string> =>
     .map((item) => item.trim())
     .filter((item) => item !== '');
 
+// Se validan al arrancar: un valor inválido detiene el backend con el motivo (como SIGNATURE_VERIFY_URL).
+const readPublicAssetsBucket = (): string | null => {
+  const raw = readString('STORAGE_S3_PUBLIC_ASSETS_BUCKET', '').trim();
+  return raw === '' ? null : normalizePublicAssetsBucket(raw);
+};
+
+const readPublicAssetsBaseUrl = (): string | null => {
+  const raw = readString('STORAGE_S3_PUBLIC_ASSETS_BASE_URL', '').trim();
+  return raw === '' ? null : normalizePublicAssetsBaseUrl(raw, process.env['NODE_ENV'] === 'production');
+};
+
 const readBrandLogoUrl = (): string | null => {
   const raw = readString('MAIL_BRAND_LOGO_URL', '').trim();
   if (raw === '') {
@@ -281,10 +296,6 @@ const configuration = (): AppConfig => {
   const secrets = resolveDedicatedSecrets(process.env);
   for (const warning of dedicatedSecretWarnings(process.env)) {
     new Logger('Config').warn(warning);
-  }
-  const apiUrlWarning = apiPublicUrlWarning(process.env);
-  if (apiUrlWarning !== null) {
-    new Logger('Config').warn(apiUrlWarning);
   }
   return {
     port: readNumber('PORT', 3000),
@@ -340,6 +351,8 @@ const configuration = (): AppConfig => {
         accessKey: readString('STORAGE_S3_ACCESS_KEY', '') || null,
         secretKey: readString('STORAGE_S3_SECRET_KEY', '') || null,
         forcePathStyle: readBoolean('STORAGE_S3_FORCE_PATH_STYLE', true),
+        publicAssetsBucket: readPublicAssetsBucket(),
+        publicAssetsBaseUrl: readPublicAssetsBaseUrl(),
       },
       google: {
         clientId: readString('STORAGE_GOOGLE_CLIENT_ID', '') || null,

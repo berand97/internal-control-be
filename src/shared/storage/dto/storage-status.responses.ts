@@ -47,6 +47,16 @@ export class StorageStatusDto {
   readonly s3ForcePathStyle!: boolean;
 
   @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Bucket público de las imágenes de correo; null = no configurado (no se pueden subir imágenes)',
+  })
+  readonly s3PublicAssetsBucket!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'URL pública base de ese bucket' })
+  readonly s3PublicAssetsBaseUrl!: string | null;
+
+  @ApiProperty({
     description:
       'true si hay una clave de acceso S3 guardada. Nunca se devuelve el valor',
   })

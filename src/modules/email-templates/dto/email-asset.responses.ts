@@ -36,14 +36,15 @@ export class EmailAssetResponseDto {
   readonly originalName!: string;
 
   @ApiProperty({
-    description: 'URL pública absoluta (API_PUBLIC_URL + /api/v1/public/email-assets/{id}); la usan los correos y la vista previa',
+    description:
+      'URL pública absoluta del objeto en el bucket público (URL base + email-assets/<uuid>.<png|jpg>); la usan los correos y la vista previa',
   })
   readonly url!: string;
 
   @ApiProperty({ type: 'string', format: 'date-time' })
   readonly createdAt!: string;
 
-  static from(row: EmailAsset, url: string): EmailAssetResponseDto {
+  static from(row: EmailAsset): EmailAssetResponseDto {
     return {
       id: row.id,
       mime: row.mime,
@@ -51,7 +52,7 @@ export class EmailAssetResponseDto {
       height: row.height,
       byteSize: row.byteSize,
       originalName: row.originalName,
-      url,
+      url: row.publicUrl,
       createdAt: new Date(row.createdAt).toISOString(),
     };
   }

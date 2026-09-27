@@ -78,7 +78,7 @@ cada una; es preferible que el despliegue falle de inmediato y se vea en Dokploy
 | `RUN_MIGRATIONS` | No | `true` | `true` | Con `true` el entrypoint corre `typeorm migration:run` antes de arrancar. Con `false` no migra (ver §4). |
 | `CORS_ALLOWED_ORIGINS` | En la práctica sí | vacío | `https://control-interno.unac.edu.co` | Vacío = ningún origen permitido: el frontend en otro dominio no puede llamar al API. Lista separada por comas. |
 | `APP_PUBLIC_URL` | En la práctica sí | `http://localhost:4200` | `https://control-interno.unac.edu.co` | Enlaces de correos (invitaciones, recuperación) y redirecciones de OAuth de almacenamiento apuntarían a localhost. |
-| `API_PUBLIC_URL` | En la práctica sí | `http://localhost:3000` | `https://api.control-interno.unac.edu.co` | URLs de archivos del almacenamiento `project`, callbacks OAuth de Google Drive/OneDrive y las **imágenes de las plantillas de correo** (`<API_PUBLIC_URL>/api/v1/public/email-assets/<id>`, pública y sin sesión) apuntarían a localhost. En producción debe ser **https** y de host público: los clientes de correo descargan las imágenes desde internet. Si no lo es, el backend arranca pero lo advierte en el log (`API_PUBLIC_URL debe usar https en producción…`). Si hay un proxy delante, debe dejar pasar `/api/v1/public/email-assets/` sin autenticación y sin cambiar `Cross-Origin-Resource-Policy: cross-origin` (si fuerza `same-origin`, Outlook web no muestra las imágenes). |
+| `API_PUBLIC_URL` | En la práctica sí | `http://localhost:3000` | `https://api.control-interno.unac.edu.co` | URLs de archivos del almacenamiento `project` y callbacks OAuth de Google Drive/OneDrive apuntarían a localhost. |
 | `MOVEMENT_SIGNING_SECRET_PREVIOUS` | Solo al rotar | vacío | `<valor anterior>` | Lista separada por comas de claves anteriores de firma de movimientos: solo **verifican**. Ver §7.3. |
 | `SETTINGS_ENCRYPTION_KEY_PREVIOUS` | Solo al rotar | vacío | `<valor anterior>` | Lista separada por comas de claves anteriores de cifrado: solo **descifran**; lo leído se vuelve a cifrar con la actual. Ver §7.2. |
 | `OUTBOUND_ALLOW_PRIVATE_NETWORKS` | No | `false` en producción, `true` fuera | `false` | Con `false`, el host SMTP y el endpoint S3 no pueden ser privados, loopback ni link-local. Ver §8. |
@@ -438,6 +438,8 @@ fija `STORAGE_DRIVER=project` como valor inicial y no hace falta tocarlo. Orden:
    | Bucket (`s3Bucket`) | `control-interno` |
    | Access key / Secret key | las de `svc-control-interno`, **nunca** la raíz |
    | Path-style (`s3ForcePathStyle`) | **activado** (MinIO no usa subdominios por bucket) |
+   | Bucket público (`s3PublicAssetsBucket`) | `control-interno-public` (solo imágenes de correo, §10.7); vacío = sin imágenes |
+   | URL pública base (`s3PublicAssetsBaseUrl`) | `https://<dominio público de la API de MinIO>/control-interno-public` (§10.7) |
 
    La clave secreta se guarda cifrada con `SETTINGS_ENCRYPTION_KEY`.
 4. **Guardar activa el driver de inmediato**: lo que se genere desde ese momento va a MinIO. Hágalo en un
@@ -472,3 +474,73 @@ idempotente con `--dry-run`: por cada fila con driver `project`, copiar el objet
 MinIO, verificar el SHA-256 contra el hash guardado en la fila (`file_hash`, `current_pdf_sha256`,
 `rubric_sha256`…) y cambiar el driver de esa fila en una transacción. Recién con todo verificado se
 retira el volumen, siempre después de un respaldo.
+
+### 10.7 Bucket público para las imágenes de los correos
+
+Las imágenes que se insertan en las plantillas de correo (bloque *Imagen*) **no** las sirve el backend ni
+van en la base: el backend las valida (PNG/JPEG por sus bytes, máximo 1 MB y 2000 × 2000 px), las
+re-codifica sin metadatos (EXIF/GPS) a lo sumo a 1200 px de ancho y las sube a un **bucket público
+dedicado** del mismo MinIO, con la clave `email-assets/<uuid>.<png|jpg>` (no adivinable, sin el nombre
+original), `Content-Type` y `Cache-Control: public, max-age=31536000, immutable`. El correo lleva la
+URL `<URL pública base>/email-assets/<uuid>.png` en el `<img src>` y el cliente de correo la descarga
+directamente de MinIO. La tabla `email_asset` guarda la clave, la URL pública y los metadatos. Las
+imágenes no se borran desde la aplicación: los correos ya enviados siguen apuntando a ellas.
+
+- **El bucket de documentos (`control-interno`) sigue privado**: nada de esta sección lo cambia.
+- **El dominio de la API S3 de MinIO debe ser público y con HTTPS** (§10.2, opción 2 de §10.4): Gmail,
+  Outlook y los demás clientes descargan la imagen desde internet y no cargan `http://` ni direcciones
+  internas. Si el backend usa MinIO por la red interna (`http://minio:9000`), la **URL pública base**
+  igual debe ser el dominio HTTPS público; el backend sube por el endpoint interno y el correo lee por
+  el público.
+- Sin driver S3, sin bucket público o sin URL base, subir una imagen responde
+  `409 PUBLIC_ASSETS_NOT_CONFIGURED`: nunca se guarda en otro sitio.
+
+Crear el bucket y darle lectura anónima **solo** de `s3:GetObject` sobre `email-assets/*` (sin
+`s3:ListBucket`: nadie puede listar su contenido):
+
+```sh
+mc mb ci/control-interno-public
+mc anonymous set-json control-interno-public-read.json ci/control-interno-public
+mc anonymous get-json ci/control-interno-public     # debe mostrar solo el GetObject de abajo
+```
+
+`control-interno-public-read.json`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "AWS": ["*"] },
+      "Action": ["s3:GetObject"],
+      "Resource": ["arn:aws:s3:::control-interno-public/email-assets/*"]
+    }
+  ]
+}
+```
+
+No use `mc anonymous set download`: además del `GetObject` concede `s3:ListBucket` sobre todo el bucket.
+
+Agregue a `control-interno-app.json` (§10.3) el permiso de escribir y leer en ese prefijo y vuelva a
+crear la política (`mc admin policy create ci control-interno-app control-interno-app.json`). En S3
+`HeadObject` se autoriza con `s3:GetObject`; no hay una acción `s3:HeadObject`:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["s3:PutObject", "s3:GetObject"],
+  "Resource": ["arn:aws:s3:::control-interno-public/email-assets/*"]
+}
+```
+
+La aplicación no tiene `DeleteObject` en ese bucket. Si dos personas suben la misma imagen a la vez,
+gana una y el objeto de la otra queda huérfano (el backend lo intenta borrar y, sin permiso, lo deja en el
+log); no afecta a nada.
+
+Luego, en *Almacenamiento* (§10.5), complete **Bucket público** (`control-interno-public`) y **URL
+pública base** (`https://<dominio público de la API de MinIO>/control-interno-public`, sin barra final
+ni parámetros; en producción solo `https`). También se pueden sembrar con
+`STORAGE_S3_PUBLIC_ASSETS_BUCKET` y `STORAGE_S3_PUBLIC_ASSETS_BASE_URL` (un valor inválido detiene el
+arranque). Compruebe subiendo una imagen desde *Plantillas de correo* y abriendo su `url` en una
+ventana privada: debe verse sin iniciar sesión, y `<URL pública base>?list-type=2` debe responder 403.

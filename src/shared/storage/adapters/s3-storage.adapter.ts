@@ -115,6 +115,7 @@ export class S3StorageAdapter implements StoragePort {
           Key: input.key,
           Body: input.body,
           ContentType: input.contentType,
+          ...(input.cacheControl ? { CacheControl: input.cacheControl } : {}),
         }),
       );
     } catch {

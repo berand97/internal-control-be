@@ -37,10 +37,28 @@ import {
   type StorageCheckName,
 } from './s3-connection-probe.js';
 import { S3_PROVIDER_PRESETS } from './s3-provider.presets.js';
+import {
+  PublicAssetsConfigError,
+  normalizePublicAssetsBaseUrl,
+  normalizePublicAssetsBucket,
+  publicAssetUrl,
+} from './public-assets.js';
 import { assertSafeStorageKey } from './storage-key.js';
 import type { PutObjectInput, StoragePort, StoredObject } from './storage.port.js';
 
 export type OauthProvider = 'google_drive' | 'onedrive';
+
+export interface PublicAssetInput {
+  readonly key: string;
+  readonly body: Buffer;
+  readonly contentType: string;
+  readonly cacheControl: string;
+}
+
+export interface StoredPublicAsset {
+  readonly key: string;
+  readonly publicUrl: string;
+}
 
 /** Vigencia del `state` OAuth y de la cookie que lo liga al navegador (BE-15). */
 export const OAUTH_STATE_TTL_SECONDS = 600;
@@ -158,6 +176,8 @@ export class StorageService {
       s3Region: resolved.s3.region,
       s3Bucket: resolved.s3.bucket,
       s3ForcePathStyle: resolved.s3.forcePathStyle,
+      s3PublicAssetsBucket: resolved.s3.publicAssetsBucket,
+      s3PublicAssetsBaseUrl: resolved.s3.publicAssetsBaseUrl,
       s3AccessKeySet: Boolean(resolved.s3.accessKey),
       s3SecretKeySet: Boolean(resolved.s3.secretKey),
       googleConnected: Boolean(resolved.google.refreshToken),
@@ -288,6 +308,8 @@ export class StorageService {
       s3AccessKey: string | null;
       s3SecretKey: string | null;
       s3ForcePathStyle: boolean;
+      s3PublicAssetsBucket: string | null;
+      s3PublicAssetsBaseUrl: string | null;
       googleClientId: string | null;
       googleClientSecret: string | null;
       googleFolderId: string | null;
@@ -343,6 +365,23 @@ export class StorageService {
     }
     if (patch.s3ForcePathStyle !== undefined) {
       row.s3ForcePathStyle = patch.s3ForcePathStyle;
+    }
+    try {
+      if (patch.s3PublicAssetsBucket !== undefined) {
+        row.s3PublicAssetsBucket =
+          patch.s3PublicAssetsBucket === null ? null : normalizePublicAssetsBucket(patch.s3PublicAssetsBucket);
+      }
+      if (patch.s3PublicAssetsBaseUrl !== undefined) {
+        row.s3PublicAssetsBaseUrl =
+          patch.s3PublicAssetsBaseUrl === null
+            ? null
+            : normalizePublicAssetsBaseUrl(patch.s3PublicAssetsBaseUrl, process.env['NODE_ENV'] === 'production');
+      }
+    } catch (error) {
+      if (error instanceof PublicAssetsConfigError) {
+        throw new ApiException(ErrorCode.ValidationFailed, error.message);
+      }
+      throw error;
     }
     if (patch.googleClientId !== undefined) {
       row.googleClientId = patch.googleClientId;
@@ -635,6 +674,47 @@ export class StorageService {
     );
   }
 
+  /**
+   * Sube un archivo público (imágenes de correo) al bucket público del proveedor S3 activo, con el mismo endpoint y
+   * credenciales que el bucket de documentos. Sin driver s3, sin bucket público o sin URL base responde
+   * PUBLIC_ASSETS_NOT_CONFIGURED: nunca se guarda en otro sitio.
+   */
+  async putPublicAsset(input: PublicAssetInput): Promise<StoredPublicAsset> {
+    assertSafeStorageKey(input.key);
+    const resolved = await this.resolvedConfig();
+    const { publicAssetsBucket, publicAssetsBaseUrl } = resolved.s3;
+    if (
+      resolved.driver !== 's3' ||
+      !publicAssetsBucket ||
+      !publicAssetsBaseUrl ||
+      !resolved.s3.accessKey ||
+      !resolved.s3.secretKey
+    ) {
+      throw new ApiException(ErrorCode.PublicAssetsNotConfigured);
+    }
+    let adapter: S3StorageAdapter;
+    try {
+      adapter = this.s3Adapter({ ...resolved, s3: { ...resolved.s3, bucket: publicAssetsBucket } });
+    } catch (error) {
+      if (isOutboundForbidden(error)) {
+        throw new ApiException(ErrorCode.OutboundDestinationForbidden);
+      }
+      throw error;
+    }
+    await adapter.put(input);
+    return { key: input.key, publicUrl: publicAssetUrl(publicAssetsBaseUrl, input.key) };
+  }
+
+  /** Borra un objeto del bucket público (solo para deshacer una subida que perdió la carrera por el mismo sha256). */
+  async deletePublicAsset(key: string): Promise<void> {
+    assertSafeStorageKey(key);
+    const resolved = await this.resolvedConfig();
+    if (resolved.driver !== 's3' || !resolved.s3.publicAssetsBucket) {
+      return;
+    }
+    await this.s3Adapter({ ...resolved, s3: { ...resolved.s3, bucket: resolved.s3.publicAssetsBucket } }).delete(key);
+  }
+
   /** Lanza StorageNotConfigured si faltan datos y OutboundDestinationError si el host está prohibido (BE-16). */
   private s3Adapter(resolved: StorageConfig, tuning?: S3ClientTuning): S3StorageAdapter {
     if (!resolved.s3.bucket || !resolved.s3.accessKey || !resolved.s3.secretKey) {
@@ -739,6 +819,8 @@ export class StorageService {
         accessKey: row.s3AccessKey ?? env.s3.accessKey,
         secretKey: row.s3SecretKey ?? env.s3.secretKey,
         forcePathStyle: row.s3ForcePathStyle ?? env.s3.forcePathStyle,
+        publicAssetsBucket: row.s3PublicAssetsBucket ?? env.s3.publicAssetsBucket ?? null,
+        publicAssetsBaseUrl: row.s3PublicAssetsBaseUrl ?? env.s3.publicAssetsBaseUrl ?? null,
       },
       google: {
         clientId: row.googleClientId ?? env.google.clientId,
@@ -799,6 +881,8 @@ export class StorageService {
       s3AccessKey: env.s3.accessKey,
       s3SecretKey: env.s3.secretKey,
       s3ForcePathStyle: env.s3.forcePathStyle,
+      s3PublicAssetsBucket: env.s3.publicAssetsBucket ?? null,
+      s3PublicAssetsBaseUrl: env.s3.publicAssetsBaseUrl ?? null,
       googleClientId: env.google.clientId,
       googleClientSecret: env.google.clientSecret,
       googleRefreshToken: env.google.refreshToken,

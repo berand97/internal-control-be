@@ -542,6 +542,13 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'La imagen no se puede usar: está dañada o supera el tamaño permitido',
   },
+  // 409 y no 503: es falta de configuración que resuelve un administrador, no una caída (no abre el circuito del módulo).
+  [ErrorCode.PublicAssetsNotConfigured]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message:
+      'Las imágenes de correo necesitan el almacenamiento S3 con un bucket público (Almacenamiento: bucket público y URL pública base)',
+  },
   [ErrorCode.AssetAlreadyLoaned]: {
     httpStatus: 406,
     action: 'CANCEL',

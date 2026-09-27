@@ -60,6 +60,26 @@ describe('configuration() en producción', () => {
     expect(config.database.url).toContain('control-interno-database');
   });
 
+  it('bucket público de imágenes de correo: se valida al arrancar (https en producción)', () => {
+    const base = {
+      SIGNATURE_VERIFY_URL: 'https://control-interno.unac.edu.co/verificar-firma',
+      GOTENBERG_URL: 'http://gotenberg:3000',
+    };
+    production(base);
+    expect(configuration().storage.s3).toMatchObject({ publicAssetsBucket: null, publicAssetsBaseUrl: null });
+    production({
+      ...base,
+      STORAGE_S3_PUBLIC_ASSETS_BUCKET: 'control-interno-public',
+      STORAGE_S3_PUBLIC_ASSETS_BASE_URL: 'https://minio-api.unac.edu.co/control-interno-public/',
+    });
+    expect(configuration().storage.s3).toMatchObject({
+      publicAssetsBucket: 'control-interno-public',
+      publicAssetsBaseUrl: 'https://minio-api.unac.edu.co/control-interno-public',
+    });
+    production({ ...base, STORAGE_S3_PUBLIC_ASSETS_BASE_URL: 'http://minio:9000/control-interno-public' });
+    expect(() => configuration()).toThrow(/https en producción/);
+  });
+
   it('fuera de producción rechaza la BD desplegada', () => {
     production({});
     process.env['NODE_ENV'] = 'development';

@@ -3,7 +3,6 @@
 // de prueba y envío multipart por el outbox (sin SMTP queda FAILED y visible), menú sembrado y contrato OpenAPI.
 // Párrafo enriquecido (documento Tiptap de esquema cerrado) e imágenes subidas servidas por un endpoint público.
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
@@ -23,7 +22,6 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { FeatureFlagsService } from '../../src/modules/features/services/feature-flags.service.js';
 import { DEFAULT_EMAIL_DESIGNS } from '../../src/modules/email-templates/domain/email-template-catalog.js';
 import { textToRichText } from '../../src/modules/email-templates/domain/rich-text.js';
-import { PUBLIC_EMAIL_ASSET_THROTTLE } from '../../src/modules/email-templates/email-assets-public.controller.js';
 import { MailOutboxService } from '../../src/shared/mail/mail-outbox.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
 import { prepareSmtpMessage } from '../../src/shared/mail/smtp-client.js';
@@ -621,32 +619,38 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const req = http().post('/api/v1/email-templates/assets');
       return (actor ? req.set(auth(actor)) : req).attach('file', file, { filename: name, contentType });
     };
-    const publicPath = (id: string) => `/api/v1/public/email-assets/${id}`;
-    let asset: { id: string; url: string; width: number; height: number; byteSize: number };
+    const assetId = randomUUID();
+    const PUBLIC_URL = `https://minio-api.unac.test/control-interno-public/email-assets/${assetId}.png`;
 
-    it('subir: director 201 con el contrato; la misma imagen devuelve la existente; lectura o viewer 403', async () => {
-      const file = await png(1500, 300);
-      const created = await upload(director, file, 'C:\\fakepath\\Logo <UNAC>.png', 'image/png').expect(201);
-      expectConforms('post', '/api/v1/email-templates/assets', 201, created.body);
-      asset = created.body.data;
-      expect(created.body.data).toMatchObject({
-        mime: 'image/png',
-        width: 1200,
-        height: 240,
-        originalName: 'Logo _UNAC_.png',
-        url: `${app.get(ConfigService).getOrThrow('apiPublicUrl')}/api/v1/public/email-assets/${asset.id}`,
-      });
-      const count = async () => scalar<string>(dataSource, 'SELECT count(*)::text FROM email_asset');
-      const before = await count();
-      const again = await upload(superAdmin, file, 'otra.png', 'image/png').expect(201);
-      expect(again.body.data.id).toBe(asset.id);
-      expect(await count()).toBe(before);
-      const row = (await dataSource.query(
-        `SELECT sha256, byte_size, octet_length(content) AS length, created_by FROM email_asset WHERE id = $1`,
-        [asset.id],
-      )) as Array<{ sha256: string; byte_size: number; length: number; created_by: string }>;
-      expect(row[0]).toMatchObject({ byte_size: asset.byteSize, length: asset.byteSize, created_by: director.userId });
+    beforeAll(async () => {
+      // Imagen ya subida (la subida real a MinIO se prueba en s3-minio.int-spec.ts): solo metadatos y URL pública.
+      await dataSource.query(
+        `INSERT INTO email_asset (id, storage_key, public_url, mime, byte_size, width, height, sha256, original_name, created_by)
+         VALUES ($1, $2, $3, 'image/png', 2048, 1200, 240, $4, 'logo.png', $5)`,
+        [assetId, `email-assets/${assetId}.png`, PUBLIC_URL, createHash('sha256').update(assetId).digest('hex'), director.userId],
+      );
+    });
 
+    it('sin almacenamiento S3 con bucket público: 409 PUBLIC_ASSETS_NOT_CONFIGURED y no se guarda nada (nunca en la BD)', async () => {
+      const before = await scalar<string>(dataSource, 'SELECT count(*)::text FROM email_asset');
+      const response = await upload(director, await png(300, 60), 'logo.png', 'image/png');
+      expect(response.status).toBe(409);
+      expect(response.body.error.code).toBe('PUBLIC_ASSETS_NOT_CONFIGURED');
+      expect(await scalar<string>(dataSource, 'SELECT count(*)::text FROM email_asset')).toBe(before);
+      const columns = (await dataSource.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_name = 'email_asset' ORDER BY ordinal_position`,
+      )) as Array<{ column_name: string }>;
+      expect(columns.map((column) => column.column_name)).toEqual([
+        'id', 'storage_key', 'public_url', 'mime', 'byte_size', 'width', 'height', 'sha256', 'original_name', 'created_by', 'created_at',
+      ]);
+      const status = await http().get('/api/v1/storage/status').set(auth(superAdmin));
+      if (status.status === 200) {
+        expect(status.body.data).toMatchObject({ s3PublicAssetsBucket: null, s3PublicAssetsBaseUrl: null });
+      }
+    });
+
+    it('permisos: lectura, viewer y sin sesión no suben; la lista usa el contrato', async () => {
+      const file = await png(300, 60);
       const reader = await createActor([], ['email_template:read:global']);
       const readOnly = await upload(reader, file, 'x.png', 'image/png');
       expect(readOnly.status).toBe(403);
@@ -656,11 +660,13 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
 
       const listed = await http().get('/api/v1/email-templates/assets?limit=5').set(auth(reader)).expect(200);
       expectConforms('get', '/api/v1/email-templates/assets', 200, listed.body);
-      expect(listed.body.data[0].id).toBe(again.body.data.id);
+      expect(listed.body.data).toContainEqual(
+        expect.objectContaining({ id: assetId, url: PUBLIC_URL, mime: 'image/png', width: 1200, height: 240, byteSize: 2048 }),
+      );
       expect((await http().get('/api/v1/email-templates/assets?limit=101').set(auth(reader))).status).toBe(400);
     });
 
-    it('rechaza por los bytes: SVG, GIF y HTML renombrados; más de 1 MB; más de 2000 px', async () => {
+    it('rechaza por los bytes antes de tocar el almacenamiento: SVG, GIF y HTML renombrados; más de 1 MB; más de 2000 px', async () => {
       const svg = await upload(director, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), 'logo.png', 'image/png');
       expect(svg.status).toBe(400);
       expect(svg.body.error).toMatchObject({ code: 'FILE_TYPE_NOT_ALLOWED', message: 'Solo se admiten imágenes PNG o JPEG' });
@@ -678,64 +684,8 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       expect(noFile.body.error.code).toBe('FILE_TYPE_NOT_ALLOWED');
     });
 
-    it('endpoint público sin cookie ni token: 200 con todas las cabeceras; 304 con If-None-Match; 404 sin filtrar nada', async () => {
-      const response = await http().get(publicPath(asset.id)).buffer(true).parse((res, done) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => done(null, Buffer.concat(chunks)));
-      });
-      expect(response.status).toBe(200);
-      const stored = (await dataSource.query(`SELECT content, sha256 FROM email_asset WHERE id = $1`, [asset.id])) as Array<{
-        content: Buffer;
-        sha256: string;
-      }>;
-      expect(Buffer.compare(response.body as Buffer, stored[0]?.content ?? Buffer.alloc(0))).toBe(0);
-      expect(createHash('sha256').update(response.body as Buffer).digest('hex')).toBe(stored[0]?.sha256);
-      expect(response.headers).toMatchObject({
-        'content-type': 'image/png',
-        'content-length': String(asset.byteSize),
-        'cache-control': 'public, max-age=31536000, immutable',
-        etag: `"${stored[0]?.sha256}"`,
-        'x-content-type-options': 'nosniff',
-        'content-disposition': 'inline',
-        'content-security-policy': "default-src 'none'",
-        'cross-origin-resource-policy': 'cross-origin',
-      });
-      expect(response.headers['set-cookie']).toBeUndefined();
-
-      const cached = await http().get(publicPath(asset.id)).set('If-None-Match', `W/"x", "${stored[0]?.sha256}"`);
-      expect(cached.status).toBe(304);
-      expect(cached.headers['etag']).toBe(`"${stored[0]?.sha256}"`);
-      expect(cached.headers['cache-control']).toBe('public, max-age=31536000, immutable');
-      expect(cached.headers['cross-origin-resource-policy']).toBe('cross-origin');
-      expect((await http().get(publicPath(asset.id)).set('If-None-Match', '"otro"')).status).toBe(200);
-
-      for (const id of [randomUUID(), 'no-es-uuid', `${asset.id}.png`, "1' OR '1'='1"]) {
-        const missing = await http().get(publicPath(encodeURIComponent(id)));
-        expect(missing.status).toBe(404);
-        expect(missing.body.error.code).toBe('RESOURCE_NOT_FOUND');
-        expect(missing.headers['cache-control'] ?? '').not.toContain('immutable');
-        expect(JSON.stringify(missing.body)).not.toContain(id.slice(0, 8));
-      }
-    });
-
-    it('no la bloquea el módulo Correo apagado ni el límite global de 100/min por IP', async () => {
-      const flags = app.get(FeatureFlagsService);
-      await flags.setEnabled('mail', false);
-      try {
-        expect((await http().get(publicPath(asset.id))).status).toBe(200);
-      } finally {
-        await flags.setEnabled('mail', true);
-      }
-      expect(PUBLIC_EMAIL_ASSET_THROTTLE.default.limit).toBeGreaterThan(100);
-      const sha = await scalar<string>(dataSource, 'SELECT sha256 FROM email_asset WHERE id = $1', [asset.id]);
-      const statuses = new Map<number, number>();
-      for (let index = 0; index < 130; index += 1) {
-        const response = await http().get(publicPath(asset.id)).set('If-None-Match', index % 2 === 0 ? '"x"' : `"${sha}"`);
-        statuses.set(response.status, (statuses.get(response.status) ?? 0) + 1);
-      }
-      expect(statuses.get(429)).toBeUndefined();
-      expect((statuses.get(200) ?? 0) + (statuses.get(304) ?? 0)).toBe(130);
+    it('el backend ya no sirve imágenes: /public/email-assets/:id no existe', async () => {
+      expect((await http().get(`/api/v1/public/email-assets/${assetId}`)).status).toBe(404);
     });
 
     it('guardar, previsualizar y enviar una versión con párrafo enriquecido e imagen', async () => {
@@ -758,7 +708,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         ],
       };
       const blocks = [
-        { type: 'image', assetId: asset.id.toUpperCase(), alt: 'Logo de {{app.name}}', align: 'center', width: 300, href: 'https://www.unac.edu.co' },
+        { type: 'image', assetId: assetId.toUpperCase(), alt: 'Logo de {{app.name}}', align: 'center', width: 300, href: 'https://www.unac.edu.co' },
         { type: 'paragraph', content },
       ];
       const saved = await http()
@@ -767,13 +717,13 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         .send({ templateType: 'SYSTEM_ALERT', subject: 'Rica: {{alert.title}}', blocks })
         .expect(201);
       expectConforms('post', '/api/v1/email-templates', 201, saved.body);
-      expect(saved.body.data.blocks[0]).toEqual({ ...blocks[0], assetId: asset.id });
+      expect(saved.body.data.blocks[0]).toEqual({ ...blocks[0], assetId });
       expect(saved.body.data.blocks[1]).toEqual({ type: 'paragraph', content });
       expect(saved.body.data.placeholders).toEqual(['alert.title', 'app.name', 'alert.message']);
       const listed = await http().get('/api/v1/email-templates?templateType=SYSTEM_ALERT').set(auth(director)).expect(200);
       expectConforms('get', '/api/v1/email-templates', 200, listed.body);
 
-      const src = `${app.get(ConfigService).getOrThrow('apiPublicUrl')}/api/v1/public/email-assets/${asset.id}`;
+      const src = PUBLIC_URL;
       const expectedImage = `<a href="https://www.unac.edu.co" target="_blank" rel="noopener" style="text-decoration:none;"><img src="${src}" alt="Logo de Control Interno UNAC" width="300" height="60" border="0" style="display:block;width:300px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;margin:0 auto;"></a>`;
       const preview = await http()
         .post('/api/v1/email-templates/preview')

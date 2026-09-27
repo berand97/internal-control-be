@@ -110,6 +110,7 @@ export enum ErrorCode {
   EmailTemplateUnknownVariable = 'EMAIL_TEMPLATE_UNKNOWN_VARIABLE',
   EmailTemplateMissingVariable = 'EMAIL_TEMPLATE_MISSING_VARIABLE',
   EmailAssetInvalidImage = 'EMAIL_ASSET_INVALID_IMAGE',
+  PublicAssetsNotConfigured = 'PUBLIC_ASSETS_NOT_CONFIGURED',
   AssetAlreadyLoaned = 'ASSET_ALREADY_LOANED',
   InvalidLoanStateTransition = 'INVALID_LOAN_STATE_TRANSITION',
   LoanSodViolation = 'LOAN_SOD_VIOLATION',

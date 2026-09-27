@@ -144,6 +144,30 @@ export class UpdateStorageSettingsDto {
   @IsBoolean()
   readonly s3ForcePathStyle?: boolean;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    maxLength: 63,
+    description:
+      'Bucket PÚBLICO (lectura anónima solo de email-assets/*) para las imágenes de las plantillas de correo, en el mismo proveedor S3. Distinto del bucket de documentos. Vacío = sin imágenes de correo',
+  })
+  @IsOptional()
+  @Transform(emptyToNull)
+  @IsString()
+  @MaxLength(63)
+  readonly s3PublicAssetsBucket?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    maxLength: 2048,
+    description:
+      'URL pública base de ese bucket (https en producción), p. ej. https://minio-api.dominio/control-interno-public. La imagen queda en <base>/email-assets/<uuid>.png',
+  })
+  @IsOptional()
+  @Transform(emptyToNull)
+  @IsString()
+  @MaxLength(2048)
+  readonly s3PublicAssetsBaseUrl?: string | null;
+
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @Transform(emptyToNull)
@@ -328,6 +352,8 @@ export const flattenStoragePatch = (dto: UpdateStorageSettingsDto) => {
     ...(dto.s3ForcePathStyle !== undefined
       ? { s3ForcePathStyle: dto.s3ForcePathStyle }
       : {}),
+    ...(dto.s3PublicAssetsBucket !== undefined ? { s3PublicAssetsBucket: dto.s3PublicAssetsBucket } : {}),
+    ...(dto.s3PublicAssetsBaseUrl !== undefined ? { s3PublicAssetsBaseUrl: dto.s3PublicAssetsBaseUrl } : {}),
     ...(googleIdPatch.include ? { googleClientId: googleIdPatch.value } : {}),
     ...(googleSecretPatch.include
       ? { googleClientSecret: googleSecretPatch.value }

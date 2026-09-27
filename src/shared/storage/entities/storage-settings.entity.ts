@@ -33,6 +33,13 @@ export class StorageSettings {
   @Column({ name: 's3_force_path_style', type: 'boolean', nullable: true })
   s3ForcePathStyle!: boolean | null;
 
+  /** Bucket público de imágenes de correo (migración 1767225820000; ver public-assets.ts). */
+  @Column({ name: 's3_public_assets_bucket', type: 'varchar', length: 63, nullable: true })
+  s3PublicAssetsBucket!: string | null;
+
+  @Column({ name: 's3_public_assets_base_url', type: 'text', nullable: true })
+  s3PublicAssetsBaseUrl!: string | null;
+
   @Column({ name: 'google_client_id', type: 'text', nullable: true })
   googleClientId!: string | null;
 

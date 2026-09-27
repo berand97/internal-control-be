@@ -17,12 +17,17 @@ import { StorageService } from '../../src/shared/storage/storage.service.js';
  * bucket privado con versionado y un usuario con la política mínima (DeleteObject solo en health/*).
  *   S3_TEST_ENDPOINT=http://127.0.0.1:19000 S3_TEST_BUCKET=control-interno
  *   S3_TEST_ACCESS_KEY=<usuario de servicio> S3_TEST_SECRET_KEY=<su clave>
+ * Imágenes de correo (§10.7), opcional: bucket público con lectura anónima solo de email-assets/* y la política de la
+ * aplicación que permite escribir ahí.
+ *   S3_TEST_PUBLIC_BUCKET=control-interno-public [S3_TEST_PUBLIC_BASE_URL=<endpoint>/control-interno-public]
  */
 const endpoint = process.env['S3_TEST_ENDPOINT'] ?? '';
 const bucket = process.env['S3_TEST_BUCKET'] ?? 'control-interno';
 const accessKey = process.env['S3_TEST_ACCESS_KEY'] ?? '';
 const secretKey = process.env['S3_TEST_SECRET_KEY'] ?? '';
 const region = process.env['S3_TEST_REGION'] ?? 'us-east-1';
+const publicBucket = process.env['S3_TEST_PUBLIC_BUCKET'] ?? '';
+const publicBaseUrl = process.env['S3_TEST_PUBLIC_BASE_URL'] ?? `${endpoint}/${publicBucket}`;
 
 const DEV: OutboundPolicy = { allowPrivateNetworks: true, allowedHosts: [] };
 const PROD: OutboundPolicy = { allowPrivateNetworks: false, allowedHosts: [] };
@@ -206,5 +211,45 @@ describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
     expect((await service.getFrom(after.driver, after.key)).toString()).toBe('despues');
     // Leer con el driver activo (get) ya no encuentra lo anterior: por eso todo documento guarda su driver.
     await expect(service.get(before.key)).rejects.toMatchObject({ code: ErrorCode.ResourceNotFound });
+  });
+
+  describe.runIf(Boolean(publicBucket))('bucket público de imágenes de correo', () => {
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64',
+    );
+
+    it('putPublicAsset sube a email-assets/ del bucket público y la URL se abre sin firma con sus cabeceras', async () => {
+      const service = serviceWith(s3Row({ s3PublicAssetsBucket: publicBucket, s3PublicAssetsBaseUrl: publicBaseUrl }), DEV);
+      const key = `email-assets/${crypto.randomUUID()}.png`;
+      const stored = await service.putPublicAsset({
+        key,
+        body: png,
+        contentType: 'image/png',
+        cacheControl: 'public, max-age=31536000, immutable',
+      });
+      expect(stored).toEqual({ key, publicUrl: `${publicBaseUrl}/${key}` });
+      const anonymous = await fetch(stored.publicUrl);
+      expect(anonymous.status).toBe(200);
+      expect(anonymous.headers.get('content-type')).toBe('image/png');
+      expect(anonymous.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(Buffer.from(await anonymous.arrayBuffer()).equals(png)).toBe(true);
+    });
+
+    it('el bucket público no se puede listar sin firma y el de documentos sigue privado', async () => {
+      expect((await fetch(`${endpoint}/${publicBucket}?list-type=2`)).status).toBe(403);
+      expect((await fetch(`${endpoint}/${bucket}?list-type=2`)).status).toBe(403);
+    });
+
+    it('sin bucket público configurado: PUBLIC_ASSETS_NOT_CONFIGURED', async () => {
+      await expect(
+        serviceWith(s3Row(), DEV).putPublicAsset({
+          key: `email-assets/${crypto.randomUUID()}.png`,
+          body: png,
+          contentType: 'image/png',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.PublicAssetsNotConfigured });
+    });
   });
 });

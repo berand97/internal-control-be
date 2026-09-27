@@ -1,0 +1,86 @@
+import sharp from 'sharp';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ErrorCode } from '../../common/constants/error-code.enum.js';
+import { ApiException } from '../../common/exceptions/api.exception.js';
+import { EMAIL_ASSET_CACHE_CONTROL, EmailAssetsService, emailAssetKey } from './email-assets.service.js';
+
+const KEY = /^email-assets\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.png$/;
+
+describe('EmailAssetsService.upload', () => {
+  let storage: { putPublicAsset: ReturnType<typeof vi.fn>; deletePublicAsset: ReturnType<typeof vi.fn> };
+  let repo: { findOneBy: ReturnType<typeof vi.fn>; findOneByOrFail: ReturnType<typeof vi.fn>; query: ReturnType<typeof vi.fn> };
+  let service: EmailAssetsService;
+  let png: Buffer;
+
+  beforeEach(async () => {
+    png = await sharp({ create: { width: 30, height: 10, channels: 3, background: '#306999' } }).png().toBuffer();
+    storage = {
+      putPublicAsset: vi.fn(async (input: { key: string }) => ({ key: input.key, publicUrl: `https://cdn.test/b/${input.key}` })),
+      deletePublicAsset: vi.fn(async () => undefined),
+    };
+    repo = {
+      findOneBy: vi.fn(async () => null),
+      findOneByOrFail: vi.fn(async (where: { id?: string }) => ({
+        id: where.id ?? 'x',
+        storageKey: 'k',
+        publicUrl: 'https://cdn.test/b/k',
+        mime: 'image/png',
+        byteSize: 10,
+        width: 30,
+        height: 10,
+        sha256: 'h',
+        originalName: 'logo.png',
+        createdBy: 'actor',
+        createdAt: new Date('2026-09-27T00:00:00Z'),
+      })),
+      query: vi.fn(async (_sql: string, params: ReadonlyArray<unknown>) => [{ id: params[0] }]),
+    };
+    service = new EmailAssetsService(repo as never, storage as never);
+  });
+
+  it('sube al bucket público con clave email-assets/<uuid>.png (sin el nombre original), Content-Type y caché inmutable', async () => {
+    await service.upload({ buffer: png, originalname: 'Mi logo secreto.png' }, 'actor');
+    expect(storage.putPublicAsset).toHaveBeenCalledTimes(1);
+    const input = storage.putPublicAsset.mock.calls[0]?.[0] as { key: string; contentType: string; cacheControl: string; body: Buffer };
+    expect(input.key).toMatch(KEY);
+    expect(input.key).not.toContain('logo');
+    expect(input).toMatchObject({ contentType: 'image/png', cacheControl: EMAIL_ASSET_CACHE_CONTROL });
+    expect(input.cacheControl).toBe('public, max-age=31536000, immutable');
+    const params = repo.query.mock.calls[0]?.[1] as ReadonlyArray<unknown>;
+    expect(params[1]).toBe(input.key);
+    expect(params[2]).toBe(`https://cdn.test/b/${input.key}`);
+    expect(params[0]).toBe(input.key.slice('email-assets/'.length, -'.png'.length));
+    expect(params[8]).toBe('Mi logo secreto.png');
+  });
+
+  it('la misma imagen ya guardada: devuelve la existente sin subir nada', async () => {
+    repo.findOneBy.mockResolvedValueOnce({ id: 'existente', publicUrl: 'https://cdn.test/b/x', createdAt: new Date() });
+    const result = await service.upload({ buffer: png }, 'actor');
+    expect(result.id).toBe('existente');
+    expect(storage.putPublicAsset).not.toHaveBeenCalled();
+  });
+
+  it('carrera por el mismo sha256: borra el objeto duplicado y devuelve la ganadora', async () => {
+    repo.query.mockResolvedValueOnce([]);
+    await service.upload({ buffer: png }, 'actor');
+    const key = (storage.putPublicAsset.mock.calls[0] as [{ key: string }])[0].key;
+    expect(storage.deletePublicAsset).toHaveBeenCalledWith(key);
+  });
+
+  it('sin bucket público: el error de configuración sale tal cual y no se inserta nada', async () => {
+    storage.putPublicAsset.mockRejectedValueOnce(new ApiException(ErrorCode.PublicAssetsNotConfigured));
+    await expect(service.upload({ buffer: png }, 'actor')).rejects.toMatchObject({ code: ErrorCode.PublicAssetsNotConfigured });
+    expect(repo.query).not.toHaveBeenCalled();
+  });
+
+  it('SVG o GIF: FILE_TYPE_NOT_ALLOWED antes de tocar el almacenamiento', async () => {
+    await expect(service.upload({ buffer: Buffer.from('<svg/>') }, 'actor')).rejects.toMatchObject({
+      code: ErrorCode.FileTypeNotAllowed,
+    });
+    expect(storage.putPublicAsset).not.toHaveBeenCalled();
+  });
+
+  it('emailAssetKey: .jpg para JPEG', () => {
+    expect(emailAssetKey('abc', 'image/jpeg')).toBe('email-assets/abc.jpg');
+  });
+});
