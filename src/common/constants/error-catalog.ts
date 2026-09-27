@@ -183,6 +183,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El rol tiene usuarios asignados; no se elimina',
   },
+  [ErrorCode.RoleHasChildRoles]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'Otros roles heredan de este rol; quítales la herencia o elimínalos antes',
+  },
   [ErrorCode.RoleSystemImmutable]: {
     httpStatus: 406,
     action: 'CANCEL',

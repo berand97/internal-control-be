@@ -85,6 +85,7 @@ import { ImportTemplates1767225710000 } from './migrations/1767225710000-import-
 import { ImportJobsAndMailOutbox1767225720000 } from './migrations/1767225720000-import-jobs-and-mail-outbox.js';
 import { AdministrableDocumentFormats1767225730000 } from './migrations/1767225730000-administrable-document-formats.js';
 import { NavigationIconsAndNewItems1767225740000 } from './migrations/1767225740000-navigation-icons-and-new-items.js';
+import { RbacInheritanceHardening1767225750000 } from './migrations/1767225750000-rbac-inheritance-hardening.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -196,6 +197,7 @@ const dataSource = new DataSource({
     ImportJobsAndMailOutbox1767225720000,
     AdministrableDocumentFormats1767225730000,
     NavigationIconsAndNewItems1767225740000,
+    RbacInheritanceHardening1767225750000,
   ],
 });
 

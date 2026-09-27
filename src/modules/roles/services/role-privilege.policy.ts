@@ -62,6 +62,44 @@ export class RolePrivilegePolicy {
     }
   }
 
+  /**
+   * Heredar de un rol (parent_role_id) equivale a otorgar todo lo que aporta: el padre y cada ancestro suyo deben ser
+   * administrables por el actor (nivel mayor al propio) y el actor debe tener, efectivamente, cada permiso del
+   * linaje. La separación de funciones sobre roles efectivos la hace cumplir la BD (fn_check_role_inheritance_sod).
+   */
+  async assertCanInheritFrom(
+    actor: AuthenticatedUser,
+    parent: Pick<Role, 'id' | 'hierarchyLevel'>,
+  ): Promise<void> {
+    await this.assertCanAdminister(actor, parent);
+    const lineage = await this.rolesRepository.findLineage(parent.id);
+    const rank = await this.actorRank(actor);
+    if (lineage.some((role) => role.hierarchyLevel <= rank)) {
+      throw new ApiException(ErrorCode.RolePrivilegeEscalation);
+    }
+    const inherited = await this.rolesRepository.findPermissionsForRoles(
+      lineage.map((role) => role.id),
+    );
+    await this.assertCanGrant(actor, inherited);
+  }
+
+  /**
+   * Superior por defecto de un rol nuevo: el SUPER_ADMIN crea bajo SUPER_ADMIN (como antes); cualquier otro actor,
+   * bajo su propio rol de mayor rango, de modo que el rol nuevo queda un nivel por debajo de él (cascada).
+   */
+  async defaultSuperiorFor(actor: AuthenticatedUser): Promise<Role | null> {
+    if (this.isSuperAdmin(actor)) {
+      return this.rolesRepository.findActiveByCode('SUPER_ADMIN');
+    }
+    const rank = await this.actorRank(actor);
+    const roles = await this.rolesRepository.findAllActive();
+    return (
+      roles.find(
+        (role) => actor.roles.includes(role.code) && role.hierarchyLevel === rank,
+      ) ?? null
+    );
+  }
+
   async assertCanGrant(
     actor: AuthenticatedUser,
     permissions: ReadonlyArray<Pick<Permission, 'code'>>,
