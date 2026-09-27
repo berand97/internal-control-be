@@ -153,3 +153,55 @@ describe('StorageService: endpoint S3 fuera de la red interna (BE-16)', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('StorageService.testConnection con S3 (sin red)', () => {
+  const s3Row = (extra: Partial<StorageSettings> = {}): Partial<StorageSettings> => ({
+    driver: 's3',
+    projectPath: DEPLOYED,
+    s3Provider: 'minio',
+    s3Region: 'us-east-1',
+    s3Bucket: 'control-interno',
+    s3AccessKey: 'svc-control-interno',
+    s3SecretKey: 'secreto-de-prueba',
+    s3ForcePathStyle: true,
+    ...extra,
+  });
+
+  it('sin bucket ni claves: 200 con CONFIGURATION FAILED STORAGE_NOT_CONFIGURED (no lanza)', async () => {
+    const { service } = build(s3Row({ s3Bucket: null, s3AccessKey: null, s3SecretKey: null }));
+    const result = await service.testConnection();
+    expect(result).toMatchObject({ ok: false, driver: 's3', bucket: null });
+    expect(result.checks[0]).toMatchObject({ name: 'CONFIGURATION', status: 'FAILED', errorCode: 'STORAGE_NOT_CONFIGURED' });
+    expect(result.checks.slice(1).every((check) => check.status === 'SKIPPED')).toBe(true);
+  });
+
+  it('producción sin OUTBOUND_ALLOWED_HOSTS: http://minio:9000 y una IP privada se rechazan sin conectar', async () => {
+    for (const endpoint of ['http://minio:9000', 'https://10.0.0.5:9000', 'https://minio.local']) {
+      const { service } = build(s3Row({ s3Endpoint: endpoint }), { allowPrivateNetworks: false });
+      const result = await service.testConnection();
+      expect(result.ok).toBe(false);
+      expect(result.checks[1]).toMatchObject({
+        name: 'DESTINATION',
+        status: 'FAILED',
+        errorCode: 'OUTBOUND_DESTINATION_FORBIDDEN',
+      });
+      expect(result.checks.find((check) => check.name === 'ENDPOINT')?.status).toBe('SKIPPED');
+      expect(JSON.stringify(result)).not.toContain('secreto-de-prueba');
+    }
+  });
+
+  it('producción: http a un host público no autorizado es ENDPOINT_NOT_ALLOWED', async () => {
+    const { service } = build(s3Row({ s3Endpoint: 'http://s3.example.com' }), { allowPrivateNetworks: false });
+    const result = await service.testConnection();
+    expect(result.checks[1]).toMatchObject({ name: 'DESTINATION', errorCode: 'ENDPOINT_NOT_ALLOWED' });
+  });
+
+  it('host autorizado en OUTBOUND_ALLOWED_HOSTS pasa DESTINATION (y la prueba sigue hasta el endpoint)', async () => {
+    // minio.interno.example no resuelve: pasa la guarda y falla al conectar, sin reintentos.
+    const { service } = build(s3Row({ s3Endpoint: 'http://minio.interno.example:9000' }), { allowPrivateNetworks: false });
+    const result = await service.testConnection();
+    expect(result.checks[1]).toMatchObject({ name: 'DESTINATION', status: 'PASSED' });
+    expect(result.checks[2]).toMatchObject({ name: 'ENDPOINT', status: 'FAILED' });
+    expect(['ENDPOINT_UNREACHABLE', 'ENDPOINT_TIMEOUT']).toContain(result.checks[2]?.errorCode);
+  }, 30_000);
+});

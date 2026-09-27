@@ -17,6 +17,7 @@ import {
   guardedLookup,
   type OutboundPolicy,
 } from '../../net/outbound-destination.js';
+import { runS3Probe, type S3ProbeResult } from '../s3-connection-probe.js';
 import { S3_PROVIDER_PRESETS } from '../s3-provider.presets.js';
 import type {
   PutObjectInput,
@@ -32,6 +33,13 @@ export interface S3AdapterConfig {
   readonly accessKey: string;
   readonly secretKey: string;
   readonly forcePathStyle: boolean;
+}
+
+/** Solo para la prueba de conexión: sin reintentos y con plazos cortos, para responder rápido y con la causa. */
+export interface S3ClientTuning {
+  readonly maxAttempts?: number;
+  readonly connectionTimeoutMs?: number;
+  readonly requestTimeoutMs?: number;
 }
 
 const toBuffer = async (body: unknown): Promise<Buffer> => {
@@ -56,6 +64,7 @@ export class S3StorageAdapter implements StoragePort {
   constructor(
     private readonly config: S3AdapterConfig,
     outbound?: OutboundPolicy,
+    tuning: S3ClientTuning = {},
   ) {
     const preset = S3_PROVIDER_PRESETS[config.provider];
     const endpoint = config.endpoint ?? preset.defaultEndpoint(config.region);
@@ -69,14 +78,24 @@ export class S3StorageAdapter implements StoragePort {
       assertHostShapeAllowed(hostname, outbound);
     }
     const lookup = outbound ? guardedLookup(outbound) : undefined;
+    const timeouts = {
+      ...(tuning.connectionTimeoutMs ? { connectionTimeout: tuning.connectionTimeoutMs } : {}),
+      ...(tuning.requestTimeoutMs ? { requestTimeout: tuning.requestTimeoutMs } : {}),
+    };
     this.client = new S3Client({
       region: config.region,
       ...(endpoint ? { endpoint } : {}),
-      ...(lookup
+      ...(tuning.maxAttempts ? { maxAttempts: tuning.maxAttempts } : {}),
+      ...(lookup || Object.keys(timeouts).length > 0
         ? {
             requestHandler: {
-              httpAgent: new HttpAgent({ keepAlive: true, lookup }),
-              httpsAgent: new HttpsAgent({ keepAlive: true, lookup }),
+              ...(lookup
+                ? {
+                    httpAgent: new HttpAgent({ keepAlive: true, lookup }),
+                    httpsAgent: new HttpsAgent({ keepAlive: true, lookup }),
+                  }
+                : {}),
+              ...timeouts,
             },
           }
         : {}),
@@ -137,6 +156,11 @@ export class S3StorageAdapter implements StoragePort {
     } catch {
       return false;
     }
+  }
+
+  /** Comprobaciones reales contra el bucket (POST /storage/test). */
+  probe(): Promise<S3ProbeResult> {
+    return runS3Probe((command) => this.client.send(command as never), this.config.bucket);
   }
 
   async presignGet(key: string, expiresInSeconds: number): Promise<string> {

@@ -14,6 +14,7 @@ import {
 import {
   ApiBearerAuth,
   ApiExtraModels,
+  ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
@@ -24,12 +25,18 @@ import { Public } from '../../common/decorators/public.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import {
   ApiErrorEnvelope,
+  envelopedSchema,
   ApiSuccessEnvelope,
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../../config/configuration.js';
+import {
+  StorageBucketStateDto,
+  StorageCheckDto,
+  StorageTestResultDto,
+} from './dto/storage-test.responses.js';
 import { UpdateStorageSettingsDto, flattenStoragePatch } from './dto/update-storage-settings.dto.js';
 import { OAUTH_STATE_TTL_SECONDS, StorageService, type OauthProvider } from './storage.service.js';
 
@@ -38,7 +45,7 @@ export const STORAGE_OAUTH_COOKIE = 'storage_oauth_binding';
 
 @ApiTags(OpenApiTag.Storage)
 @ApiBearerAuth()
-@ApiExtraModels(ApiSuccessEnvelope, ApiErrorEnvelope)
+@ApiExtraModels(ApiSuccessEnvelope, ApiErrorEnvelope, StorageTestResultDto, StorageCheckDto, StorageBucketStateDto)
 @Feature('storage')
 @Controller('storage')
 export class StorageController {
@@ -86,7 +93,12 @@ export class StorageController {
   @Post('test')
   @RequirePermission('storage:manage:global')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Probar conexión del proveedor activo' })
+  @ApiOperation({
+    summary: 'Probar conexión del proveedor activo',
+    description:
+      'Con S3 (MinIO, AWS…) responde siempre 200 con el detalle de cada comprobación: destino permitido (BE-16), endpoint alcanzable, credenciales, bucket, escritura/lectura/borrado de health/probe-<uuid>.txt, versionado y object lock. ok=false si alguna terminó en FAILED. Con project/Google Drive/OneDrive los errores siguen llegando como error HTTP (p. ej. 424 STORAGE_OAUTH_REQUIRED).',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(StorageTestResultDto) })
   test() {
     return this.storageService.testConnection();
   }

@@ -23,9 +23,19 @@ import {
 import { GoogleDriveStorageAdapter } from './adapters/google-drive-storage.adapter.js';
 import { OneDriveStorageAdapter } from './adapters/onedrive-storage.adapter.js';
 import { ProjectStorageAdapter } from './adapters/project-storage.adapter.js';
-import { S3StorageAdapter } from './adapters/s3-storage.adapter.js';
+import { S3StorageAdapter, type S3ClientTuning } from './adapters/s3-storage.adapter.js';
 import { StorageSettings } from './entities/storage-settings.entity.js';
 import { parseDriveFolderId } from './parse-drive-folder-id.js';
+import {
+  STORAGE_PROBE_PREFIX,
+  failed,
+  passed,
+  skipped,
+  type BucketState,
+  type StorageCheck,
+  type StorageCheckName,
+} from './s3-connection-probe.js';
+import { S3_PROVIDER_PRESETS } from './s3-provider.presets.js';
 import { assertSafeStorageKey } from './storage-key.js';
 import type { PutObjectInput, StoragePort, StoredObject } from './storage.port.js';
 
@@ -42,6 +52,18 @@ export const STORAGE_SECRET_FIELDS = [
   'onedriveClientSecret',
   'onedriveRefreshToken',
 ] as const satisfies ReadonlyArray<keyof StorageSettings>;
+
+/** Prueba de conexión S3: un intento, 5 s para conectar y 15 s sin actividad por petición. */
+const S3_TEST_TUNING: S3ClientTuning = { maxAttempts: 1, connectionTimeoutMs: 5000, requestTimeoutMs: 15000 };
+
+export interface StorageTestResult {
+  readonly ok: boolean;
+  readonly driver: StorageDriver;
+  readonly checkedAt: string;
+  readonly checks: ReadonlyArray<StorageCheck>;
+  /** Solo S3 (null con los demás drivers o si no se llegó a consultar el bucket). */
+  readonly bucket: BucketState | null;
+}
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -155,16 +177,109 @@ export class StorageService {
     };
   }
 
-  async testConnection(): Promise<{ readonly ok: true; readonly driver: StorageDriver }> {
+  /**
+   * POST /storage/test. Con S3 hace comprobaciones reales (ver s3-connection-probe.ts) y responde siempre 200 con
+   * el detalle: `ok` es false si alguna comprobación falló. Con los demás drivers escribe, lee y borra un objeto de
+   * sonda; ahí un error se sigue lanzando como antes (el frontend ofrece reconectar OAuth con STORAGE_OAUTH_REQUIRED).
+   */
+  async testConnection(): Promise<StorageTestResult> {
+    const resolved = await this.resolvedConfig();
+    if (resolved.driver === 's3') {
+      return this.testS3(resolved);
+    }
     const adapter = await this.resolveAdapter();
-    const key = `health/${Date.now()}.txt`;
-    await adapter.put({
-      key,
-      body: Buffer.from('ok'),
-      contentType: 'text/plain',
-    });
+    const key = `${STORAGE_PROBE_PREFIX}probe-${Date.now()}.txt`;
+    const body = Buffer.from('ok');
+    await adapter.put({ key, body, contentType: 'text/plain' });
+    const read = await adapter.get(key);
     await adapter.delete(key);
-    return { ok: true, driver: adapter.driver };
+    const checks: StorageCheck[] = [
+      passed('CONFIGURATION'),
+      skipped('DESTINATION'),
+      passed('WRITE'),
+      read.equals(body) ? passed('READ') : failed('READ', 'CONTENT_MISMATCH', 'El objeto leído no coincide con el escrito'),
+      passed('DELETE'),
+    ];
+    return this.testResult(adapter.driver, checks, null);
+  }
+
+  private async testS3(resolved: StorageConfig): Promise<StorageTestResult> {
+    const s3 = resolved.s3;
+    const rest: ReadonlyArray<StorageCheckName> = [
+      'ENDPOINT',
+      'CREDENTIALS',
+      'BUCKET',
+      'WRITE',
+      'READ',
+      'DELETE',
+      'VERSIONING',
+      'OBJECT_LOCK',
+    ];
+    if (!s3.bucket || !s3.accessKey || !s3.secretKey) {
+      return this.testResult(
+        's3',
+        [
+          failed('CONFIGURATION', 'STORAGE_NOT_CONFIGURED', 'Faltan el bucket, la clave de acceso o la clave secreta'),
+          skipped('DESTINATION'),
+          ...rest.map(skipped),
+        ],
+        null,
+      );
+    }
+    const checks: StorageCheck[] = [passed('CONFIGURATION')];
+    const endpoint = s3.endpoint ?? S3_PROVIDER_PRESETS[s3.provider].defaultEndpoint(s3.region);
+    if (endpoint) {
+      try {
+        await this.assertS3EndpointAllowed(endpoint);
+        checks.push(passed('DESTINATION'));
+      } catch (error) {
+        if (!(error instanceof ApiException)) {
+          throw error;
+        }
+        checks.push(
+          error.code === ErrorCode.OutboundDestinationForbidden
+            ? failed(
+                'DESTINATION',
+                'OUTBOUND_DESTINATION_FORBIDDEN',
+                'El endpoint está en una red privada, loopback o link-local y el despliegue no lo autoriza (OUTBOUND_ALLOWED_HOSTS)',
+              )
+            : failed('DESTINATION', 'ENDPOINT_NOT_ALLOWED', error.message),
+        );
+        return this.testResult('s3', [...checks, ...rest.map(skipped)], null);
+      }
+    } else {
+      checks.push(passed('DESTINATION', 'Endpoint por defecto del proveedor'));
+    }
+    let adapter: S3StorageAdapter;
+    try {
+      adapter = this.s3Adapter(resolved, S3_TEST_TUNING);
+    } catch (error) {
+      if (!isOutboundForbidden(error)) {
+        throw error;
+      }
+      checks[checks.length - 1] = failed(
+        'DESTINATION',
+        'OUTBOUND_DESTINATION_FORBIDDEN',
+        'El endpoint está en una red privada, loopback o link-local y el despliegue no lo autoriza (OUTBOUND_ALLOWED_HOSTS)',
+      );
+      return this.testResult('s3', [...checks, ...rest.map(skipped)], null);
+    }
+    const probe = await adapter.probe();
+    return this.testResult('s3', [...checks, ...probe.checks], probe.bucket);
+  }
+
+  private testResult(
+    driver: StorageDriver,
+    checks: ReadonlyArray<StorageCheck>,
+    bucket: BucketState | null,
+  ): StorageTestResult {
+    return {
+      ok: checks.every((check) => check.status !== 'FAILED'),
+      driver,
+      checkedAt: new Date().toISOString(),
+      checks,
+      bucket,
+    };
   }
 
   async updateSettings(
@@ -498,9 +613,7 @@ export class StorageService {
     const listed = policy.allowedHosts.some(
       (allowed) => normalizeHost(allowed) === normalizeHost(url.hostname),
     );
-    if (url.protocol === 'http:' && !policy.allowPrivateNetworks && !listed) {
-      throw new ApiException(ErrorCode.ValidationFailed, 's3Endpoint debe usar https');
-    }
+    // Primero el destino: para http://minio:9000 la causa útil es "host interno no autorizado", no "use https".
     try {
       await assertDestinationAllowed(url.hostname, policy);
     } catch (error) {
@@ -508,6 +621,9 @@ export class StorageService {
         throw new ApiException(ErrorCode.OutboundDestinationForbidden);
       }
       throw error;
+    }
+    if (url.protocol === 'http:' && !policy.allowPrivateNetworks && !listed) {
+      throw new ApiException(ErrorCode.ValidationFailed, 's3Endpoint debe usar https');
     }
   }
 
@@ -521,6 +637,26 @@ export class StorageService {
     this.warnedIgnoredProjectPath = true;
     this.logger.warn(
       `storage_settings.project_path ${JSON.stringify(stored)} se ignora: el almacenamiento local usa STORAGE_PROJECT_PATH ${JSON.stringify(deployed)}. Si allí había archivos, muévalos a esa carpeta.`,
+    );
+  }
+
+  /** Lanza StorageNotConfigured si faltan datos y OutboundDestinationError si el host está prohibido (BE-16). */
+  private s3Adapter(resolved: StorageConfig, tuning?: S3ClientTuning): S3StorageAdapter {
+    if (!resolved.s3.bucket || !resolved.s3.accessKey || !resolved.s3.secretKey) {
+      throw new ApiException(ErrorCode.StorageNotConfigured);
+    }
+    return new S3StorageAdapter(
+      {
+        provider: resolved.s3.provider,
+        endpoint: resolved.s3.endpoint,
+        region: resolved.s3.region,
+        bucket: resolved.s3.bucket,
+        accessKey: resolved.s3.accessKey,
+        secretKey: resolved.s3.secretKey,
+        forcePathStyle: resolved.s3.forcePathStyle,
+      },
+      this.outboundPolicy(),
+      tuning,
     );
   }
 
@@ -538,18 +674,7 @@ export class StorageService {
         throw new ApiException(ErrorCode.StorageNotConfigured);
       }
       try {
-        return new S3StorageAdapter(
-          {
-            provider: resolved.s3.provider,
-            endpoint: resolved.s3.endpoint,
-            region: resolved.s3.region,
-            bucket: resolved.s3.bucket,
-            accessKey: resolved.s3.accessKey,
-            secretKey: resolved.s3.secretKey,
-            forcePathStyle: resolved.s3.forcePathStyle,
-          },
-          this.outboundPolicy(),
-        );
+        return this.s3Adapter(resolved);
       } catch (error) {
         if (isOutboundForbidden(error)) {
           throw new ApiException(ErrorCode.OutboundDestinationForbidden);
