@@ -28,10 +28,12 @@ import {
 import { FeaturesModule } from '../../src/modules/features/features.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
-import { createActor, scalar, useSharedStorage } from './helpers.js';
+import { DocumentFormatCatalogService } from '../../src/modules/documents/services/document-format-catalog.service.js';
+import { createActor, createFreeTestFormat, dropTestFormat, scalar, useSharedStorage } from './helpers.js';
 
 const ENTITY = 'IT_PROCESS';
-const LIFECYCLE_FORMAT = 'OCI-21-37';
+/** Formato libre de prueba: RESPONSABLE (RESPONSIBLE) y AUDITA (REQUEST), sin proceso enchufado. */
+const LIFECYCLE_FORMAT = 'IT-LIFECYCLE';
 const ROLES_FORMAT = 'OCI-01-65';
 
 class FakePdfConverter implements PdfConverter {
@@ -248,6 +250,7 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     )) as typeof sequencesBefore;
 
     director = await createActor(dataSource);
+    await createFreeTestFormat(moduleRef.get(DocumentFormatCatalogService), LIFECYCLE_FORMAT, director.id);
     await dataSource.query(
       `INSERT INTO user_role (user_id, role_id, scope_type) SELECT $1, id, 'GLOBAL' FROM role WHERE code = 'INTERNAL_CONTROL_DIRECTOR'`,
       [director.id],
@@ -275,7 +278,7 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
   });
 
   afterAll(async () => {
-    // Deja la BD compartida como estaba: otros archivos esperan OCI-21-37 sin plantilla y el consecutivo de OCI-01-65.
+    // Deja la BD compartida como estaba: sin el formato de prueba y con el consecutivo de OCI-01-65.
     const documents = (await dataSource.query('SELECT id FROM document WHERE template_version_id = ANY($1)', [
       templateIds,
     ])) as Array<{ id: string }>;
@@ -297,6 +300,7 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
       ]);
     }
     await dataSource.query('DROP TABLE it_lifecycle_effect');
+    await dropTestFormat(dataSource, LIFECYCLE_FORMAT);
     await moduleRef.close();
   });
 

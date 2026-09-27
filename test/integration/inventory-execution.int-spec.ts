@@ -11,7 +11,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { addDays, bogotaDate } from '../../src/modules/inventories/domain/inventory-schedule.js';
-import { openTestSession, scalar } from './helpers.js';
+import { discardInventoryActRequests, openTestSession, scalar } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
 
 interface Who {
@@ -192,6 +192,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
   });
 
   afterAll(async () => {
+    await discardInventoryActRequests(dataSource);
     await app.close();
   });
 

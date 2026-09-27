@@ -7,7 +7,7 @@ import { PhysicalCondition } from '../../src/modules/assets/enums/physical-condi
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { InventoriesModule } from '../../src/modules/inventories/inventories.module.js';
 import { InventoriesService } from '../../src/modules/inventories/services/inventories.service.js';
-import { bootModules, createActor, scalar } from './helpers.js';
+import { bootModules, createActor, discardInventoryActRequests, scalar } from './helpers.js';
 
 describe('Toma física sobre el camino único de escritura (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
@@ -65,6 +65,7 @@ describe('Toma física sobre el camino único de escritura (PostgreSQL real)', (
   afterAll(async () => {
     await dataSource.query('DROP TRIGGER IF EXISTS it_fail_lost ON asset');
     await dataSource.query('DROP FUNCTION IF EXISTS it_fail_lost()');
+    await discardInventoryActRequests(dataSource);
     await moduleRef.close();
   });
 

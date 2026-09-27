@@ -14,9 +14,11 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
-import { scalar, useSharedStorage } from './helpers.js';
+import { DocumentFormatCatalogService } from '../../src/modules/documents/services/document-format-catalog.service.js';
+import { createFreeTestFormat, dropTestFormat, scalar, useSharedStorage } from './helpers.js';
 
-const FORMAT = 'OCI-21-37';
+/** Formato libre de prueba (RESPONSABLE + AUDITA, sin proceso): los institucionales pertenecen a sus procesos. */
+const FORMAT = 'IT-OPENAPI-ACTA';
 
 class BlankPdfConverter implements PdfConverter {
   async toPdf(): Promise<Buffer> {
@@ -188,6 +190,7 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
     dataSource = app.get(DataSource);
     await useSharedStorage(dataSource);
     openapi = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+    await createFreeTestFormat(app.get(DocumentFormatCatalogService), FORMAT, null);
     sequenceBefore = await scalar<string | undefined>(
       dataSource,
       `SELECT current_value FROM document_sequence WHERE format_key = $1 AND period = ''`,
@@ -196,7 +199,7 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
   });
 
   afterAll(async () => {
-    // OCI-21-37 queda como estaba: otro archivo espera que no tenga plantilla.
+    // Deja la BD compartida sin el formato de prueba ni sus actas.
     const ids = (
       (await dataSource.query('SELECT id FROM document WHERE template_version_id = $1', [templateId || null])) as Array<{ id: string }>
     ).map((item) => item.id);
@@ -217,6 +220,7 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
         sequenceBefore,
       ]);
     }
+    await dropTestFormat(dataSource, FORMAT);
     await app.close();
   });
 

@@ -15,10 +15,13 @@ import { DocumentEngineService } from '../../src/modules/documents/services/docu
 import { SIGNATURE_PROVIDER, StubSignatureProvider } from '../../src/modules/documents/signature/signature-provider.js';
 import { FeaturesModule } from '../../src/modules/features/features.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
-import { createActor, scalar, useSharedStorage } from './helpers.js';
+import { DocumentFormatCatalogService } from '../../src/modules/documents/services/document-format-catalog.service.js';
+import { createActor, createFreeTestFormat, dropTestFormat, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 const CLEANED_FORMATS = ['OCI-01-55', 'OCI-17-89', 'OCI-01-65'];
+/** Formato libre sin plantilla (los institucionales pueden tener plantilla o proceso según el orden de los archivos). */
+const NO_TEMPLATE_FORMAT = 'IT-ENGINE-SIN-PLANTILLA';
 const snapshot: {
   templates: string[];
   sequences: Array<{ format_key: string; period: string; current_value: string }>;
@@ -106,6 +109,7 @@ describe('Motor de documentos (PostgreSQL real)', () => {
     )) as typeof snapshot.sequences;
 
     director = await createActor(dataSource);
+    await createFreeTestFormat(moduleRef.get(DocumentFormatCatalogService), NO_TEMPLATE_FORMAT, director.id);
     await dataSource.query(
       `INSERT INTO user_role (user_id, role_id, scope_type) SELECT $1, id, 'GLOBAL' FROM role WHERE code = 'INTERNAL_CONTROL_DIRECTOR'`,
       [director.id],
@@ -194,6 +198,7 @@ describe('Motor de documentos (PostgreSQL real)', () => {
         sequence.current_value,
       ]);
     }
+    await dropTestFormat(dataSource, NO_TEMPLATE_FORMAT);
     await moduleRef.close();
   });
 
@@ -261,8 +266,10 @@ describe('Motor de documentos (PostgreSQL real)', () => {
   });
 
   it('sin plantilla vigente falla explícitamente y no consume consecutivo', async () => {
-    await expect(engine.generate(request('OCI-21-37'), director.id)).rejects.toMatchObject({ code: 'TEMPLATE_NOT_ACTIVE' });
-    expect(await sequence('OCI-21-37')).toBeNull();
+    await expect(engine.generate(request(NO_TEMPLATE_FORMAT), director.id)).rejects.toMatchObject({
+      code: 'TEMPLATE_NOT_ACTIVE',
+    });
+    expect(await sequence(NO_TEMPLATE_FORMAT)).toBeNull();
   });
 
   it('la firma es un paso aparte: el stub la completa y el documento pasa a firmado', async () => {

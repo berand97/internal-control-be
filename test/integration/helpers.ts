@@ -10,6 +10,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import { AppConfigModule } from '../../src/config/config.module.js';
 import dataSourceConfig from '../../src/database/data-source.js';
 import { DatabaseModule } from '../../src/database/database.module.js';
+import type { DocumentFormatCatalogService } from '../../src/modules/documents/services/document-format-catalog.service.js';
 import { FeaturesModule } from '../../src/modules/features/features.module.js';
 
 export const bootModules = async (
@@ -68,6 +69,58 @@ export const useSharedStorage = async (dataSource: DataSource): Promise<string> 
   await mkdir(SHARED_STORAGE_DIR, { recursive: true });
   await dataSource.query('UPDATE storage_settings SET driver = $1, project_path = $2', ['project', SHARED_STORAGE_DIR]);
   return SHARED_STORAGE_DIR;
+};
+
+/**
+ * Formato libre de prueba (clave IT-…): con código SGC y los firmantes de un acta de dos turnos (RESPONSABLE =
+ * RESPONSIBLE, AUDITA = REQUEST), sin plantilla y sin proceso enchufado. Para las pruebas del motor que necesitan un
+ * formato "de nadie": los institucionales sembrados ya pertenecen a un proceso (OCI-21-37 → tomas físicas).
+ * Borrarlo con dropTestFormat después de borrar sus actas.
+ */
+export const createFreeTestFormat = async (
+  catalog: DocumentFormatCatalogService,
+  key: string,
+  actorId: string | null,
+): Promise<string> => {
+  await catalog.createFormat(
+    {
+      key,
+      sgcCode: `PRUEBA-${key.slice(-8)}`,
+      sgcVersion: '1',
+      name: `Formato libre de prueba ${key}`,
+      signers: [
+        { order: 1, role: 'RESPONSABLE', label: 'Responsable', source: 'RESPONSIBLE' },
+        { order: 2, role: 'AUDITA', label: 'Control Interno', source: 'REQUEST' },
+      ],
+      numbering: { width: 5, perYear: false, lastIssued: 0 },
+      readPermission: 'inventory:read:global',
+      generatePermission: 'inventory:execute:global',
+    },
+    actorId,
+  );
+  return key;
+};
+
+export const dropTestFormat = async (dataSource: DataSource, key: string): Promise<void> => {
+  await dataSource.query('DELETE FROM document_request WHERE format_key = $1', [key]);
+  await dataSource.query('DELETE FROM document_template_version WHERE format_key = $1', [key]);
+  await dataSource.query('DELETE FROM document_sequence WHERE format_key = $1', [key]);
+  await dataSource.query('DELETE FROM document_format_version WHERE format_key = $1', [key]);
+  await dataSource.query('DELETE FROM document_format WHERE key = $1', [key]);
+};
+
+/**
+ * Aprobar una conciliación encola el acta OCI-21-37 (outbox). Los archivos que concilian tomas la descartan al
+ * terminar: processPending procesa toda la cola y otros archivos cuentan exactamente lo que generan.
+ */
+export const discardInventoryActRequests = async (dataSource: DataSource): Promise<void> => {
+  await dataSource.query(
+    `UPDATE physical_inventory SET act_request_id = NULL
+     WHERE act_request_id IN (SELECT id FROM document_request WHERE status <> 'GENERATED' AND payload->>'entityType' = 'PHYSICAL_INVENTORY')`,
+  );
+  await dataSource.query(
+    `DELETE FROM document_request WHERE status <> 'GENERATED' AND payload->>'entityType' = 'PHYSICAL_INVENTORY'`,
+  );
 };
 
 /**
