@@ -11,6 +11,7 @@ import type { AuthUsersRepository } from '../repositories/auth-users.repository.
 import type { PasswordResetTokensRepository } from '../repositories/password-reset-tokens.repository.interface.js';
 import type { RefreshTokenFamiliesRepository } from '../repositories/refresh-token-families.repository.interface.js';
 import { AuthService, requiresMfaEnrollment } from './auth.service.js';
+import type { AuthLockoutService } from './auth-lockout.service.js';
 import type { MfaAccountService } from './mfa-account.service.js';
 import type { MfaService } from './mfa.service.js';
 import type { TokenService } from './token.service.js';
@@ -77,6 +78,10 @@ describe('AuthService', () => {
     status: ReturnType<typeof vi.fn>;
     completeSetupEnrollment: ReturnType<typeof vi.fn>;
     consumeForLogin: ReturnType<typeof vi.fn>;
+  };
+  let lockout: {
+    registerAttempt: ReturnType<typeof vi.fn>;
+    clear: ReturnType<typeof vi.fn>;
   };
   let service: AuthService;
 
@@ -166,6 +171,14 @@ describe('AuthService', () => {
       completeSetupEnrollment: vi.fn().mockResolvedValue(['AAAA-BBBB-CCCC']),
       consumeForLogin: vi.fn().mockResolvedValue(9),
     };
+    lockout = {
+      registerAttempt: vi.fn().mockResolvedValue({
+        allowed: true,
+        lockedNow: false,
+        lockedUntil: null,
+      }),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
     service = new AuthService(
       authUsersRepository,
       refreshTokenFamiliesRepository,
@@ -190,7 +203,52 @@ describe('AuthService', () => {
         ]),
       } as never,
       mfaAccount as unknown as MfaAccountService,
+      lockout as unknown as AuthLockoutService,
     );
+  });
+
+  describe('bloqueo por cuenta (BE-04)', () => {
+    it('con la cuenta bloqueada responde 429 sin verificar la contraseña', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser(),
+      );
+      lockout.registerAttempt.mockResolvedValue({
+        allowed: false,
+        lockedNow: false,
+        lockedUntil: new Date(Date.now() + 60_000),
+      });
+      await expect(
+        service.login(
+          { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.TooManyAttempts });
+      expect(hashService.verify).not.toHaveBeenCalled();
+    });
+
+    it('una cuenta inexistente se cuenta por hash del identificador, no por su texto', async () => {
+      await expect(
+        service.login({ username: 'nadie.existe', password: 'x' }, context),
+      ).rejects.toMatchObject({ code: ErrorCode.InvalidCredentials });
+      const [subject, factor] = lockout.registerAttempt.mock.calls[0] as [string, string];
+      expect(factor).toBe('PASSWORD');
+      expect(subject).toMatch(/^id:[0-9a-f]{64}$/);
+      expect(hashService.runDummyVerification).toHaveBeenCalled();
+    });
+
+    it('un login correcto borra el contador de contraseña', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser(),
+      );
+      await service.login(
+        { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+        context,
+      );
+      expect(lockout.clear).toHaveBeenCalledWith(
+        expect.stringMatching(/^user:/),
+        'PASSWORD',
+      );
+    });
   });
 
   describe('login', () => {

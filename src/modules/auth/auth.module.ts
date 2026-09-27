@@ -17,6 +17,7 @@ import { TypeOrmAuthUsersRepository } from './repositories/auth-users.repository
 import { TypeOrmMfaCredentialsRepository } from './repositories/mfa-credentials.repository.js';
 import { TypeOrmPasswordResetTokensRepository } from './repositories/password-reset-tokens.repository.js';
 import { TypeOrmRefreshTokenFamiliesRepository } from './repositories/refresh-token-families.repository.js';
+import { AuthLockoutService } from './services/auth-lockout.service.js';
 import { AuthService } from './services/auth.service.js';
 import { MfaAccountService } from './services/mfa-account.service.js';
 import { MfaService } from './services/mfa.service.js';
@@ -43,6 +44,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
   controllers: [AuthController],
   providers: [
     AuthService,
+    AuthLockoutService,
     TokenService,
     MfaService,
     MfaAccountService,
