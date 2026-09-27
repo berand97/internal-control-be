@@ -248,16 +248,26 @@ export class InventoryCatalogsService {
     }
   }
 
+  /** En uso: asignada a un ítem o citada en el historial de correcciones (borrarla dejaría el historial huérfano). */
   private async usedCategoryCodes(): Promise<ReadonlySet<string>> {
     const rows = (await this.dataSource.query(
-      `SELECT DISTINCT finding_category_code AS code FROM physical_inventory_item WHERE finding_category_code IS NOT NULL`,
+      `SELECT finding_category_code AS code FROM physical_inventory_item WHERE finding_category_code IS NOT NULL
+       UNION
+       SELECT c.value->>'findingCategory' FROM inventory_item_correction ic,
+         LATERAL (VALUES (ic.before), (ic.after)) AS c(value)
+       WHERE c.value->>'findingCategory' IS NOT NULL`,
     )) as Array<{ code: string }>;
     return new Set(rows.map((row) => row.code));
   }
 
+  /** En uso: causa de un faltante o citada en el historial de correcciones. */
   private async usedCauseIds(): Promise<ReadonlySet<string>> {
     const rows = (await this.dataSource.query(
-      `SELECT DISTINCT missing_cause_id AS id FROM physical_inventory_item WHERE missing_cause_id IS NOT NULL`,
+      `SELECT missing_cause_id::text AS id FROM physical_inventory_item WHERE missing_cause_id IS NOT NULL
+       UNION
+       SELECT c.value->>'missingCauseId' FROM inventory_item_correction ic,
+         LATERAL (VALUES (ic.before), (ic.after)) AS c(value)
+       WHERE c.value->>'missingCauseId' IS NOT NULL`,
     )) as Array<{ id: string }>;
     return new Set(rows.map((row) => row.id));
   }
