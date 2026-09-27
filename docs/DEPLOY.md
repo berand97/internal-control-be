@@ -503,8 +503,8 @@ retira el volumen, siempre después de un respaldo.
 ### 10.7 Imágenes de los correos: la carpeta pública `images/email/`
 
 Las imágenes que se insertan en las plantillas de correo (bloque *Imagen*) **no** las sirve el backend ni
-van en la base: el backend las valida (PNG/JPEG por sus bytes, máximo 1 MB y 2000 × 2000 px), las
-re-codifica sin metadatos (EXIF/GPS) a lo sumo a 1200 px de ancho y las sube al bucket de imágenes con la
+van en la base: el backend las valida (PNG/JPEG por sus bytes, hasta 1 MB y cualquier tamaño en píxeles hasta 100 megapíxeles), las
+re-codifica sin metadatos (EXIF/GPS), las reduce a lo sumo a 1200 × 2000 px y las sube al bucket de imágenes con la
 clave `images/email/<uuid>.<png|jpg>` (no adivinable, sin el nombre original), `Content-Type` y
 `Cache-Control: public, max-age=31536000, immutable`. El correo lleva la URL
 `<URL pública base>/images/email/<uuid>.png` en el `<img src>` y el cliente de correo la descarga

@@ -23,10 +23,10 @@ export class EmailAssetResponseDto {
   @ApiProperty({ enum: EMAIL_ASSET_MIMES, enumName: 'EmailAssetMime' })
   readonly mime!: EmailAssetMime;
 
-  @ApiProperty({ type: 'integer', description: 'Ancho guardado en px (máximo 1200: se reduce al subir)' })
+  @ApiProperty({ type: 'integer', description: 'Ancho guardado en px (máximo 1200: la imagen subida, de cualquier tamaño en píxeles, se reduce)' })
   readonly width!: number;
 
-  @ApiProperty({ type: 'integer', description: 'Alto guardado en px' })
+  @ApiProperty({ type: 'integer', description: 'Alto guardado en px (máximo 2000: se reduce conservando la proporción)' })
   readonly height!: number;
 
   @ApiProperty({ type: 'integer', description: 'Bytes guardados (re-codificada, sin metadatos)' })

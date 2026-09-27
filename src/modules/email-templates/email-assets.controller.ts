@@ -50,13 +50,13 @@ export class EmailAssetsController {
     schema: {
       type: 'object',
       required: ['file'],
-      properties: { file: { type: 'string', format: 'binary', description: 'PNG o JPEG, máximo 1 MB y 2000 × 2000 px' } },
+      properties: { file: { type: 'string', format: 'binary', description: 'PNG o JPEG de hasta 1 MB; cualquier tamaño en píxeles (se reduce a 1200 px de ancho)' } },
     },
   })
   @ApiOperation({
     summary: 'Subir una imagen para las plantillas de correo',
     description:
-      'Se valida por los bytes (no por la extensión ni el tipo declarado): solo PNG o JPEG, máximo 1 MB (FILE_TOO_LARGE) y 2000 × 2000 px (EMAIL_ASSET_INVALID_IMAGE); otro formato (SVG, GIF, HTML renombrado...): FILE_TYPE_NOT_ALLOWED. Se re-codifica sin metadatos (EXIF/GPS) y a lo sumo 1200 px de ancho y se guarda en el bucket de imágenes del proveedor S3 (images/email/<uuid>.<png|jpg>, la única carpeta de lectura anónima); url es su dirección pública. Sin almacenamiento S3 con bucket de imágenes y URL base configurados: 409 PUBLIC_ASSETS_NOT_CONFIGURED. La misma imagen (mismo contenido guardado) devuelve la existente. Las imágenes no se borran.',
+      'Se valida por los bytes (no por la extensión ni el tipo declarado): solo PNG o JPEG de hasta 1 MB (FILE_TOO_LARGE); cualquier tamaño en píxeles (se reduce a 1200 px de ancho). Solo se rechaza con EMAIL_ASSET_INVALID_IMAGE una imagen dañada o ilegible, o de más de 100 megapíxeles (protección contra bombas de descompresión); otro formato (SVG, GIF, HTML renombrado...): FILE_TYPE_NOT_ALLOWED. Se re-codifica sin metadatos (EXIF/GPS), con la orientación EXIF aplicada, reducida a lo sumo a 1200 px de ancho y 2000 px de alto (conservando la proporción) y se guarda en el bucket de imágenes del proveedor S3 (images/email/<uuid>.<png|jpg>, la única carpeta de lectura anónima); url es su dirección pública. Sin almacenamiento S3 con bucket de imágenes y URL base configurados: 409 PUBLIC_ASSETS_NOT_CONFIGURED. La misma imagen (mismo contenido guardado) devuelve la existente. Las imágenes no se borran.',
   })
   @ApiCreatedResponse({ schema: envelopedSchema(EmailAssetResponseDto) })
   @ApiBadRequestResponse({
