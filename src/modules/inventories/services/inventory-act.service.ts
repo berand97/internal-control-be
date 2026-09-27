@@ -35,7 +35,7 @@ const AUTOMATIC_GENERATION_ATTEMPTS = 5;
 
 type BlockedReason = Extract<
   InventoryActReason,
-  'FORMAT_NOT_READY' | 'RESPONSIBLE_WITHOUT_PERSON' | 'APPROVER_WITHOUT_PERSON' | 'ENQUEUE_FAILED'
+  'FORMAT_NOT_READY' | 'ENQUEUE_FAILED'
 >;
 
 type EnqueueOutcome =
@@ -66,7 +66,7 @@ interface ActItemRow {
 
 /**
  * Acta de toma física OCI-21-37. Al aprobar la conciliación se encola en la misma transacción; si el formato no está
- * listo o falta un firmante, la conciliación sigue y el motivo queda en la toma (act_blocked_*), reintentable con
+ * listo o falla armarla, la conciliación sigue y el motivo queda en la toma (act_blocked_*), reintentable con
  * POST /inventories/:id/act/enqueue. La generación es asíncrona (outbox). Los manejadores del ciclo de vida solo
  * guardan el vínculo con el acta: firmarla o rechazarla no cambia la toma.
  */
@@ -247,22 +247,11 @@ export class InventoryActService implements OnModuleInit {
         message: `El formato ${INVENTORY_ACT_FORMAT_KEY} no se puede generar: ${readiness.reasons.join('; ')}`,
       };
     }
-    const responsiblePersonId = await this.personOf(manager, inventory.responsibleUserId);
-    if (!responsiblePersonId) {
-      return {
-        blocked: 'RESPONSIBLE_WITHOUT_PERSON',
-        message: 'El responsable de la toma no tiene una persona asociada a su usuario: no puede firmar el acta',
-      };
-    }
-    const approverPersonId = await this.personOf(manager, approverUserId);
-    if (!approverPersonId) {
-      return {
-        blocked: 'APPROVER_WITHOUT_PERSON',
-        message: 'Quien aprobó la conciliación no tiene una persona asociada a su usuario: no puede firmar el acta',
-      };
-    }
     await manager.query('SAVEPOINT inventory_act');
     try {
+      // app_user.person_id es NOT NULL: responsable y aprobador siempre tienen persona que firme.
+      const responsiblePersonId = await this.personOf(manager, inventory.responsibleUserId);
+      const approverPersonId = await this.personOf(manager, approverUserId);
       const payload = await this.payload(manager, inventory, responsiblePersonId, approverPersonId);
       const requestId = await this.engine.enqueue(manager, payload, approverUserId);
       await manager.query('RELEASE SAVEPOINT inventory_act');
@@ -276,11 +265,14 @@ export class InventoryActService implements OnModuleInit {
     }
   }
 
-  private async personOf(manager: EntityManager, userId: string): Promise<string | null> {
+  private async personOf(manager: EntityManager, userId: string): Promise<string> {
     const [row] = (await manager.query('SELECT person_id FROM app_user WHERE id = $1', [userId])) as Array<{
-      person_id: string | null;
+      person_id: string;
     }>;
-    return row?.person_id ?? null;
+    if (!row) {
+      throw new Error(`No existe el usuario ${userId} que firma el acta`);
+    }
+    return row.person_id;
   }
 
   private async payload(

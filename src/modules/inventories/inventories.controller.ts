@@ -388,7 +388,7 @@ export class InventoriesController {
     description:
       'MISPLACED actualiza la ubicación; MISSING marca LOST; FOUND y MISPLACED con condición distinta actualizan la ' +
       'condición. NOT_VERIFIED y los sobrantes (incluidos los de activos LOST) no cambian nada. En la misma ' +
-      'transacción encola el acta OCI-21-37; si el formato no está listo o falta la persona de un firmante, la ' +
+      'transacción encola el acta OCI-21-37; si el formato no está listo (o falla armarla), la ' +
       'conciliación sigue y el acta queda NOT_ENQUEUED con su motivo (act en la respuesta).',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
@@ -446,8 +446,8 @@ export class InventoriesController {
     summary: 'Encolar el acta OCI-21-37 que la conciliación no pudo encolar',
     description:
       'Solo tomas RECONCILED con acta NOT_ENQUEUED. Firman el responsable de la toma (RESPONSABLE) y quien aprobó la ' +
-      'conciliación (AUDITA). Si el formato sigue sin código SGC o firmantes: 409 DOCUMENT_FORMAT_NOT_READY; si falta ' +
-      'la persona de un firmante: 406 INVALID_STATE (errors[0].message = reason).',
+      'conciliación (AUDITA). Si el formato sigue sin código SGC o firmantes: 409 DOCUMENT_FORMAT_NOT_READY; otro ' +
+      'error al armar el acta: 406 INVALID_STATE. En ambos, error.details[0] = { field: reason, message: <reason> }.',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryActStateDto) })
   enqueueAct(

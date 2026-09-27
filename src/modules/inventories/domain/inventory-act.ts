@@ -15,14 +15,11 @@ export const INVENTORY_ACT_GENERATIONS = ['NONE', 'PENDING', 'FAILED', 'GENERATE
 export type InventoryActGeneration = (typeof INVENTORY_ACT_GENERATIONS)[number];
 
 /**
- * Por qué el acta no está: FORMAT_NOT_READY (sin código SGC o firmantes), RESPONSIBLE_WITHOUT_PERSON /
- * APPROVER_WITHOUT_PERSON (el usuario no tiene persona para firmar), ENQUEUE_FAILED (error inesperado al encolar),
+ * Por qué el acta no está: FORMAT_NOT_READY (sin código SGC o firmantes), ENQUEUE_FAILED (error inesperado al encolar),
  * TEMPLATE_NOT_ACTIVE (encolada, pero sin plantilla vigente), GENERATION_FAILED (otro error del motor).
  */
 export const INVENTORY_ACT_REASONS = [
   'FORMAT_NOT_READY',
-  'RESPONSIBLE_WITHOUT_PERSON',
-  'APPROVER_WITHOUT_PERSON',
   'ENQUEUE_FAILED',
   'TEMPLATE_NOT_ACTIVE',
   'GENERATION_FAILED',

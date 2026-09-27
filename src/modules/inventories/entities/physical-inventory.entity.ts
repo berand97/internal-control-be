@@ -97,7 +97,7 @@ export class PhysicalInventory {
   @Column({ name: 'act_document_id', type: 'uuid', nullable: true })
   actDocumentId!: string | null;
 
-  /** Por qué el acta no se encoló (FORMAT_NOT_READY, RESPONSIBLE_WITHOUT_PERSON, APPROVER_WITHOUT_PERSON). */
+  /** Por qué el acta no se encoló (FORMAT_NOT_READY o ENQUEUE_FAILED). */
   @Column({ name: 'act_blocked_code', type: 'varchar', length: 40, nullable: true })
   actBlockedCode!: string | null;
 
