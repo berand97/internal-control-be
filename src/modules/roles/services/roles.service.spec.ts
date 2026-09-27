@@ -78,7 +78,11 @@ describe('RolesService', () => {
       removePermission: vi.fn(),
       findSodForRole: vi.fn().mockResolvedValue([]),
       insertSod: vi.fn(),
-      findActiveAssigneeIds: vi.fn().mockResolvedValue([]),
+      findActiveHolderIdsInheriting: vi.fn().mockResolvedValue([]),
+      findLineage: vi.fn().mockResolvedValue([]),
+      findPermissionsForRoles: vi.fn().mockResolvedValue([]),
+      countActiveChildren: vi.fn().mockResolvedValue(0),
+      findHolderScopesReachingRole: vi.fn().mockResolvedValue([]),
       countActiveAssignees: vi.fn().mockResolvedValue(0),
       insertPermission: vi.fn(),
       updatePermission: vi.fn(),
@@ -260,8 +264,10 @@ describe('RolesService', () => {
 
   it('permite al super admin cambiar el padre sin recalcular el nivel', async () => {
     const current = customRole();
-    const parent = adminRole();
+    const parent = systemRole();
     parent.id = 'parent-1';
+    parent.code = 'VIEWER';
+    parent.hierarchyLevel = 3;
     const updated = customRole();
     updated.parentRoleId = 'parent-1';
     vi.mocked(rolesRepository.findActiveById)
@@ -311,7 +317,7 @@ describe('RolesService', () => {
         code: 'asset:read:global',
       } as never,
     ]);
-    vi.mocked(rolesRepository.findActiveAssigneeIds).mockResolvedValue([
+    vi.mocked(rolesRepository.findActiveHolderIdsInheriting).mockResolvedValue([
       'user-9',
     ]);
     await service.assignPermissions(
@@ -332,7 +338,7 @@ describe('RolesService', () => {
         code: 'asset:read:global',
       } as never,
     ]);
-    vi.mocked(rolesRepository.findActiveAssigneeIds).mockResolvedValue([
+    vi.mocked(rolesRepository.findActiveHolderIdsInheriting).mockResolvedValue([
       'user-9',
     ]);
     await service.replacePermissions(
@@ -380,5 +386,136 @@ describe('RolesService', () => {
       ),
     ).rejects.toMatchObject({ code: ErrorCode.ResourceNotFound });
     expect(rolesRepository.replacePermissions).not.toHaveBeenCalled();
+  });
+
+  describe('herencia (parentRoleId) — BE-02', () => {
+    const director = (): Role => {
+      const role = systemRole();
+      role.id = 'director-role';
+      role.code = 'INTERNAL_CONTROL_DIRECTOR';
+      role.hierarchyLevel = 1;
+      return role;
+    };
+
+    it('no deja heredar de un rol cuyo linaje aporta permisos que el actor no tiene', async () => {
+      vi.mocked(rolesRepository.findActiveById).mockResolvedValue(director());
+      vi.mocked(rolesRepository.findLineage).mockResolvedValue([director()]);
+      vi.mocked(rolesRepository.findPermissionsForRoles).mockResolvedValue([
+        { id: 'perm-w', code: 'asset:write_off:global' } as never,
+      ]);
+      await expect(
+        service.create(
+          { code: 'SHADOW', name: 'Sombra', parentRoleId: 'director-role' },
+          actor,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.PermissionNotHeld });
+      expect(rolesRepository.insert).not.toHaveBeenCalled();
+    });
+
+    it('no deja heredar de un rol de nivel igual o superior al actor', async () => {
+      const directorActor: AuthenticatedUser = {
+        ...actor,
+        roles: ['INTERNAL_CONTROL_DIRECTOR'],
+      };
+      vi.mocked(rolesRepository.findAllActive).mockResolvedValue([
+        adminRole(),
+        director(),
+      ]);
+      vi.mocked(rolesRepository.findActiveById).mockResolvedValue(director());
+      await expect(
+        service.create(
+          { code: 'SHADOW', name: 'Sombra', parentRoleId: 'director-role' },
+          directorActor,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.RolePrivilegeEscalation });
+    });
+
+    it('aplica las mismas reglas al cambiar el padre de un rol existente', async () => {
+      vi.mocked(rolesRepository.findActiveById)
+        .mockResolvedValueOnce(customRole())
+        .mockResolvedValueOnce(director());
+      vi.mocked(rolesRepository.findLineage).mockResolvedValue([director()]);
+      vi.mocked(rolesRepository.findPermissionsForRoles).mockResolvedValue([
+        { id: 'perm-w', code: 'asset:write_off:global' } as never,
+      ]);
+      await expect(
+        service.update('role-1', { parentRoleId: 'director-role' }, actor),
+      ).rejects.toMatchObject({ code: ErrorCode.PermissionNotHeld });
+      expect(rolesRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('un actor no super admin crea el rol un nivel por debajo del suyo', async () => {
+      const directorActor: AuthenticatedUser = {
+        ...actor,
+        roles: ['INTERNAL_CONTROL_DIRECTOR'],
+      };
+      vi.mocked(rolesRepository.findAllActive).mockResolvedValue([
+        adminRole(),
+        director(),
+      ]);
+      vi.mocked(rolesRepository.insert).mockResolvedValue(customRole());
+      await service.create({ code: 'ASSISTANT', name: 'Asistente' }, directorActor);
+      expect(rolesRepository.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          superiorRoleId: 'director-role',
+          hierarchyLevel: 2,
+        }),
+      );
+    });
+  });
+
+  describe('nadie se amplía permisos a sí mismo', () => {
+    beforeEach(() => {
+      vi.mocked(rolesRepository.findActiveById).mockResolvedValue(customRole());
+      vi.mocked(rolesRepository.findPermissionsByIds).mockResolvedValue([
+        { id: 'perm-1', code: 'asset:read:global' } as never,
+      ]);
+      vi.mocked(permissionsService.getEffectivePermissions).mockResolvedValue([
+        { permissionCode: 'asset:read:global', userScopeType: 'COST_CENTER', userScopeId: 'cc-1' },
+      ]);
+    });
+
+    it('no agrega a un rol propio (asignación GLOBAL) un permiso que el actor solo tiene en un centro de costo', async () => {
+      vi.mocked(rolesRepository.findHolderScopesReachingRole).mockResolvedValue([
+        { scopeType: 'GLOBAL', scopeId: null },
+      ]);
+      await expect(
+        service.assignPermissions('role-1', { permissionIds: ['perm-1'] }, actor),
+      ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
+      expect(rolesRepository.assignPermission).not.toHaveBeenCalled();
+    });
+
+    it('sí lo agrega si el actor no tiene el rol', async () => {
+      await service.assignPermissions('role-1', { permissionIds: ['perm-1'] }, actor);
+      expect(rolesRepository.assignPermission).toHaveBeenCalled();
+    });
+  });
+
+  describe('borrado con herederos — BE-03', () => {
+    it('no elimina un rol del que otros roles heredan', async () => {
+      vi.mocked(rolesRepository.findActiveById).mockResolvedValue(customRole());
+      vi.mocked(rolesRepository.countActiveChildren).mockResolvedValue(1);
+      await expect(service.remove('role-1', actor)).rejects.toMatchObject({
+        code: ErrorCode.RoleHasChildRoles,
+      });
+      expect(rolesRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('al cambiar permisos invalida también a los titulares de roles herederos', async () => {
+      vi.mocked(rolesRepository.findActiveById).mockResolvedValue(customRole());
+      vi.mocked(rolesRepository.findActiveHolderIdsInheriting).mockResolvedValue([
+        'direct-holder',
+        'child-holder',
+      ]);
+      vi.mocked(rolesRepository.removePermission).mockResolvedValue(true);
+      await service.removePermission('role-1', 'perm-1', actor);
+      expect(rolesRepository.findActiveHolderIdsInheriting).toHaveBeenCalledWith(
+        'role-1',
+      );
+      expect(permissionsService.invalidateMany).toHaveBeenCalledWith([
+        'direct-holder',
+        'child-holder',
+      ]);
+    });
   });
 });

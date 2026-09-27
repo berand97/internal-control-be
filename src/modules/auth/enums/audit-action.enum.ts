@@ -1,6 +1,7 @@
 export enum AuditAction {
   Login = 'LOGIN',
   LoginFailed = 'LOGIN_FAILED',
+  LoginLocked = 'LOGIN_LOCKED',
   PasswordChanged = 'PASSWORD_CHANGED',
   PasswordResetRequested = 'PWD_RESET_REQUEST',
   PasswordReset = 'PASSWORD_RESET',

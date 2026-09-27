@@ -62,6 +62,88 @@ export class RolePrivilegePolicy {
     }
   }
 
+  /**
+   * Heredar de un rol (parent_role_id) equivale a otorgar todo lo que aporta: el padre y cada ancestro suyo deben ser
+   * administrables por el actor (nivel mayor al propio) y el actor debe tener, efectivamente, cada permiso del
+   * linaje. La separación de funciones sobre roles efectivos la hace cumplir la BD (fn_check_role_inheritance_sod).
+   */
+  async assertCanInheritFrom(
+    actor: AuthenticatedUser,
+    parent: Pick<Role, 'id' | 'hierarchyLevel'>,
+    /** Rol existente que pasaría a heredar: si el actor lo tiene, no puede ampliarse con la herencia. */
+    inheritingRoleId?: string,
+  ): Promise<void> {
+    await this.assertCanAdminister(actor, parent);
+    const lineage = await this.rolesRepository.findLineage(parent.id);
+    const rank = await this.actorRank(actor);
+    if (lineage.some((role) => role.hierarchyLevel <= rank)) {
+      throw new ApiException(ErrorCode.RolePrivilegeEscalation);
+    }
+    const inherited = await this.rolesRepository.findPermissionsForRoles(
+      lineage.map((role) => role.id),
+    );
+    await this.assertCanGrant(actor, inherited);
+    if (inheritingRoleId !== undefined) {
+      await this.assertDoesNotWidenOwn(actor, inheritingRoleId, inherited);
+    }
+  }
+
+  /**
+   * Superior por defecto de un rol nuevo: el SUPER_ADMIN crea bajo SUPER_ADMIN (como antes); cualquier otro actor,
+   * bajo su propio rol de mayor rango, de modo que el rol nuevo queda un nivel por debajo de él (cascada).
+   */
+  async defaultSuperiorFor(actor: AuthenticatedUser): Promise<Role | null> {
+    if (this.isSuperAdmin(actor)) {
+      return this.rolesRepository.findActiveByCode('SUPER_ADMIN');
+    }
+    const rank = await this.actorRank(actor);
+    const roles = await this.rolesRepository.findAllActive();
+    return (
+      roles.find(
+        (role) => actor.roles.includes(role.code) && role.hierarchyLevel === rank,
+      ) ?? null
+    );
+  }
+
+  /**
+   * Nadie se amplía permisos a sí mismo. Si el actor tiene el rol (directo o heredado), lo que se le agregue al rol
+   * llega también al actor con el alcance de esa asignación: solo se permite si el actor ya tenía cada permiso con
+   * ese mismo alcance (o GLOBAL). assertCanGrant compara solo códigos; esto cierra la ampliación de alcance. Quitar
+   * permisos de un rol propio no pasa por aquí.
+   */
+  async assertDoesNotWidenOwn(
+    actor: AuthenticatedUser,
+    roleId: string,
+    permissions: ReadonlyArray<Pick<Permission, 'code'>>,
+  ): Promise<void> {
+    if (permissions.length === 0) {
+      return;
+    }
+    const scopes = await this.rolesRepository.findHolderScopesReachingRole(
+      actor.id,
+      roleId,
+    );
+    if (scopes.length === 0) {
+      return;
+    }
+    const held = await this.permissionsService.getEffectivePermissions(actor.id);
+    const covered = (code: string, scope: { scopeType: string; scopeId: string | null }) =>
+      held.some(
+        (item) =>
+          item.permissionCode === code &&
+          (item.userScopeType === 'GLOBAL' ||
+            (item.userScopeType === scope.scopeType &&
+              item.userScopeId === scope.scopeId)),
+      );
+    if (
+      permissions.some((permission) =>
+        scopes.some((scope) => !covered(permission.code, scope)),
+      )
+    ) {
+      throw new ApiException(ErrorCode.RoleSelfAssignmentForbidden);
+    }
+  }
+
   async assertCanGrant(
     actor: AuthenticatedUser,
     permissions: ReadonlyArray<Pick<Permission, 'code'>>,

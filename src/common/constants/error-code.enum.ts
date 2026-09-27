@@ -35,6 +35,8 @@ export enum ErrorCode {
   RoleMaxUsersReached = 'ROLE_MAX_USERS_REACHED',
   RoleCodeAlreadyExists = 'ROLE_CODE_ALREADY_EXISTS',
   RoleHasAssignedUsers = 'ROLE_HAS_ASSIGNED_USERS',
+  RoleHasChildRoles = 'ROLE_HAS_CHILD_ROLES',
+  RoleSelfAssignmentForbidden = 'ROLE_SELF_ASSIGNMENT_FORBIDDEN',
   RoleSystemImmutable = 'ROLE_SYSTEM_IMMUTABLE',
   RolePrivilegeEscalation = 'ROLE_PRIVILEGE_ESCALATION',
   PermissionNotHeld = 'PERMISSION_NOT_HELD',

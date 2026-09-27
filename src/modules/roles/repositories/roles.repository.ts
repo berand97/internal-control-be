@@ -217,15 +217,72 @@ export class TypeOrmRolesRepository implements RolesRepository {
     return this.sodRules.save(entity);
   }
 
-  async findActiveAssigneeIds(roleId: string): Promise<ReadonlyArray<string>> {
-    const rows = await this.userRoles
-      .createQueryBuilder('ur')
-      .select('ur.userId', 'userId')
-      .where('ur.roleId = :roleId', { roleId })
-      .andWhere('ur.revokedAt IS NULL')
-      .distinct(true)
-      .getRawMany<{ userId: string }>();
-    return rows.map((row) => row.userId);
+  async findActiveHolderIdsInheriting(
+    roleId: string,
+  ): Promise<ReadonlyArray<string>> {
+    const rows = (await this.userRoles.query(
+      `SELECT DISTINCT ur.user_id
+       FROM user_role ur
+       CROSS JOIN LATERAL fn_role_lineage(ur.role_id) l
+       WHERE ur.revoked_at IS NULL
+         AND l.role_id = $1`,
+      [roleId],
+    )) as Array<{ user_id: string }>;
+    return rows.map((row) => row.user_id);
+  }
+
+  async findLineage(roleId: string): Promise<ReadonlyArray<Role>> {
+    const rows = (await this.roles.query(
+      'SELECT role_id FROM fn_role_lineage($1)',
+      [roleId],
+    )) as Array<{ role_id: string }>;
+    if (rows.length === 0) {
+      return [];
+    }
+    return this.roles.find({
+      where: { id: In(rows.map((row) => row.role_id)), deletedAt: IsNull() },
+    });
+  }
+
+  async findPermissionsForRoles(
+    roleIds: ReadonlyArray<string>,
+  ): Promise<ReadonlyArray<Permission>> {
+    if (roleIds.length === 0) {
+      return [];
+    }
+    const rows = await this.rolePermissions.find({
+      where: { roleId: In([...roleIds]) },
+      relations: { permission: true },
+    });
+    const unique = new Map<string, Permission>();
+    for (const row of rows) {
+      if (row.permission) {
+        unique.set(row.permission.id, row.permission);
+      }
+    }
+    return [...unique.values()];
+  }
+
+  async findHolderScopesReachingRole(
+    userId: string,
+    roleId: string,
+  ): Promise<
+    ReadonlyArray<{ readonly scopeType: string; readonly scopeId: string | null }>
+  > {
+    const rows = (await this.userRoles.query(
+      `SELECT DISTINCT ur.scope_type, ur.scope_id
+       FROM user_role ur
+       CROSS JOIN LATERAL fn_role_lineage(ur.role_id) l
+       WHERE ur.user_id = $1
+         AND ur.revoked_at IS NULL
+         AND l.role_id = $2`,
+      [userId, roleId],
+    )) as Array<{ scope_type: string; scope_id: string | null }>;
+    return rows.map((row) => ({ scopeType: row.scope_type, scopeId: row.scope_id }));
+  }
+
+  countActiveChildren(parentRoleId: string): Promise<number> {
+    return this.roles.count({ where: { parentRoleId, deletedAt: IsNull() } });
   }
 
   countActiveAssignees(roleId: string): Promise<number> {

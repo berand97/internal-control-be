@@ -3,6 +3,7 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import {
   isRoleHierarchyCycle,
+  isSodViolation,
   isUniqueViolation,
 } from '../../../common/exceptions/postgres-error.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
@@ -77,12 +78,15 @@ export class RolesService {
     const parent = dto.parentRoleId
       ? await this.requireRole(dto.parentRoleId)
       : null;
+    if (parent) {
+      await this.privilege.assertCanInheritFrom(actor, parent);
+    }
     if (dto.superiorRoleId !== undefined) {
       this.privilege.assertCanReorganize(actor);
     }
     const superior = dto.superiorRoleId
       ? await this.requireRole(dto.superiorRoleId)
-      : await this.rolesRepository.findActiveByCode('SUPER_ADMIN');
+      : await this.privilege.defaultSuperiorFor(actor);
     const hierarchyLevel = superior
       ? superior.hierarchyLevel + 1
       : (await this.privilege.actorRank(actor)) + 1;
@@ -126,6 +130,9 @@ export class RolesService {
       if (isRoleHierarchyCycle(error)) {
         throw new ApiException(ErrorCode.InvalidState);
       }
+      if (isSodViolation(error)) {
+        throw new ApiException(ErrorCode.SodViolation);
+      }
       throw error;
     }
   }
@@ -154,6 +161,7 @@ export class RolesService {
         parentRoleId = null;
       } else {
         const parent = await this.requireRole(dto.parentRoleId);
+        await this.privilege.assertCanInheritFrom(actor, parent, role.id);
         parentRoleId = parent.id;
       }
     }
@@ -184,6 +192,9 @@ export class RolesService {
       }
     }
 
+    // Titulares alcanzados por el linaje actual: si se quita o cambia la herencia, también cambian sus permisos.
+    const affectedBefore =
+      await this.rolesRepository.findActiveHolderIdsInheriting(role.id);
     try {
       await this.rolesRepository.update(role.id, {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
@@ -204,9 +215,13 @@ export class RolesService {
       if (isRoleHierarchyCycle(error)) {
         throw new ApiException(ErrorCode.InvalidState);
       }
+      if (isSodViolation(error)) {
+        throw new ApiException(ErrorCode.SodViolation);
+      }
       throw error;
     }
 
+    this.permissionsService.invalidateMany(affectedBefore);
     await this.invalidateAssignees(role.id);
     await this.auditLogsRepository.record({
       action: AuditAction.RoleUpdated,
@@ -231,7 +246,16 @@ export class RolesService {
     if (assignees > 0) {
       throw new ApiException(ErrorCode.RoleHasAssignedUsers);
     }
+    // Un rol del que otros heredan no se borra: sus hijos perderían sus permisos heredados sin que nadie lo
+    // decida. Primero se desenlazan (PATCH parentRoleId: null) o se borran los hijos.
+    const children = await this.rolesRepository.countActiveChildren(role.id);
+    if (children > 0) {
+      throw new ApiException(ErrorCode.RoleHasChildRoles);
+    }
+    const affected =
+      await this.rolesRepository.findActiveHolderIdsInheriting(role.id);
     await this.rolesRepository.softDelete(role.id, new Date());
+    this.permissionsService.invalidateMany(affected);
     await this.auditLogsRepository.record({
       action: AuditAction.RoleDeleted,
       entityType: ROLE_ENTITY_TYPE,
@@ -340,6 +364,7 @@ export class RolesService {
     await this.privilege.assertCanAdminister(actor, role);
     const permissions = await this.requirePermissions(dto.permissionIds);
     await this.privilege.assertCanGrant(actor, permissions);
+    await this.privilege.assertDoesNotWidenOwn(actor, role.id, permissions);
     const permissionIds = permissions.map((permission) => permission.id);
     for (const permissionId of permissionIds) {
       await this.rolesRepository.assignPermission(
@@ -373,6 +398,7 @@ export class RolesService {
     const currentIds = new Set(current.map((permission) => permission.id));
     const added = permissions.filter((permission) => !currentIds.has(permission.id));
     await this.privilege.assertCanGrant(actor, added);
+    await this.privilege.assertDoesNotWidenOwn(actor, role.id, added);
     const permissionIds = permissions.map((permission) => permission.id);
     await this.rolesRepository.replacePermissions(
       role.id,
@@ -476,8 +502,10 @@ export class RolesService {
     return permissions;
   }
 
+  /** Titulares del rol y de los roles que heredan de él: todos ven cambiar sus permisos efectivos. */
   private async invalidateAssignees(roleId: string): Promise<void> {
-    const userIds = await this.rolesRepository.findActiveAssigneeIds(roleId);
+    const userIds =
+      await this.rolesRepository.findActiveHolderIdsInheriting(roleId);
     this.permissionsService.invalidateMany(userIds);
   }
 }

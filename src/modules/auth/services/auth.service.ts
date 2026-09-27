@@ -29,6 +29,8 @@ import type { AuthUsersRepository } from '../repositories/auth-users.repository.
 import type { PasswordResetTokensRepository } from '../repositories/password-reset-tokens.repository.interface.js';
 import type { RefreshTokenFamiliesRepository } from '../repositories/refresh-token-families.repository.interface.js';
 import type { RefreshTokenPayload } from '../types/token-payloads.type.js';
+import type { AuthFactor } from './auth-lockout.policy.js';
+import { AuthLockoutService, type AttemptOutcome } from './auth-lockout.service.js';
 import { MfaAccountService, type MfaProofMethod } from './mfa-account.service.js';
 import { requiresMfaEnrollment } from './mfa-policy.js';
 import { MfaService } from './mfa.service.js';
@@ -89,6 +91,7 @@ export class AuthService {
     private readonly featureFlags: FeatureFlagsService,
     private readonly navigationService: NavigationService,
     private readonly mfaAccount: MfaAccountService,
+    private readonly lockout: AuthLockoutService,
   ) {}
 
   async login(
@@ -97,8 +100,25 @@ export class AuthService {
   ): Promise<LoginOutcome> {
     const user = await this.findUserForLogin(dto.username);
 
+    // Cuenta inexistente: se cuenta y bloquea igual que una real (misma respuesta, mismo trabajo).
+    const lockSubject = user
+      ? AuthLockoutService.subjectForUser(user.id)
+      : AuthLockoutService.subjectForUnknownIdentifier(dto.username);
+    const attempt = await this.lockout.registerAttempt(lockSubject, 'PASSWORD');
+    if (!attempt.allowed) {
+      await this.recordAudit(
+        AuditAction.LoginFailed,
+        user?.id ?? NIL_ENTITY_ID,
+        user?.id ?? null,
+        context,
+        { reason: 'ACCOUNT_LOCKED', factor: 'PASSWORD' },
+      );
+      throw new ApiException(ErrorCode.TooManyAttempts);
+    }
+
     if (!user) {
       await this.hashService.runDummyVerification(dto.password);
+      await this.auditLockIfOpened(attempt, null, context, 'PASSWORD');
       await this.recordAudit(
         AuditAction.LoginFailed,
         NIL_ENTITY_ID,
@@ -129,8 +149,10 @@ export class AuthService {
           reason: 'BAD_PASSWORD',
         },
       );
+      await this.auditLockIfOpened(attempt, user.id, context, 'PASSWORD');
       throw new ApiException(ErrorCode.InvalidCredentials);
     }
+    await this.lockout.clear(lockSubject, 'PASSWORD');
 
     if (user.mfaEnabled) {
       const mfaChallengeToken = this.tokenService.signMfaChallengeToken(
@@ -177,6 +199,7 @@ export class AuthService {
     }
 
     this.assertAccountUsable(user);
+    const attempt = await this.registerMfaAttempt(user.id, context);
 
     const codeValid = await this.mfaService.verifyTotp(
       dto.code,
@@ -193,8 +216,10 @@ export class AuthService {
           reason: 'MFA_CODE_INVALID',
         },
       );
+      await this.auditLockIfOpened(attempt, user.id, context, 'MFA');
       throw new ApiException(ErrorCode.MfaCodeInvalid);
     }
+    await this.lockout.clear(AuthLockoutService.subjectForUser(user.id), 'MFA');
 
     return this.issueSession(user, context, 'TOTP');
   }
@@ -220,6 +245,7 @@ export class AuthService {
       throw new ApiException(ErrorCode.MfaRequired);
     }
     this.assertAccountUsable(user);
+    const attempt = await this.registerMfaAttempt(user.id, context);
 
     const remaining = await this.mfaAccount.consumeForLogin(
       user,
@@ -237,8 +263,10 @@ export class AuthService {
           reason: 'MFA_RECOVERY_CODE_INVALID',
         },
       );
+      await this.auditLockIfOpened(attempt, user.id, context, 'MFA');
       throw new ApiException(ErrorCode.MfaCodeInvalid);
     }
+    await this.lockout.clear(AuthLockoutService.subjectForUser(user.id), 'MFA');
 
     const outcome = await this.issueSession(user, context, 'RECOVERY_CODE');
     return {
@@ -664,6 +692,47 @@ export class AuthService {
   private refreshExpiryFrom(now: Date): Date {
     return new Date(
       now.getTime() + this.tokenService.getRefreshTokenLifetimeSeconds() * 1000,
+    );
+  }
+
+  /** TOTP y códigos de recuperación comparten el contador MFA de la cuenta, sea cual sea el desafío o la IP. */
+  private async registerMfaAttempt(
+    userId: string,
+    context: AuthRequestContext,
+  ): Promise<AttemptOutcome> {
+    const attempt = await this.lockout.registerAttempt(
+      AuthLockoutService.subjectForUser(userId),
+      'MFA',
+    );
+    if (!attempt.allowed) {
+      await this.recordAudit(AuditAction.LoginFailed, userId, userId, context, {
+        reason: 'ACCOUNT_LOCKED',
+        factor: 'MFA',
+      });
+      throw new ApiException(ErrorCode.TooManyAttempts);
+    }
+    return attempt;
+  }
+
+  /** Auditoría del bloqueo recién abierto: factor y vencimiento; nunca la credencial ni el identificador tecleado. */
+  private async auditLockIfOpened(
+    attempt: AttemptOutcome,
+    userId: string | null,
+    context: AuthRequestContext,
+    factor: AuthFactor,
+  ): Promise<void> {
+    if (!attempt.lockedNow) {
+      return;
+    }
+    await this.recordAudit(
+      AuditAction.LoginLocked,
+      userId ?? NIL_ENTITY_ID,
+      userId,
+      context,
+      {
+        factor,
+        lockedUntil: attempt.lockedUntil?.toISOString() ?? null,
+      },
     );
   }
 
