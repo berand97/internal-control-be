@@ -98,10 +98,14 @@ import { EmailRichParagraphAndAssets1767225820000 } from './migrations/176722582
 import { EmailAssetImagesPrefix1767225830000 } from './migrations/1767225830000-email-asset-images-prefix.js';
 import { EmailLinkVariablesAsLinks1767225840000 } from './migrations/1767225840000-email-link-variables-as-links.js';
 import { InventorySchedule1767225860000 } from './migrations/1767225860000-inventory-schedule.js';
+import { InventoryFindingsAndCorrections1767225870000 } from './migrations/1767225870000-inventory-findings-and-corrections.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
 import { PhysicalInventoryScope } from '../modules/inventories/entities/physical-inventory-scope.entity.js';
+import { InventoryFindingCategory } from '../modules/inventories/entities/inventory-finding-category.entity.js';
+import { InventoryMissingCause } from '../modules/inventories/entities/inventory-missing-cause.entity.js';
+import { InventoryItemCorrection } from '../modules/inventories/entities/inventory-item-correction.entity.js';
 import { AssetDepreciation } from '../modules/depreciation/entities/asset-depreciation.entity.js';
 
 // El CLI de migraciones (y el de staging) no pasa por ConfigModule: misma guarda que la app.
@@ -159,6 +163,9 @@ const dataSource = new DataSource({
     PhysicalInventory,
     PhysicalInventoryItem,
     PhysicalInventoryScope,
+    InventoryFindingCategory,
+    InventoryMissingCause,
+    InventoryItemCorrection,
     AssetDepreciation,
     FeatureFlag,
     NavigationItemEntity,
@@ -222,6 +229,7 @@ const dataSource = new DataSource({
     EmailAssetImagesPrefix1767225830000,
     EmailLinkVariablesAsLinks1767225840000,
     InventorySchedule1767225860000,
+    InventoryFindingsAndCorrections1767225870000,
   ],
 });
 

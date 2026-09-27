@@ -147,6 +147,13 @@ export enum ErrorCode {
   InventoryScopeOverlap = 'INVENTORY_SCOPE_OVERLAP',
   InventoryUnverifiedExceedsThreshold = 'INVENTORY_UNVERIFIED_EXCEEDS',
   InventoryReconcileSod = 'INVENTORY_RECONCILE_SOD',
+  InventoryActorNotAllowed = 'INVENTORY_ACTOR_NOT_ALLOWED',
+  InventoryConflictOfInterest = 'INVENTORY_CONFLICT_OF_INTEREST',
+  InventoryAssetWrittenOff = 'INVENTORY_ASSET_WRITTEN_OFF',
+  InventoryMissingCauseRequired = 'INVENTORY_MISSING_CAUSE_REQUIRED',
+  InventoryCatalogEntryUnavailable = 'INVENTORY_CATALOG_ENTRY_UNAVAILABLE',
+  InventoryCatalogEntryInUse = 'INVENTORY_CATALOG_ENTRY_IN_USE',
+  InventoryCatalogEntryExists = 'INVENTORY_CATALOG_ENTRY_EXISTS',
   DepreciationInvalidPeriod = 'DEPRECIATION_INVALID_PERIOD',
 
   ModuleUnavailable = 'MODULE_UNAVAILABLE',

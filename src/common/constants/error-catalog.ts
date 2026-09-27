@@ -729,6 +729,45 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Quien solicita la reconciliación no puede aprobarla',
   },
+  [ErrorCode.InventoryActorNotAllowed]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message:
+      'Solo el responsable de la toma o quien programa tomas físicas puede ejecutarla, corregirla o cerrarla',
+  },
+  [ErrorCode.InventoryConflictOfInterest]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message:
+      'Eres jefe vigente de un centro auditado o custodio de activos de esta toma: no puedes ejecutarla, corregirla ni cerrarla',
+  },
+  [ErrorCode.InventoryAssetWrittenOff]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message:
+      'El activo está dado de baja; si reapareció, primero hay que reversar la baja',
+  },
+  [ErrorCode.InventoryMissingCauseRequired]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message:
+      'Un faltante necesita exactamente una causa: una del catálogo o "Otra" con su descripción (3 a 500 caracteres)',
+  },
+  [ErrorCode.InventoryCatalogEntryUnavailable]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'La opción del catálogo de toma física no existe, está inactiva o no tiene definición',
+  },
+  [ErrorCode.InventoryCatalogEntryInUse]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'La opción del catálogo ya se usó en una toma: desactívala en lugar de borrarla',
+  },
+  [ErrorCode.InventoryCatalogEntryExists]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'Ya existe una opción con ese código o nombre en el catálogo',
+  },
   [ErrorCode.DepreciationInvalidPeriod]: {
     httpStatus: 400,
     action: 'CANCEL',

@@ -57,4 +57,27 @@ export class PhysicalInventoryItem {
 
   @Column({ name: 'photo_url', type: 'text', nullable: true })
   photoUrl!: string | null;
+
+  /** Código del catálogo inventory_finding_category; lo fija el auditor, nunca el sistema. */
+  @Column({ name: 'finding_category_code', type: 'varchar', length: 10, nullable: true })
+  findingCategoryCode!: string | null;
+
+  @Column({ name: 'missing_cause_id', type: 'uuid', nullable: true })
+  missingCauseId!: string | null;
+
+  /** Causa "Otra" en texto libre (3..500); excluyente con missingCauseId. */
+  @Column({ name: 'missing_cause_other', type: 'text', nullable: true })
+  missingCauseOther!: string | null;
+
+  /** El activo tenía la marca BARCODE_TEMP al congelar la foto. NULL en fotos anteriores a esta columna. */
+  @Column({ name: 'expected_code_temporary', type: 'boolean', nullable: true })
+  expectedCodeTemporary!: boolean | null;
+
+  /** Sobrante de un activo que estaba LOST: la conciliación no lo recupera. */
+  @Column({ name: 'was_lost', type: 'boolean', default: false })
+  wasLost!: boolean;
+
+  /** Sobrante anulado por error (queda en el historial de correcciones). */
+  @Column({ name: 'voided_at', type: 'timestamptz', nullable: true })
+  voidedAt!: Date | null;
 }
