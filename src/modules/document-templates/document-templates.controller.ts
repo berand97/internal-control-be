@@ -8,7 +8,6 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -22,6 +21,8 @@ import { Feature } from '../../common/decorators/feature.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import { ErrorCode } from '../../common/constants/error-code.enum.js';
 import { ApiException } from '../../common/exceptions/api.exception.js';
+import { BoundedFileInterceptor, UPLOAD_LIMITS } from '../../shared/storage/uploads/bounded-file.interceptor.js';
+import { assertZipWithinLimits, ZIP_LIMITS } from '../../shared/storage/uploads/zip-limits.js';
 import {
   ApiErrorEnvelope,
   ApiSuccessEnvelope,
@@ -66,7 +67,7 @@ export class DocumentTemplatesController {
 
   @Post()
   @RequirePermission('document_template:update:global')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(BoundedFileInterceptor('file', UPLOAD_LIMITS.DOCX_TEMPLATE))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -87,6 +88,7 @@ export class DocumentTemplatesController {
     if (!file?.buffer) {
       throw new ApiException(ErrorCode.FileTypeNotAllowed);
     }
+    assertZipWithinLimits(file.buffer, ZIP_LIMITS.DOCX);
     return this.templatesService.upload(documentType, file, actor);
   }
 

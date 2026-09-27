@@ -1,4 +1,7 @@
 import ExcelJS from 'exceljs';
+import { ErrorCode } from '../../../common/constants/error-code.enum.js';
+import { ApiException } from '../../../common/exceptions/api.exception.js';
+import { assertZipWithinLimits, ZIP_LIMITS } from '../../../shared/storage/uploads/zip-limits.js';
 
 export type RawCellValue = string | number | boolean;
 
@@ -15,6 +18,14 @@ export interface RawSheet {
 }
 
 const { ValueType } = ExcelJS;
+
+/**
+ * Topes de lectura (BE-05). La hoja más larga del informe real de activos (Movimientos, julio 2026) tiene 14.806
+ * filas y el libro 5 hojas: 100.000 filas por hoja y 50 hojas dejan margen de años. Sin tope, una sola celda en la
+ * fila 1.048.576 hacía crear un objeto por cada fila vacía intermedia.
+ */
+export const MAX_SHEET_ROWS = 100_000;
+export const MAX_SHEETS = 50;
 
 const isErrorValue = (value: unknown): value is { error: string } =>
   typeof value === 'object' && value !== null && 'error' in value;
@@ -64,8 +75,22 @@ const readCell = (cell: ExcelJS.Cell): [RawCellValue, string] | null => {
 const columnLetter = (address: string): string => address.replace(/\d+/g, '');
 
 export const readWorkbook = async (content: Buffer): Promise<ReadonlyArray<RawSheet>> => {
+  assertZipWithinLimits(content, ZIP_LIMITS.XLSX);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(content as unknown as ArrayBuffer);
+  if (workbook.worksheets.length > MAX_SHEETS) {
+    throw new ApiException(
+      ErrorCode.ArchiveTooLarge,
+      `El libro tiene ${workbook.worksheets.length} hojas; el máximo es ${MAX_SHEETS}`,
+    );
+  }
+  const tooLong = workbook.worksheets.find((worksheet) => worksheet.rowCount > MAX_SHEET_ROWS);
+  if (tooLong) {
+    throw new ApiException(
+      ErrorCode.ArchiveTooLarge,
+      `La hoja "${tooLong.name}" llega hasta la fila ${tooLong.rowCount}; el máximo es ${MAX_SHEET_ROWS}. Borre las filas vacías sobrantes al final de la hoja`,
+    );
+  }
   return workbook.worksheets.map((worksheet) => {
     const rows: RawRow[] = [];
     for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {

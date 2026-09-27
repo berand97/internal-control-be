@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { StorageDriver } from '../../../config/configuration.js';
+import { assertSafeStorageKey } from '../storage-key.js';
 import type {
   PutObjectInput,
   StoragePort,
@@ -45,9 +46,23 @@ const readAccessToken = async (
   return payload.access_token;
 };
 
-const itemPath = (config: OneDriveAdapterConfig, key: string): string => {
-  const folder = config.folderId ? `${config.folderId}/` : '';
-  return `root:/${folder}${key}`.replaceAll('//', '/');
+const encodeSegments = (value: string): ReadonlyArray<string> =>
+  value
+    .split('/')
+    .filter((segment) => segment !== '')
+    .map((segment) => encodeURIComponent(segment));
+
+/**
+ * Ruta de Graph con cada segmento codificado: sin codificar, un '..' o un '?'/'#' en la clave
+ * se normalizaba en la URL y la petición salía de `root:/<carpeta>/` (BE-01).
+ */
+export const itemPath = (config: OneDriveAdapterConfig, key: string): string => {
+  const safeKey = assertSafeStorageKey(key);
+  const folder = config.folderId ? encodeSegments(config.folderId) : [];
+  if (folder.some((segment) => segment === '.' || segment === '..')) {
+    throw new ApiException(ErrorCode.StorageNotConfigured, 'La carpeta de OneDrive no es válida');
+  }
+  return `root:/${[...folder, ...encodeSegments(safeKey)].join('/')}`;
 };
 
 export class OneDriveStorageAdapter implements StoragePort {

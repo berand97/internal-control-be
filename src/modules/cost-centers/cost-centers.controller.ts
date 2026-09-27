@@ -13,7 +13,6 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -35,6 +34,7 @@ import {
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
+import { BoundedFileInterceptor, UPLOAD_LIMITS } from '../../shared/storage/uploads/bounded-file.interceptor.js';
 import { CreateCostCenterDto } from './dto/create-cost-center.dto.js';
 import { QueryCostCentersDto } from './dto/query-cost-centers.dto.js';
 import { CostCenterSyncResponseDto } from './dto/responses/cost-center-sync.response.dto.js';
@@ -70,7 +70,7 @@ export class CostCentersController {
 
   @Post('sync')
   @RequirePermission('cost_center:manage:global')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(BoundedFileInterceptor('file', UPLOAD_LIMITS.COST_CENTER_CSV))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {

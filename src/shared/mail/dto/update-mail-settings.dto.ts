@@ -7,8 +7,10 @@ import {
   IsString,
   Max,
   MaxLength,
+  Matches,
   Min,
 } from 'class-validator';
+import { NO_CONTROL_CHARS } from '../mail-address.js';
 
 export class UpdateMailSettingsDto {
   @ApiPropertyOptional({ example: 'smtp.office365.com' })
@@ -44,10 +46,14 @@ export class UpdateMailSettingsDto {
   @IsString()
   readonly password?: string;
 
-  @ApiPropertyOptional({ example: 'Control Interno UNAC' })
+  @ApiPropertyOptional({
+    example: 'Control Interno UNAC',
+    description: 'Sin saltos de línea ni caracteres de control',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(150)
+  @Matches(NO_CONTROL_CHARS, { message: 'fromName no admite saltos de línea ni caracteres de control' })
   readonly fromName?: string;
 
   @ApiPropertyOptional({ example: 'noreply@unac.edu.co' })

@@ -13,7 +13,6 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -28,6 +27,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import { ApiException } from '../../common/exceptions/api.exception.js';
+import { BoundedFileInterceptor, UPLOAD_LIMITS } from '../../shared/storage/uploads/bounded-file.interceptor.js';
 import {
   ApiErrorEnvelope,
   ApiSuccessEnvelope,
@@ -249,7 +249,7 @@ export class AssetsController {
 
   @Post('import')
   @RequirePermission('asset:create:global')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(BoundedFileInterceptor('file', UPLOAD_LIMITS.ASSET_CSV))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {

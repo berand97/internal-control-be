@@ -10,7 +10,6 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiAcceptedResponse,
   ApiBearerAuth,
@@ -29,6 +28,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import { ApiException } from '../../common/exceptions/api.exception.js';
+import { BoundedFileInterceptor, UPLOAD_LIMITS } from '../../shared/storage/uploads/bounded-file.interceptor.js';
 import {
   IDENTITY_DOCUMENT_TYPE_CODES,
   type IdentityDocumentType,
@@ -55,7 +55,6 @@ import { ExcelImportService } from './services/excel-import.service.js';
 import { ImportJobsService } from './services/import-jobs.service.js';
 import { envelopedJobListSchema, ImportJobDto } from './dto/import-job.responses.js';
 
-const MAX_BYTES = 25 * 1024 * 1024;
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 interface ExcelUpload {
@@ -141,7 +140,7 @@ export class ImportsController {
 
   @Post()
   @RequirePermission('asset:create:global')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_BYTES } }))
+  @UseInterceptors(BoundedFileInterceptor('file', UPLOAD_LIMITS.EXCEL_IMPORT))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Subir un Excel: devuelve sus hojas y las columnas detectadas',

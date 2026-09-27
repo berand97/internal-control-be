@@ -15,6 +15,7 @@ import type { UpdateMailSettingsDto } from './dto/update-mail-settings.dto.js';
 import type { EmailTemplateType } from './domain/email-template-catalog.js';
 import { EmailTemplatesService } from './email-templates.service.js';
 import { MailSettings } from './entities/mail-settings.entity.js';
+import { UnsafeMailFieldError } from './mail-address.js';
 import { sendSmtpMail, verifySmtp } from './smtp-client.js';
 
 const SECRET_FIELDS = ['host', 'username', 'password', 'fromName', 'fromEmail'] as const;
@@ -228,6 +229,11 @@ export class MailService {
         text,
       });
     } catch (error) {
+      if (error instanceof UnsafeMailFieldError) {
+        // Ni la dirección ni el nombre rechazados van al log: son datos personales y pueden traer CR/LF (BE-06).
+        this.logger.warn(`smtp send rejected before connecting: unsafe ${error.field}`);
+        throw new ApiException(ErrorCode.MailAddressInvalid);
+      }
       this.logger.error(
         `smtp send failed to=${to} subject=${subject}`,
         error instanceof Error ? error.stack : String(error),

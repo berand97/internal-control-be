@@ -1,5 +1,6 @@
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import jwt from 'jsonwebtoken';
@@ -18,6 +19,7 @@ import { ProjectStorageAdapter } from './adapters/project-storage.adapter.js';
 import { S3StorageAdapter } from './adapters/s3-storage.adapter.js';
 import { StorageSettings } from './entities/storage-settings.entity.js';
 import { parseDriveFolderId } from './parse-drive-folder-id.js';
+import { assertSafeStorageKey } from './storage-key.js';
 import type { PutObjectInput, StoragePort, StoredObject } from './storage.port.js';
 
 interface OauthState {
@@ -38,6 +40,16 @@ const isOauthState = (value: unknown): value is OauthState => {
   );
 };
 
+/** Ruta canónica para comparar carpetas: resuelve symlinks si existe (en Docker /app/storage → /data/storage). */
+const canonicalPath = (value: string): string => {
+  const absolute = path.resolve(value);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    return absolute;
+  }
+};
+
 const mask = (value: string | null): string | null => {
   if (!value) {
     return null;
@@ -50,33 +62,43 @@ const mask = (value: string | null): string | null => {
 
 @Injectable()
 export class StorageService {
+  private readonly logger = new Logger(StorageService.name);
+  private warnedIgnoredProjectPath = false;
+
   constructor(
     @InjectRepository(StorageSettings)
     private readonly settings: Repository<StorageSettings>,
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
+  // Toda clave se valida aquí, antes de elegir el driver: ninguna puede salir de su carpeta o prefijo.
   async put(input: PutObjectInput): Promise<StoredObject> {
+    assertSafeStorageKey(input.key);
     return (await this.resolveAdapter()).put(input);
   }
 
   async get(key: string): Promise<Buffer> {
+    assertSafeStorageKey(key);
     return (await this.resolveAdapter()).get(key);
   }
 
   async getFrom(driver: StorageDriver, key: string): Promise<Buffer> {
+    assertSafeStorageKey(key);
     return (await this.resolveAdapter(driver)).get(key);
   }
 
   async delete(key: string): Promise<void> {
+    assertSafeStorageKey(key);
     return (await this.resolveAdapter()).delete(key);
   }
 
   async exists(key: string): Promise<boolean> {
+    assertSafeStorageKey(key);
     return (await this.resolveAdapter()).exists(key);
   }
 
   async presignGet(key: string, expiresInSeconds = 3600): Promise<string> {
+    assertSafeStorageKey(key);
     return (await this.resolveAdapter()).presignGet(key, expiresInSeconds);
   }
 
@@ -161,6 +183,7 @@ export class StorageService {
     }>,
     actorId: string,
   ): Promise<void> {
+    this.assertProjectPathUnchanged(patch.projectPath);
     const row = await this.requireRow();
     const nextDriver = patch.driver ?? row.driver;
     const nextGoogleId = patch.googleClientId ?? row.googleClientId;
@@ -181,9 +204,6 @@ export class StorageService {
     }
     if (patch.driver !== undefined) {
       row.driver = patch.driver;
-    }
-    if (patch.projectPath !== undefined) {
-      row.projectPath = patch.projectPath;
     }
     if (patch.s3Provider !== undefined) {
       row.s3Provider = patch.s3Provider;
@@ -374,6 +394,33 @@ export class StorageService {
     return payload.refresh_token;
   }
 
+  /**
+   * La carpeta del driver project solo se fija al desplegar (STORAGE_PROJECT_PATH). Por API se acepta
+   * el mismo valor (el formulario lo reenvía tal cual lo recibió en el estado) y nada más (BE-01).
+   */
+  private assertProjectPathUnchanged(requested: string | undefined): void {
+    if (requested === undefined) {
+      return;
+    }
+    const deployed = this.config.getOrThrow('storage', { infer: true }).projectPath;
+    if (canonicalPath(requested) !== canonicalPath(deployed)) {
+      throw new ApiException(ErrorCode.StorageProjectPathLocked);
+    }
+  }
+
+  private warnIgnoredProjectPath(stored: string | null, deployed: string): void {
+    if (this.warnedIgnoredProjectPath || !stored) {
+      return;
+    }
+    if (canonicalPath(stored) === canonicalPath(deployed)) {
+      return;
+    }
+    this.warnedIgnoredProjectPath = true;
+    this.logger.warn(
+      `storage_settings.project_path ${JSON.stringify(stored)} se ignora: el almacenamiento local usa STORAGE_PROJECT_PATH ${JSON.stringify(deployed)}. Si allí había archivos, muévalos a esa carpeta.`,
+    );
+  }
+
   private async resolveAdapter(driver?: StorageDriver): Promise<StoragePort> {
     const configured = await this.resolvedConfig();
     const resolved = driver ? { ...configured, driver } : configured;
@@ -441,9 +488,11 @@ export class StorageService {
     if (!row) {
       return env;
     }
+    this.warnIgnoredProjectPath(row.projectPath, env.projectPath);
     return {
       driver: row.driver || env.driver,
-      projectPath: row.projectPath || env.projectPath,
+      // Nunca la de la BD: una fila editada por API podía apuntar la raíz a '/' (BE-01).
+      projectPath: env.projectPath,
       s3: {
         provider: row.s3Provider ?? env.s3.provider,
         endpoint: row.s3Endpoint ?? env.s3.endpoint,

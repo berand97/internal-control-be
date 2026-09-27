@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { StorageDriver } from '../../../config/configuration.js';
+import { resolveInsideRoot } from '../storage-key.js';
 import type {
   PutObjectInput,
   StoragePort,
@@ -12,11 +13,14 @@ import type {
 
 export class ProjectStorageAdapter implements StoragePort {
   readonly driver: StorageDriver = 'project';
+  private readonly rootDir: string;
 
   constructor(
-    private readonly rootDir: string,
+    rootDir: string,
     private readonly apiPublicUrl: string,
-  ) {}
+  ) {
+    this.rootDir = path.resolve(rootDir);
+  }
 
   async put(input: PutObjectInput): Promise<StoredObject> {
     const absolute = this.resolveKey(input.key);
@@ -33,8 +37,9 @@ export class ProjectStorageAdapter implements StoragePort {
   }
 
   async get(key: string): Promise<Buffer> {
+    const absolute = this.resolveKey(key);
     try {
-      return await readFile(this.resolveKey(key));
+      return await readFile(absolute);
     } catch {
       throw new ApiException(ErrorCode.ResourceNotFound);
     }
@@ -45,8 +50,9 @@ export class ProjectStorageAdapter implements StoragePort {
   }
 
   async exists(key: string): Promise<boolean> {
+    const absolute = this.resolveKey(key);
     try {
-      await stat(this.resolveKey(key));
+      await stat(absolute);
       return true;
     } catch {
       return false;
@@ -54,6 +60,7 @@ export class ProjectStorageAdapter implements StoragePort {
   }
 
   async presignGet(key: string): Promise<string> {
+    this.resolveKey(key);
     const encoded = key
       .split('/')
       .map((segment) => encodeURIComponent(segment))
@@ -62,12 +69,6 @@ export class ProjectStorageAdapter implements StoragePort {
   }
 
   private resolveKey(key: string): string {
-    const normalized = path.normalize(key).replace(/^(\.\.(\/|\\|$))+/, '');
-    const absolute = path.resolve(this.rootDir, normalized);
-    const root = path.resolve(this.rootDir);
-    if (!absolute.startsWith(root)) {
-      throw new ApiException(ErrorCode.MalformedRequest);
-    }
-    return absolute;
+    return resolveInsideRoot(this.rootDir, key);
   }
 }

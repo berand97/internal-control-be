@@ -1,5 +1,11 @@
 import { connect as netConnect, type Socket } from 'node:net';
 import { connect as tlsConnect, type TLSSocket } from 'node:tls';
+import {
+  encodeHeaderWord,
+  isValidMailbox,
+  parseFrom,
+  UnsafeMailFieldError,
+} from './mail-address.js';
 
 export interface SmtpAuthOptions {
   readonly host: string;
@@ -30,9 +36,11 @@ export async function verifySmtp(options: SmtpAuthOptions): Promise<void> {
 }
 
 export async function sendSmtpMail(options: SmtpSendOptions): Promise<void> {
+  // Se valida antes de conectar: un valor inseguro nunca llega a escribirse en el socket (BE-06).
+  const message = prepareSmtpMessage(options);
   const socket = await openSession(options);
   try {
-    await deliver(socket, options);
+    await deliver(socket, message);
   } finally {
     socket.destroy();
   }
@@ -62,20 +70,49 @@ export function extractSmtpAddress(from: string): string {
   return match?.[1] ?? from;
 }
 
-async function deliver(socket: SmtpSocket, options: SmtpSendOptions): Promise<void> {
-  await command(socket, `MAIL FROM:<${extractSmtpAddress(options.from)}>`, 250);
-  await command(socket, `RCPT TO:<${options.to}>`, 250);
-  await command(socket, 'DATA', 354);
+export interface SmtpMessage {
+  readonly mailFrom: string;
+  readonly rcptTo: string;
+  readonly payload: string;
+}
+
+/**
+ * Arma los comandos y el mensaje (BE-06). Lanza UnsafeMailFieldError, sin el valor, si el destinatario o el
+ * remitente no son una dirección simple o si el nombre del remitente trae CR, LF, NUL u otro carácter de control.
+ * Los datos variables de las cabeceras van validados (direcciones) o codificados RFC 2047 (nombre y asunto), y el
+ * cuerpo se normaliza a CRLF antes del dot-stuffing: un LF o CR suelto no puede cerrar el DATA.
+ */
+export function prepareSmtpMessage(options: SmtpSendOptions): SmtpMessage {
+  const to = options.to.trim();
+  if (!isValidMailbox(to)) {
+    throw new UnsafeMailFieldError('to');
+  }
+  const from = parseFrom(options.from);
+  const fromHeader = from.name
+    ? `${encodeHeaderWord(from.name)} <${from.address}>`
+    : from.address;
+  const body = options.text.replace(/\r\n|\r|\n/g, CRLF).replace(/^\./gm, '..');
   const payload = [
-    `From: ${options.from}`,
-    `To: ${options.to}`,
-    `Subject: =?UTF-8?B?${Buffer.from(options.subject, 'utf8').toString('base64')}?=`,
+    `From: ${fromHeader}`,
+    `To: ${to}`,
+    `Subject: ${encodeHeaderWord(options.subject)}`,
     'Content-Type: text/plain; charset=utf-8',
     '',
-    options.text.replace(/^\./gm, '..'),
+    body,
     '.',
   ].join(CRLF);
-  await command(socket, payload, 250);
+  return {
+    mailFrom: `MAIL FROM:<${from.address}>`,
+    rcptTo: `RCPT TO:<${to}>`,
+    payload,
+  };
+}
+
+async function deliver(socket: SmtpSocket, message: SmtpMessage): Promise<void> {
+  await command(socket, message.mailFrom, 250);
+  await command(socket, message.rcptTo, 250);
+  await command(socket, 'DATA', 354);
+  await command(socket, message.payload, 250);
   await command(socket, 'QUIT', 221);
 }
 
