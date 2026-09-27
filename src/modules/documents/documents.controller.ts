@@ -14,7 +14,6 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -45,6 +44,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import { ApiException } from '../../common/exceptions/api.exception.js';
+import { BoundedFileInterceptor, UPLOAD_LIMITS } from '../../shared/storage/uploads/bounded-file.interceptor.js';
+import { assertZipWithinLimits, ZIP_LIMITS } from '../../shared/storage/uploads/zip-limits.js';
 import { envelopedSchema } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
@@ -284,7 +285,7 @@ export class DocumentsController {
 
   @Post('formats/:formatKey/templates')
   @RequirePermission('document_template:update:global')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @UseInterceptors(BoundedFileInterceptor('file', UPLOAD_LIMITS.DOCX_TEMPLATE))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Subir una versión de plantilla DOCX con su fecha de vigencia',
     description:
@@ -299,6 +300,7 @@ export class DocumentsController {
     if (!file || !file.originalname.toLowerCase().endsWith('.docx')) {
       throw new ApiException(ErrorCode.FileTypeNotAllowed, 'Se espera un archivo .docx');
     }
+    assertZipWithinLimits(file.buffer, ZIP_LIMITS.DOCX);
     return this.engine.uploadTemplate(formatKey, file, { ...(dto.sgcVersion ? { sgcVersion: dto.sgcVersion } : {}), effectiveDate: dto.effectiveDate.slice(0, 10) }, actor.id);
   }
 
