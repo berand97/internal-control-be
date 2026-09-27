@@ -112,6 +112,7 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
       ['/handovers', 'package-check'],
       ['/inventories', 'clipboard-check'],
       ['/inventories/calendar', 'clipboard-check'],
+      ['/inventories/catalogs', 'tags'],
       ['/loans', 'handshake'],
       ['/depreciation', 'calculator'],
       ['/documents', 'file-text'],

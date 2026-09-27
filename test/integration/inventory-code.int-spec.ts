@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import { InventoryScopeType } from '../../src/modules/inventories/enums/inventory-scope.js';
 import { InventoriesModule } from '../../src/modules/inventories/inventories.module.js';
 import { InventorySchedulesService } from '../../src/modules/inventories/services/inventory-schedules.service.js';
+import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { bootModules, createActor, scalar } from './helpers.js';
 
 describe('Código de toma física (PostgreSQL real)', () => {
@@ -13,7 +14,8 @@ describe('Código de toma física (PostgreSQL real)', () => {
   let actor: AuthenticatedUser;
 
   beforeAll(async () => {
-    moduleRef = await bootModules(InventoriesModule);
+    // InventoriesModule encola el acta OCI-21-37: el motor de actas necesita el almacenamiento.
+    moduleRef = await bootModules(InventoriesModule, StorageModule);
     dataSource = moduleRef.get(DataSource);
     inventories = moduleRef.get(InventorySchedulesService);
     actor = await createActor(dataSource);

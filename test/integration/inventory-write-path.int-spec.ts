@@ -7,6 +7,7 @@ import { PhysicalCondition } from '../../src/modules/assets/enums/physical-condi
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { InventoriesModule } from '../../src/modules/inventories/inventories.module.js';
 import { InventoriesService } from '../../src/modules/inventories/services/inventories.service.js';
+import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { bootModules, createActor, discardInventoryActRequests, scalar } from './helpers.js';
 
 describe('Toma física sobre el camino único de escritura (PostgreSQL real)', () => {
@@ -21,7 +22,8 @@ describe('Toma física sobre el camino único de escritura (PostgreSQL real)', (
   let roomB: string;
 
   beforeAll(async () => {
-    moduleRef = await bootModules(AssetsModule, InventoriesModule);
+    // InventoriesModule encola el acta OCI-21-37: el motor de actas necesita el almacenamiento.
+    moduleRef = await bootModules(AssetsModule, InventoriesModule, StorageModule);
     dataSource = moduleRef.get(DataSource);
     assets = moduleRef.get(AssetsService);
     inventories = moduleRef.get(InventoriesService);

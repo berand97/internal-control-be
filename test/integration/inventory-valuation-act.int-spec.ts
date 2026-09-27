@@ -288,6 +288,11 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
         sequenceBefore,
       ]);
     }
+    // Otros archivos esperan asset_depreciation vacía (la depreciación está apagada por defecto).
+    await dataSource.query(
+      `DELETE FROM asset_depreciation WHERE asset_id IN (SELECT id FROM asset WHERE category_id = $1)`,
+      [base.categoryId],
+    );
     await dataSource.query('DROP TRIGGER IF EXISTS it_fail_surplus ON asset_movement');
     await dataSource.query('DROP FUNCTION IF EXISTS it_fail_surplus()');
     await app.close();
