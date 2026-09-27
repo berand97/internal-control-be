@@ -14,8 +14,14 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  * - physical_inventory_item: resolución del sobrante sin activo (CREATE_ASSET con resolved_asset_id, o
  *   LEAVE_UNRESOLVED con su motivo), quién y cuándo.
  *
+ * - Menú: "Catálogos de toma física" (/inventories/catalogs, physical_inventory:read, ícono existente `tags`, orden
+ *   77 junto al calendario), id fijo y ON CONFLICT (path) DO NOTHING; down() borra por ese id.
+ *
  * down(): se niega si hay datos que se perderían (cortes, tomas con corte o acta, sobrantes resueltos).
  */
+
+const CATALOGS_NAV_ID = '6f1d2c3a-7b4e-4a1f-9c2d-000000018801';
+
 export class InventoryValuationSurplusAndAct1767225880000 implements MigrationInterface {
   name = 'InventoryValuationSurplusAndAct1767225880000';
 
@@ -85,6 +91,15 @@ export class InventoryValuationSurplusAndAct1767225880000 implements MigrationIn
       `CREATE UNIQUE INDEX uq_inv_item_resolved_asset ON physical_inventory_item (resolved_asset_id)
        WHERE resolved_asset_id IS NOT NULL`,
     );
+
+    await queryRunner.query(`
+      INSERT INTO navigation_item
+        (id, module, module_label, resource, path, label, required_action, sort_order, icon)
+      VALUES
+        ('${CATALOGS_NAV_ID}', 'INVENTORY', 'Inventarios', 'physical_inventory', '/inventories/catalogs',
+         'Catálogos de toma física', 'read', 77, 'tags')
+      ON CONFLICT (path) DO NOTHING
+    `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
@@ -102,6 +117,7 @@ export class InventoryValuationSurplusAndAct1767225880000 implements MigrationIn
           'antes de revertir.',
       );
     }
+    await queryRunner.query(`DELETE FROM navigation_item WHERE id = '${CATALOGS_NAV_ID}'`);
     await queryRunner.query(`DROP INDEX IF EXISTS uq_inv_item_resolved_asset`);
     await queryRunner.query(`
       ALTER TABLE physical_inventory_item
