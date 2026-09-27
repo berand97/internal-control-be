@@ -49,8 +49,11 @@ backend). Los ejemplos son ilustrativos: genere sus propios secretos.
 | Variable | Ejemplo | Qué pasa si falta |
 |---|---|---|
 | `DATABASE_URL` | `postgres://USUARIO:CLAVE@control-interno-database:5432/control_interno` | `docker compose` falla (`required variable DATABASE_URL is missing`); fuera de compose, el backend no arranca (`Variable de entorno requerida ausente`). |
-| `JWT_ACCESS_SECRET` | salida de `openssl rand -base64 64` | Igual que arriba. Además es el valor por defecto de `QR_SIGNING_SECRET`, `MOVEMENT_SIGNING_SECRET` y `SETTINGS_ENCRYPTION_KEY` si no se definen. |
+| `JWT_ACCESS_SECRET` | salida de `openssl rand -base64 64` | Igual que arriba. Solo firma tokens de sesión de vida corta (acceso 15 min, retos MFA 5 min): se puede rotar en cualquier momento (ver §7). |
 | `JWT_REFRESH_SECRET` | salida de `openssl rand -base64 64` (distinta de la anterior) | Igual que arriba. |
+| `QR_SIGNING_SECRET` | ver §7 **antes** de elegir el valor | `docker compose` falla (`QR_SIGNING_SECRET es obligatoria en produccion…`); fuera de compose el backend no arranca. No puede ser igual a `JWT_ACCESS_SECRET` ni a `JWT_REFRESH_SECRET`. Firma los QR **impresos** en las etiquetas: cambiarla invalida todas las etiquetas. |
+| `MOVEMENT_SIGNING_SECRET` | ver §7 | Igual que arriba. HMAC de integridad de cada movimiento: cambiarla sin `MOVEMENT_SIGNING_SECRET_PREVIOUS` hace que los movimientos anteriores salgan como alterados. |
+| `SETTINGS_ENCRYPTION_KEY` | ver §7 | Igual que arriba. Cifra en la base los secretos SMTP y las credenciales de almacenamiento (S3, Google Drive, OneDrive): cambiarla sin `SETTINGS_ENCRYPTION_KEY_PREVIOUS` los deja ilegibles. |
 | `SIGNATURE_VERIFY_URL` | `https://control-interno.unac.edu.co/verificar-firma` | `docker compose` falla con `SIGNATURE_VERIFY_URL es obligatoria en produccion…`. Fuera de compose, el backend no arranca. Debe ser **https**, de host **público** (no localhost/10.x/192.168.x/172.16-31.x/`.local`/`.internal`) y **sin** `?` ni `#`: queda impresa en el QR de cada acta firmada. |
 | `GOTENBERG_URL` | `http://gotenberg:3000` | En compose ya viene fijada a `http://gotenberg:3000` (solo defínala para apuntar a otro Gotenberg). Fuera de compose (despliegue solo con Dockerfile), si falta el backend **no arranca**: `GOTENBERG_URL es obligatoria en producción`. |
 
@@ -75,9 +78,10 @@ cada una; es preferible que el despliegue falle de inmediato y se vea en Dokploy
 | `CORS_ALLOWED_ORIGINS` | En la práctica sí | vacío | `https://control-interno.unac.edu.co` | Vacío = ningún origen permitido: el frontend en otro dominio no puede llamar al API. Lista separada por comas. |
 | `APP_PUBLIC_URL` | En la práctica sí | `http://localhost:4200` | `https://control-interno.unac.edu.co` | Enlaces de correos (invitaciones, recuperación) y redirecciones de OAuth de almacenamiento apuntarían a localhost. |
 | `API_PUBLIC_URL` | En la práctica sí | `http://localhost:3000` | `https://api.control-interno.unac.edu.co` | URLs de archivos del almacenamiento `project` y callbacks OAuth de Google Drive/OneDrive apuntarían a localhost. |
-| `QR_SIGNING_SECRET` | Recomendada | `JWT_ACCESS_SECRET` | `openssl rand -base64 64` | Firma los tokens QR con el secreto de acceso. Cambiarla invalida los QR emitidos. |
-| `MOVEMENT_SIGNING_SECRET` | Recomendada | `JWT_ACCESS_SECRET` | `openssl rand -base64 64` | Firma de movimientos con el secreto de acceso. Cambiarla invalida verificaciones previas. |
-| `SETTINGS_ENCRYPTION_KEY` | Recomendada | `JWT_ACCESS_SECRET` | `openssl rand -base64 32` | Cifra secretos guardados en BD (correo, almacenamiento). **Cambiarla después deja ilegibles los secretos ya guardados.** |
+| `MOVEMENT_SIGNING_SECRET_PREVIOUS` | Solo al rotar | vacío | `<valor anterior>` | Lista separada por comas de claves anteriores de firma de movimientos: solo **verifican**. Ver §7.3. |
+| `SETTINGS_ENCRYPTION_KEY_PREVIOUS` | Solo al rotar | vacío | `<valor anterior>` | Lista separada por comas de claves anteriores de cifrado: solo **descifran**; lo leído se vuelve a cifrar con la actual. Ver §7.2. |
+| `OUTBOUND_ALLOW_PRIVATE_NETWORKS` | No | `false` en producción, `true` fuera | `false` | Con `false`, el host SMTP y el endpoint S3 no pueden ser privados, loopback ni link-local. Ver §8. |
+| `OUTBOUND_ALLOWED_HOSTS` | No | vacío | `minio,relay.interno.unac.edu.co` | Excepciones explícitas (host o IP exactos) a la regla anterior. Ver §8. |
 | `JWT_ACCESS_EXPIRES_IN` | No | `15m` | `15m` | Formato `900`, `15m`, `7d`; un valor inválido impide arrancar. |
 | `JWT_REFRESH_EXPIRES_IN` | No | `7d` | `7d` | Ídem. |
 | `JWT_MFA_CHALLENGE_EXPIRES_IN` | No | `5m` | `5m` | Ídem. |
@@ -109,6 +113,9 @@ aplicación), el driver y las credenciales salen de la base de datos. La carpeta
 `project` es la excepción: **siempre** sale de `STORAGE_PROJECT_PATH` (no se cambia desde la
 aplicación; una `project_path` distinta guardada en la base se ignora y se avisa en el log la
 primera vez que se usa el almacenamiento). Debe seguir siendo `/data/storage` o los archivos quedarán fuera del volumen.
+Los secretos de almacenamiento (`s3_secret_key`, `google_client_secret`, `google_refresh_token`,
+`onedrive_client_secret`, `onedrive_refresh_token`) se guardan cifrados con
+`SETTINGS_ENCRYPTION_KEY` (prefijo `enc.v1.`); la migración `1767225780000` cifra los que ya existían.
 
 ## 3. Volúmenes
 
@@ -169,3 +176,112 @@ del servidor haga que un `pnpm start` o `pnpm db:migrate` escriba en producción
 - Escape explícito: `ALLOW_REMOTE_DATABASE=true` (solo ese valor). La conexión se permite y
   queda un aviso en el log con el host y el `NODE_ENV`, sin credenciales.
 - En producción no se restringe el host.
+
+## 7. Claves separadas por propósito: primer despliegue y rotación
+
+Desde la auditoría BE-12, en producción cada propósito tiene su clave y el backend **no arranca**
+(y `docker compose` no levanta) si falta alguna o si es igual a `JWT_ACCESS_SECRET` o
+`JWT_REFRESH_SECRET`:
+
+| Variable | Protege | Qué rompe cambiarla sin más |
+|---|---|---|
+| `QR_SIGNING_SECRET` | QR impresos en las etiquetas de los activos | Todas las etiquetas impresas dejan de validar. |
+| `MOVEMENT_SIGNING_SECRET` | HMAC de integridad de cada movimiento | Los movimientos anteriores aparecen como alterados (`MOVEMENT_TAMPERED`, `SIGNATURE_MISMATCH`). |
+| `SETTINGS_ENCRYPTION_KEY` | Secretos SMTP y credenciales de almacenamiento cifrados en la base | La configuración de correo y de almacenamiento no se puede leer (500). |
+
+**Antes de esta versión, una variable que no estuviera definida usaba el valor de
+`JWT_ACCESS_SECRET`.** Por eso el primer despliegue no se hace con claves nuevas.
+
+### 7.1 Primer despliegue de esta versión (sin romper firmas, QR ni secretos)
+
+1. En Dokploy → *Environment* revise (sin copiarlos a ningún otro lado) si existen
+   `QR_SIGNING_SECRET`, `MOVEMENT_SIGNING_SECRET` y `SETTINGS_ENCRYPTION_KEY`.
+2. **Si las tres existen y ninguna es igual a `JWT_ACCESS_SECRET` ni a `JWT_REFRESH_SECRET`:** no
+   cambie nada. Siga con el paso 6.
+3. **Si alguna falta:** su valor efectivo hoy es el de `JWT_ACCESS_SECRET`. Cree cada una que
+   falte con **exactamente el valor actual de `JWT_ACCESS_SECRET`** (copiar y pegar dentro del
+   panel). No genere un valor nuevo: invalidaría etiquetas, firmas y secretos.
+4. **Rote `JWT_ACCESS_SECRET`** (obligatorio si en el paso 3 copió su valor, o si alguna de las
+   tres ya era igual a él): reemplácelo por la salida de `openssl rand -base64 64`. Efecto: los
+   tokens de acceso vigentes (15 min) y los retos MFA en curso (5 min) dejan de valer; la
+   aplicación renueva la sesión con la cookie de refresco (firmada con `JWT_REFRESH_SECRET`, que no
+   cambia) y quien estaba a mitad de un inicio de sesión con MFA lo repite.
+   - Si alguna de las tres era igual a `JWT_REFRESH_SECRET`, rote también `JWT_REFRESH_SECRET`:
+     todos los usuarios tendrán que iniciar sesión de nuevo.
+5. Despliegue. La migración `1767225780000` cifra con `SETTINGS_ENCRYPTION_KEY` las credenciales
+   de almacenamiento que estuvieran en claro. En el log aparecerá el aviso
+   `… comparten valor: rótelas por separado` mientras las tres compartan el valor heredado: es
+   esperado y no impide arrancar.
+6. Verifique: `GET /api/v1/movements/<id>/verify` de un movimiento **anterior** al despliegue
+   responde `valid: true`; *Correo → Probar conexión* funciona; *Almacenamiento* muestra el estado
+   (y el driver en uso sigue guardando archivos); escanee una etiqueta QR impresa antes.
+
+### 7.2 Separar o rotar `SETTINGS_ENCRYPTION_KEY`
+
+1. `SETTINGS_ENCRYPTION_KEY_PREVIOUS` = valor **actual** de `SETTINGS_ENCRYPTION_KEY`.
+2. `SETTINGS_ENCRYPTION_KEY` = salida de `openssl rand -base64 32`.
+3. Despliegue. Lo cifrado con la anterior se sigue leyendo y, la primera vez que se lee, se vuelve
+   a cifrar con la nueva. Para forzarlo abra en la aplicación *Correo* (configuración) y
+   *Almacenamiento* (estado) una vez, con un usuario que tenga esos permisos.
+4. En el despliegue siguiente quite `SETTINGS_ENCRYPTION_KEY_PREVIOUS`. **Excepción:** si otro módulo
+   ya guarda datos con el mismo cifrado (por ejemplo semillas MFA), no la quite hasta que ese
+   módulo haya vuelto a cifrar sus filas: sin la anterior, lo no re-cifrado queda ilegible.
+   La migración `1767225780000` en `down()` también descifra con las anteriores.
+
+### 7.3 Separar o rotar `MOVEMENT_SIGNING_SECRET`
+
+1. `MOVEMENT_SIGNING_SECRET_PREVIOUS` = valor **actual** de `MOVEMENT_SIGNING_SECRET` (si ya había
+   anteriores, agréguela a la lista separada por comas).
+2. `MOVEMENT_SIGNING_SECRET` = salida de `openssl rand -base64 64`.
+3. Despliegue. Los movimientos nuevos se firman con la nueva; los anteriores se verifican con la
+   anterior. Las firmas antiguas **no** se recalculan (son la evidencia de integridad), así que
+   `MOVEMENT_SIGNING_SECRET_PREVIOUS` se conserva de forma **permanente**.
+4. Una clave anterior no puede ser el `JWT_ACCESS_SECRET` vigente (el backend no arranca): por eso,
+   si la anterior es el valor heredado del JWT, haga antes el paso 4 de §7.1.
+5. Si sospecha que una clave anterior se filtró, las firmas hechas con ella dejan de ser evidencia
+   desde la fecha de la filtración: regístrelo en el informe de control interno.
+
+### 7.4 `QR_SIGNING_SECRET`
+
+No tiene clave anterior: cambiarla invalida todas las etiquetas impresas. Solo se rota ante una
+filtración, y exige reimprimir las etiquetas.
+
+## 8. Destinos salientes: host SMTP y endpoint S3
+
+Quien administra el correo o el almacenamiento elige a qué servidor se conecta el backend. En
+producción (`OUTBOUND_ALLOW_PRIVATE_NETWORKS=false`, valor por defecto con `NODE_ENV=production`)
+se rechazan con `400 OUTBOUND_DESTINATION_FORBIDDEN`:
+
+- IP de loopback (`127.0.0.0/8`, `::1`), privadas (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`),
+  link-local y metadatos de nube (`169.254/16`, `fe80::/10`), CGNAT (`100.64/10`), `0.0.0.0/8`,
+  multicast y reservadas, también en forma `::ffff:a.b.c.d`;
+- `localhost`, nombres de una sola etiqueta (`gotenberg`, `postgres`: servicios del compose) y los
+  sufijos `.local`, `.internal`, `.lan`, `.localhost`, `.home.arpa`;
+- nombres que resuelven a cualquiera de esas direcciones. La comprobación se repite **en cada
+  conexión** sobre las IP que se van a usar, así que un DNS que cambia después de guardar
+  (rebinding) no la salta.
+
+Además el endpoint S3 debe ser `http(s)` sin usuario, parámetros ni fragmento, y en producción
+`https` salvo que el host esté en `OUTBOUND_ALLOWED_HOSTS`.
+
+- Un SMTP o MinIO interno legítimo: agregue su host (o IP) a `OUTBOUND_ALLOWED_HOSTS`
+  (lista separada por comas, coincidencia exacta).
+- En desarrollo (`NODE_ENV` distinto de `production`) se permiten por defecto (MailHog o MinIO en
+  `localhost`). Para probar la regla localmente: `OUTBOUND_ALLOW_PRIVATE_NETWORKS=false`.
+- Las URL de Google Drive y OneDrive son fijas (no configurables) y no pasan por esta regla.
+
+## 9. Conexión OAuth de Google Drive / OneDrive
+
+El `state` que viaja a Google o Microsoft es un valor aleatorio de **un solo uso**, válido 10
+minutos, guardado solo como hash en `storage_oauth_state` junto con el usuario que inició la
+conexión. `start` además deja en el navegador la cookie `storage_oauth_binding` (HttpOnly,
+`SameSite=Lax`, ruta `<ruta de API_PUBLIC_URL>/api/v1/storage/oauth`, `Secure` según
+`REFRESH_COOKIE_SECURE`). El callback consume el `state` y exige esa cookie y que el usuario siga
+activo; si algo no cuadra responde `424 STORAGE_OAUTH_FAILED` y no cambia el almacenamiento.
+
+- El frontend y el API deben ser del **mismo sitio** (igual que para la cookie de refresco): el
+  frontend ya envía `withCredentials`, así que la cookie se guarda al llamar a `start`.
+- Conecte la cuenta desde el mismo navegador en el que pulsa *Conectar*; abrir el enlace de
+  autorización en otro navegador o equipo falla a propósito.
+- `GET /api/v1/storage` ya no devuelve `authorizationUrl` (siempre `null`): la URL solo la emiten
+  `oauth/{google,onedrive}/start`.

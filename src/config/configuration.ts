@@ -5,7 +5,7 @@ import {
   type TrustProxySetting,
 } from '../common/http/trust-proxy.js';
 import { guardDatabaseUrl } from './database-host-guard.js';
-import { resolveDedicatedSecrets } from './dedicated-secrets.js';
+import { dedicatedSecretWarnings, resolveDedicatedSecrets } from './dedicated-secrets.js';
 import { resolveGotenbergUrl } from './gotenberg-url.js';
 import { resolveSignatureVerifyUrl } from './signature-verify-url.js';
 
@@ -250,6 +250,9 @@ const readList = (key: string): ReadonlyArray<string> =>
 const configuration = (): AppConfig => {
   // Primero: sin claves propias en producción el backend no arranca (BE-12).
   const secrets = resolveDedicatedSecrets(process.env);
+  for (const warning of dedicatedSecretWarnings(process.env)) {
+    new Logger('Config').warn(warning);
+  }
   return {
     port: readNumber('PORT', 3000),
     appPublicUrl: readString('APP_PUBLIC_URL', 'http://localhost:4200'),

@@ -22,6 +22,11 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL es obligatoria (postgres://usuario:clave@host:5432/base). Ver docs/DEPLOY.md}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET es obligatoria (openssl rand -base64 64). Ver docs/DEPLOY.md}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET es obligatoria (openssl rand -base64 64). Ver docs/DEPLOY.md}
+      # Una clave por propósito (BE-12). Si la instalación ya funcionaba sin ellas, su valor actual es el de
+      # JWT_ACCESS_SECRET: fíjelas con ESE valor (no uno nuevo) y rote JWT_ACCESS_SECRET. Ver docs/DEPLOY.md §7.
+      QR_SIGNING_SECRET: ${QR_SIGNING_SECRET:?QR_SIGNING_SECRET es obligatoria en produccion (firma los QR impresos). Ver docs/DEPLOY.md §7}
+      MOVEMENT_SIGNING_SECRET: ${MOVEMENT_SIGNING_SECRET:?MOVEMENT_SIGNING_SECRET es obligatoria en produccion (firma de movimientos). Ver docs/DEPLOY.md §7}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?SETTINGS_ENCRYPTION_KEY es obligatoria en produccion (cifra secretos SMTP y de almacenamiento). Ver docs/DEPLOY.md §7}
       # Queda impresa en el QR de cada acta firmada; el backend exige https y host público.
       SIGNATURE_VERIFY_URL: ${SIGNATURE_VERIFY_URL:?SIGNATURE_VERIFY_URL es obligatoria en produccion (https publica del frontend, ej. https://control-interno.unac.edu.co/verificar-firma). Ver docs/DEPLOY.md}
       # Servicio interno de abajo; solo cambiarla si Gotenberg corre en otro lado.
