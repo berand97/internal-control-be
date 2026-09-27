@@ -18,6 +18,7 @@ import {
   docToText,
 } from '../../src/database/migrations/1767225820000-email-rich-paragraph-and-assets.js';
 import { EmailAssetImagesPrefix1767225830000 } from '../../src/database/migrations/1767225830000-email-asset-images-prefix.js';
+import { EmailLinkVariablesAsLinks1767225840000 } from '../../src/database/migrations/1767225840000-email-link-variables-as-links.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { FeatureFlagsService } from '../../src/modules/features/services/feature-flags.service.js';
@@ -266,11 +267,12 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
 
     it('1767225820000: ningún párrafo queda con text; down() los devuelve a texto y up() otra vez al mismo documento', async () => {
       const snapshot = async (runner: QueryRunner) =>
-        (await runner.query(`SELECT id, blocks FROM email_template ORDER BY id`)) as Array<{ id: string; blocks: Array<Record<string, unknown>> }>;
-      const before = (await dataSource.query(`SELECT id, blocks FROM email_template ORDER BY id`)) as Array<{
-        id: string;
-        blocks: Array<Record<string, unknown>>;
-      }>;
+        (await runner.query(`SELECT template_type, version, blocks FROM email_template ORDER BY template_type, version`)) as Array<{
+          blocks: Array<Record<string, unknown>>;
+        }>;
+      const before = (await dataSource.query(
+        `SELECT template_type, version, blocks FROM email_template ORDER BY template_type, version`,
+      )) as Array<{ blocks: Array<Record<string, unknown>> }>;
       expect(before.length).toBeGreaterThan(0);
       for (const row of before) {
         for (const block of row.blocks.filter((item) => item['type'] === 'paragraph')) {
@@ -281,6 +283,10 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       await runner.connect();
       await runner.startTransaction();
       try {
+        // Orden real de un revert: primero 1767225840000 (sus versiones tienen enlaces, que down() de 1767225820000
+        // pierde, documentado), luego 1767225820000; y de vuelta en orden inverso.
+        const links = new EmailLinkVariablesAsLinks1767225840000();
+        await links.down(runner);
         const migration = new EmailRichParagraphAndAssets1767225820000();
         await migration.down(runner);
         const down = await snapshot(runner);
@@ -291,6 +297,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         }
         expect(await runner.query(`SELECT to_regclass('email_asset') AS t`)).toEqual([{ t: null }]);
         await migration.up(runner);
+        await links.up(runner);
         expect(await snapshot(runner)).toEqual(before);
       } finally {
         await runner.rollbackTransaction();
@@ -329,6 +336,102 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
 
         await migration.up(runner);
         await insert(`images/email/${randomUUID()}.jpg`);
+      } finally {
+        await runner.rollbackTransaction();
+        await runner.release();
+      }
+    });
+
+    it('1767225840000: la versión activa con un URL como texto pasa a vN+1 con enlaces; la anterior queda intacta; down() y up()', async () => {
+      type Row = {
+        template_type: string;
+        version: number;
+        is_active: boolean;
+        created_by: string | null;
+        activated_by: string | null;
+        activated: boolean;
+        has_body: boolean;
+        subject: string;
+        placeholders: string[];
+        blocks: Array<{ type: string; content: { content: Array<{ content?: Array<Record<string, unknown>> }> } }>;
+      };
+      const seeded = async (runner: QueryRunner | DataSource) =>
+        (await runner.query(
+          `SELECT template_type, version, is_active, created_by, activated_by, activated_at IS NOT NULL AS activated,
+                  body IS NOT NULL AS has_body, subject, placeholders, blocks
+           FROM email_template WHERE created_by IS NULL ORDER BY template_type, version`,
+        )) as Row[];
+      const shape = (rows: Row[]) => rows.map((row) => `${row.template_type} v${row.version}${row.is_active ? ' activa' : ''}`);
+      const after = await seeded(dataSource);
+      expect(shape(after)).toEqual([
+        'GENERIC_NOTIFICATION v1',
+        'GENERIC_NOTIFICATION v2 activa',
+        'INVENTORY_ALERT v1',
+        'INVENTORY_ALERT v2 activa',
+        'LOAN_STATUS_NOTIFICATION v1',
+        'LOAN_STATUS_NOTIFICATION v2 activa',
+        'PASSWORD_RESET v1',
+        'PASSWORD_RESET v2 activa',
+        'SYSTEM_ALERT v1 activa',
+        'USER_INVITATION v1',
+        'USER_INVITATION v2 activa',
+      ]);
+      for (const row of after.filter((item) => item.version === 2)) {
+        const previous = after.find((item) => item.template_type === row.template_type && item.version === 1);
+        expect(row).toMatchObject({ created_by: null, activated_by: null, activated: true, has_body: false });
+        expect(row.subject).toBe(previous?.subject);
+        expect(row.placeholders).toEqual(previous?.placeholders);
+        // La v1 sigue siendo el texto original (historial sin tocar); la v2 ya no muestra el URL.
+        expect(previous?.has_body).toBe(true);
+        expect(JSON.stringify(previous?.blocks)).toMatch(/"text": ?"[^"]*\{\{(auth\.loginUrl|auth\.resetUrl|app\.loginUrl)\}\}/);
+        expect(JSON.stringify(row.blocks)).not.toMatch(/"text": ?"[^"]*\{\{(auth\.loginUrl|auth\.resetUrl|app\.loginUrl)\}\}/);
+      }
+      const reset = after.find((row) => row.template_type === 'PASSWORD_RESET' && row.version === 2);
+      expect(reset?.blocks[1]?.content.content[0]?.content).toEqual([
+        { type: 'text', text: 'Use este enlace para restablecer su contraseña:' },
+        { type: 'hardBreak' },
+        { type: 'text', text: 'Restablecer contraseña', marks: [{ type: 'link', attrs: { href: '{{auth.resetUrl}}' } }] },
+      ]);
+      // Las versiones nuevas pasan la validación que aplica el editor.
+      const versions = await http().get('/api/v1/email-templates?templateType=PASSWORD_RESET').set(auth(director)).expect(200);
+      const active = (versions.body.data as Array<{ isActive: boolean; subject: string; blocks: unknown }>).find((row) => row.isActive);
+      await http()
+        .post('/api/v1/email-templates/preview')
+        .set(auth(director))
+        .send({ templateType: 'PASSWORD_RESET', subject: active?.subject, blocks: active?.blocks })
+        .expect(200);
+
+      const runner = dataSource.createQueryRunner();
+      await runner.connect();
+      await runner.startTransaction();
+      try {
+        const migration = new EmailLinkVariablesAsLinks1767225840000();
+        // Una versión guardada por una persona con el mismo contenido NO la borra down().
+        await runner.query(
+          `INSERT INTO email_template (template_type, version, subject, blocks, placeholders, is_active, created_by)
+           SELECT template_type, 50, subject, blocks, placeholders, FALSE, $1 FROM email_template
+           WHERE template_type = 'PASSWORD_RESET' AND version = 2`,
+          [director.userId],
+        );
+        await migration.down(runner);
+        expect(shape(await seeded(runner))).toEqual([
+          'GENERIC_NOTIFICATION v1 activa',
+          'INVENTORY_ALERT v1 activa',
+          'LOAN_STATUS_NOTIFICATION v1 activa',
+          'PASSWORD_RESET v1 activa',
+          'SYSTEM_ALERT v1 activa',
+          'USER_INVITATION v1 activa',
+        ]);
+        expect(await runner.query(`SELECT version FROM email_template WHERE template_type = 'PASSWORD_RESET' AND created_by IS NOT NULL`)).toEqual([
+          { version: 50 },
+        ]);
+        await runner.query(`DELETE FROM email_template WHERE version = 50`);
+        await migration.up(runner);
+        const again = await seeded(runner);
+        expect(shape(again)).toEqual(shape(after));
+        expect(again.map((row) => row.blocks)).toEqual(after.map((row) => row.blocks));
+        await migration.up(runner);
+        expect(shape(await seeded(runner))).toEqual(shape(after));
       } finally {
         await runner.rollbackTransaction();
         await runner.release();
@@ -436,6 +539,22 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       ]);
       expect(catalog.body.data.imageAligns).toEqual(['left', 'center']);
       expect(catalog.body.data.limits).toMatchObject({ paragraphMaxNodes: 200, maxImages: 10, imageMinWidth: 50, imageMaxWidth: 560 });
+      const reset = (catalog.body.data.types as Array<{ templateType: string; required: string[]; optional: string[]; variables: Array<Record<string, unknown>> }>).find(
+        (item) => item.templateType === 'PASSWORD_RESET',
+      );
+      expect(reset?.variables).toEqual([
+        { name: 'user.email', label: 'Correo del usuario', kind: 'text', linkText: null },
+        { name: 'auth.resetUrl', label: 'Enlace para restablecer la contraseña', kind: 'url', linkText: 'Restablecer contraseña' },
+        { name: 'user.username', label: 'Usuario con el que inicia sesión', kind: 'text', linkText: null },
+        { name: 'auth.expiresInHours', label: 'Horas de validez del enlace', kind: 'text', linkText: null },
+        { name: 'app.name', label: 'Nombre de la aplicación', kind: 'text', linkText: null },
+      ]);
+      for (const type of catalog.body.data.types as Array<{ required: string[]; optional: string[]; variables: Array<{ name: string }> }>) {
+        expect(type.variables.map((item) => item.name)).toEqual([...type.required, ...type.optional]);
+      }
+      const variableSchema = (openapi.components?.schemas ?? {})['EmailTemplateVariableDto'] as Schema;
+      expect(variableSchema.properties?.['linkText']).toMatchObject({ type: 'string', nullable: true });
+      expect((openapi.components?.schemas ?? {})['EmailTemplateVariableKind']).toMatchObject({ enum: ['url', 'text'] });
       const superCatalog = await http().get('/api/v1/email-templates/catalog').set(auth(superAdmin)).expect(200);
       expectConforms('get', '/api/v1/email-templates/catalog', 200, superCatalog.body);
       const denied = await http().get('/api/v1/email-templates/catalog').set(auth(viewer));
@@ -621,6 +740,62 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const extraField = await post({ templateType: 'SYSTEM_ALERT', subject: 'x', blocks: [], body: 'texto' });
       expect(extraField.status).toBe(400);
       expect(extraField.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('una variable de enlace como texto se rechaza al guardar y al previsualizar con la ruta exacta; como enlace sí', async () => {
+      const versionsBefore = await scalar<string>(dataSource, `SELECT count(*)::text FROM email_template WHERE template_type = 'PASSWORD_RESET'`);
+      const asText = {
+        templateType: 'PASSWORD_RESET',
+        subject: 'Restablecer contraseña',
+        blocks: [
+          { type: 'paragraph', content: textToRichText('Hola {{user.email}},\n\nUse este enlace:\n{{auth.resetUrl}}') },
+          { type: 'keyValueList', items: [{ label: 'Enlace', value: '{{auth.resetUrl}}' }] },
+        ],
+      };
+      const expected = [
+        { field: 'blocks[0].content.content[1].content[2].text', message: 'Use la variable {{auth.resetUrl}} como enlace o botón, no como texto' },
+        { field: 'blocks[1].items[0].value', message: 'Use la variable {{auth.resetUrl}} como enlace o botón, no como texto' },
+      ];
+      const saved = await http().post('/api/v1/email-templates').set(auth(director)).send(asText);
+      expect(saved.status).toBe(400);
+      expect(saved.body.error.code).toBe('EMAIL_TEMPLATE_INVALID_DESIGN');
+      expect(saved.body.error.details).toEqual(expected);
+      const previewed = await http().post('/api/v1/email-templates/preview').set(auth(director)).send(asText);
+      expect(previewed.status).toBe(400);
+      expect(previewed.body.error.code).toBe('EMAIL_TEMPLATE_INVALID_DESIGN');
+      expect(previewed.body.error.details).toEqual(expected);
+      expect(await scalar<string>(dataSource, `SELECT count(*)::text FROM email_template WHERE template_type = 'PASSWORD_RESET'`)).toBe(
+        versionsBefore,
+      );
+
+      const asLink = await http()
+        .post('/api/v1/email-templates/preview')
+        .set(auth(director))
+        .send({
+          templateType: 'PASSWORD_RESET',
+          subject: 'Restablecer contraseña',
+          blocks: [
+            {
+              type: 'paragraph',
+              content: {
+                type: 'doc',
+                content: [
+                  {
+                    type: 'paragraph',
+                    content: [
+                      { type: 'text', text: 'Hola {{user.email}}, use este enlace:' },
+                      { type: 'hardBreak' },
+                      { type: 'text', text: 'Restablecer contraseña', marks: [{ type: 'link', attrs: { href: '{{auth.resetUrl}}' } }] },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        })
+        .expect(200);
+      expect(asLink.body.data.html).toMatch(/<a href="http:\/\/localhost:4200\/auth\/reset-password\?token=ejemplo"[^>]*>Restablecer contraseña<\/a>/);
+      expect(asLink.body.data.text).toContain('Restablecer contraseña (http://localhost:4200/auth/reset-password?token=ejemplo)');
     });
 
     it('la vista previa devuelve HTML con layout institucional y texto, sin guardar ni enviar', async () => {
