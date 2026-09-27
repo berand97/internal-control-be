@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from 'node:crypto';
 import { connect as netConnect, type LookupFunction, type Socket } from 'node:net';
 import { connect as tlsConnect, type TLSSocket } from 'node:tls';
 import {
@@ -27,6 +28,8 @@ export interface SmtpSendOptions extends SmtpAuthOptions {
   readonly to: string;
   readonly subject: string;
   readonly text: string;
+  /** Si viene, el mensaje es multipart/alternative (text/plain + text/html). */
+  readonly html?: string;
 }
 
 type SmtpSocket = Socket | TLSSocket;
@@ -88,13 +91,26 @@ export interface SmtpMessage {
   readonly payload: string;
 }
 
+/** Cuerpo en base64 (RFC 2045) en líneas de 76: ninguna línea pasa de 998 octetos, empieza con "." ni trae CR/LF sueltos. */
+export function encodeBase64Body(content: string): string {
+  const encoded = Buffer.from(content.replace(/\r\n|\r|\n/g, CRLF), 'utf8').toString('base64');
+  return (encoded.match(/.{1,76}/g) ?? ['']).join(CRLF);
+}
+
+/** Límite de parte MIME: aleatorio y con caracteres que base64 no produce al inicio de línea ("--" y "="). */
+export function mimeBoundary(): string {
+  return `=_ci_${randomBytes(12).toString('hex')}`;
+}
+
 /**
  * Arma los comandos y el mensaje (BE-06). Lanza UnsafeMailFieldError, sin el valor, si el destinatario o el
  * remitente no son una dirección simple o si el nombre del remitente trae CR, LF, NUL u otro carácter de control.
- * Los datos variables de las cabeceras van validados (direcciones) o codificados RFC 2047 (nombre y asunto), y el
- * cuerpo se normaliza a CRLF antes del dot-stuffing: un LF o CR suelto no puede cerrar el DATA.
+ * Los datos variables de las cabeceras van validados (direcciones) o codificados RFC 2047 (nombre y asunto). Los
+ * cuerpos van en base64 con líneas de 76 caracteres: ni un LF o CR suelto ni un "." inicial pueden cerrar el DATA,
+ * y ninguna línea supera el límite de 998 octetos de SMTP. Con `html` el mensaje es multipart/alternative
+ * (text/plain primero, text/html después: el cliente muestra la última que entienda).
  */
-export function prepareSmtpMessage(options: SmtpSendOptions): SmtpMessage {
+export function prepareSmtpMessage(options: SmtpSendOptions, boundary: string = mimeBoundary()): SmtpMessage {
   const to = options.to.trim();
   if (!isValidMailbox(to)) {
     throw new UnsafeMailFieldError('to');
@@ -103,16 +119,37 @@ export function prepareSmtpMessage(options: SmtpSendOptions): SmtpMessage {
   const fromHeader = from.name
     ? `${encodeHeaderWord(from.name)} <${from.address}>`
     : from.address;
-  const body = options.text.replace(/\r\n|\r|\n/g, CRLF).replace(/^\./gm, '..');
-  const payload = [
+  const headers = [
     `From: ${fromHeader}`,
     `To: ${to}`,
     `Subject: ${encodeHeaderWord(options.subject)}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: <${randomUUID()}@${from.address.slice(from.address.lastIndexOf('@') + 1)}>`,
+    'MIME-Version: 1.0',
+  ];
+  const textPart = [
     'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: base64',
     '',
-    body,
-    '.',
-  ].join(CRLF);
+    encodeBase64Body(options.text),
+  ];
+  const lines =
+    options.html === undefined
+      ? [...headers, ...textPart]
+      : [
+          ...headers,
+          `Content-Type: multipart/alternative; boundary="${boundary}"`,
+          '',
+          `--${boundary}`,
+          ...textPart,
+          `--${boundary}`,
+          'Content-Type: text/html; charset=utf-8',
+          'Content-Transfer-Encoding: base64',
+          '',
+          encodeBase64Body(options.html),
+          `--${boundary}--`,
+        ];
+  const payload = [...lines, '.'].join(CRLF);
   return {
     mailFrom: `MAIL FROM:<${from.address}>`,
     rcptTo: `RCPT TO:<${to}>`,

@@ -57,9 +57,27 @@ export const parseFrom = (from: string): ParsedFrom => {
   return { name: name === '' ? null : name, address };
 };
 
-/** Palabra codificada RFC 2047 (UTF-8, base64): el nombre visible nunca se escribe en crudo en la cabecera. */
-export const encodeHeaderWord = (value: string): string =>
-  `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
+/** Bytes UTF-8 por palabra codificada: 39 → 52 caracteres base64 + 12 de envoltura = 64; con "Subject: " la línea queda en 73 (RFC 5322 recomienda 78). */
+const ENCODED_WORD_BYTES = 39;
+
+/**
+ * Palabra codificada RFC 2047 (UTF-8, base64): el nombre visible y el asunto nunca se escriben en crudo en la
+ * cabecera. Un valor largo se parte en varias palabras (sin cortar un carácter) plegadas con CRLF + espacio, así
+ * ninguna línea de cabecera supera los límites de RFC 5322.
+ */
+export const encodeHeaderWord = (value: string): string => {
+  const words: string[] = [];
+  let chunk = '';
+  for (const char of value) {
+    if (Buffer.byteLength(chunk + char, 'utf8') > ENCODED_WORD_BYTES) {
+      words.push(chunk);
+      chunk = '';
+    }
+    chunk += char;
+  }
+  words.push(chunk);
+  return words.map((word) => `=?UTF-8?B?${Buffer.from(word, 'utf8').toString('base64')}?=`).join('\r\n ');
+};
 
 /**
  * Correo enmascarado para logs (Ley 1581): primera letra del usuario y el dominio, `a***@unac.edu.co`.

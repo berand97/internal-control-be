@@ -80,19 +80,78 @@ describe('prepareSmtpMessage', () => {
     expect(message.mailFrom).toBe('MAIL FROM:<noreply@unac.edu.co>');
     expect(message.rcptTo).toBe('RCPT TO:<ana.ruiz@unac.edu.co>');
     const headers = message.payload.split('\r\n\r\n')[0]?.split('\r\n') ?? [];
-    expect(headers).toEqual([
+    expect(headers.map((line) => line.replace(/^(Date|Message-ID): .*/, '$1: *'))).toEqual([
       `From: =?UTF-8?B?${Buffer.from('Control Interno UNAC').toString('base64')}?= <noreply@unac.edu.co>`,
       'To: ana.ruiz@unac.edu.co',
       `Subject: =?UTF-8?B?${Buffer.from('Firma\r\nBcc: x@evil.com').toString('base64')}?=`,
+      'Date: *',
+      'Message-ID: *',
+      'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
     ]);
+    expect(headers.find((line) => line.startsWith('Message-ID:'))).toMatch(/^Message-ID: <[0-9a-f-]{36}@unac\.edu\.co>$/);
   });
 
-  it('normaliza el cuerpo a CRLF y duplica el punto inicial: un LF suelto no cierra el DATA', () => {
-    const message = prepareSmtpMessage({ ...base, text: 'hola\n.\nMAIL FROM:<x@evil.com>\r.\r\nfin' });
-    expect(message.payload.endsWith('\r\nfin\r\n.')).toBe(true);
-    expect(message.payload).not.toMatch(/\r\n\.\r\n(?!$)/);
-    expect(message.payload).toContain('hola\r\n..\r\nMAIL FROM:<x@evil.com>\r\n..\r\nfin');
+  it('un asunto largo se parte en palabras codificadas plegadas, sin cortar caracteres', () => {
+    const subject = `Firma pendiente: ${'Acta de entrega y asignación de activos fijos · '.repeat(4)}`;
+    const message = prepareSmtpMessage({ ...base, subject });
+    const head = message.payload.split('\r\n\r\n')[0] ?? '';
+    const subjectLines = head.slice(head.indexOf('Subject: ')).split('\r\n').filter((line, index) => index === 0 || line.startsWith(' '));
+    expect(subjectLines.length).toBeGreaterThan(1);
+    for (const line of subjectLines) {
+      expect(line.length).toBeLessThanOrEqual(78);
+    }
+    const decoded = subjectLines
+      .map((line) => /=\?UTF-8\?B\?([^?]*)\?=/.exec(line)?.[1] ?? '')
+      .map((word) => Buffer.from(word, 'base64').toString('utf8'))
+      .join('');
+    expect(decoded).toBe(subject);
+  });
+
+  it('el cuerpo va en base64 en líneas de 76: un "." o un LF suelto no pueden cerrar el DATA', () => {
+    const text = `hola\n.\nMAIL FROM:<x@evil.com>\r.\r\nfin ${'x'.repeat(3000)}`;
+    const message = prepareSmtpMessage({ ...base, text });
+    expect(message.payload.endsWith('\r\n.')).toBe(true);
+    expect(message.payload.slice(0, -1)).not.toMatch(/(^|\r\n)\.(\r\n|$)/);
+    expect(message.payload).not.toContain('MAIL FROM:<x@evil.com>');
+    const body = message.payload.split('\r\n\r\n')[1]?.replace(/\r\n\.$/, '') ?? '';
+    for (const line of body.split('\r\n')) {
+      expect(line.length).toBeLessThanOrEqual(76);
+      expect(line.startsWith('.')).toBe(false);
+    }
+    expect(Buffer.from(body.replace(/\r\n/g, ''), 'base64').toString('utf8')).toBe(
+      text.replace(/\r\n|\r|\n/g, '\r\n'),
+    );
+  });
+
+  it('con html arma multipart/alternative: texto y HTML en base64 con un límite propio', () => {
+    const html = '<!DOCTYPE html><html><body><p>Hola &amp; adiós</p></body></html>';
+    const message = prepareSmtpMessage({ ...base, text: 'Hola & adiós', html }, '=_ci_prueba');
+    const lines = message.payload.split('\r\n');
+    expect(lines).toContain('MIME-Version: 1.0');
+    expect(lines).toContain('Content-Type: multipart/alternative; boundary="=_ci_prueba"');
+    expect(lines.filter((line) => line === '--=_ci_prueba')).toHaveLength(2);
+    expect(lines.at(-2)).toBe('--=_ci_prueba--');
+    expect(lines.at(-1)).toBe('.');
+    const parts = message.payload.split('--=_ci_prueba');
+    const decode = (part: string): string =>
+      Buffer.from((part.split('\r\n\r\n')[1] ?? '').replace(/\r\n/g, ''), 'base64').toString('utf8');
+    expect(parts[1]).toContain('Content-Type: text/plain; charset=utf-8');
+    expect(decode(parts[1] ?? '')).toBe('Hola & adiós');
+    expect(parts[2]).toContain('Content-Type: text/html; charset=utf-8');
+    expect(decode(parts[2] ?? '')).toBe(html);
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(998);
+    }
+  });
+
+  it('el límite MIME es aleatorio en cada mensaje', () => {
+    const first = prepareSmtpMessage({ ...base, html: '<p>x</p>' }).payload;
+    const second = prepareSmtpMessage({ ...base, html: '<p>x</p>' }).payload;
+    const boundary = (payload: string): string => /boundary="([^"]+)"/.exec(payload)?.[1] ?? '';
+    expect(boundary(first)).toMatch(/^=_ci_[0-9a-f]{24}$/);
+    expect(boundary(first)).not.toBe(boundary(second));
   });
 });
 
