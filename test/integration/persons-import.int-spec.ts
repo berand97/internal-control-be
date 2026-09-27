@@ -82,21 +82,45 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
     }
   };
 
-  it('el archivo de contratos (sin correo ni tipo) no entra nadie: todo a cuarentena con motivo, sin escribir en la vista previa', async () => {
+  it('el archivo de contratos (sin correo ni tipo) no entra nadie: sin columna de correo la vista previa bloquea; con la columna vacía, todo a cuarentena con motivo, sin escribir en la vista previa', async () => {
     const base = tag();
     const numbers = [`10${base}`, `11${base}`, `12${base}`];
-    const file = await workbook('revision_datos_migrados', [
-      CONTRACT_HEADER,
+    const contractRows: ReadonlyArray<ReadonlyArray<Cell>> = [
       [numbers[0] ?? '', 'CRISTIAN CAMILO GOMEZ TUBERQUIA', 'UNAC EMPLEADOS', 'DESARROLLADOR', null, 'ÁREA', 'DIV', center, 'Centro'],
       [numbers[1] ?? '', 'ANA MARIA LOPEZ', 'UNAC EMPLEADOS', 'ANALISTA', 'LIDER', 'ÁREA', 'DIV', 'NO-EXISTE-1', 'X'],
       [numbers[2] ?? '', 'JUAN PEREZ', 'UNAC EMPLEADOS', 'AUXILIAR', null, 'ÁREA', 'DIV', center, 'Centro'],
+    ];
+    const asIs = await imports.upload(
+      await workbook('revision_datos_migrados', [CONTRACT_HEADER, ...contractRows]),
+      'contratos.xlsx',
+      actor.id,
+    );
+    expect(asIs.sheets[0]).toMatchObject({ detectedHeaderRow: 1, columns: { A: CONTRACT_HEADER[0], B: CONTRACT_HEADER[1] } });
+    // Sin correo ninguna fila entra: no es un aviso, es un error del mapeo que dice qué hacer (y no crea la vista previa).
+    const previewsBefore = await count('SELECT count(*) FROM staging_import');
+    await expect(
+      imports.preview(asIs.batchId, { sheet: 'revision_datos_migrados', target: 'PERSONS', mapping: CONTRACT_MAPPING }, actor.id),
+    ).rejects.toMatchObject({
+      details: [
+        {
+          field: 'email',
+          message:
+            'Asigne la columna de «Correo institucional»: sin ese dato ninguna fila se importa. Si el archivo no la trae, agréguela y vuelva a subirlo.',
+        },
+      ],
+    });
+    expect(await count('SELECT count(*) FROM staging_import')).toBe(previewsBefore);
+
+    // El mismo archivo con la columna de correo agregada pero vacía: la vista previa corre y todo va a cuarentena.
+    const file = await workbook('revision_datos_migrados', [
+      [...CONTRACT_HEADER, 'Correo'],
+      ...contractRows.map((row) => [...row, null]),
     ]);
-    const upload = await imports.upload(file, 'contratos.xlsx', actor.id);
-    expect(upload.sheets[0]).toMatchObject({ detectedHeaderRow: 1, columns: { A: CONTRACT_HEADER[0], B: CONTRACT_HEADER[1] } });
+    const upload = await imports.upload(file, 'contratos-con-correo.xlsx', actor.id);
     const before = await count('SELECT count(*) FROM person');
     const preview = await imports.preview(
       upload.batchId,
-      { sheet: 'revision_datos_migrados', target: 'PERSONS', mapping: CONTRACT_MAPPING },
+      { sheet: 'revision_datos_migrados', target: 'PERSONS', mapping: { ...CONTRACT_MAPPING, email: 'J' } },
       actor.id,
     );
     expect(await count('SELECT count(*) FROM person')).toBe(before);

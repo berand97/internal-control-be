@@ -177,6 +177,7 @@ export class ImportsController {
         kind: definition.kind,
         catalog: definition.catalog ?? null,
         format: definition.format,
+        summary: definition.summary,
         whenEmpty: definition.whenEmpty.effect,
         whenEmptyText: definition.whenEmpty.text,
         inTemplate: definition.inTemplate !== false,

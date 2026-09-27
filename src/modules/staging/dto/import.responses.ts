@@ -1,5 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { EMPTY_EFFECTS, FIELD_KINDS, IMPORT_TARGETS, TEMPLATE_CATALOGS } from '../import/import-fields.js';
+import {
+  EMPTY_EFFECTS,
+  FIELD_KINDS,
+  IMPORT_TARGETS,
+  IMPORT_TRANSFORMATIONS,
+  SAMPLE_CELL_MAX,
+  SAMPLE_ROWS,
+  TEMPLATE_CATALOGS,
+} from '../import/import-fields.js';
 
 /**
  * Esquemas de respuesta de /imports. Solo documentan lo que ExcelImportService ya devuelve: cambiar un shape exige
@@ -27,6 +35,12 @@ export class ImportFieldDto {
 
   @ApiProperty({ description: 'Formato esperado' })
   readonly format!: string;
+
+  @ApiProperty({
+    description:
+      'Una línea en lenguaje llano para mostrar bajo el campo, sin códigos de error. Sale de la misma definición que aplica el importador (límites incluidos)',
+  })
+  readonly summary!: string;
 
   @ApiProperty({
     enum: EMPTY_EFFECTS,
@@ -128,6 +142,32 @@ export class ImportTemplateUsageDto {
   readonly exampleRowsIgnored!: number[];
 }
 
+export class ImportTransformationDto {
+  @ApiProperty({
+    enum: IMPORT_TRANSFORMATIONS,
+    enumName: 'ImportTransformationCode',
+    description:
+      'VALUE_TRUNCATED: el texto pasa del largo del campo y se guarda recortado. USEFUL_LIFE_DISCARDED: la vida útil no es un número entero de años y el activo queda sin vida útil',
+  })
+  readonly code!: (typeof IMPORT_TRANSFORMATIONS)[number];
+
+  @ApiProperty({ description: 'Campo destino (clave del mapeo)' })
+  readonly field!: string;
+
+  @ApiProperty({ description: 'Nombre del campo para mostrar' })
+  readonly label!: string;
+
+  @ApiProperty({ type: 'integer', description: 'Filas que se importarían con este cambio' })
+  readonly rows!: number;
+
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    description: 'VALUE_TRUNCATED: caracteres que se guardan. USEFUL_LIFE_DISCARDED: null',
+  })
+  readonly limit!: number | null;
+}
+
 export class ImportSummaryDto {
   @ApiProperty({
     type: [ImportUnmappedColumnDto],
@@ -161,6 +201,13 @@ export class ImportSummaryDto {
     description: 'Marcas de calidad de lo que se insertaría. PERSONS: DOCUMENT_TYPE_UNKNOWN, NAME_NOT_SPLIT',
   })
   readonly flagged!: Record<string, number>;
+
+  @ApiProperty({
+    type: [ImportTransformationDto],
+    description:
+      'Datos que se importan cambiados, por campo: texto más largo que el campo (se guarda recortado) y vida útil que no es un entero (se descarta). Solo los que afectan alguna fila; el detalle por fila está en los problemas con el mismo código',
+  })
+  readonly transformations!: ImportTransformationDto[];
 
   @ApiProperty({ type: 'integer' })
   readonly issues!: number;
@@ -228,6 +275,19 @@ export class ImportQuarantineRowDto {
 
 // ---------- POST /imports ----------
 
+export class ImportSampleRowDto {
+  @ApiProperty({ type: 'integer', description: 'Fila en la hoja (1 = primera fila de Excel)' })
+  readonly rowNumber!: number;
+
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: { type: 'string' },
+    description:
+      `Letra → valor de la celda como texto, solo columnas con encabezado. Recortado a ${SAMPLE_CELL_MAX} caracteres (termina en «…» si se recortó). Números y fechas tal como quedaron en el archivo cargado (fecha en ISO 8601)`,
+  })
+  readonly cells!: Record<string, string>;
+}
+
 export class ImportUploadedSheetDto {
   @ApiProperty()
   readonly name!: string;
@@ -240,6 +300,14 @@ export class ImportUploadedSheetDto {
 
   @ApiProperty({ type: 'object', additionalProperties: { type: 'string' }, description: 'Letra → encabezado' })
   readonly columns!: Record<string, string>;
+
+  @ApiProperty({
+    type: [ImportSampleRowDto],
+    maxItems: SAMPLE_ROWS,
+    description:
+      `Hasta ${SAMPLE_ROWS} filas con datos bajo el encabezado detectado (sin la fila de ejemplo de la plantilla), para ver el mapeo aplicado. Pueden traer datos personales: solo para mostrar en pantalla; el servidor no las guarda ni las registra`,
+  })
+  readonly sampleRows!: ImportSampleRowDto[];
 }
 
 export class ImportUploadedTemplateDto {

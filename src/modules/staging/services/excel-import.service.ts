@@ -22,17 +22,25 @@ import {
 import type { RawCellValue } from '../excel/read-workbook.js';
 import {
   ASSET_IMPORT_FIELDS,
+  type AssetImportField,
   catalogCode,
   catalogCodeSql,
   COLUMN_LETTER,
+  COST_CENTER_IMPORT_FIELDS,
   detectHeaderRow,
   fieldsFor,
   type ImportField,
   type ImportTarget,
+  type ImportTransformationCode,
   isImportTarget,
+  PERSON_IMPORT_FIELDS,
   recognizeColumns,
+  SAMPLE_CELL_MAX,
+  SAMPLE_COLUMNS_MAX,
+  SAMPLE_ROWS,
   templateFields,
   type UnknownCostCenterPolicy,
+  USEFUL_LIFE_PATTERN,
 } from '../import/import-fields.js';
 import { normalizeHeader } from '../diagnostics/asset-report-diagnostics.js';
 import { PHYSICAL_CONDITIONS } from '../../assets/enums/physical-condition.enum.js';
@@ -51,11 +59,81 @@ const INSTITUTIONAL_MAILBOX_SQL = String.raw`'^[A-Za-z0-9_%+-]+(\.[A-Za-z0-9_%+-
 /** Activos por transacción al registrar movimientos: acota bloqueos y da avance visible (movementsDone). */
 const MOVEMENT_CHUNK = 1000;
 
+export interface SampleRow {
+  readonly rowNumber: number;
+  /** Letra → valor de la celda como texto (recortado a SAMPLE_CELL_MAX caracteres, con «…» si se recortó). */
+  readonly cells: Record<string, string>;
+}
+
 export interface UploadedSheet {
   readonly name: string;
   readonly rows: number;
   readonly detectedHeaderRow: number;
   readonly columns: Record<string, string>;
+  /** Primeras filas con datos bajo el encabezado detectado (sin la fila de ejemplo de la plantilla). */
+  readonly sampleRows: ReadonlyArray<SampleRow>;
+}
+
+const sampleCell = (value: RawCellValue): string => {
+  const text = String(value);
+  return text.length > SAMPLE_CELL_MAX ? `${text.slice(0, SAMPLE_CELL_MAX - 1)}…` : text;
+};
+
+/**
+ * Campos que el importador recorta al guardar (left() en el INSERT) y la columna de import_src que los lleva. La
+ * vista previa cuenta con esta misma lista lo que el INSERT va a recortar.
+ */
+const ASSET_SRC_COLUMN: Partial<Record<AssetImportField, string>> = {
+  legacyCode: 'barcode',
+  serial: 'serial',
+  description: 'description',
+  model: 'model',
+  acquisitionDocument: 'document',
+};
+
+interface Truncation {
+  readonly field: string;
+  readonly column: string;
+  readonly length: number;
+}
+
+const assetTruncations: ReadonlyArray<Truncation> = Object.entries(ASSET_SRC_COLUMN).flatMap(([field, column]) => {
+  const limit = (ASSET_IMPORT_FIELDS as Record<string, ImportField>)[field]?.maxLength;
+  return limit?.over === 'TRUNCATE' && column ? [{ field, column, length: limit.length }] : [];
+});
+
+/** Largo al que el INSERT recorta un campo de activos (el mismo que cuenta la vista previa). */
+const assetMax = (field: AssetImportField): number => {
+  const truncation = assetTruncations.find((item) => item.field === field);
+  if (!truncation) {
+    throw new Error(`El campo ${field} no tiene largo máximo`);
+  }
+  return truncation.length;
+};
+
+const COST_CENTER_NAME_MAX = COST_CENTER_IMPORT_FIELDS.name.maxLength.length;
+const PERSON_NAME_MAX = PERSON_IMPORT_FIELDS.firstName.maxLength.length;
+const PERSON_LAST_NAME_MAX = PERSON_IMPORT_FIELDS.lastName.maxLength.length;
+const PERSON_POSITION_MAX = PERSON_IMPORT_FIELDS.positionTitle.maxLength.length;
+const PERSON_DOCUMENT_MAX = PERSON_IMPORT_FIELDS.documentNumber.maxLength.length;
+
+/** Lo que el importador va a transformar sin avisar de otro modo, por campo (summary.transformations). */
+export interface ImportTransformation {
+  readonly code: ImportTransformationCode;
+  readonly field: string;
+  readonly label: string;
+  readonly rows: number;
+  /** VALUE_TRUNCATED: caracteres que se guardan. USEFUL_LIFE_DISCARDED: null. */
+  readonly limit: number | null;
+}
+
+interface TransformedRow {
+  readonly row_number: number;
+  readonly code: ImportTransformationCode;
+  readonly field: string;
+  readonly length: number | null;
+  readonly limit: number | null;
+  readonly raw: string | null;
 }
 
 /** Columna de la plantilla que el archivo no trae (plantilla de otra versión o columna borrada). */
@@ -158,6 +236,8 @@ export interface ImportSummary {
   readonly alreadyPresent: number;
   readonly quarantined: Record<string, number>;
   readonly flagged: Record<string, number>;
+  /** Datos que se importan cambiados (texto recortado, vida útil descartada): cuántas filas, en qué campo. */
+  readonly transformations: ReadonlyArray<ImportTransformation>;
   readonly issues: number;
   readonly metrics: ReadonlyArray<Metric>;
 }
@@ -315,6 +395,9 @@ const targetRuleErrors = (
   return errors;
 };
 
+/** Nombre de la persona: una columna (fullName) o dos (firstName + lastName); targetRuleErrors lo valida junto. */
+const PERSON_NAME_FIELDS: ReadonlySet<string> = new Set(['fullName', 'firstName', 'lastName']);
+
 const sqlText = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
 /** (código, forma plegada) de cada tipo del catálogo: el código y la abreviatura sin puntos. */
@@ -368,7 +451,18 @@ export class ExcelImportService {
           ? detection.headerRow
           : detectHeaderRow(head.map((row) => ({ rowNumber: row.row_number, cells: row.cells, types: row.cell_types })));
       const header = head.find((row) => row.row_number === headerRow);
-      sheets.push({ name: sheet.name, rows: sheet.rows, detectedHeaderRow: headerRow, columns: headerColumns(header?.cells) });
+      const columns = headerColumns(header?.cells);
+      const example =
+        detection?.dataSheet === sheet.name && Object.keys(detection.example).length > 0
+          ? JSON.stringify(detection.example)
+          : null;
+      sheets.push({
+        name: sheet.name,
+        rows: sheet.rows,
+        detectedHeaderRow: headerRow,
+        columns,
+        sampleRows: await this.sampleRows(loaded.batchId, sheet.name, headerRow, columns, example),
+      });
     }
     let template: UploadedTemplate | null = null;
     if (detection) {
@@ -389,6 +483,41 @@ export class ExcelImportService {
       };
     }
     return { batchId: loaded.batchId, created: loaded.created, sheets, template };
+  }
+
+  /**
+   * Muestra de la hoja para ver el mapeo aplicado a datos reales: las primeras SAMPLE_ROWS filas con algún valor
+   * bajo el encabezado, sin la fila de ejemplo de la plantilla, leídas de staging (no se relee el archivo). Solo las
+   * columnas con encabezado y cada celda recortada. Ver SAMPLE_ROWS: no se guarda ni se registra en ningún lado.
+   */
+  private async sampleRows(
+    batchId: string,
+    sheet: string,
+    headerRow: number,
+    columns: Record<string, string>,
+    example: string | null,
+  ): Promise<SampleRow[]> {
+    const letters = Object.keys(columns).slice(0, SAMPLE_COLUMNS_MAX);
+    if (letters.length === 0) {
+      return [];
+    }
+    const rows = (await this.dataSource.query(
+      `SELECT r.row_number, r.cells FROM staging_row r
+       WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3
+         AND EXISTS (SELECT 1 FROM jsonb_each_text(r.cells) e WHERE btrim(e.value) <> '')
+         AND ($4::jsonb IS NULL OR r.cells <> $4::jsonb)
+       ORDER BY r.row_number LIMIT $5`,
+      [batchId, sheet, headerRow, example, SAMPLE_ROWS],
+    )) as Array<{ row_number: number; cells: Record<string, RawCellValue> }>;
+    return rows.map((row) => ({
+      rowNumber: row.row_number,
+      cells: Object.fromEntries(
+        letters.flatMap((letter) => {
+          const value = row.cells[letter];
+          return value === undefined ? [] : [[letter, sampleCell(value)]];
+        }),
+      ),
+    }));
   }
 
   async preview(
@@ -440,10 +569,12 @@ export class ExcelImportService {
     const job = await this.importRow(importId);
 
     let classified: Classified | null = null;
+    let transformed: TransformedRow[] = [];
     try {
       await this.dataSource.transaction(async (manager) => {
         await this.prepareCatalogs(manager, job, actorId);
         classified = await this.classify(manager, job);
+        transformed = await this.transformations(manager, job);
         throw new PreviewRollback();
       });
     } catch (error) {
@@ -470,6 +601,32 @@ export class ExcelImportService {
           rawValue: row.legacy_id,
           detail: row.detail,
         });
+      }
+    }
+    const definitions: Record<string, ImportField> = fieldsFor(job.target);
+    const labelOf = (field: string): string => definitions[field]?.label ?? field;
+    for (const row of transformed) {
+      const letter = job.mapping[row.field];
+      issues.push({
+        sheet: job.sheet_name,
+        rowNumber: row.row_number,
+        column: (letter ? columns[letter] : undefined) ?? definitions[row.field]?.header ?? row.field,
+        code: row.code,
+        rawValue: row.code === 'USEFUL_LIFE_DISCARDED' ? row.raw : null,
+        detail:
+          row.code === 'VALUE_TRUNCATED'
+            ? `${labelOf(row.field)}: ${row.length ?? '?'} caracteres; se guardan los primeros ${row.limit ?? '?'}`
+            : `${labelOf(row.field)}: no es un número entero de años; el activo se importa sin vida útil`,
+      });
+    }
+    const transformations: ImportTransformation[] = [];
+    for (const row of transformed) {
+      const existing = transformations.findIndex((item) => item.code === row.code && item.field === row.field);
+      if (existing >= 0) {
+        const item = transformations[existing] as ImportTransformation;
+        transformations[existing] = { ...item, rows: item.rows + 1 };
+      } else {
+        transformations.push({ code: row.code, field: row.field, label: labelOf(row.field), rows: 1, limit: row.limit });
       }
     }
     const mappedLetters = new Set(Object.values(request.mapping));
@@ -535,6 +692,7 @@ export class ExcelImportService {
       alreadyPresent: result.alreadyPresent,
       quarantined: result.quarantined,
       flagged: result.flagged,
+      transformations,
       issues: issues.length,
       metrics: job.target === 'ASSETS' ? diagnosis.metrics : (result.metrics ?? []),
     };
@@ -747,12 +905,35 @@ export class ExcelImportService {
     const missing = Object.entries(fields)
       .filter(([field, definition]) => definition.required && !request.mapping[field] && !absent.has(field))
       .map(([field]) => field);
+    // Un campo cuya celda vacía manda la fila a cuarentena, sin columna asignada, deja fuera el 100 % de las filas:
+    // eso no es un aviso sino un error del mapeo. El nombre de las personas se valida como grupo en targetRuleErrors;
+    // una columna que falta en una plantilla detectada sigue la regla de las obligatorias (se trata como vacía).
+    const rejectsEveryRow = Object.entries(fields)
+      .filter(
+        ([field, definition]) =>
+          !definition.required &&
+          definition.whenEmpty.effect === 'QUARANTINE' &&
+          !request.mapping[field] &&
+          !absent.has(field) &&
+          !(request.target === 'PERSONS' && PERSON_NAME_FIELDS.has(field)),
+      )
+      .map(([field, definition]) => ({
+        field,
+        message: `Asigne la columna de «${definition.header}»: sin ese dato ninguna fila se importa. Si el archivo no la trae, agréguela y vuelva a subirlo.`,
+      }));
     const badLetters = Object.entries(request.mapping).filter(([, letter]) => !COLUMN_LETTER.test(letter));
     const rules = targetRuleErrors(request, absent);
-    if (unknown.length > 0 || missing.length > 0 || badLetters.length > 0 || rules.length > 0) {
+    if (
+      unknown.length > 0 ||
+      missing.length > 0 ||
+      rejectsEveryRow.length > 0 ||
+      badLetters.length > 0 ||
+      rules.length > 0
+    ) {
       throw new ApiException(ErrorCode.ValidationFailed, 'Mapeo inválido', [
         ...unknown.map((field) => ({ field, message: 'Campo destino desconocido' })),
         ...missing.map((field) => ({ field, message: 'Campo obligatorio sin columna asignada' })),
+        ...rejectsEveryRow,
         ...badLetters.map(([field]) => ({ field, message: 'Columna inválida' })),
         ...rules,
       ]);
@@ -901,12 +1082,61 @@ export class ExcelImportService {
             CASE WHEN purchase_raw IS NOT NULL AND (coalesce(purchase_type, '') NOT IN ('date', 'formula:date')
               OR left(purchase_raw, 10) = '1970-01-01') THEN 'ACQUISITION_DATE_INVALID' END,
             CASE WHEN price_raw ~ '^-?[0-9]+(\\.[0-9]+)?$' AND price_raw::numeric = 0 THEN 'PRICE_ZERO' END,
-            CASE WHEN price_raw IS NULL OR price_raw !~ '^-?[0-9]+(\\.[0-9]+)?$' THEN 'PRICE_MISSING' END
+            CASE WHEN price_raw IS NULL OR price_raw !~ '^-?[0-9]+(\\.[0-9]+)?$' THEN 'PRICE_MISSING' END,
+            -- Las mismas condiciones que insertAssets: vacías, quedan en «Sin clasificar» / sin verificar.
+            CASE WHEN category_code IS NULL THEN 'CATEGORY_UNASSIGNED' END,
+            CASE WHEN physical_condition IS NULL THEN 'PHYSICAL_CONDITION_UNKNOWN' END
           ], NULL)) AS flag
           FROM import_src s
           WHERE s.reason IS NULL AND NOT EXISTS (SELECT 1 FROM asset_import_origin o WHERE o.legacy_asset_id = s.legacy_id)
         ) f GROUP BY flag`,
     );
+  }
+
+  /**
+   * Lo que el INSERT va a cambiar de filas que sí se importan, fila por fila: texto recortado (mismos largos que
+   * los left() de insertAssets / insertCostCenters) y vida útil descartada (misma expresión que insertAssets). Corre
+   * sobre import_src ya clasificada, con el mismo filtro de filas que el INSERT. Sin valores de las celdas salvo la
+   * vida útil descartada (un número, útil para corregirlo).
+   */
+  private async transformations(manager: EntityManager, job: ImportRow): Promise<TransformedRow[]> {
+    if (job.target === 'PERSONS') {
+      // En personas un texto largo no se recorta: la fila va a cuarentena (FIELD_TOO_LONG / DOCUMENT_NUMBER_INVALID).
+      return [];
+    }
+    const truncations: ReadonlyArray<Truncation> =
+      job.target === 'ASSETS'
+        ? assetTruncations
+        : [{ field: 'name', column: 'name', length: COST_CENTER_NAME_MAX }];
+    const insertable =
+      job.target === 'ASSETS'
+        ? 'NOT EXISTS (SELECT 1 FROM asset_import_origin o WHERE o.legacy_asset_id = s.legacy_id)'
+        : 'NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = s.code)';
+    const checks = [
+      ...truncations
+        .filter((truncation) => job.mapping[truncation.field])
+        .map(
+          (truncation) =>
+            `('VALUE_TRUNCATED', ${sqlText(truncation.field)}, length(s.${truncation.column}), ${truncation.length},
+              NULL::text, length(s.${truncation.column}) > ${truncation.length})`,
+        ),
+      ...(job.target === 'ASSETS' && job.mapping['usefulLifeYears']
+        ? [
+            `('USEFUL_LIFE_DISCARDED', 'usefulLifeYears', NULL::int, NULL::int, left(s.useful_raw, 40),
+              s.useful_raw IS NOT NULL AND s.useful_raw !~ '${USEFUL_LIFE_PATTERN}')`,
+          ]
+        : []),
+    ];
+    if (checks.length === 0) {
+      return [];
+    }
+    return (await manager.query(
+      `SELECT s.row_number, t.code, t.field, t.length, t."limit", t.raw
+       FROM import_src s
+       CROSS JOIN LATERAL (VALUES ${checks.join(',\n')}) AS t(code, field, length, "limit", raw, applies)
+       WHERE s.reason IS NULL AND ${insertable} AND t.applies
+       ORDER BY s.row_number, t.field`,
+    )) as TransformedRow[];
   }
 
   /**
@@ -950,7 +1180,7 @@ export class ExcelImportService {
                 THEN 'Ya existe una persona con ese número y tipo de documento; declare el tipo del lote'
                 ELSE 'Ya existe una persona con ese número sin tipo de documento; complete su tipo antes de importar' END
             WHEN 'COST_CENTER_UNKNOWN' THEN 'Centro de costo ' || center_code
-            WHEN 'FIELD_TOO_LONG' THEN 'Nombre (máx. 100) o cargo (máx. 150) demasiado largo'
+            WHEN 'FIELD_TOO_LONG' THEN 'Nombre (máx. ${PERSON_NAME_MAX}) o cargo (máx. ${PERSON_POSITION_MAX}) demasiado largo'
             WHEN 'EMAIL_NOT_INSTITUTIONAL' THEN
               CASE WHEN email ~* '@unac\\.edu\\.co$'
                 THEN 'El correo no es una dirección válida: tiene espacios, saltos de línea u otros caracteres no permitidos' END
@@ -962,11 +1192,12 @@ export class ExcelImportService {
               WHEN is_blank THEN 'EMPTY_ROW'
               WHEN doc_number IS NULL THEN 'DOCUMENT_NUMBER_MISSING'
               WHEN doc_type_raw IS NOT NULL AND doc_type IS NULL THEN 'DOCUMENT_TYPE_INVALID'
-              WHEN length(doc_number) > 30
+              WHEN length(doc_number) > ${PERSON_DOCUMENT_MAX}
                 OR (doc_type IN (${NUMERIC_DOCUMENT_TYPES}) AND doc_number !~ '^[0-9]+$') THEN 'DOCUMENT_NUMBER_INVALID'
               WHEN count(*) OVER (PARTITION BY doc_number) > 1 THEN 'DOCUMENT_NUMBER_DUPLICATED'
               WHEN first_name IS NULL OR last_name IS NULL THEN 'REQUIRED_FIELD_MISSING'
-              WHEN length(first_name) > 100 OR length(last_name) > 100 OR length(position_title) > 150
+              WHEN length(first_name) > ${PERSON_NAME_MAX} OR length(last_name) > ${PERSON_LAST_NAME_MAX}
+                OR length(position_title) > ${PERSON_POSITION_MAX}
                 THEN 'FIELD_TOO_LONG'
               WHEN (doc_type IS NULL AND EXISTS (SELECT 1 FROM person p
                       WHERE p.document_number = import_src.doc_number AND p.document_type IS NOT NULL))
@@ -1123,7 +1354,7 @@ export class ExcelImportService {
            CASE WHEN s.purchase_type IN ('date', 'formula:date') AND left(s.purchase_raw, 10) <> '1970-01-01'
                 THEN left(s.purchase_raw, 10)::date END AS purchase_date,
            CASE WHEN s.price_raw ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN s.price_raw::numeric END AS price,
-           CASE WHEN s.useful_raw ~ '^[0-9]{1,3}(\\.0+)?$' THEN s.useful_raw::numeric::smallint END AS useful_life,
+           CASE WHEN s.useful_raw ~ '${USEFUL_LIFE_PATTERN}' THEN s.useful_raw::numeric::smallint END AS useful_life,
            cc.id AS cost_center_id,
            coalesce((cc.external_metadata ->> 'notInCatalog')::boolean, FALSE) AS center_not_in_catalog
          FROM import_src s JOIN cost_center cc ON cc.external_code = s.center_code
@@ -1135,13 +1366,15 @@ export class ExcelImportService {
            acquisition_type_id, acquisition_date, acquisition_document, acquisition_price, currency,
            operational_status, physical_condition, current_cost_center_id, depreciation_method,
            useful_life_years, salvage_value, notes, created_by, updated_by, data_quality_flags)
-         SELECT 'XLS-' || src.legacy_id, left(src.barcode, 50), left(src.serial, 100), left(src.description, 500),
-           left(src.model, 150),
+         -- Recortes: los largos de ASSET_IMPORT_FIELDS (maxLength), los mismos que cuenta la vista previa.
+         SELECT 'XLS-' || src.legacy_id, left(src.barcode, ${assetMax('legacyCode')}),
+           left(src.serial, ${assetMax('serial')}), left(src.description, ${assetMax('description')}),
+           left(src.model, ${assetMax('model')}),
            -- Categoría y condición del archivo (ya validadas en la clasificación: fuera del catálogo va a cuarentena).
            -- Sin valor: la categoría de relleno y la condición sin verificar, con sus marcas.
            (SELECT id FROM asset_category WHERE code = coalesce(src.category_code, $1)),
            (SELECT id FROM acquisition_type WHERE code = $2), src.purchase_date,
-           left(src.document, 100), coalesce(src.price, 0), 'COP', 'IN_USE',
+           left(src.document, ${assetMax('acquisitionDocument')}), coalesce(src.price, 0), 'COP', 'IN_USE',
            src.physical_condition::asset_physical_condition,
            src.cost_center_id, 'STRAIGHT_LINE', src.useful_life, 0, src.notes, $3, $3,
            array_remove(ARRAY[
@@ -1190,7 +1423,7 @@ export class ExcelImportService {
   private async insertCostCenters(manager: EntityManager, job: ImportRow): Promise<number> {
     const inserted = (await manager.query(
       `INSERT INTO cost_center (external_code, name, accepts_assets, is_active, sync_source, last_synced_at, external_metadata)
-       SELECT s.code, left(s.name, 200), TRUE, TRUE, 'IMPORT_EXCEL', NOW(),
+       SELECT s.code, left(s.name, ${COST_CENTER_NAME_MAX}), TRUE, TRUE, 'IMPORT_EXCEL', NOW(),
               jsonb_build_object('importId', $1::text, 'row', s.row_number)
        FROM import_src s WHERE s.reason IS NULL
        ON CONFLICT (external_code) DO NOTHING
