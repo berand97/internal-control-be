@@ -89,6 +89,7 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     url.pathname = `/${E2E_DB}`;
     process.env['DATABASE_URL'] = url.toString();
     process.env['GOTENBERG_URL'] = GOTENBERG;
+    process.env['STORAGE_PROJECT_PATH'] = STORAGE;
 
     const { default: migrations } = await import('../../src/database/data-source.js');
     await migrations.initialize();

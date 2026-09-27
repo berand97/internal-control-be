@@ -105,8 +105,10 @@ cada una; es preferible que el despliegue falle de inmediato y se vea en Dokploy
 
 **Nota de almacenamiento.** Las variables `STORAGE_*` son solo el valor inicial: en cuanto
 existe la fila de `storage_settings` (se crea al guardar la configuración desde la
-aplicación), el driver y la ruta salen de la base de datos. Con el driver `project`, esa
-ruta debe seguir siendo `/data/storage` o los archivos quedarán fuera del volumen.
+aplicación), el driver y las credenciales salen de la base de datos. La carpeta del driver
+`project` es la excepción: **siempre** sale de `STORAGE_PROJECT_PATH` (no se cambia desde la
+aplicación; una `project_path` distinta guardada en la base se ignora y se avisa en el log la
+primera vez que se usa el almacenamiento). Debe seguir siendo `/data/storage` o los archivos quedarán fuera del volumen.
 
 ## 3. Volúmenes
 

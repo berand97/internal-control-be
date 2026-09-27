@@ -716,4 +716,25 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Solo se reintenta una importación que falló; esta sigue en cola, en curso o ya terminó',
   },
+  [ErrorCode.StorageKeyInvalid]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'La clave del objeto de almacenamiento no es válida',
+  },
+  [ErrorCode.StorageProjectPathLocked]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message:
+      'La carpeta del almacenamiento local se define al desplegar (STORAGE_PROJECT_PATH) y no se cambia desde la aplicación',
+  },
+  [ErrorCode.ArchiveTooLarge]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El archivo es demasiado grande o complejo para procesarlo',
+  },
+  [ErrorCode.MailAddressInvalid]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'La dirección o una cabecera del correo no es válida',
+  },
 };

@@ -6,6 +6,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { parseDriveFolderId } from '../parse-drive-folder-id.js';
@@ -86,9 +87,13 @@ export class UpdateStorageSettingsDto {
   @IsIn(DRIVERS)
   readonly driver?: (typeof DRIVERS)[number];
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Solo lectura: la carpeta del almacenamiento local se fija al desplegar con STORAGE_PROJECT_PATH. Se acepta reenviar el valor que devuelve el estado; cualquier otro responde 400 STORAGE_PROJECT_PATH_LOCKED',
+  })
   @IsOptional()
   @IsString()
+  @MaxLength(4096)
   readonly projectPath?: string;
 
   @ApiPropertyOptional({ enum: S3_PROVIDERS })

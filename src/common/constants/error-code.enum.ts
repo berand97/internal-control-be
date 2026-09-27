@@ -149,4 +149,9 @@ export enum ErrorCode {
   CostCenterHeadEnded = 'COST_CENTER_HEAD_ENDED',
 
   ImportJobNotRetryable = 'IMPORT_JOB_NOT_RETRYABLE',
+
+  StorageKeyInvalid = 'STORAGE_KEY_INVALID',
+  StorageProjectPathLocked = 'STORAGE_PROJECT_PATH_LOCKED',
+  ArchiveTooLarge = 'ARCHIVE_TOO_LARGE',
+  MailAddressInvalid = 'MAIL_ADDRESS_INVALID',
 }
