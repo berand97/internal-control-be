@@ -16,6 +16,7 @@ es `src/config/configuration.ts` (más `src/instrumentation.ts`, `src/app.module
 | `gotenberg` | Conversión DOCX→PDF de las actas (`POST /forms/libreoffice/convert`) | servicio `gotenberg` de `docker-compose.yml` |
 | PostgreSQL 18.6 | Base de datos | Servicio de base de datos de Dokploy (fuera de este compose) |
 | Volumen `backend_storage` | Fotos, plantillas, actas generadas y adjuntos | montado en `/data/storage` del `api` |
+| MinIO (opcional) | Almacenamiento S3 de actas, plantillas, rúbricas y archivos de importación | Servicio aparte, fuera de este compose; se conecta desde la pantalla *Almacenamiento* (ver §10) |
 
 ### Gotenberg
 
@@ -264,7 +265,7 @@ se rechazan con `400 OUTBOUND_DESTINATION_FORBIDDEN`:
 Además el endpoint S3 debe ser `http(s)` sin usuario, parámetros ni fragmento, y en producción
 `https` salvo que el host esté en `OUTBOUND_ALLOWED_HOSTS`.
 
-- Un SMTP o MinIO interno legítimo: agregue su host (o IP) a `OUTBOUND_ALLOWED_HOSTS`
+- Un SMTP o MinIO interno legítimo (MinIO: ver §10.4): agregue su host (o IP) a `OUTBOUND_ALLOWED_HOSTS`
   (lista separada por comas, coincidencia exacta).
 - En desarrollo (`NODE_ENV` distinto de `production`) se permiten por defecto (MailHog o MinIO en
   `localhost`). Para probar la regla localmente: `OUTBOUND_ALLOW_PRIVATE_NETWORKS=false`.
@@ -285,3 +286,189 @@ activo; si algo no cuadra responde `424 STORAGE_OAUTH_FAILED` y no cambia el alm
   autorización en otro navegador o equipo falla a propósito.
 - `GET /api/v1/storage` ya no devuelve `authorizationUrl` (siempre `null`): la URL solo la emiten
   `oauth/{google,onedrive}/start`.
+
+## 10. Almacenamiento con MinIO
+
+MinIO se instala **aparte** (no forma parte de `docker-compose.yml`) y el backend se conecta a él desde
+la pantalla *Almacenamiento*. Nada de esta sección cambia el despliegue del `api`, salvo
+`OUTBOUND_ALLOWED_HOSTS` si MinIO queda en la red interna (§10.4).
+
+### 10.1 Qué imagen usar (estado comprobado el 2026-09-26)
+
+| Fuente | Estado | Evidencia |
+|---|---|---|
+| `minio/minio`, `minio/mc` (Docker Hub) | **Ya no existen** | `docker pull minio/minio:latest` → `pull access denied, repository does not exist`; `hub.docker.com/v2/repositories/minio/minio/` → 404. |
+| `quay.io/minio/minio`, `quay.io/minio/mc` | **Sin acceso anónimo** | El token anónimo de quay.io para `minio/minio` sale con `actions: []` y el manifiesto responde 401; no figuran entre los repositorios públicos del namespace `minio`. |
+| Binarios `dl.min.io/server/minio/release/…` | **Retirados** | `410 Gone`: *"The open-source MinIO Server, MinIO Client (mc) and MinIO KES projects are archived and no longer maintained… no security updates"*. |
+| Código fuente `github.com/minio/minio` (AGPLv3) | **Archivado, solo lectura** | README: *"THIS REPOSITORY IS NO LONGER MAINTAINED"* y *"distributed as source code only"*. Última versión: `RELEASE.2025-10-15T17-29-55Z` (commit `9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a`). `mc`: `RELEASE.2025-08-13T08-35-41Z` (commit `d6541ea280b73a834b64d4097e21f2be77676104`), también archivado. |
+| **AIStor** (`quay.io/minio/aistor/minio`, `quay.io/minio/aistor/mc`) | **Única imagen oficial publicada hoy** | Licencia comercial de MinIO, no AGPL. Servidor `RELEASE.2026-09-19T17-05-25Z@sha256:107cf2014a9583c74c11e3cdbd6903d89c2244355886b89ce532f4ecae9c23f3`; cliente `quay.io/minio/aistor/mc:RELEASE.2026-09-19T15-24-59Z@sha256:23511e340cbabf07e6a8b53f9c434975708f22f3c047d6beeddc17bf1a5aed88` (digest del índice multi-arquitectura amd64/arm64). Exige un archivo de licencia (`--license /minio.license`). El nivel *AIStor Free* es gratuito, pero solo para un nodo, sin cifrado en reposo y sin soporte. |
+
+Además, desde `RELEASE.2025-05-24` la consola web de la edición comunitaria solo permite navegar por los
+objetos: usuarios, políticas y configuración se administran con `mc`.
+
+**Decisión pendiente (licencia):** hay dos caminos y los dos se conectan igual al backend.
+
+- **A. AIStor Free:** tiene actualizaciones de seguridad, pero hay que registrarse para obtener la
+  licencia y aceptar el contrato *AIStor Free Tier* (lo revisa quien firma por la UNAC).
+- **B. Edición comunitaria compilada desde el código fuente archivado:** AGPLv3 y sin licencia que
+  tramitar, pero **ya no recibe parches de seguridad**. Si se elige, compílela fijada por commit:
+
+  ```dockerfile
+  FROM golang:1.24-bookworm AS build
+  ENV CGO_ENABLED=0
+  RUN go install github.com/minio/minio@9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a \
+   && go install github.com/minio/mc@d6541ea280b73a834b64d4097e21f2be77676104
+  FROM debian:bookworm-slim
+  COPY --from=build /go/bin/minio /go/bin/mc /usr/local/bin/
+  ENTRYPOINT ["minio"]
+  ```
+
+  Con este Dockerfile se corrieron las pruebas de `test/integration/s3-minio.int-spec.ts`.
+
+No use etiquetas flotantes (`latest`): fije versión y digest como en Gotenberg (§1).
+
+### 10.2 Instalar MinIO (servicio independiente)
+
+- **Un solo servicio**, con volumen persistente en `/data` y comando `minio server /data`
+  (AIStor: `minio server /data --license /minio.license`, con la licencia montada).
+- **Credenciales raíz** (`MINIO_ROOT_USER` y `MINIO_ROOT_PASSWORD`): largas y aleatorias
+  (`openssl rand -hex 24`), guardadas solo en el panel. No se usan en el backend: sirven para administrar
+  con `mc`. Si usa una plantilla de MinIO de Dokploy, cambie la imagen: `minio/minio` ya no existe.
+- **API S3 (puerto 9000):** no le asigne dominio público si el backend está en el mismo servidor
+  (§10.4, opción 1). Si necesita publicarla, solo con **HTTPS** (opción 2).
+- **Consola (puerto 9001, `--console-address :9001`):** no la publique. Si hace falta, publíquela solo
+  detrás de HTTPS y con restricción de IP o autenticación del proxy.
+- **Respaldo:** el versionado no es un respaldo. Respalde el volumen `/data` (con el servicio detenido
+  o con una instantánea) o copie el bucket a otro destino con `mc mirror --preserve`, en la **misma
+  ventana** que el `pg_dump`: la base guarda las claves de los objetos y, sin los dos respaldos,
+  un acta firmada no se puede volver a mostrar.
+
+### 10.3 Bucket privado, versionado y usuario de la aplicación
+
+Con `mc` (el que viene en la imagen o `quay.io/minio/aistor/mc`), usando la credencial raíz **solo**
+para esto:
+
+```sh
+mc alias set ci <URL de la API S3> <MINIO_ROOT_USER> <MINIO_ROOT_PASSWORD>
+mc mb ci/control-interno                      # añada --with-lock si se decide object lock (abajo)
+mc version enable ci/control-interno
+mc anonymous get ci/control-interno           # debe decir: private
+# Las sondas de "Probar conexión" (health/probe-*.txt) quedan como versiones antiguas: que caduquen.
+mc ilm rule add --prefix health/ --noncurrent-expire-days 1 --expire-delete-marker ci/control-interno
+mc admin policy create ci control-interno-app control-interno-app.json
+mc admin user add ci svc-control-interno "<clave aleatoria de 40 caracteres>"
+mc admin policy attach ci control-interno-app --user svc-control-interno
+```
+
+`control-interno-app.json`: política mínima, válida solo para ese bucket. La aplicación nunca borra
+documentos: solo puede borrar sus sondas en `health/`.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:GetBucketVersioning", "s3:GetBucketObjectLockConfiguration"],
+      "Resource": ["arn:aws:s3:::control-interno"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": ["arn:aws:s3:::control-interno/*"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:DeleteObject"],
+      "Resource": ["arn:aws:s3:::control-interno/health/*"]
+    }
+  ]
+}
+```
+
+**Object lock (evidencia inmutable).** Se decide **al crear el bucket** (`mc mb --with-lock`, que
+además activa el versionado); en MinIO no se activa después.
+
+- A favor: con una retención por defecto (`mc retention set --default GOVERNANCE|COMPLIANCE <días>d`),
+  ninguna versión de un acta firmada se puede borrar ni sobrescribir durante ese plazo. En modo
+  `COMPLIANCE` no la borra ni la cuenta raíz: es evidencia fuerte para control interno.
+- En contra: se aplica a **todo** lo que entra en el bucket (plantillas, archivos de importación y
+  sondas de salud). Un archivo cargado por error, o con datos personales que haya que suprimir
+  (Ley 1581), no se puede eliminar hasta que venza el plazo. Las versiones retenidas no caducan con
+  `mc ilm`, así que el disco crece. `COMPLIANCE` es irreversible.
+- Requisitos: un plazo de retención definido por la tabla de retención documental (TRD) de la UNAC y
+  un bucket nuevo creado con `--with-lock`.
+- Recomendación: por ahora, versionado sin object lock. Si control interno fija un plazo, cree un
+  bucket con `--with-lock` y retención `GOVERNANCE` y migre (§10.6). *Probar conexión* muestra el estado
+  en `bucket.objectLock`.
+
+### 10.4 Red: BE-16 y `OUTBOUND_ALLOWED_HOSTS`
+
+En producción el backend **rechaza** cualquier endpoint S3 en la red interna (§8):
+`http://minio:9000`, el nombre interno de un servicio de Dokploy (una sola etiqueta, sin punto), una IP
+privada o un nombre que resuelva a una. Al guardar responde `400 OUTBOUND_DESTINATION_FORBIDDEN` y
+*Probar conexión* lo muestra en la comprobación `DESTINATION`. Hay dos opciones:
+
+1. **MinIO interno + autorización por variable (recomendada si están en el mismo servidor).** En el
+   *Environment* del backend, `OUTBOUND_ALLOWED_HOSTS=<host exacto del endpoint>` (por ejemplo, el
+   nombre interno que Dokploy asigna al servicio MinIO) y **vuelva a desplegar el backend**. Con el host
+   en la lista también se acepta `http://`. MinIO y el `api` deben compartir red de Docker.
+2. **MinIO con dominio HTTPS público** (por ejemplo `https://s3.control-interno.unac.edu.co`). No
+   necesita variable si el dominio resuelve a una IP pública. Si dentro del servidor resuelve a una
+   IP privada (DNS interno o *hairpin*), también se rechaza y hay que usar la opción 1.
+
+La autorización es una variable de despliegue **a propósito**. Si se pudiera cambiar desde la pantalla,
+un administrador de almacenamiento podría volver a usar *Probar conexión* para sondear la red interna.
+
+### 10.5 Conectar el backend desde la pantalla *Almacenamiento*
+
+La fila `storage_settings` de la base **manda** sobre las variables `STORAGE_*`. `docker-compose.yml`
+fija `STORAGE_DRIVER=project` como valor inicial y no hace falta tocarlo. Orden:
+
+1. Respaldo de la base y del volumen `backend_storage` (§5).
+2. MinIO instalado, bucket y usuario creados (§10.2 y §10.3). Si aplica, `OUTBOUND_ALLOWED_HOSTS` ya
+   desplegado (§10.4): **sin él, guardar falla con 400**.
+3. En *Almacenamiento*, elija *S3 compatible* y complete:
+
+   | Campo | Valor |
+   |---|---|
+   | Proveedor (`s3Provider`) | `MinIO` |
+   | Endpoint (`s3Endpoint`) | URL de la API S3, **sin** ruta ni bucket: `http://<host interno>:9000` u `https://s3.dominio` |
+   | Región (`s3Region`) | `us-east-1` (la de MinIO, salvo que configure `MINIO_REGION`) |
+   | Bucket (`s3Bucket`) | `control-interno` |
+   | Access key / Secret key | las de `svc-control-interno`, **nunca** la raíz |
+   | Path-style (`s3ForcePathStyle`) | **activado** (MinIO no usa subdominios por bucket) |
+
+   La clave secreta se guarda cifrada con `SETTINGS_ENCRYPTION_KEY`.
+4. **Guardar activa el driver de inmediato**: lo que se genere desde ese momento va a MinIO. Hágalo en un
+   momento de poca actividad y pulse *Probar conexión* enseguida. Si algo sale `FAILED`, vuelva a
+   *Local (servidor)*: lo guardado en MinIO mientras tanto se sigue leyendo porque cada fila guarda su
+   driver, pero solo mientras la configuración S3 se conserve.
+5. *Probar conexión* debe mostrar `ok: true`, con todas las comprobaciones `PASSED` y `VERSIONING` en
+   `PASSED`. Luego genere un acta de prueba y descárguela, y abra un acta **anterior** al cambio.
+
+*Probar conexión* (`POST /api/v1/storage/test`) comprueba, en orden:
+`CONFIGURATION` (bucket y claves), `DESTINATION` (BE-16), `ENDPOINT`, `CREDENTIALS`, `BUCKET`,
+`WRITE`/`READ`/`DELETE` (objeto `health/probe-<uuid>.txt`), `VERSIONING` y `OBJECT_LOCK`. Códigos de falla:
+`STORAGE_NOT_CONFIGURED`, `OUTBOUND_DESTINATION_FORBIDDEN`, `ENDPOINT_NOT_ALLOWED`, `ENDPOINT_UNREACHABLE`,
+`ENDPOINT_TIMEOUT`, `TLS_CERTIFICATE_INVALID`, `INVALID_CREDENTIALS`, `ACCESS_DENIED`, `BUCKET_NOT_FOUND`,
+`CONTENT_MISMATCH` y `UNEXPECTED_ERROR`. Los mensajes nunca incluyen claves ni el texto del proveedor.
+
+### 10.6 Documentos que ya estaban en el volumen local
+
+**No se migran solos, y no hace falta para seguir usándolos.** Cada documento guarda con qué driver se
+escribió (`document.docx_driver`/`pdf_driver`/`signed_pdf_driver`, `signature_envelope.current_pdf_driver`,
+`signature_envelope_signer.rubric_driver`, `document_template_version.storage_driver`,
+`import_template.storage_driver`) y se lee con ese driver (`StorageService.getFrom`). Por eso:
+
+- El volumen `backend_storage` **sigue montado y en los respaldos** mientras exista una fila con driver
+  `project`.
+- `getFrom('s3', …)` usa la configuración S3 **vigente**: si luego cambia el endpoint o el bucket,
+  lo guardado en el bucket anterior deja de leerse. Copie los objetos antes de cambiarlo.
+- `GET /api/v1/storage/objects?key=` descarga solo del driver activo.
+
+Si se quiere vaciar el volumen, la migración va aparte y está sin implementar. Tendría que ser un comando
+idempotente con `--dry-run`: por cada fila con driver `project`, copiar el objeto con la misma clave a
+MinIO, verificar el SHA-256 contra el hash guardado en la fila (`file_hash`, `current_pdf_sha256`,
+`rubric_sha256`…) y cambiar el driver de esa fila en una transacción. Recién con todo verificado se
+retira el volumen, siempre después de un respaldo.
