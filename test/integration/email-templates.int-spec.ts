@@ -849,6 +849,10 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const response = await upload(director, await png(300, 60), 'logo.png', 'image/png');
       expect(response.status).toBe(409);
       expect(response.body.error.code).toBe('PUBLIC_ASSETS_NOT_CONFIGURED');
+      // 3000 × 1500 px ya no se rechaza por tamaño: pasa la validación y llega al almacenamiento (aquí, sin S3).
+      const wide = await upload(director, await png(3000, 1500), 'ancha.png', 'image/png');
+      expect(wide.status).toBe(409);
+      expect(wide.body.error.code).toBe('PUBLIC_ASSETS_NOT_CONFIGURED');
       expect(await scalar<string>(dataSource, 'SELECT count(*)::text FROM email_asset')).toBe(before);
       const columns = (await dataSource.query(
         `SELECT column_name FROM information_schema.columns WHERE table_name = 'email_asset' ORDER BY ordinal_position`,
@@ -879,7 +883,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       expect((await http().get('/api/v1/email-templates/assets?limit=101').set(auth(reader))).status).toBe(400);
     });
 
-    it('rechaza por los bytes antes de tocar el almacenamiento: SVG, GIF y HTML renombrados; más de 1 MB; más de 2000 px', async () => {
+    it('rechaza por los bytes antes de tocar el almacenamiento: SVG, GIF y HTML renombrados; más de 1 MB; más de 100 megapíxeles; dañada', async () => {
       const svg = await upload(director, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), 'logo.png', 'image/png');
       expect(svg.status).toBe(400);
       expect(svg.body.error).toMatchObject({ code: 'FILE_TYPE_NOT_ALLOWED', message: 'Solo se admiten imágenes PNG o JPEG' });
@@ -890,9 +894,19 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const big = await upload(director, Buffer.alloc(1024 * 1024 + 1, 0x41), 'grande.png', 'image/png');
       expect(big.status).toBe(400);
       expect(big.body.error).toMatchObject({ code: 'FILE_TOO_LARGE', message: 'El archivo supera el máximo de 1 MB' });
-      const wide = await upload(director, await png(2001, 10), 'ancha.png', 'image/png');
-      expect(wide.status).toBe(400);
-      expect(wide.body.error).toMatchObject({ code: 'EMAIL_ASSET_INVALID_IMAGE', message: 'La imagen supera 2000 × 2000 px' });
+      // Más de 100 megapíxeles en 318 KB (un solo color): bomba de descompresión, se rechaza sin decodificarla.
+      const bomb = await sharp({ create: { width: 10240, height: 10240, channels: 3, background: '#306999' } })
+        .png({ compressionLevel: 9 })
+        .toBuffer();
+      expect(bomb.length).toBeLessThan(1024 * 1024);
+      const huge = await upload(director, bomb, 'enorme.png', 'image/png');
+      expect(huge.status).toBe(400);
+      expect(huge.body.error).toMatchObject({
+        code: 'EMAIL_ASSET_INVALID_IMAGE',
+        message: 'La imagen es demasiado grande para procesarla (más de 100 megapíxeles)',
+      });
+      const broken = await upload(director, (await png(40, 20)).subarray(0, 40), 'rota.png', 'image/png');
+      expect(broken.body.error).toMatchObject({ code: 'EMAIL_ASSET_INVALID_IMAGE', message: 'La imagen está dañada o no se puede leer' });
       const noFile = await http().post('/api/v1/email-templates/assets').set(auth(director)).field('x', '1');
       expect(noFile.body.error.code).toBe('FILE_TYPE_NOT_ALLOWED');
     });

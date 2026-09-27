@@ -32,7 +32,8 @@ const EXTENSION: Record<EmailAssetMime, 'png' | 'jpg'> = { 'image/png': 'png', '
 export const emailAssetKey = (id: string, mime: EmailAssetMime): string => emailImageKey(id, EXTENSION[mime]);
 
 /**
- * Subida de imágenes de las plantillas de correo: valida por bytes mágicos, re-codifica (sin EXIF/GPS, ≤ 1200 px),
+ * Subida de imágenes de las plantillas de correo: valida por bytes mágicos, re-codifica (sin EXIF/GPS, reducida a
+ * ≤ 1200 × 2000 px; cualquier tamaño de entrada hasta 100 megapíxeles),
  * deduplica por sha256 y guarda los bytes en el bucket de imágenes públicas del proveedor S3
  * (StorageService.putPublicAsset; puede ser el mismo bucket de documentos, ver docs/DEPLOY.md §10.7). En la BD solo
  * quedan clave, URL pública y metadatos. Sin bucket de imágenes configurado: 409 PUBLIC_ASSETS_NOT_CONFIGURED; nunca
@@ -105,9 +106,12 @@ export class EmailAssetUploadsService {
     switch (error.reason) {
       case 'NOT_PNG_OR_JPEG':
         return new ApiException(ErrorCode.FileTypeNotAllowed, 'Solo se admiten imágenes PNG o JPEG');
-      case 'TOO_LARGE_DIMENSIONS': {
-        const max = EMAIL_IMAGE_LIMITS.maxInputDimension;
-        return new ApiException(ErrorCode.EmailAssetInvalidImage, `La imagen supera ${max} × ${max} px`);
+      case 'TOO_MANY_PIXELS': {
+        const megapixels = EMAIL_IMAGE_LIMITS.maxInputPixels / 1_000_000;
+        return new ApiException(
+          ErrorCode.EmailAssetInvalidImage,
+          `La imagen es demasiado grande para procesarla (más de ${megapixels} megapíxeles)`,
+        );
       }
       case 'UNREADABLE':
         return new ApiException(ErrorCode.EmailAssetInvalidImage, 'La imagen está dañada o no se puede leer');

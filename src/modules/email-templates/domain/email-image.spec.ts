@@ -87,11 +87,39 @@ describe('processEmailImage', () => {
     expect(result).toMatchObject({ width: EMAIL_IMAGE_LIMITS.maxStoredWidth, height: 600 });
   });
 
-  it(`acepta ${EMAIL_IMAGE_LIMITS.maxInputDimension} px y rechaza más, en ancho o alto`, async () => {
-    const max = EMAIL_IMAGE_LIMITS.maxInputDimension;
-    expect(await rejection(await jpeg(max, 10))).toBe('ACCEPTED');
-    expect(await rejection(await jpeg(max + 1, 10))).toBe('TOO_LARGE_DIMENSIONS');
-    expect(await rejection(await jpeg(10, max + 1))).toBe('TOO_LARGE_DIMENSIONS');
+  it('el tamaño en píxeles no se rechaza: 3000 × 1500 (pocos KB) se guarda a 1200 × 600', async () => {
+    const wide = await png(3000, 1500);
+    expect(wide.length).toBeLessThan(EMAIL_IMAGE_LIMITS.maxBytes);
+    const result = await processEmailImage(wide);
+    expect(result).toMatchObject({ mime: 'image/png', width: 1200, height: 600 });
+    const stored = await sharp(result.content).metadata();
+    expect(stored).toMatchObject({ width: 1200, height: 600 });
+  });
+
+  it('12000 × 8000 (96 megapíxeles, JPEG de un color) se acepta y se reduce a 1200 × 800', async () => {
+    const result = await processEmailImage(await jpeg(12000, 8000));
+    expect(result).toMatchObject({ mime: 'image/jpeg', width: 1200, height: 800 });
+  });
+
+  it(`una tira alta y angosta se reduce hasta caber en ${EMAIL_IMAGE_LIMITS.maxStoredWidth} × ${EMAIL_IMAGE_LIMITS.maxStoredHeight}`, async () => {
+    const result = await processEmailImage(await png(1000, 5000));
+    expect(result).toMatchObject({ width: 400, height: EMAIL_IMAGE_LIMITS.maxStoredHeight });
+  });
+
+  it('más de 100 megapíxeles (PNG de un color, pesa poco): TOO_MANY_PIXELS, también al leer la cabecera', async () => {
+    const bomb = await solid(10240, 10240).png({ compressionLevel: 9 }).toBuffer();
+    expect(10240 * 10240).toBeGreaterThan(EMAIL_IMAGE_LIMITS.maxInputPixels);
+    expect(await rejection(bomb)).toBe('TOO_MANY_PIXELS');
+  });
+
+  it('sin ancho ni alto legibles (PNG con IHDR 0 × 0): UNREADABLE, no un mensaje de tamaño', async () => {
+    const good = await png(40, 20);
+    const zero = Buffer.from(good);
+    // IHDR: firma (8) + longitud (4) + "IHDR" (4) → ancho en 16..19 y alto en 20..23 (el CRC deja de cuadrar:
+    // sharp no la lee, y si la leyera sin ancho/alto también sería UNREADABLE).
+    zero.writeUInt32BE(0, 16);
+    zero.writeUInt32BE(0, 20);
+    expect(await rejection(zero)).toBe('UNREADABLE');
   });
 
   it('rechaza una imagen dañada o un JPEG con cola de otro formato por la firma', async () => {
