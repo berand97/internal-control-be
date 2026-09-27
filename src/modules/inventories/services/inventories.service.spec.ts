@@ -119,23 +119,13 @@ describe('InventoriesService', () => {
     );
   });
 
-  it('crea una toma PLANNED y rechaza solape GLOBAL', async () => {
+  it('no inicia si otra toma EN CURSO es GLOBAL (solape duro)', async () => {
+    inventories.findOne.mockResolvedValue({ ...inventory });
     inventories.find.mockResolvedValueOnce([
-      { ...inventory, scopeType: InventoryScopeType.Global, scopeId: null },
+      { ...inventory, id: 'inv-2', status: InventoryStatus.InProgress, scopeType: InventoryScopeType.Global, scopeId: null },
     ]);
-    await expect(
-      service.create(
-        {
-          name: 'Toma TH',
-          scope: InventoryScopeType.CostCenter,
-          scopeId: 'cc-1',
-          plannedStartDate: '2026-01-01',
-          plannedEndDate: '2026-01-31',
-          responsibleUserId: 'user-resp',
-        },
-        actor,
-      ),
-    ).rejects.toMatchObject({ code: ErrorCode.InventoryScopeOverlap });
+    await expect(service.start('inv-1', actor)).rejects.toMatchObject({ code: ErrorCode.InventoryScopeOverlap });
+    expect(inventories.find).toHaveBeenCalledWith({ where: { status: InventoryStatus.InProgress } });
   });
 
   it('congela snapshot al iniciar', async () => {

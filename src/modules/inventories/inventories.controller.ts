@@ -11,7 +11,9 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiCreatedResponse,
   ApiExtraModels,
+  ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
@@ -21,32 +23,81 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import {
   ApiErrorEnvelope,
   ApiSuccessEnvelope,
+  envelopedSchema,
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
 import {
+  CancelInventoryDto,
   CloseInventoryDto,
   CreateInventoryDto,
+  InventoryCalendarQueryDto,
   QueryInventoriesDto,
   ReportNotFoundDto,
   ReportUnexpectedDto,
+  RescheduleInventoryDto,
   VerifyInventoryAssetDto,
 } from './dto/inventory.dto.js';
+import {
+  InventoryCalendarResponseDto,
+  InventoryCancelResponseDto,
+  InventoryCoverageResponseDto,
+  InventoryScheduleResponseDto,
+} from './dto/inventory-schedule.responses.js';
 import { InventoriesService } from './services/inventories.service.js';
+import { InventoryPlanningService } from './services/inventory-planning.service.js';
+import { InventorySchedulesService } from './services/inventory-schedules.service.js';
 
 @ApiTags(OpenApiTag.Inventories)
 @ApiBearerAuth()
-@ApiExtraModels(ApiSuccessEnvelope, ApiErrorEnvelope)
+@ApiExtraModels(
+  ApiSuccessEnvelope,
+  ApiErrorEnvelope,
+  InventoryScheduleResponseDto,
+  InventoryCancelResponseDto,
+  InventoryCalendarResponseDto,
+  InventoryCoverageResponseDto,
+)
 @Feature('inventories')
 @Controller('inventories')
 export class InventoriesController {
-  constructor(private readonly inventoriesService: InventoriesService) {}
+  constructor(
+    private readonly inventoriesService: InventoriesService,
+    private readonly schedules: InventorySchedulesService,
+    private readonly planning: InventoryPlanningService,
+  ) {}
 
   @Get()
   @RequirePermission('inventory:read:global')
   @ApiOperation({ summary: 'Listar tomas físicas' })
   list(@Query() query: QueryInventoriesDto) {
     return this.inventoriesService.list(query);
+  }
+
+  @Get('calendar')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({
+    summary: 'Calendario de tomas',
+    description:
+      'Tomas cuyo rango planeado cruza la ventana [from, to] (máximo 93 días), con sus choques de fechas y, si hay ' +
+      'umbral configurado, las semanas ISO con demasiadas tomas.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryCalendarResponseDto) })
+  calendar(@Query() query: InventoryCalendarQueryDto) {
+    return this.planning.calendar(query);
+  }
+
+  @Get('coverage')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({
+    summary: 'Cobertura de tomas por centro de costo',
+    description:
+      'Centros con activos actuales: última toma cerrada que los incluyó, su resultado, días desde entonces y la ' +
+      'próxima toma programada. Primero los nunca revisados.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryCoverageResponseDto) })
+  coverage() {
+    return this.planning.coverage();
   }
 
   @Get(':id/progress')
@@ -72,12 +123,53 @@ export class InventoriesController {
 
   @Post()
   @RequirePermission('inventory:create:global')
-  @ApiOperation({ summary: 'Programar una toma física' })
+  @ApiOperation({
+    summary: 'Programar una toma física',
+    description:
+      'Crea la toma PLANNED, sus recordatorios y el aviso inicial (correo a los jefes vigentes del centro con correo, ' +
+      'notificación en la aplicación a jefes con usuario y al responsable). Los choques de fechas con otras tomas ' +
+      'no bloquean: vuelven en warnings y conflicts.',
+  })
+  @ApiCreatedResponse({ schema: envelopedSchema(InventoryScheduleResponseDto) })
   create(
     @Body() dto: CreateInventoryDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.inventoriesService.create(dto, actor);
+    return this.schedules.schedule(dto, actor);
+  }
+
+  @Post(':id/reschedule')
+  @RequirePermission('inventory:create:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reprogramar una toma planeada',
+    description:
+      'Mueve las fechas (inicio desde hoy), invalida los recordatorios pendientes, crea los de las nuevas fechas y ' +
+      'avisa a los mismos destinatarios. Solo tomas PLANNED.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryScheduleResponseDto) })
+  reschedule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RescheduleInventoryDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.schedules.reschedule(id, dto, actor);
+  }
+
+  @Post(':id/cancel')
+  @RequirePermission('inventory:create:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancelar una toma planeada',
+    description: 'Guarda el motivo, detiene los recordatorios pendientes y avisa la cancelación. Solo tomas PLANNED.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryCancelResponseDto) })
+  cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelInventoryDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.schedules.cancel(id, dto, actor);
   }
 
   @Post(':id/start')

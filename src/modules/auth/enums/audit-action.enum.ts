@@ -79,5 +79,7 @@ export enum AuditAction {
   InventoryStarted = 'INV_STARTED',
   InventoryClosed = 'INV_CLOSED',
   InventoryReconciled = 'INV_RECONCILED',
+  InventoryRescheduled = 'INV_RESCHEDULED',
+  InventoryCancelled = 'INV_CANCELLED',
   DepreciationCalculated = 'DEPR_CALCULATED',
 }

@@ -1,11 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, type EntityManager, In, Repository } from 'typeorm';
+import { DataSource, type EntityManager, Repository } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { AppUser } from '../../auth/entities/app-user.entity.js';
-import { UserStatus } from '../../auth/enums/user-status.enum.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import { Asset } from '../../assets/entities/asset.entity.js';
@@ -21,9 +20,9 @@ import {
   assertInventoryTransition,
   exceedsUnverifiedThreshold,
 } from '../domain/inventory-transitions.js';
+import { scopeSql } from '../domain/inventory-scope-sql.js';
 import {
   CloseInventoryDto,
-  CreateInventoryDto,
   QueryInventoriesDto,
   ReportNotFoundDto,
   ReportUnexpectedDto,
@@ -33,11 +32,9 @@ import { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../entities/physical-inventory-item.entity.js';
 import { PhysicalInventoryScope } from '../entities/physical-inventory-scope.entity.js';
 import { InventoryScopeType } from '../enums/inventory-scope.js';
-import {
-  InventoryStatus,
-  OPEN_INVENTORY_STATUSES,
-} from '../enums/inventory-status.js';
+import { InventoryStatus } from '../enums/inventory-status.js';
 import { VerificationResult } from '../enums/verification-result.js';
+import { inventorySummary } from './inventory-summary.js';
 
 const ENTITY_TYPE = 'INVENTORY';
 
@@ -114,69 +111,10 @@ export class InventoriesService {
     };
   }
 
-  async create(dto: CreateInventoryDto, actor: AuthenticatedUser) {
-    this.assertScope(dto.scope, dto.scopeId);
-    await this.requireScopeTarget(dto.scope, dto.scopeId ?? null);
-    if (dto.plannedEndDate < dto.plannedStartDate) {
-      throw new ApiException(ErrorCode.ValidationFailed);
-    }
-    const responsible = await this.users.findOne({
-      where: { id: dto.responsibleUserId, status: UserStatus.Active },
-    });
-    if (!responsible) {
-      throw new ApiException(ErrorCode.ResourceNotFound);
-    }
-    await this.assertNoOverlap(dto.scope, dto.scopeId ?? null, null);
-    const code = await this.nextCode();
-    const now = new Date();
-    const inventory = await this.inventories.save(
-      this.inventories.create({
-        code,
-        name: dto.name,
-        plannedStartDate: dto.plannedStartDate.slice(0, 10),
-        plannedEndDate: dto.plannedEndDate.slice(0, 10),
-        actualStartDate: null,
-        actualEndDate: null,
-        status: InventoryStatus.Planned,
-        responsibleUserId: dto.responsibleUserId,
-        scopeType: dto.scope,
-        scopeId: dto.scopeId ?? null,
-        scopeNotes: dto.notes ?? null,
-        closedAt: null,
-        closedBy: null,
-        reconcileRequestedAt: null,
-        reconcileRequestedBy: null,
-        reconcileApprovedAt: null,
-        reconcileApprovedBy: null,
-        discrepancyReport: null,
-        createdAt: now,
-        createdBy: actor.id,
-      }),
-    );
-    if (dto.scope === InventoryScopeType.CostCenter && dto.scopeId) {
-      await this.scopes.save(
-        this.scopes.create({
-          inventoryId: inventory.id,
-          costCenterId: dto.scopeId,
-        }),
-      );
-    }
-    await this.auditLogsRepository.record({
-      action: AuditAction.InventoryCreated,
-      entityType: ENTITY_TYPE,
-      entityId: inventory.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { code, scope: dto.scope, scopeId: dto.scopeId ?? null },
-    });
-    return this.toSummary(inventory);
-  }
-
   async start(id: string, actor: AuthenticatedUser) {
     const inventory = await this.requireInventory(id);
     assertInventoryTransition(inventory.status, InventoryStatus.InProgress);
-    await this.assertNoOverlap(
+    await this.assertNoRunningOverlap(
       inventory.scopeType,
       inventory.scopeId,
       inventory.id,
@@ -576,7 +514,8 @@ export class InventoriesService {
     return asset;
   }
 
-  private assertScope(
+  /** Programar (InventorySchedulesService): GLOBAL sin scopeId; los demás alcances con scopeId. */
+  assertScope(
     scope: InventoryScopeType,
     scopeId: string | undefined,
   ): void {
@@ -588,7 +527,7 @@ export class InventoriesService {
     }
   }
 
-  private async requireScopeTarget(
+  async requireScopeTarget(
     scope: InventoryScopeType,
     scopeId: string | null,
   ): Promise<void> {
@@ -621,13 +560,17 @@ export class InventoriesService {
     }
   }
 
-  private async assertNoOverlap(
+  /**
+   * Bloqueo duro al iniciar: dos tomas EN CURSO no pueden compartir activos. Las PLANNED no bloquean: programar dos
+   * tomas del mismo alcance en fechas distintas es válido y, si las fechas se cruzan, programar solo advierte.
+   */
+  private async assertNoRunningOverlap(
     scopeType: InventoryScopeType,
     scopeId: string | null,
     excludeId: string | null,
   ): Promise<void> {
     const others = await this.inventories.find({
-      where: { status: In([...OPEN_INVENTORY_STATUSES]) },
+      where: { status: InventoryStatus.InProgress },
     });
     for (const other of others) {
       if (excludeId && other.id === excludeId) {
@@ -654,8 +597,8 @@ export class InventoriesService {
     left: { readonly type: InventoryScopeType; readonly id: string | null },
     right: { readonly type: InventoryScopeType; readonly id: string | null },
   ): Promise<boolean> {
-    const leftSql = this.scopeSql('a', left.type, left.id, 1);
-    const rightSql = this.scopeSql(
+    const leftSql = scopeSql('a', left.type, left.id, 1);
+    const rightSql = scopeSql(
       'a',
       right.type,
       right.id,
@@ -684,7 +627,7 @@ export class InventoriesService {
     scopeType: InventoryScopeType,
     scopeId: string | null,
   ): Promise<ReadonlyArray<ScopeAssetRow>> {
-    const scoped = this.scopeSql('a', scopeType, scopeId, 1);
+    const scoped = scopeSql('a', scopeType, scopeId, 1);
     const rows: unknown = await this.dataSource.query(
       `
       SELECT a.id, a.current_location_id, a.physical_condition,
@@ -701,50 +644,10 @@ export class InventoriesService {
     return rows as ScopeAssetRow[];
   }
 
-  private scopeSql(
-    alias: string,
-    scopeType: InventoryScopeType,
-    scopeId: string | null,
-    paramIndex: number,
-  ): { readonly sql: string; readonly params: ReadonlyArray<string> } {
-    if (scopeType === InventoryScopeType.Global) {
-      return { sql: 'TRUE', params: [] };
-    }
-    if (!scopeId) {
-      return { sql: 'FALSE', params: [] };
-    }
-    const placeholder = `$${paramIndex}`;
-    if (scopeType === InventoryScopeType.CostCenter) {
-      return {
-        sql: `${alias}.current_cost_center_id = ${placeholder}`,
-        params: [scopeId],
-      };
-    }
-    if (scopeType === InventoryScopeType.Location) {
-      return {
-        sql: `${alias}.current_location_id = ${placeholder}`,
-        params: [scopeId],
-      };
-    }
-    return {
-      sql: `${alias}.current_cost_center_id IN (
-        SELECT cc.id FROM cost_center cc
-        WHERE cc.organizational_unit_id IN (
-          WITH RECURSIVE tree AS (
-            SELECT id FROM organizational_unit WHERE id = ${placeholder}
-            UNION ALL
-            SELECT u.id FROM organizational_unit u JOIN tree t ON u.parent_id = t.id
-          )
-          SELECT id FROM tree
-        )
-      )`,
-      params: [scopeId],
-    };
-  }
-
-  private async nextCode(): Promise<string> {
+  /** Código correlativo TF-<año>-NNN. Con `manager`, dentro de la transacción que crea la toma. */
+  async nextCode(manager?: EntityManager): Promise<string> {
     const year = new Date().getFullYear();
-    const rows: unknown = await this.dataSource.query(
+    const rows: unknown = await (manager ?? this.dataSource).query(
       `
       WITH reserved AS (
         UPDATE code_sequence
@@ -794,28 +697,7 @@ export class InventoriesService {
   }
 
   private toSummary(inventory: PhysicalInventory) {
-    return {
-      id: inventory.id,
-      code: inventory.code,
-      name: inventory.name,
-      status: inventory.status,
-      scope: inventory.scopeType,
-      scopeId: inventory.scopeId,
-      plannedStartDate: inventory.plannedStartDate,
-      plannedEndDate: inventory.plannedEndDate,
-      actualStartDate: inventory.actualStartDate,
-      actualEndDate: inventory.actualEndDate,
-      responsibleUserId: inventory.responsibleUserId,
-      notes: inventory.scopeNotes,
-      closedAt: inventory.closedAt,
-      closedBy: inventory.closedBy,
-      reconcileRequestedAt: inventory.reconcileRequestedAt,
-      reconcileRequestedBy: inventory.reconcileRequestedBy,
-      reconcileApprovedAt: inventory.reconcileApprovedAt,
-      reconcileApprovedBy: inventory.reconcileApprovedBy,
-      createdAt: inventory.createdAt,
-      createdBy: inventory.createdBy,
-    };
+    return inventorySummary(inventory);
   }
 
   private toItem(item: PhysicalInventoryItem) {

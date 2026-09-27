@@ -6,20 +6,30 @@ import { AssetsModule } from '../assets/assets.module.js';
 import { Asset } from '../assets/entities/asset.entity.js';
 import { CostCenter } from '../cost-centers/entities/cost-center.entity.js';
 import { Location } from '../locations/entities/location.entity.js';
+import { MailModule } from '../../shared/mail/mail.module.js';
 import { MovementsModule } from '../movements/movements.module.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
 import { OrganizationalUnit } from '../organizational-units/entities/organizational-unit.entity.js';
 import { RolesModule } from '../roles/roles.module.js';
 import { PhysicalInventoryItem } from './entities/physical-inventory-item.entity.js';
 import { PhysicalInventoryScope } from './entities/physical-inventory-scope.entity.js';
 import { PhysicalInventory } from './entities/physical-inventory.entity.js';
 import { InventoriesController } from './inventories.controller.js';
+import { InventoryRemindersJob } from './jobs/inventory-reminders.job.js';
 import { InventoriesService } from './services/inventories.service.js';
+import { InventoryConflictsService } from './services/inventory-conflicts.service.js';
+import { InventoryNoticesService } from './services/inventory-notices.service.js';
+import { InventoryPlanningService } from './services/inventory-planning.service.js';
+import { InventoryRemindersService } from './services/inventory-reminders.service.js';
+import { InventorySchedulesService } from './services/inventory-schedules.service.js';
 
 @Module({
   imports: [
     AuthModule,
     AssetsModule,
     MovementsModule,
+    MailModule,
+    NotificationsModule,
     RolesModule,
     TypeOrmModule.forFeature([
       PhysicalInventory,
@@ -33,7 +43,15 @@ import { InventoriesService } from './services/inventories.service.js';
     ]),
   ],
   controllers: [InventoriesController],
-  providers: [InventoriesService],
-  exports: [InventoriesService],
+  providers: [
+    InventoriesService,
+    InventoryConflictsService,
+    InventoryNoticesService,
+    InventoryRemindersService,
+    InventorySchedulesService,
+    InventoryPlanningService,
+    InventoryRemindersJob,
+  ],
+  exports: [InventoriesService, InventorySchedulesService, InventoryRemindersService, InventoryPlanningService],
 })
 export class InventoriesModule {}

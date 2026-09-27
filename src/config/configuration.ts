@@ -111,6 +111,16 @@ export interface AppConfig {
   readonly features: FeaturesConfig;
   readonly documents: DocumentsConfig;
   readonly emailBrand: EmailBrandConfig;
+  readonly inventories: InventoriesConfig;
+}
+
+/** Programación de tomas físicas. */
+export interface InventoriesConfig {
+  /**
+   * Alerta de concentración semanal del calendario: tomas por semana ISO por encima de las cuales se avisa.
+   * Sin valor (INVENTORY_WEEKLY_CONCENTRATION_THRESHOLD vacía) no se evalúa: el número lo define Control Interno.
+   */
+  readonly weeklyConcentrationThreshold: number | null;
 }
 
 /** Destinos salientes configurables (SMTP, S3): ver src/shared/net/outbound-destination.ts (BE-16). */
@@ -178,6 +188,19 @@ const readNumber = (key: string, fallback: number): number => {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
     throw new Error(`Variable de entorno no numérica: ${key}`);
+  }
+  return parsed;
+};
+
+/** Entero >= 1 o null si la variable no está definida. Cualquier otro valor detiene el arranque. */
+const readOptionalPositiveInteger = (key: string): number | null => {
+  const raw = process.env[key]?.trim();
+  if (raw === undefined || raw === '') {
+    return null;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${key} debe ser un entero mayor o igual a 1 (recibido: ${raw})`);
   }
   return parsed;
 };
@@ -392,6 +415,9 @@ const configuration = (): AppConfig => {
     emailBrand: {
       name: readString('MAIL_BRAND_NAME', 'Control Interno UNAC').trim(),
       logoUrl: readBrandLogoUrl(),
+    },
+    inventories: {
+      weeklyConcentrationThreshold: readOptionalPositiveInteger('INVENTORY_WEEKLY_CONCENTRATION_THRESHOLD'),
     },
   };
 };

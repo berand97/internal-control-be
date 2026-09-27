@@ -3,19 +3,19 @@ import { DataSource } from 'typeorm';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { InventoryScopeType } from '../../src/modules/inventories/enums/inventory-scope.js';
 import { InventoriesModule } from '../../src/modules/inventories/inventories.module.js';
-import { InventoriesService } from '../../src/modules/inventories/services/inventories.service.js';
+import { InventorySchedulesService } from '../../src/modules/inventories/services/inventory-schedules.service.js';
 import { bootModules, createActor, scalar } from './helpers.js';
 
 describe('Código de toma física (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
   let dataSource: DataSource;
-  let inventories: InventoriesService;
+  let inventories: InventorySchedulesService;
   let actor: AuthenticatedUser;
 
   beforeAll(async () => {
     moduleRef = await bootModules(InventoriesModule);
     dataSource = moduleRef.get(DataSource);
-    inventories = moduleRef.get(InventoriesService);
+    inventories = moduleRef.get(InventorySchedulesService);
     actor = await createActor(dataSource);
   });
 
@@ -30,7 +30,7 @@ describe('Código de toma física (PostgreSQL real)', () => {
         `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Centro de toma') RETURNING id`,
         [code],
       );
-      const created = (await inventories.create(
+      const created = (await inventories.schedule(
         {
           name: `Toma ${code}`,
           scope: InventoryScopeType.CostCenter,
