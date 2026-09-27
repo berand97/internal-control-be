@@ -1,4 +1,5 @@
 import type { RawRow } from '../excel/read-workbook.js';
+import { IDENTITY_DOCUMENT_TYPE_CODES, IDENTITY_DOCUMENT_TYPES } from '../../../common/identity/identity-document-types.js';
 import { type AssetColumn, normalizeHeader } from '../diagnostics/asset-report-diagnostics.js';
 
 export const IMPORT_TARGETS = ['ASSETS', 'COST_CENTERS', 'PERSONS'] as const;
@@ -37,6 +38,17 @@ export interface ImportField {
   readonly catalog?: TemplateCatalog;
   /** Formato esperado, para la hoja de instrucciones. */
   readonly format: string;
+  /**
+   * Una línea en lenguaje llano, sin códigos de error, que el asistente muestra bajo el campo
+   * (GET /imports/targets/{target}/fields → summary). Los límites salen de las mismas constantes que aplica el
+   * importador: la pantalla no puede describir una regla distinta a la que se ejecuta.
+   */
+  readonly summary: string;
+  /**
+   * Largo máximo que se guarda. TRUNCATE: el importador recorta con left() y la vista previa lo cuenta
+   * (VALUE_TRUNCATED); QUARANTINE: la fila no se importa (lo decide la clasificación).
+   */
+  readonly maxLength?: { readonly length: number; readonly over: 'TRUNCATE' | 'QUARANTINE' };
   readonly whenEmpty: { readonly effect: EmptyEffect; readonly text: string };
   /** Valor de la fila de ejemplo. En columnas de catálogo se usa el primer valor del catálogo. */
   readonly example?: string | number;
@@ -47,6 +59,40 @@ export interface ImportField {
 const CATALOG_FORMAT =
   'Elija de la lista (código — nombre); se guarda el código. También se acepta escribir solo el código.';
 
+/**
+ * Largos que el importador recorta (left() en insertAssets / insertCostCenters) o que mandan la fila a cuarentena
+ * (classifyPersons). Son los de las columnas de la base; el SQL y los textos los leen de aquí.
+ */
+const cut = (length: number) => ({ length, over: 'TRUNCATE' as const });
+const reject = (length: number) => ({ length, over: 'QUARANTINE' as const });
+
+/**
+ * Cambios que el importador hace sobre un dato que sí se importa, sin mandar la fila a cuarentena ni marcarla. La
+ * vista previa los cuenta (summary.transformations) y los lista por fila (problemas con el mismo código).
+ * VALUE_TRUNCATED: texto más largo que el campo, se guarda recortado. USEFUL_LIFE_DISCARDED: la vida útil no es un
+ * entero de años, el activo queda sin vida útil.
+ */
+export const IMPORT_TRANSFORMATIONS = ['VALUE_TRUNCATED', 'USEFUL_LIFE_DISCARDED'] as const;
+export type ImportTransformationCode = (typeof IMPORT_TRANSFORMATIONS)[number];
+
+/**
+ * Muestra de filas al subir el archivo (datos personales, Ley 1581): pocas filas, celdas recortadas y solo las
+ * columnas con encabezado. Viaja únicamente en la respuesta HTTP de POST /imports; no se guarda, no se registra en
+ * logs ni en audit_log, y el SQL que la lee lleva los valores como resultado, nunca en el texto de la consulta.
+ */
+export const SAMPLE_ROWS = 3;
+export const SAMPLE_CELL_MAX = 60;
+/** Tope de columnas de la muestra: una hoja con miles de encabezados no infla la respuesta. */
+export const SAMPLE_COLUMNS_MAX = 60;
+
+/** Vida útil que se guarda: entero de hasta 3 cifras (5 o 5.0); cualquier otro valor se descarta. */
+export const USEFUL_LIFE_PATTERN = String.raw`^[0-9]{1,3}(\.0+)?$`;
+
+const DOCUMENT_TYPE_LIST = IDENTITY_DOCUMENT_TYPE_CODES.join(', ');
+const NUMERIC_DOCUMENT_TYPE_LIST = IDENTITY_DOCUMENT_TYPE_CODES.filter(
+  (code) => IDENTITY_DOCUMENT_TYPES[code].numeric,
+).join(' o ');
+
 export const ASSET_IMPORT_FIELDS = {
   legacyAssetId: {
     label: 'Identificador del activo en el origen',
@@ -55,6 +101,7 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Identificador del activo',
     kind: 'code',
     format: 'Texto, único por activo. El activo queda con código interno XLS-<identificador>.',
+    summary: 'Único por activo. Si se repite en el archivo, esas filas no se importan.',
     whenEmpty: {
       effect: 'QUARANTINE',
       text: 'La fila no se importa (ROW_WITHOUT_ASSET_ID). Si se repite en el archivo, ninguna de esas filas se importa (ASSET_ID_DUPLICATED); si ya se importó antes, se omite.',
@@ -68,6 +115,8 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Código de barras',
     kind: 'code',
     format: 'Texto, máx. 50. «TEMP» se importa con la marca BARCODE_TEMP; un código repetido en el archivo, con BARCODE_DUPLICATED.',
+    summary: 'Opcional. Un código TEMP, repetido o vacío se importa marcado para revisión.',
+    maxLength: cut(50),
     whenEmpty: { effect: 'FLAG', text: 'Se importa con la marca BARCODE_EMPTY.' },
     example: '000123',
   },
@@ -77,6 +126,8 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Descripción',
     kind: 'text',
     format: 'Texto, máx. 500 (se recorta).',
+    summary: 'Hasta 500 caracteres; lo que pase de ahí se recorta.',
+    maxLength: cut(500),
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (REQUIRED_FIELD_MISSING).' },
     example: 'EJEMPLO: portátil 14 pulgadas (fila de ejemplo, se ignora)',
   },
@@ -88,6 +139,7 @@ export const ASSET_IMPORT_FIELDS = {
     kind: 'catalog',
     catalog: 'COST_CENTERS',
     format: CATALOG_FORMAT,
+    summary: 'Debe existir en el catálogo, salvo que elijas crearlo más abajo.',
     whenEmpty: {
       effect: 'QUARANTINE',
       text: 'La fila no se importa (COST_CENTER_UNKNOWN). Un código fuera del catálogo tampoco, salvo que en la vista previa se elija crear los centros inexistentes.',
@@ -100,6 +152,7 @@ export const ASSET_IMPORT_FIELDS = {
     kind: 'catalog',
     catalog: 'CATEGORIES',
     format: `${CATALOG_FORMAT} Un valor fuera del catálogo: la fila no se importa (CATEGORY_UNKNOWN).`,
+    summary: 'Una categoría de la lista. Vacía, queda «Sin clasificar».',
     whenEmpty: { effect: 'FLAG', text: 'Queda en la categoría «Sin clasificar» con la marca CATEGORY_UNASSIGNED.' },
   },
   physicalCondition: {
@@ -109,6 +162,7 @@ export const ASSET_IMPORT_FIELDS = {
     kind: 'catalog',
     catalog: 'PHYSICAL_CONDITIONS',
     format: `${CATALOG_FORMAT} Un valor fuera del catálogo: la fila no se importa (PHYSICAL_CONDITION_INVALID).`,
+    summary: 'Un estado de la lista. Vacío, queda sin verificar.',
     whenEmpty: { effect: 'FLAG', text: 'Queda sin verificar con la marca PHYSICAL_CONDITION_UNKNOWN.' },
   },
   model: {
@@ -118,6 +172,8 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Modelo',
     kind: 'text',
     format: 'Texto, máx. 150 (se recorta).',
+    summary: 'Opcional. Hasta 150 caracteres.',
+    maxLength: cut(150),
     whenEmpty: { effect: 'NONE', text: 'Queda vacío.' },
     example: 'Latitude 5440',
   },
@@ -128,6 +184,8 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Número de serie',
     kind: 'code',
     format: 'Texto, máx. 100 (se recorta).',
+    summary: 'Opcional. Hasta 100 caracteres.',
+    maxLength: cut(100),
     whenEmpty: { effect: 'NONE', text: 'Queda vacío.' },
     example: 'SN0001234',
   },
@@ -137,6 +195,8 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Documento de adquisición',
     kind: 'code',
     format: 'Texto, máx. 100 (se recorta). Factura u orden de compra.',
+    summary: 'Opcional. Factura u orden de compra.',
+    maxLength: cut(100),
     whenEmpty: { effect: 'NONE', text: 'Queda vacío.' },
     example: 'FV-000123',
   },
@@ -147,6 +207,7 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Fecha de compra',
     kind: 'date',
     format: 'Fecha de Excel (AAAA-MM-DD). Un texto que no sea fecha, o 1970-01-01, se importa sin fecha con la marca ACQUISITION_DATE_INVALID.',
+    summary: 'Una fecha. Si falta o no es fecha, se importa marcada para revisión.',
     whenEmpty: { effect: 'FLAG', text: 'Se importa sin fecha con la marca ACQUISITION_DATE_MISSING.' },
     example: '2025-03-14',
   },
@@ -157,6 +218,7 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Precio de compra',
     kind: 'number',
     format: 'Número en pesos (COP), sin símbolo ni separadores de miles. 0 se importa con la marca PRICE_ZERO.',
+    summary: 'Número en pesos, sin símbolo ni puntos de miles.',
     whenEmpty: { effect: 'FLAG', text: 'Se importa con precio 0 y la marca PRICE_MISSING (también si no es un número).' },
     example: 3500000,
   },
@@ -166,6 +228,7 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Vida útil (años)',
     kind: 'integer',
     format: 'Número entero de años (hasta 3 cifras); otro valor se ignora.',
+    summary: 'Opcional. Número entero de años.',
     whenEmpty: { effect: 'NONE', text: 'Queda vacía.' },
     example: 5,
   },
@@ -175,6 +238,7 @@ export const ASSET_IMPORT_FIELDS = {
     header: 'Observaciones',
     kind: 'text',
     format: 'Texto libre.',
+    summary: 'Opcional. Texto libre.',
     whenEmpty: { effect: 'NONE', text: 'Queda vacío.' },
     example: 'Fila de ejemplo',
   },
@@ -187,6 +251,7 @@ export const COST_CENTER_IMPORT_FIELDS = {
     header: 'Código',
     kind: 'code',
     format: 'Texto. Un código repetido en el archivo no se importa (CODE_DUPLICATED); uno que ya existe se omite.',
+    summary: 'No puede repetirse en el archivo; si ya existe, se omite.',
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (REQUIRED_FIELD_MISSING).' },
     example: 'EJ01',
   },
@@ -196,6 +261,8 @@ export const COST_CENTER_IMPORT_FIELDS = {
     header: 'Nombre',
     kind: 'text',
     format: 'Texto, máx. 200 (se recorta).',
+    summary: 'Hasta 200 caracteres; lo que pase de ahí se recorta.',
+    maxLength: cut(200),
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (REQUIRED_FIELD_MISSING).' },
     example: 'EJEMPLO: oficina de ejemplo (fila de ejemplo, se ignora)',
   },
@@ -213,6 +280,8 @@ export const PERSON_IMPORT_FIELDS = {
     header: 'Número de documento',
     kind: 'code',
     format: 'Texto, máx. 30. Con CC o TI, solo dígitos (DOCUMENT_NUMBER_INVALID). Un número repetido en el archivo no se importa (DOCUMENT_NUMBER_DUPLICATED).',
+    summary: `Con ${NUMERIC_DOCUMENT_TYPE_LIST}, solo dígitos. No puede repetirse en el archivo.`,
+    maxLength: reject(30),
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (DOCUMENT_NUMBER_MISSING).' },
     example: '1000000000',
   },
@@ -223,6 +292,7 @@ export const PERSON_IMPORT_FIELDS = {
     kind: 'catalog',
     catalog: 'DOCUMENT_TYPES',
     format: `${CATALOG_FORMAT} También la abreviatura impresa (C.C.). Un valor fuera del catálogo: la fila no se importa (DOCUMENT_TYPE_INVALID).`,
+    summary: `Un tipo de la lista (${DOCUMENT_TYPE_LIST}) o su abreviatura.`,
     whenEmpty: { effect: 'FLAG', text: 'Se guarda sin tipo, con la marca DOCUMENT_TYPE_UNKNOWN.' },
   },
   fullName: {
@@ -231,6 +301,8 @@ export const PERSON_IMPORT_FIELDS = {
     header: 'Nombre completo',
     kind: 'text',
     format: 'Texto, máx. 100. Se guarda sin partir con la marca NAME_NOT_SPLIT.',
+    summary: 'Nombre y apellidos en una sola columna; se guarda sin separar.',
+    maxLength: reject(100),
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (REQUIRED_FIELD_MISSING).' },
     inTemplate: false,
   },
@@ -240,6 +312,8 @@ export const PERSON_IMPORT_FIELDS = {
     header: 'Nombres',
     kind: 'text',
     format: 'Texto, máx. 100 (más largo: FIELD_TOO_LONG).',
+    summary: 'Hasta 100 caracteres.',
+    maxLength: reject(100),
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (REQUIRED_FIELD_MISSING).' },
     example: 'EJEMPLO',
   },
@@ -249,6 +323,8 @@ export const PERSON_IMPORT_FIELDS = {
     header: 'Apellidos',
     kind: 'text',
     format: 'Texto, máx. 100 (más largo: FIELD_TOO_LONG).',
+    summary: 'Hasta 100 caracteres.',
+    maxLength: reject(100),
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (REQUIRED_FIELD_MISSING).' },
     example: 'FILA DE EJEMPLO',
   },
@@ -258,6 +334,8 @@ export const PERSON_IMPORT_FIELDS = {
     header: 'Cargo',
     kind: 'text',
     format: 'Texto, máx. 150 (más largo: FIELD_TOO_LONG).',
+    summary: 'Opcional. Hasta 150 caracteres.',
+    maxLength: reject(150),
     whenEmpty: { effect: 'NONE', text: 'Queda vacío.' },
     example: 'Cargo de ejemplo',
   },
@@ -267,6 +345,7 @@ export const PERSON_IMPORT_FIELDS = {
     header: 'Correo institucional',
     kind: 'text',
     format: 'Correo terminado en @unac.edu.co; otro dominio: la fila no se importa (EMAIL_NOT_INSTITUTIONAL).',
+    summary: 'El correo debe terminar en @unac.edu.co.',
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (EMAIL_MISSING).' },
     example: 'ejemplo.plantilla@unac.edu.co',
   },
@@ -277,6 +356,7 @@ export const PERSON_IMPORT_FIELDS = {
     kind: 'catalog',
     catalog: 'COST_CENTERS',
     format: `${CATALOG_FORMAT} Un código fuera del catálogo: la fila no se importa (COST_CENTER_UNKNOWN).`,
+    summary: 'Opcional. Si viene, debe existir en el catálogo de centros de costo.',
     whenEmpty: { effect: 'NONE', text: 'La persona queda sin centro de costo.' },
   },
 } as const satisfies Record<string, ImportField>;
