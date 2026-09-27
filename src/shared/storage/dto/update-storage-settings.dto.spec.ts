@@ -77,4 +77,43 @@ describe('flattenStoragePatch', () => {
       googleClientSecret: 'GOCSPX-secret',
     });
   });
+
+  it.each([
+    ['vacías', ''],
+    ['en blanco', '   '],
+    ['null', null],
+    ['con el marcador ****', '****'],
+    ['enmascaradas parcialmente', 'AK****9Z'],
+  ])('omite las credenciales %s: el backend conserva las guardadas', (_label, value) => {
+    expect(
+      flattenStoragePatch({
+        s3Bucket: 'bucket',
+        s3AccessKey: value,
+        s3SecretKey: value,
+        googleClientSecret: value,
+        onedriveClientSecret: value,
+        google: { clientSecret: value },
+        onedrive: { clientSecret: value },
+        clientSecret: value,
+      }),
+    ).toEqual({ s3Bucket: 'bucket' });
+  });
+
+  it('envía las credenciales nuevas tal cual', () => {
+    expect(
+      flattenStoragePatch({
+        s3AccessKey: 'AKIA-nueva',
+        s3SecretKey: 'secreto-nuevo',
+        onedriveClientSecret: 'onedrive-nuevo',
+      }),
+    ).toEqual({
+      s3AccessKey: 'AKIA-nueva',
+      s3SecretKey: 'secreto-nuevo',
+      onedriveClientSecret: 'onedrive-nuevo',
+    });
+  });
+
+  it('s3ForcePathStyle false se envía (no se confunde con ausente)', () => {
+    expect(flattenStoragePatch({ s3ForcePathStyle: false })).toEqual({ s3ForcePathStyle: false });
+  });
 });

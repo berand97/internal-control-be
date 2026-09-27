@@ -37,15 +37,22 @@ import {
   StorageCheckDto,
   StorageTestResultDto,
 } from './dto/storage-test.responses.js';
+import { StorageStatusDto } from './dto/storage-status.responses.js';
 import { UpdateStorageSettingsDto, flattenStoragePatch } from './dto/update-storage-settings.dto.js';
 import { OAUTH_STATE_TTL_SECONDS, StorageService, type OauthProvider } from './storage.service.js';
 
 /** Cookie que liga el `state` OAuth al navegador que inició la conexión (BE-15). */
 export const STORAGE_OAUTH_COOKIE = 'storage_oauth_binding';
 
+const STATUS_DESCRIPTION =
+  'Nunca devuelve credenciales: s3AccessKeySet, s3SecretKeySet, googleClientSecretSet y onedriveClientSecretSet solo dicen si hay una guardada; googleConnected/onedriveConnected, si hay refresh token.';
+
+const PATCH_DESCRIPTION =
+  'Devuelve el estado actualizado. Credenciales (s3AccessKey, s3SecretKey, googleClientSecret, onedriveClientSecret, clientSecret): ausentes, null, vacías o con **** conservan la guardada; solo un valor nuevo la reemplaza. Los demás campos: ausente conserva; null o vacío, donde se admite, borra el valor guardado.';
+
 @ApiTags(OpenApiTag.Storage)
 @ApiBearerAuth()
-@ApiExtraModels(ApiSuccessEnvelope, ApiErrorEnvelope, StorageTestResultDto, StorageCheckDto, StorageBucketStateDto)
+@ApiExtraModels(ApiSuccessEnvelope, ApiErrorEnvelope, StorageTestResultDto, StorageCheckDto, StorageBucketStateDto, StorageStatusDto)
 @Feature('storage')
 @Controller('storage')
 export class StorageController {
@@ -56,36 +63,52 @@ export class StorageController {
 
   @Get()
   @RequirePermission('storage:manage:global')
-  @ApiOperation({ summary: 'Estado del almacenamiento activo' })
-  status() {
+  @ApiOperation({
+    summary: 'Estado del almacenamiento activo',
+    description: STATUS_DESCRIPTION,
+  })
+  @ApiOkResponse({ schema: envelopedSchema(StorageStatusDto) })
+  status(): Promise<StorageStatusDto> {
     return this.storageService.status();
   }
 
   @Get('status')
   @RequirePermission('storage:manage:global')
-  @ApiOperation({ summary: 'Estado del almacenamiento activo' })
-  statusAlias() {
+  @ApiOperation({
+    summary: 'Estado del almacenamiento activo',
+    description: STATUS_DESCRIPTION,
+  })
+  @ApiOkResponse({ schema: envelopedSchema(StorageStatusDto) })
+  statusAlias(): Promise<StorageStatusDto> {
     return this.storageService.status();
   }
 
   @Patch()
   @RequirePermission('storage:manage:global')
-  @ApiOperation({ summary: 'Administrar proveedor de almacenamiento' })
+  @ApiOperation({
+    summary: 'Administrar proveedor de almacenamiento',
+    description: PATCH_DESCRIPTION,
+  })
+  @ApiOkResponse({ schema: envelopedSchema(StorageStatusDto) })
   async updateRoot(
     @Body() dto: UpdateStorageSettingsDto,
     @CurrentUser() actor: AuthenticatedUser,
-  ) {
+  ): Promise<StorageStatusDto> {
     await this.storageService.updateSettings(flattenStoragePatch(dto), actor.id);
     return this.storageService.status();
   }
 
   @Patch('settings')
   @RequirePermission('storage:manage:global')
-  @ApiOperation({ summary: 'Administrar proveedor de almacenamiento' })
+  @ApiOperation({
+    summary: 'Administrar proveedor de almacenamiento',
+    description: PATCH_DESCRIPTION,
+  })
+  @ApiOkResponse({ schema: envelopedSchema(StorageStatusDto) })
   async updateSettings(
     @Body() dto: UpdateStorageSettingsDto,
     @CurrentUser() actor: AuthenticatedUser,
-  ) {
+  ): Promise<StorageStatusDto> {
     await this.storageService.updateSettings(flattenStoragePatch(dto), actor.id);
     return this.storageService.status();
   }

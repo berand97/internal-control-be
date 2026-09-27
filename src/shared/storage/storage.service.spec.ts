@@ -120,6 +120,40 @@ describe('StorageService: credenciales cifradas en reposo (BE-11)', () => {
   });
 });
 
+describe('StorageService: estado del formulario (path style e indicadores de credenciales)', () => {
+  it('devuelve s3ForcePathStyle guardado y los indicadores *Set, nunca los valores', async () => {
+    const cipher = cipherWith('clave-unitaria');
+    const row = {
+      driver: 's3',
+      projectPath: DEPLOYED,
+      s3Bucket: 'bucket',
+      s3AccessKey: 'AKIA-unitaria-1',
+      s3SecretKey: cipher.encrypt('secreto-unitario-2'),
+      s3ForcePathStyle: false,
+      googleClientSecret: cipher.encrypt('GOCSPX-unitario-3'),
+      onedriveClientSecret: null,
+    } as Partial<StorageSettings>;
+    const { service } = build(row, { cipher });
+    const status = await service.status();
+    expect(status).toMatchObject({
+      s3ForcePathStyle: false,
+      s3AccessKeySet: true,
+      s3SecretKeySet: true,
+      googleClientSecretSet: true,
+      onedriveClientSecretSet: false,
+    });
+    const text = JSON.stringify(status);
+    for (const fragment of ['AKIA', 'unitari', 'GOCSPX', 'enc.v1.']) {
+      expect(text).not.toContain(fragment);
+    }
+  });
+
+  it('sin fila usa el path style del entorno', async () => {
+    const { service } = build(null);
+    expect((await service.status()).s3ForcePathStyle).toBe(true);
+  });
+});
+
 describe('StorageService: endpoint S3 fuera de la red interna (BE-16)', () => {
   it.each(['http://10.0.0.5:9000', 'http://127.0.0.1:9000', 'https://169.254.169.254', 'http://localhost:9000', 'https://gotenberg:3000', 'http://[::1]:9000'])(
     'en producción rechaza %s con OUTBOUND_DESTINATION_FORBIDDEN',

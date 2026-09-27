@@ -12,13 +12,20 @@ import {
 import { parseDriveFolderId } from '../parse-drive-folder-id.js';
 
 const DRIVERS = ['project', 's3', 'google_drive', 'onedrive'] as const;
-const S3_PROVIDERS = [
+export const S3_PROVIDERS = [
   'aws',
   'minio',
   'digitalocean',
   'cloudflare',
   'custom',
 ] as const;
+
+/**
+ * Descripción común de los campos de credencial. Contrato con el formulario: el estado solo dice si hay una guardada
+ * (`*Set`), así que el campo se deja sin tocar y no se envía; ausente, null, vacío o con `****` conserva la guardada.
+ */
+const CREDENTIAL_DESCRIPTION =
+  'Credencial. Ausente, null, vacía o con el marcador **** conserva la guardada; solo un valor nuevo la reemplaza. No se borra por esta API';
 
 const emptyToNull = ({ value }: { value: unknown }): string | null | undefined => {
   if (value === undefined) {
@@ -36,7 +43,7 @@ export class GoogleStorageCredentialsDto {
   @Transform(emptyToNull)
   readonly clientId?: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ nullable: true, description: CREDENTIAL_DESCRIPTION })
   @IsOptional()
   @Transform(emptyToNull)
   readonly clientSecret?: string | null;
@@ -58,7 +65,7 @@ export class OnedriveStorageCredentialsDto {
   @Transform(emptyToNull)
   readonly clientId?: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ nullable: true, description: CREDENTIAL_DESCRIPTION })
   @IsOptional()
   @Transform(emptyToNull)
   readonly clientSecret?: string | null;
@@ -122,12 +129,12 @@ export class UpdateStorageSettingsDto {
   @Transform(emptyToNull)
   readonly s3Bucket?: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ nullable: true, description: CREDENTIAL_DESCRIPTION })
   @IsOptional()
   @Transform(emptyToNull)
   readonly s3AccessKey?: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ nullable: true, description: CREDENTIAL_DESCRIPTION })
   @IsOptional()
   @Transform(emptyToNull)
   readonly s3SecretKey?: string | null;
@@ -142,7 +149,7 @@ export class UpdateStorageSettingsDto {
   @Transform(emptyToNull)
   readonly googleClientId?: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ nullable: true, description: CREDENTIAL_DESCRIPTION })
   @IsOptional()
   @Transform(emptyToNull)
   readonly googleClientSecret?: string | null;
@@ -170,7 +177,7 @@ export class UpdateStorageSettingsDto {
 
   @ApiPropertyOptional({
     nullable: true,
-    description: 'Alias de googleClientSecret si driver es google_drive',
+    description: `Alias de googleClientSecret si driver no es onedrive (de onedriveClientSecret si lo es). ${CREDENTIAL_DESCRIPTION}`,
   })
   @IsOptional()
   @Transform(emptyToNull)
@@ -186,7 +193,7 @@ export class UpdateStorageSettingsDto {
   @Transform(emptyToNull)
   readonly onedriveClientId?: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ nullable: true, description: CREDENTIAL_DESCRIPTION })
   @IsOptional()
   @Transform(emptyToNull)
   readonly onedriveClientSecret?: string | null;
@@ -241,6 +248,16 @@ const firstUnmasked = (
   return undefined;
 };
 
+/** Primera credencial nueva: ignora ausentes, null, vacías y enmascaradas (todas conservan la guardada). */
+const firstNewCredential = (...values: ReadonlyArray<string | null | undefined>): string | undefined => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0 && !isMaskedSecret(value)) {
+      return value;
+    }
+  }
+  return undefined;
+};
+
 const patchIfPresent = (
   value: string | null | undefined,
 ): { readonly include: boolean; readonly value: string | null } => ({
@@ -260,7 +277,7 @@ export const flattenStoragePatch = (dto: UpdateStorageSettingsDto) => {
     dto.google?.clientId,
     googleAlias,
   );
-  const googleClientSecret = firstUnmasked(
+  const googleClientSecret = firstNewCredential(
     dto.googleClientSecret,
     dto.google?.clientSecret,
     googleSecretAlias,
@@ -281,7 +298,7 @@ export const flattenStoragePatch = (dto: UpdateStorageSettingsDto) => {
     dto.onedrive?.clientId,
     onedriveAlias,
   );
-  const onedriveClientSecret = firstUnmasked(
+  const onedriveClientSecret = firstNewCredential(
     dto.onedriveClientSecret,
     dto.onedrive?.clientSecret,
     onedriveSecretAlias,
@@ -290,6 +307,8 @@ export const flattenStoragePatch = (dto: UpdateStorageSettingsDto) => {
     dto.onedriveFolderId,
     dto.onedrive?.folderId,
   );
+  const s3AccessKey = firstNewCredential(dto.s3AccessKey);
+  const s3SecretKey = firstNewCredential(dto.s3SecretKey);
   const googleIdPatch = patchIfPresent(googleClientId);
   const googleSecretPatch = patchIfPresent(googleClientSecret);
   const googleFolderPatch = patchIfPresent(googleFolderId);
@@ -304,8 +323,8 @@ export const flattenStoragePatch = (dto: UpdateStorageSettingsDto) => {
     ...(dto.s3Endpoint !== undefined ? { s3Endpoint: dto.s3Endpoint } : {}),
     ...(dto.s3Region !== undefined ? { s3Region: dto.s3Region } : {}),
     ...(dto.s3Bucket !== undefined ? { s3Bucket: dto.s3Bucket } : {}),
-    ...(dto.s3AccessKey !== undefined ? { s3AccessKey: dto.s3AccessKey } : {}),
-    ...(dto.s3SecretKey !== undefined ? { s3SecretKey: dto.s3SecretKey } : {}),
+    ...(s3AccessKey !== undefined ? { s3AccessKey } : {}),
+    ...(s3SecretKey !== undefined ? { s3SecretKey } : {}),
     ...(dto.s3ForcePathStyle !== undefined
       ? { s3ForcePathStyle: dto.s3ForcePathStyle }
       : {}),

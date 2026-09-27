@@ -24,6 +24,7 @@ import { GoogleDriveStorageAdapter } from './adapters/google-drive-storage.adapt
 import { OneDriveStorageAdapter } from './adapters/onedrive-storage.adapter.js';
 import { ProjectStorageAdapter } from './adapters/project-storage.adapter.js';
 import { S3StorageAdapter, type S3ClientTuning } from './adapters/s3-storage.adapter.js';
+import type { StorageStatusDto } from './dto/storage-status.responses.js';
 import { StorageSettings } from './entities/storage-settings.entity.js';
 import { parseDriveFolderId } from './parse-drive-folder-id.js';
 import {
@@ -140,22 +141,11 @@ export class StorageService {
    * `authorizationUrl` es siempre null: cada `state` OAuth es de un solo uso y va ligado a una cookie del
    * navegador, así que solo lo emiten los endpoints `oauth/{google,onedrive}/start` (BE-15). Un GET de estado
    * no debe acuñar credenciales.
+   *
+   * Las credenciales nunca se devuelven (ni cifradas ni parciales): solo si hay una guardada (`*Set`), para que el
+   * formulario muestre el campo como lleno y no la reenvíe (ver StorageStatusDto).
    */
-  async status(): Promise<{
-    readonly driver: StorageDriver;
-    readonly projectPath: string;
-    readonly s3Provider: S3Provider;
-    readonly s3Endpoint: string | null;
-    readonly s3Region: string;
-    readonly s3Bucket: string | null;
-    readonly googleConnected: boolean;
-    readonly onedriveConnected: boolean;
-    readonly googleClientId: string | null;
-    readonly googleFolderId: string | null;
-    readonly onedriveClientId: string | null;
-    readonly needsOauth: boolean;
-    readonly authorizationUrl: string | null;
-  }> {
+  async status(): Promise<StorageStatusDto> {
     const resolved = await this.resolvedConfig();
     const needsOauth =
       (resolved.driver === 'google_drive' && !resolved.google.refreshToken) ||
@@ -167,11 +157,16 @@ export class StorageService {
       s3Endpoint: resolved.s3.endpoint,
       s3Region: resolved.s3.region,
       s3Bucket: resolved.s3.bucket,
+      s3ForcePathStyle: resolved.s3.forcePathStyle,
+      s3AccessKeySet: Boolean(resolved.s3.accessKey),
+      s3SecretKeySet: Boolean(resolved.s3.secretKey),
       googleConnected: Boolean(resolved.google.refreshToken),
       onedriveConnected: Boolean(resolved.onedrive.refreshToken),
       googleClientId: mask(resolved.google.clientId),
+      googleClientSecretSet: Boolean(resolved.google.clientSecret),
       googleFolderId: resolved.google.folderId,
       onedriveClientId: mask(resolved.onedrive.clientId),
+      onedriveClientSecretSet: Boolean(resolved.onedrive.clientSecret),
       needsOauth,
       authorizationUrl: null,
     };
