@@ -12,6 +12,7 @@ import { vi } from 'vitest';
 import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
+import { FeatureFlagsService } from '../../src/modules/features/services/feature-flags.service.js';
 import { DEFAULT_EMAIL_DESIGNS } from '../../src/modules/email-templates/domain/email-template-catalog.js';
 import { MailOutboxService } from '../../src/shared/mail/mail-outbox.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
@@ -289,6 +290,22 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       expect((await menu(director)).find((item) => item.path === '/email-templates')).toMatchObject({ icon: 'mail' });
       expect((await menu(viewer)).find((item) => item.path === '/email-templates')).toBeUndefined();
       expect((await menu(superAdmin)).find((item) => item.path === '/email-templates')).toBeUndefined();
+    });
+
+    it('con el módulo Correo apagado, /auth/me no sirve el ítem y la API responde MODULE_UNAVAILABLE', async () => {
+      const flags = app.get(FeatureFlagsService);
+      const menu = async (actor: Actor) =>
+        ((await http().get('/api/v1/auth/me').set(auth(actor)).expect(200)).body.data.navigation as Array<{ path: string }>);
+      await flags.setEnabled('mail', false);
+      try {
+        expect((await menu(director)).find((item) => item.path === '/email-templates')).toBeUndefined();
+        const blocked = await http().get('/api/v1/email-templates/catalog').set(auth(director));
+        expect(blocked.status).toBe(503);
+        expect(blocked.body.error.code).toBe('MODULE_UNAVAILABLE');
+      } finally {
+        await flags.setEnabled('mail', true);
+      }
+      expect((await menu(director)).find((item) => item.path === '/email-templates')).toBeDefined();
     });
   });
 

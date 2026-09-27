@@ -161,8 +161,9 @@ export const FEATURE_CATALOG: ReadonlyArray<FeatureDefinition> = [
     code: 'mail',
     label: 'Correo',
     core: false,
-    resourceTypes: ['mail'],
-    pathPrefixes: ['/mail'],
+    // Las plantillas de correo (src/modules/email-templates) viven bajo el módulo Correo: apagarlo las oculta.
+    resourceTypes: ['mail', 'email_template'],
+    pathPrefixes: ['/mail', '/email-templates'],
   },
 ];
 
