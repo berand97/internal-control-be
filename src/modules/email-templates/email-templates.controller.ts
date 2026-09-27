@@ -107,7 +107,7 @@ export class EmailTemplatesController {
   @ApiOperation({
     summary: 'Guardar una versión nueva (queda activa)',
     description:
-      'Valida los bloques (catálogo cerrado, campos y longitudes; el párrafo es un documento Tiptap de esquema cerrado), que cada imagen exista, las variables del tipo (EMAIL_TEMPLATE_UNKNOWN_VARIABLE, EMAIL_TEMPLATE_MISSING_VARIABLE) y los URL de botón, enlace e imagen (variable o https://). Estructura inválida: EMAIL_TEMPLATE_INVALID_DESIGN con details[].field = ruta exacta (blocks[i].campo, blocks[i].content.content[j]..., blocks[i].assetId).',
+      'Valida los bloques (catálogo cerrado, campos y longitudes; el párrafo es un documento Tiptap de esquema cerrado), que cada imagen exista, las variables del tipo (EMAIL_TEMPLATE_UNKNOWN_VARIABLE, EMAIL_TEMPLATE_MISSING_VARIABLE) y los URL de botón, enlace e imagen (variable o https://). Una variable de enlace (variables[].kind = url del catálogo) como texto visible en un párrafo, título, nota destacada o valor de una lista de datos también es EMAIL_TEMPLATE_INVALID_DESIGN ("Use la variable {{x}} como enlace o botón, no como texto"). Estructura inválida: EMAIL_TEMPLATE_INVALID_DESIGN con details[].field = ruta exacta (blocks[i].campo, blocks[i].content.content[j]..., blocks[i].assetId).',
   })
   @ApiCreatedResponse({ schema: envelopedSchema(EmailTemplateVersionResponseDto) })
   create(

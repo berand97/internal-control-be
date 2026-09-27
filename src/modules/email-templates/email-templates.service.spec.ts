@@ -111,6 +111,43 @@ describe('EmailTemplatesService', () => {
     expect(repo.save).not.toHaveBeenCalled();
   });
 
+  it('rechaza un URL como texto, al guardar y al previsualizar, con la ruta exacta; como enlace sí previsualiza', async () => {
+    const blocks = [
+      { type: 'paragraph', content: textToRichText('Hola {{user.email}},\n\nUse este enlace:\n{{auth.resetUrl}}') },
+    ];
+    const expected = {
+      code: ErrorCode.EmailTemplateInvalidDesign,
+      details: [
+        {
+          field: 'blocks[0].content.content[1].content[2].text',
+          message: 'Use la variable {{auth.resetUrl}} como enlace o botón, no como texto',
+        },
+      ],
+    };
+    await expect(service.create('PASSWORD_RESET', 'Restablecer', blocks, 'actor')).rejects.toMatchObject(expected);
+    await expect(service.preview('PASSWORD_RESET', 'Restablecer', blocks)).rejects.toMatchObject(expected);
+    expect(repo.save).not.toHaveBeenCalled();
+
+    const asLink = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Hola {{user.email}}, use este enlace:' },
+            { type: 'hardBreak' },
+            { type: 'text', text: 'Restablecer contraseña', marks: [{ type: 'link', attrs: { href: '{{auth.resetUrl}}' } }] },
+          ],
+        },
+      ],
+    };
+    const preview = await service.preview('PASSWORD_RESET', 'Restablecer', [{ type: 'paragraph', content: asLink }]);
+    expect(preview.html).toContain('href="http://localhost:4200/auth/reset-password?token=ejemplo"');
+    expect(preview.html).toMatch(/<a href="http:\/\/localhost:4200\/auth\/reset-password\?token=ejemplo"[^>]*>Restablecer contraseña<\/a>/);
+    expect(preview.html).not.toContain('>http://localhost:4200/auth/reset-password');
+    expect(preview.text).toContain('Restablecer contraseña (http://localhost:4200/auth/reset-password?token=ejemplo)');
+  });
+
   it('guarda la versión 1 activa con las variables usadas', async () => {
     const design = DEFAULT_EMAIL_DESIGNS.USER_INVITATION;
     const saved = await service.create('USER_INVITATION', design.subject, design.blocks, 'actor');

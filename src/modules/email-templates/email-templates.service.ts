@@ -34,6 +34,7 @@ import {
   type EmailPreviewResponseDto,
   type EmailTemplateCatalogResponseDto,
 } from './dto/email-template.responses.js';
+import { urlVariablesAsText } from './domain/url-variables-as-text.js';
 import { EmailTemplate } from './entities/email-template.entity.js';
 import { EmailAssetsService } from './email-assets.service.js';
 
@@ -174,8 +175,8 @@ export class EmailTemplatesService {
   }
 
   /**
-   * Estructura (catálogo cerrado), imágenes (que cada assetId exista en email_asset) y variables (catálogo del
-   * tipo). Devuelve el diseño normalizado.
+   * Estructura (catálogo cerrado), variables de enlace no usadas como texto (url-variables-as-text.ts), imágenes
+   * (que cada assetId exista en email_asset) y variables (catálogo del tipo). Devuelve el diseño normalizado.
    */
   async validate(templateType: EmailTemplateType, subject: string, blocks: unknown): Promise<ValidDesign> {
     const issues = validateEmailBlocks(blocks);
@@ -186,6 +187,10 @@ export class EmailTemplatesService {
       subject: subject.trim(),
       blocks: normalizeEmailBlocks(blocks as ReadonlyArray<EmailBlock>),
     };
+    const linkIssues = urlVariablesAsText(templateType, design.blocks);
+    if (linkIssues.length > 0) {
+      throw new ApiException(ErrorCode.EmailTemplateInvalidDesign, undefined, [...linkIssues]);
+    }
     const missingAssets = new Set(await this.assets.missing(imageAssetIds(design.blocks)));
     if (missingAssets.size > 0) {
       throw new ApiException(
