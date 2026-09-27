@@ -11,16 +11,23 @@ export const OUTBOX_RETRY_MINUTES = 5;
 
 export { MAIL_OUTBOX_STATUSES, type MailOutboxStatus };
 
-export interface MailOutboxEntry {
+/**
+ * Destinatario: un usuario (correo de su persona) o una persona sin usuario (p. ej. el jefe de un centro de costo).
+ * Exactamente uno de los dos; la tabla lo refuerza con chk_mail_outbox_recipient.
+ */
+export type MailOutboxRecipient =
+  | { readonly recipientUserId: string; readonly recipientPersonId?: never }
+  | { readonly recipientPersonId: string; readonly recipientUserId?: never };
+
+export type MailOutboxEntry = MailOutboxRecipient & {
   readonly templateType: EmailTemplateType;
-  readonly recipientUserId: string;
   /** Valores de la plantilla. Se guardan en BD: nunca tokens, contraseñas ni números de documento. */
   readonly context: Record<string, string>;
   readonly entityType: string | null;
   readonly entityId: string | null;
   /** Versión de plantilla a usar (correo de prueba de una versión). Sin ella, la activa al momento de enviar. */
   readonly templateVersionId?: string | null;
-}
+};
 
 export interface MailOutboxState {
   readonly status: MailOutboxStatus;
@@ -33,7 +40,8 @@ export interface MailOutboxState {
  * Outbox de correo genérico (mismo patrón que los enlaces de firma): enqueue escribe la fila dentro de la
  * transacción del negocio; dispatchPending envía FUERA de cualquier transacción y registra SENT o FAILED con el error.
  * Sin SMTP configurado el correo queda FAILED con el motivo, visible para quien consulta la entidad.
- * El destinatario se resuelve al enviar (correo de la persona del usuario), no se copia al encolar.
+ * El destinatario se resuelve al enviar (correo de la persona del usuario, o de la persona si se encoló a una persona
+ * sin usuario), no se copia al encolar.
  */
 @Injectable()
 export class MailOutboxService {
@@ -46,11 +54,13 @@ export class MailOutboxService {
 
   async enqueue(manager: EntityManager, entry: MailOutboxEntry): Promise<string> {
     const [row] = (await manager.query(
-      `INSERT INTO mail_outbox (template_type, recipient_user_id, context, entity_type, entity_id, template_version_id)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      `INSERT INTO mail_outbox
+         (template_type, recipient_user_id, recipient_person_id, context, entity_type, entity_id, template_version_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [
         entry.templateType,
-        entry.recipientUserId,
+        entry.recipientUserId ?? null,
+        entry.recipientPersonId ?? null,
         JSON.stringify(entry.context),
         entry.entityType,
         entry.entityId,
@@ -115,8 +125,8 @@ export class MailOutboxService {
         `SELECT o.template_type, o.context, o.template_version_id, p.email,
                 nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') AS full_name
          FROM mail_outbox o
-         JOIN app_user u ON u.id = o.recipient_user_id
-         LEFT JOIN person p ON p.id = u.person_id
+         LEFT JOIN app_user u ON u.id = o.recipient_user_id
+         LEFT JOIN person p ON p.id = coalesce(o.recipient_person_id, u.person_id)
          WHERE o.id = $1
            AND (o.delivery_status = 'PENDING_SEND' OR (o.delivery_status = 'FAILED' AND o.send_attempts < $2))
            AND (o.send_started_at IS NULL OR o.send_started_at < NOW() - make_interval(mins => $3))
@@ -143,7 +153,7 @@ export class MailOutboxService {
     }
     let error: string | null = null;
     if (!claimed.email) {
-      error = 'El usuario destinatario no tiene correo registrado';
+      error = 'El destinatario no tiene correo registrado';
     } else {
       try {
         const delivered = await this.mail.sendTemplated(

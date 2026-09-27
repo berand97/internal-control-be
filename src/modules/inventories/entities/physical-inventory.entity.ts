@@ -61,6 +61,26 @@ export class PhysicalInventory {
   @Column({ name: 'discrepancy_report', type: 'jsonb', nullable: true })
   discrepancyReport!: Record<string, unknown> | null;
 
+  /** Veces que se movieron las fechas; también es la revisión vigente de los recordatorios (schedule_rev). */
+  @Column({ name: 'reschedule_count', type: 'integer', default: 0 })
+  rescheduleCount!: number;
+
+  @Column({ name: 'rescheduled_at', type: 'timestamptz', nullable: true })
+  rescheduledAt!: Date | null;
+
+  /** Días antes del inicio en que se envía recordatorio. Vacío en las tomas anteriores a la programación. */
+  @Column({ name: 'reminder_offsets_days', type: 'smallint', array: true, default: () => "'{}'" })
+  reminderOffsetsDays!: number[];
+
+  @Column({ name: 'cancel_reason', type: 'text', nullable: true })
+  cancelReason!: string | null;
+
+  @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
+  cancelledAt!: Date | null;
+
+  @Column({ name: 'cancelled_by', type: 'uuid', nullable: true })
+  cancelledBy!: string | null;
+
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 
