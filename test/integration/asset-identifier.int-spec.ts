@@ -1,5 +1,5 @@
 import type { TestingModule } from '@nestjs/testing';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { DataSource, type QueryRunner } from 'typeorm';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { AssetIdentifier1767225624000 } from '../../src/database/migrations/1767225624000-asset-identifier.js';
@@ -129,8 +129,13 @@ describe('Identificadores de activo (PostgreSQL real)', () => {
       await runner.query('DELETE FROM asset_identifier');
       await migration.down(runner);
 
-      const [withBarcode] = await insertRaw(runner, 'A2019-0007', 'TEMP');
-      const [withoutBarcode] = await insertRaw(runner, 'EXCEL-0045', null);
+      // Mismo formato que el generador (A<año>-<n>) para que el backfill lo marque GENERATED,
+      // pero con año 0000 —que nextInternalCode nunca produce— y sufijo aleatorio, para no
+      // chocar con los códigos que otros archivos de la suite ya generaron en la BD compartida.
+      const generatedLike = `A0000-${randomInt(1_000_000, 10_000_000)}`;
+      const importedLike = `EXCEL-${randomUUID().slice(0, 8)}`;
+      const [withBarcode] = await insertRaw(runner, generatedLike, 'TEMP');
+      const [withoutBarcode] = await insertRaw(runner, importedLike, null);
 
       await migration.up(runner);
 
@@ -138,7 +143,7 @@ describe('Identificadores de activo (PostgreSQL real)', () => {
       expect(first).toEqual([
         expect.objectContaining({ identifier_type: 'LEGACY_CODE', value: 'TEMP', origin: 'IMPORTED' }),
         expect.objectContaining({ identifier_type: 'OPAQUE_ID', origin: 'GENERATED' }),
-        expect.objectContaining({ identifier_type: 'VISIBLE_CODE', value: 'A2019-0007', origin: 'GENERATED' }),
+        expect.objectContaining({ identifier_type: 'VISIBLE_CODE', value: generatedLike, origin: 'GENERATED' }),
       ]);
       const second = await identifiers(withoutBarcode!.id, runner);
       expect(second.map((row) => row.identifier_type)).toEqual(['OPAQUE_ID', 'VISIBLE_CODE']);
