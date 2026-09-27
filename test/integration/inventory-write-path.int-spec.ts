@@ -88,8 +88,8 @@ describe('Toma física sobre el camino único de escritura (PostgreSQL real)', (
   const addItem = (inventoryId: string, assetId: string, result: string, actualLocation: string | null) =>
     dataSource.query(
       `INSERT INTO physical_inventory_item (inventory_id, asset_id, verification_result,
-         expected_location_id, actual_location_id, expected_condition, expected_cost_center_id)
-       VALUES ($1, $2, $3, $4, $5, 'NEW', $6)`,
+         expected_location_id, actual_location_id, expected_condition, expected_cost_center_id, missing_cause_other)
+       VALUES ($1, $2, $3::varchar, $4, $5, 'NEW', $6, CASE WHEN $3::varchar = 'MISSING' THEN 'Faltante de prueba' END)`,
       [inventoryId, assetId, result, roomA, actualLocation, base.costCenterId],
     );
 

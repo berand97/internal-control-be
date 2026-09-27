@@ -508,8 +508,9 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
       );
       for (const [assetId, result] of items) {
         await dataSource.query(
-          `INSERT INTO physical_inventory_item (inventory_id, asset_id, verification_result, expected_cost_center_id)
-           VALUES ($1, $2, $3, $4)`,
+          `INSERT INTO physical_inventory_item (inventory_id, asset_id, verification_result, expected_cost_center_id,
+             missing_cause_other)
+           VALUES ($1, $2, $3::varchar, $4, CASE WHEN $3::varchar = 'MISSING' THEN 'Faltante de prueba' END)`,
           [id, assetId, result, costCenterId],
         );
       }
