@@ -17,6 +17,7 @@ import type { AuthUsersRepository } from '../repositories/auth-users.repository.
 import type { MfaCredentialsRepository } from '../repositories/mfa-credentials.repository.interface.js';
 import { requiresMfaEnrollment } from './mfa-policy.js';
 import { MfaService } from './mfa.service.js';
+import { SessionStateService } from './session-state.service.js';
 import {
   generateRecoveryCodes,
   normalizeRecoveryCode,
@@ -63,7 +64,23 @@ export class MfaAccountService {
     private readonly hashService: HashService,
     private readonly tokenService: TokenService,
     private readonly dataSource: DataSource,
+    private readonly sessions: SessionStateService,
   ) {}
+
+  /**
+   * Verifica un TOTP contra el secreto activo del usuario y lo consume (BE-11): el paso de tiempo aceptado queda
+   * registrado y el mismo código (o uno de un paso anterior) ya no sirve, ni en el login ni en me/mfa/*.
+   */
+  async acceptTotp(user: AppUser, code: string): Promise<boolean> {
+    if (!user.mfaSecret) {
+      return false;
+    }
+    const step = await this.mfaService.matchTotp(code, user.mfaSecret);
+    if (step === null) {
+      return false;
+    }
+    return this.credentials.recordTotpStep(user.id, step);
+  }
 
   async status(
     actor: AuthenticatedUser,
@@ -114,7 +131,11 @@ export class MfaAccountService {
       this.tokenService.getIssuer(),
     );
     const now = new Date();
-    await this.credentials.savePending(user.id, enrollment.secret, now);
+    await this.credentials.savePending(
+      user.id,
+      this.mfaService.sealSecret(enrollment.secret),
+      now,
+    );
     await this.audit(AuditAction.MfaEnrollmentStarted, user.id, actor.id, context, {
       reenroll: user.mfaEnabled,
       proof: method,
@@ -139,7 +160,8 @@ export class MfaAccountService {
     if (!pending || isExpired(pending.createdAt)) {
       throw new ApiException(ErrorCode.MfaEnrollmentNotStarted);
     }
-    if (!(await this.mfaService.verifyTotp(dto.code, pending.secret))) {
+    const step = await this.mfaService.matchTotp(dto.code, pending.secret);
+    if (step === null) {
       await this.audit(AuditAction.MfaVerificationFailed, user.id, actor.id, context, {
         purpose: 'CONFIRM_ENROLLMENT',
       });
@@ -155,7 +177,12 @@ export class MfaAccountService {
         // Otro inicio de enrolamiento reemplazó el secreto entre la verificación y el bloqueo.
         throw new ApiException(ErrorCode.MfaEnrollmentNotStarted);
       }
-      await this.credentials.activate(user.id, pending.secret, manager);
+      await this.credentials.activate(
+        user.id,
+        this.mfaService.sealSecret(pending.secret),
+        manager,
+        step,
+      );
       await this.credentials.replaceRecoveryCodes(user.id, hashes, manager);
       const now = new Date();
       const revokedSessions = reenroll
@@ -187,6 +214,9 @@ export class MfaAccountService {
         manager,
       );
     });
+    if (reenroll) {
+      this.sessions.invalidate(user.id);
+    }
     return MfaRecoveryCodesResponseDto.from(codes);
   }
 
@@ -203,7 +233,11 @@ export class MfaAccountService {
     const hashes = await this.hashCodes(codes);
     await this.dataSource.transaction(async (manager) => {
       await this.credentials.lockUser(user.id, manager);
-      await this.credentials.activate(user.id, secret, manager);
+      await this.credentials.activate(
+        user.id,
+        this.mfaService.sealSecret(secret),
+        manager,
+      );
       await this.credentials.replaceRecoveryCodes(user.id, hashes, manager);
       await this.audit(
         AuditAction.MfaEnabled,
@@ -261,7 +295,7 @@ export class MfaAccountService {
       throw new ApiException(ErrorCode.MfaRequiredByRole);
     }
     const method = await this.assertProof(user, proof, context, 'DISABLE');
-    return this.dataSource.transaction(async (manager) => {
+    const outcome = await this.dataSource.transaction(async (manager) => {
       await this.credentials.lockUser(user.id, manager);
       await this.credentials.clear(user.id, false, manager);
       const recoveryCodesDeleted = await this.credentials.deleteRecoveryCodes(
@@ -284,6 +318,8 @@ export class MfaAccountService {
       );
       return { revokedSessions, recoveryCodesDeleted };
     });
+    this.sessions.invalidate(user.id);
+    return outcome;
   }
 
   async resetByAdmin(
@@ -302,7 +338,7 @@ export class MfaAccountService {
     if (!target) {
       throw new ApiException(ErrorCode.ResourceNotFound);
     }
-    return this.dataSource.transaction(async (manager) => {
+    const outcome = await this.dataSource.transaction(async (manager) => {
       await this.credentials.lockUser(target.id, manager);
       await this.credentials.clear(target.id, true, manager);
       const recoveryCodesDeleted = await this.credentials.deleteRecoveryCodes(
@@ -330,6 +366,8 @@ export class MfaAccountService {
       );
       return { userId: target.id, revokedSessions, recoveryCodesDeleted };
     });
+    this.sessions.invalidate(target.id);
+    return outcome;
   }
 
   /**
@@ -358,11 +396,7 @@ export class MfaAccountService {
     context: MfaRequestContext,
     purpose: 'REENROLL' | 'DISABLE',
   ): Promise<MfaProofMethod> {
-    if (
-      proof.code !== undefined &&
-      user.mfaSecret &&
-      (await this.mfaService.verifyTotp(proof.code, user.mfaSecret))
-    ) {
+    if (proof.code !== undefined && (await this.acceptTotp(user, proof.code))) {
       return 'TOTP';
     }
     if (

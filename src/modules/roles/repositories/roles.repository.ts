@@ -38,6 +38,26 @@ export class TypeOrmRolesRepository implements RolesRepository {
     return this.roles.findOne({ where: { id, deletedAt: IsNull() } });
   }
 
+  findRolesHeldBy(userId: string): Promise<ReadonlyArray<Role>> {
+    return this.roles
+      .createQueryBuilder('r')
+      .where('r.deleted_at IS NULL')
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM user_role ur
+          WHERE ur.role_id = r.id
+            AND ur.user_id = :userId
+            AND ur.revoked_at IS NULL
+            AND ur.valid_from <= NOW()
+            AND (ur.valid_until IS NULL OR ur.valid_until > NOW())
+        )`,
+        { userId },
+      )
+      .orderBy('r.hierarchy_level', 'ASC')
+      .addOrderBy('r.name', 'ASC')
+      .getMany();
+  }
+
   findActiveByCode(code: string): Promise<Role | null> {
     return this.roles.findOne({ where: { code, deletedAt: IsNull() } });
   }

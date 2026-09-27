@@ -26,6 +26,11 @@ export interface UpdateRoleRecord {
 export interface RolesRepository {
   findAllActive(): Promise<ReadonlyArray<Role>>;
   findActiveById(id: string): Promise<Role | null>;
+  /**
+   * Roles vivos que el usuario tiene HOY por asignación directa (no revocada y dentro de su vigencia). Es la fuente
+   * del rango para las decisiones de privilegio: nunca los roles del JWT, que pueden estar desactualizados (BE-09).
+   */
+  findRolesHeldBy(userId: string): Promise<ReadonlyArray<Role>>;
   findActiveByCode(code: string): Promise<Role | null>;
   findChildren(parentRoleId: string): Promise<ReadonlyArray<Role>>;
   insert(record: CreateRoleRecord): Promise<Role>;

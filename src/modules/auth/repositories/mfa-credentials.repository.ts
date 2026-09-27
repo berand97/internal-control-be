@@ -39,14 +39,29 @@ export class TypeOrmMfaCredentialsRepository implements MfaCredentialsRepository
     userId: string,
     secret: string,
     manager: EntityManager,
+    totpStep: number | null = null,
   ): Promise<void> {
     await manager.query(
       `UPDATE app_user
        SET mfa_secret = $2, mfa_enabled = TRUE, mfa_pending_secret = NULL,
-           mfa_pending_created_at = NULL, mfa_enrollment_required = FALSE
+           mfa_pending_created_at = NULL, mfa_enrollment_required = FALSE,
+           mfa_last_totp_step = CASE
+             WHEN $3::bigint IS NULL THEN mfa_last_totp_step
+             ELSE GREATEST(COALESCE(mfa_last_totp_step, $3::bigint), $3::bigint)
+           END
        WHERE id = $1`,
-      [userId, secret],
+      [userId, secret, totpStep],
     );
+  }
+
+  async recordTotpStep(userId: string, step: number): Promise<boolean> {
+    const rows = (await this.dataSource.query(
+      `UPDATE app_user SET mfa_last_totp_step = $2
+       WHERE id = $1 AND (mfa_last_totp_step IS NULL OR mfa_last_totp_step < $2)
+       RETURNING id`,
+      [userId, step],
+    )) as [ReadonlyArray<unknown>, number];
+    return rows[1] === 1;
   }
 
   async clear(
@@ -57,7 +72,8 @@ export class TypeOrmMfaCredentialsRepository implements MfaCredentialsRepository
     await manager.query(
       `UPDATE app_user
        SET mfa_secret = NULL, mfa_enabled = FALSE, mfa_pending_secret = NULL,
-           mfa_pending_created_at = NULL, mfa_enrollment_required = $2
+           mfa_pending_created_at = NULL, mfa_enrollment_required = $2,
+           mfa_last_totp_step = NULL
        WHERE id = $1`,
       [userId, enrollmentRequired],
     );

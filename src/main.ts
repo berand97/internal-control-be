@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import cookieParser from 'cookie-parser';
 import { AppModule, ObserveInstrument } from './app.module.js';
+import { buildCorsOptions } from './common/http/cors.js';
 import { applyTrustProxy } from './common/http/trust-proxy.js';
 import { createAppValidationPipe } from './common/pipes/app-validation.pipe.js';
 import {
@@ -53,12 +54,9 @@ async function bootstrap(): Promise<void> {
   app.use(cookieParser());
   app.setGlobalPrefix(API_GLOBAL_PREFIX);
   app.useGlobalPipes(createAppValidationPipe());
-  app.enableCors({
-    origin: Array.from(
-      config.getOrThrow('cors.allowedOrigins', { infer: true }),
-    ),
-    credentials: true,
-  });
+  app.enableCors(
+    buildCorsOptions(config.getOrThrow('cors.allowedOrigins', { infer: true })),
+  );
 
   if (config.getOrThrow('apiDocsEnabled', { infer: true })) {
     publishApiDocs(app);

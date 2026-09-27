@@ -100,7 +100,10 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       }
       const blocked = await login(user.username, PASSWORD);
       expect(blocked.status).toBe(429);
-      expect(blocked.body.error.code).toBe('TOO_MANY_ATTEMPTS');
+      expect(blocked.body.error.code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
+      const retryAfter = Number(blocked.headers['retry-after']);
+      expect(retryAfter).toBeGreaterThan(14 * 60);
+      expect(retryAfter).toBeLessThanOrEqual(15 * 60);
 
       const row = await lockRow(`user:${user.id}`, 'PASSWORD');
       expect(row?.lock_level).toBe(1);
@@ -167,7 +170,7 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       const ghostSeq = await sequence(ghost);
       const realSeq = await sequence(real.username);
       expect(ghostSeq).toEqual(realSeq);
-      expect(ghostSeq.at(-1)).toEqual({ status: 429, code: 'TOO_MANY_ATTEMPTS' });
+      expect(ghostSeq.at(-1)).toEqual({ status: 429, code: 'ACCOUNT_TEMPORARILY_LOCKED' });
       // Lo guardado para la cuenta inexistente es un hash, no el identificador.
       const stored = (await dataSource.query(
         `SELECT subject FROM auth_attempt_lockout WHERE subject LIKE 'id:%'`,
@@ -207,6 +210,8 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       const secret = started.body.data.secret as string;
       const confirmed = await post('/auth/me/mfa/enrollment/confirm', token).send({ code: await generate({ secret }) });
       expect(confirmed.status).toBe(200);
+      // El código de la confirmación ya se usó (BE-11); las pruebas de abajo simulan el paso de 30 s siguiente.
+      await dataSource.query('UPDATE app_user SET mfa_last_totp_step = NULL WHERE id = $1', [user.id]);
       return { user, secret, codes: confirmed.body.data.recoveryCodes as string[] };
     };
 
@@ -228,7 +233,8 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       }
       const blocked = await post('/auth/mfa/verify', await challenge(user)).send({ code: await generate({ secret }) });
       expect(blocked.status).toBe(429);
-      expect(blocked.body.error.code).toBe('TOO_MANY_ATTEMPTS');
+      expect(blocked.body.error.code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
+      expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
 
       // El código de recuperación comparte el contador: tampoco sirve mientras dure el bloqueo, ni se consume.
       const recovery = await post('/auth/mfa/recovery', await challenge(user)).send({ recoveryCode: codes[0] });

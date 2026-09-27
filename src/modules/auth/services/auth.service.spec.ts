@@ -14,6 +14,7 @@ import { AuthService, requiresMfaEnrollment } from './auth.service.js';
 import type { AuthLockoutService } from './auth-lockout.service.js';
 import type { MfaAccountService } from './mfa-account.service.js';
 import type { MfaService } from './mfa.service.js';
+import type { SessionStateService } from './session-state.service.js';
 import type { TokenService } from './token.service.js';
 import { FEATURE_CATALOG } from '../../features/feature-catalog.js';
 import type { FeatureFlagsService } from '../../features/services/feature-flags.service.js';
@@ -37,6 +38,7 @@ const buildUser = (overrides: Partial<AppUser> = {}): AppUser => {
   user.mfaSecret = null;
   user.mustChangePassword = false;
   user.mfaEnrollmentRequired = false;
+  user.invitationExpiresAt = null;
   Object.assign(user, overrides);
   return user;
 };
@@ -71,13 +73,15 @@ describe('AuthService', () => {
     getRefreshTokenLifetimeSeconds: ReturnType<typeof vi.fn>;
     getIssuer: ReturnType<typeof vi.fn>;
   };
-  let mfaService: Pick<MfaService, 'verifyTotp' | 'createEnrollment'>;
+  let mfaService: Pick<MfaService, 'createEnrollment' | 'sealSecret'>;
   let mailService: { sendPasswordReset: ReturnType<typeof vi.fn> };
+  let sessions: { invalidate: ReturnType<typeof vi.fn> };
   let featureFlags: Pick<FeatureFlagsService, 'list'>;
   let mfaAccount: {
     status: ReturnType<typeof vi.fn>;
     completeSetupEnrollment: ReturnType<typeof vi.fn>;
     consumeForLogin: ReturnType<typeof vi.fn>;
+    acceptTotp: ReturnType<typeof vi.fn>;
   };
   let lockout: {
     registerAttempt: ReturnType<typeof vi.fn>;
@@ -141,8 +145,9 @@ describe('AuthService', () => {
       getRefreshTokenLifetimeSeconds: vi.fn().mockReturnValue(604800),
       getIssuer: vi.fn().mockReturnValue('asset-management-api'),
     };
+    sessions = { invalidate: vi.fn() };
     mfaService = {
-      verifyTotp: vi.fn().mockResolvedValue(true),
+      sealSecret: vi.fn((secret: string) => `enc.v1.sealed-${secret}`),
       createEnrollment: vi.fn().mockResolvedValue({
         secret: 'SECRET',
         otpauthUrl: 'otpauth://totp/x',
@@ -170,6 +175,7 @@ describe('AuthService', () => {
       }),
       completeSetupEnrollment: vi.fn().mockResolvedValue(['AAAA-BBBB-CCCC']),
       consumeForLogin: vi.fn().mockResolvedValue(9),
+      acceptTotp: vi.fn().mockResolvedValue(true),
     };
     lockout = {
       registerAttempt: vi.fn().mockResolvedValue({
@@ -204,11 +210,12 @@ describe('AuthService', () => {
       } as never,
       mfaAccount as unknown as MfaAccountService,
       lockout as unknown as AuthLockoutService,
+      sessions as unknown as SessionStateService,
     );
   });
 
   describe('bloqueo por cuenta (BE-04)', () => {
-    it('con la cuenta bloqueada responde 429 sin verificar la contraseña', async () => {
+    it('con la cuenta bloqueada responde 429 ACCOUNT_TEMPORARILY_LOCKED con los segundos de espera, sin verificar la contraseña', async () => {
       vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
         buildUser(),
       );
@@ -217,13 +224,37 @@ describe('AuthService', () => {
         lockedNow: false,
         lockedUntil: new Date(Date.now() + 60_000),
       });
-      await expect(
-        service.login(
+      const error: unknown = await service
+        .login(
           { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
           context,
-        ),
-      ).rejects.toMatchObject({ code: ErrorCode.TooManyAttempts });
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: ErrorCode.AccountTemporarilyLocked });
+      const retryAfter = (error as { retryAfterSeconds: number }).retryAfterSeconds;
+      expect(retryAfter).toBeGreaterThan(55);
+      expect(retryAfter).toBeLessThanOrEqual(60);
       expect(hashService.verify).not.toHaveBeenCalled();
+    });
+
+    it('el bloqueo del segundo factor usa el mismo código', async () => {
+      tokenService.verifyMfaChallengeToken.mockReturnValue({
+        sub: 'user-1',
+        username: 'juliana.perez',
+        type: 'mfa_challenge',
+      });
+      vi.mocked(authUsersRepository.findByIdWithPerson).mockResolvedValue(
+        buildUser({ mfaEnabled: true, mfaSecret: 's' }),
+      );
+      lockout.registerAttempt.mockResolvedValue({
+        allowed: false,
+        lockedNow: false,
+        lockedUntil: new Date(Date.now() + 60_000),
+      });
+      await expect(
+        service.verifyMfa({ code: '123456' }, 'Bearer challenge', context),
+      ).rejects.toMatchObject({ code: ErrorCode.AccountTemporarilyLocked });
+      expect(mfaAccount.acceptTotp).not.toHaveBeenCalled();
     });
 
     it('una cuenta inexistente se cuenta por hash del identificador, no por su texto', async () => {
@@ -297,13 +328,45 @@ describe('AuthService', () => {
       ).rejects.toMatchObject({ code: ErrorCode.InvalidCredentials });
     });
 
-    it('retorna 403 si la cuenta está suspendida', async () => {
+    it('retorna 403 si la cuenta está suspendida y la contraseña es correcta', async () => {
       vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
         buildUser({ status: UserStatus.Suspended }),
       );
       await expect(
         service.login({ username: 'juliana.perez', password: 'x' }, context),
       ).rejects.toMatchObject({ code: ErrorCode.UserSuspended });
+    });
+
+    it('BE-13: no revela el estado de la cuenta con una contraseña incorrecta', async () => {
+      for (const status of [
+        UserStatus.Suspended,
+        UserStatus.Inactive,
+        UserStatus.PendingActivation,
+      ]) {
+        vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+          buildUser({ status }),
+        );
+        hashService.verify.mockResolvedValue(false);
+        await expect(
+          service.login({ username: 'juliana.perez', password: 'mala' }, context),
+        ).rejects.toMatchObject({ code: ErrorCode.InvalidCredentials });
+      }
+    });
+
+    it('BE-14: rechaza la contraseña temporal vencida con INVITATION_EXPIRED', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser({
+          status: UserStatus.PendingActivation,
+          mustChangePassword: true,
+          invitationExpiresAt: new Date(Date.now() - 1000),
+        }),
+      );
+      await expect(
+        service.login(
+          { username: 'juliana.perez', password: 'T3mporal-Segura!' },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.InvitationExpired });
     });
 
     it('retorna challenge cuando MFA ya está activo', async () => {
@@ -404,9 +467,10 @@ describe('AuthService', () => {
         otpauthUrl: 'otpauth://totp/x',
         qrDataUrl: 'data:image/png;base64,iVBORw0KGgo',
       });
+      // BE-11: lo que se guarda es la semilla cifrada, nunca la que se muestra en el QR.
       expect(authUsersRepository.saveMfaSecret).toHaveBeenCalledWith(
         'user-1',
-        'SECRET',
+        'enc.v1.sealed-SECRET',
       );
     });
   });
@@ -438,7 +502,7 @@ describe('AuthService', () => {
       vi.mocked(authUsersRepository.findByIdWithPerson).mockResolvedValue(
         buildUser({ mfaEnabled: true, mfaSecret: 's' }),
       );
-      vi.mocked(mfaService.verifyTotp).mockResolvedValue(false);
+      mfaAccount.acceptTotp.mockResolvedValue(false);
       await expect(
         service.verifyMfa({ code: '000000' }, 'Bearer challenge', context),
       ).rejects.toMatchObject({ code: ErrorCode.MfaCodeInvalid });
@@ -564,9 +628,42 @@ describe('AuthService', () => {
   });
 
   describe('logout', () => {
-    it('revoca todas las familias del usuario', async () => {
+    it('revoca todas las familias del usuario e invalida la caché de sesión', async () => {
       await service.logout(actor, context);
       expect(refreshTokenFamiliesRepository.revokeAllForUser).toHaveBeenCalled();
+      expect(sessions.invalidate).toHaveBeenCalledWith('user-1');
+    });
+  });
+
+  describe('forgotPassword (BE-13)', () => {
+    it('responde sin esperar el envío del correo', async () => {
+      vi.mocked(authUsersRepository.findByEmailWithPerson).mockResolvedValue(
+        buildUser(),
+      );
+      let release: () => void = () => undefined;
+      mailService.sendPasswordReset.mockReturnValue(
+        new Promise<boolean>((resolve) => {
+          release = () => resolve(true);
+        }),
+      );
+      await expect(
+        service.forgotPassword({ email: 'juliana.perez@unac.edu.co' }, context),
+      ).resolves.toBeNull();
+      await vi.waitFor(() =>
+        expect(mailService.sendPasswordReset).toHaveBeenCalled(),
+      );
+      expect(auditLogsRepository.record).not.toHaveBeenCalled();
+      release();
+      await vi.waitFor(() => expect(auditLogsRepository.record).toHaveBeenCalled());
+    });
+
+    it('con un correo desconocido no crea token ni envía nada', async () => {
+      vi.mocked(authUsersRepository.findByEmailWithPerson).mockResolvedValue(null);
+      await expect(
+        service.forgotPassword({ email: 'nadie@unac.edu.co' }, context),
+      ).resolves.toBeNull();
+      expect(passwordResetTokensRepository.insert).not.toHaveBeenCalled();
+      expect(mailService.sendPasswordReset).not.toHaveBeenCalled();
     });
   });
 

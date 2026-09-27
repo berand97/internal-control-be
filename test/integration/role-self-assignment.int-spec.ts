@@ -9,7 +9,7 @@ import { applyTrustProxy } from '../../src/common/http/trust-proxy.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { scalar } from './helpers.js';
+import { scalar, openTestSession } from './helpers.js';
 
 /** Regla del desarrollador: nadie se autoasigna roles ni permisos, tampoco SUPER_ADMIN (HTTP real + PostgreSQL real). */
 describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () => {
@@ -48,7 +48,7 @@ describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () 
       roles: [...roleCodes],
       scopes: [{ type: 'GLOBAL', id: null }],
       mustChangePassword: false,
-      sessionId: randomUUID(),
+      sessionId: await openTestSession(dataSource, id),
     });
     return { id, token };
   };

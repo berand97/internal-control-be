@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
@@ -22,6 +22,7 @@ import { MfaSetupRequiredResponseDto } from '../dto/responses/mfa-setup-required
 import { RecoveryLoginResponseDto } from '../dto/responses/recovery-login-response.dto.js';
 import { RefreshResponseDto } from '../dto/responses/refresh-response.dto.js';
 import { AuditAction } from '../enums/audit-action.enum.js';
+import { AccountLockedException } from '../exceptions/account-locked.exception.js';
 import { RefreshTokenFamilyStatus } from '../enums/refresh-token-family-status.enum.js';
 import { UserStatus } from '../enums/user-status.enum.js';
 import type { AuditLogsRepository } from '../repositories/audit-logs.repository.interface.js';
@@ -31,9 +32,11 @@ import type { RefreshTokenFamiliesRepository } from '../repositories/refresh-tok
 import type { RefreshTokenPayload } from '../types/token-payloads.type.js';
 import type { AuthFactor } from './auth-lockout.policy.js';
 import { AuthLockoutService, type AttemptOutcome } from './auth-lockout.service.js';
+import { isInvitationExpired } from './invitation-policy.js';
 import { MfaAccountService, type MfaProofMethod } from './mfa-account.service.js';
 import { requiresMfaEnrollment } from './mfa-policy.js';
 import { MfaService } from './mfa.service.js';
+import { SessionStateService } from './session-state.service.js';
 import { TokenService } from './token.service.js';
 import { FeatureFlagsService } from '../../features/services/feature-flags.service.js';
 import { NavigationService } from '../../navigation/services/navigation.service.js';
@@ -75,6 +78,8 @@ const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @Inject('AuthUsersRepository')
     private readonly authUsersRepository: AuthUsersRepository,
@@ -92,6 +97,7 @@ export class AuthService {
     private readonly navigationService: NavigationService,
     private readonly mfaAccount: MfaAccountService,
     private readonly lockout: AuthLockoutService,
+    private readonly sessions: SessionStateService,
   ) {}
 
   async login(
@@ -113,7 +119,7 @@ export class AuthService {
         context,
         { reason: 'ACCOUNT_LOCKED', factor: 'PASSWORD' },
       );
-      throw new ApiException(ErrorCode.TooManyAttempts);
+      throw AccountLockedException.until(attempt.lockedUntil);
     }
 
     if (!user) {
@@ -132,8 +138,8 @@ export class AuthService {
       throw new ApiException(ErrorCode.InvalidCredentials);
     }
 
-    this.assertAccountUsable(user);
-
+    // BE-13: el estado de la cuenta (suspendida, inactiva, invitación vencida) solo se revela a quien demostró la
+    // contraseña. Con contraseña errónea, cualquier cuenta responde INVALID_CREDENTIALS, exista o no.
     const passwordMatches = await this.hashService.verify(
       user.passwordHash,
       dto.password,
@@ -153,6 +159,7 @@ export class AuthService {
       throw new ApiException(ErrorCode.InvalidCredentials);
     }
     await this.lockout.clear(lockSubject, 'PASSWORD');
+    this.assertAccountUsable(user);
 
     if (user.mfaEnabled) {
       const mfaChallengeToken = this.tokenService.signMfaChallengeToken(
@@ -201,10 +208,7 @@ export class AuthService {
     this.assertAccountUsable(user);
     const attempt = await this.registerMfaAttempt(user.id, context);
 
-    const codeValid = await this.mfaService.verifyTotp(
-      dto.code,
-      user.mfaSecret,
-    );
+    const codeValid = await this.mfaAccount.acceptTotp(user, dto.code);
     if (!codeValid) {
       await this.recordAudit(
         AuditAction.LoginFailed,
@@ -378,6 +382,7 @@ export class AuthService {
       user.id,
       new Date(),
     );
+    this.sessions.invalidate(user.id);
     await this.recordAudit(AuditAction.Logout, user.id, user.id, context, null);
   }
 
@@ -422,7 +427,10 @@ export class AuthService {
       user.person?.email ?? user.username,
       this.tokenService.getIssuer(),
     );
-    await this.authUsersRepository.saveMfaSecret(user.id, enrollment.secret);
+    await this.authUsersRepository.saveMfaSecret(
+      user.id,
+      this.mfaService.sealSecret(enrollment.secret),
+    );
     return MfaEnrollmentResponseDto.from(
       enrollment.secret,
       enrollment.otpauthUrl,
@@ -444,7 +452,7 @@ export class AuthService {
       throw new ApiException(ErrorCode.MfaRequired);
     }
     this.assertAccountUsable(user);
-    const codeValid = await this.mfaService.verifyTotp(dto.code, user.mfaSecret);
+    const codeValid = await this.mfaAccount.acceptTotp(user, dto.code);
     if (!codeValid) {
       throw new ApiException(ErrorCode.MfaCodeInvalid);
     }
@@ -473,10 +481,26 @@ export class AuthService {
       dto.email,
     );
     if (!user) {
-      await this.hashService.runDummyVerification(dto.email);
       return null;
     }
+    // BE-13: la respuesta sale sin esperar el token ni el SMTP (conexión, STARTTLS, AUTH), que delataban por tiempo
+    // los correos registrados. El trabajo sigue en segundo plano; un fallo solo se registra (sin correo ni token).
+    void this.deliverPasswordReset(user, dto.email, context).catch(
+      (error: unknown) => {
+        this.logger.error(
+          'No se pudo completar el restablecimiento de contraseña solicitado',
+          error instanceof Error ? error.stack : String(error),
+        );
+      },
+    );
+    return null;
+  }
 
+  private async deliverPasswordReset(
+    user: AppUser,
+    email: string,
+    context: AuthRequestContext,
+  ): Promise<void> {
     const { token, tokenHash } = this.createPasswordResetToken();
     const now = new Date();
     await this.passwordResetTokensRepository.invalidateUnusedForUser(
@@ -488,15 +512,14 @@ export class AuthService {
       tokenHash,
       expiresAt: new Date(now.getTime() + PASSWORD_RESET_TTL_MS),
     });
-    await this.mailService.sendPasswordReset(dto.email, token);
+    await this.mailService.sendPasswordReset(email, token);
     await this.recordAudit(
       AuditAction.PasswordResetRequested,
       user.id,
       user.id,
       context,
-      { email: dto.email },
+      { email },
     );
-    return null;
   }
 
   async resetPassword(
@@ -528,6 +551,7 @@ export class AuthService {
       now,
     );
     await this.refreshTokenFamiliesRepository.revokeAllForUser(user.id, now);
+    this.sessions.invalidate(user.id);
     await this.recordAudit(
       AuditAction.PasswordReset,
       user.id,
@@ -564,6 +588,7 @@ export class AuthService {
     await this.authUsersRepository.updatePassword(user.id, passwordHash);
     await this.authUsersRepository.activateAfterPasswordReset(user.id);
     await this.refreshTokenFamiliesRepository.revokeAllForUser(user.id, now);
+    this.sessions.invalidate(user.id);
     await this.recordAudit(
       AuditAction.PasswordChanged,
       user.id,
@@ -687,6 +712,13 @@ export class AuthService {
     ) {
       throw new ApiException(ErrorCode.UserInactive);
     }
+    // BE-14: la contraseña temporal de una invitación vence; el reenvío genera otra y renueva el plazo.
+    if (
+      user.mustChangePassword &&
+      isInvitationExpired(user.invitationExpiresAt ?? null, new Date())
+    ) {
+      throw new ApiException(ErrorCode.InvitationExpired);
+    }
   }
 
   private refreshExpiryFrom(now: Date): Date {
@@ -709,7 +741,7 @@ export class AuthService {
         reason: 'ACCOUNT_LOCKED',
         factor: 'MFA',
       });
-      throw new ApiException(ErrorCode.TooManyAttempts);
+      throw AccountLockedException.until(attempt.lockedUntil);
     }
     return attempt;
   }

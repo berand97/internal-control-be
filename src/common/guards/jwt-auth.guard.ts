@@ -29,6 +29,10 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   handleRequest<TUser>(err: unknown, user: TUser, info: unknown): TUser {
+    // JwtStrategy.validate rechaza con su propio código (p. ej. SESSION_REVOKED): se conserva tal cual.
+    if (err instanceof ApiException) {
+      throw err;
+    }
     if (err instanceof Error) {
       throw new ApiException(ErrorCode.Unauthorized, err.message);
     }

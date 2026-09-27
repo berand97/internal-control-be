@@ -88,6 +88,8 @@ import { NavigationIconsAndNewItems1767225740000 } from './migrations/1767225740
 import { RbacInheritanceHardening1767225750000 } from './migrations/1767225750000-rbac-inheritance-hardening.js';
 import { AuthAttemptLockout1767225751000 } from './migrations/1767225751000-auth-attempt-lockout.js';
 import { PersonEmailSingleLine1767225760000 } from './migrations/1767225760000-person-email-single-line.js';
+import { InvitationExpiryAndTotpStep1767225770000 } from './migrations/1767225770000-invitation-expiry-and-totp-step.js';
+import { EncryptMfaSecrets1767225771000 } from './migrations/1767225771000-encrypt-mfa-secrets.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -202,6 +204,8 @@ const dataSource = new DataSource({
     RbacInheritanceHardening1767225750000,
     AuthAttemptLockout1767225751000,
     PersonEmailSingleLine1767225760000,
+    InvitationExpiryAndTotpStep1767225770000,
+    EncryptMfaSecrets1767225771000,
   ],
 });
 

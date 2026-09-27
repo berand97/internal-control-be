@@ -9,6 +9,8 @@ export enum ErrorCode {
   InvalidState = 'INVALID_STATE',
   ConcurrentModification = 'CONCURRENT_MODIFICATION',
   TooManyAttempts = 'TOO_MANY_ATTEMPTS',
+  AccountTemporarilyLocked = 'ACCOUNT_TEMPORARILY_LOCKED',
+  SessionRevoked = 'SESSION_REVOKED',
   ExternalServiceFailure = 'EXTERNAL_SERVICE_FAILURE',
   InternalError = 'INTERNAL_ERROR',
 
@@ -29,6 +31,7 @@ export enum ErrorCode {
   PersonEmailAlreadyExists = 'PERSON_EMAIL_ALREADY_EXISTS',
   PasswordResetInvalid = 'PASSWORD_RESET_INVALID',
   PasswordChangeRequired = 'PASSWORD_CHANGE_REQUIRED',
+  InvitationExpired = 'INVITATION_EXPIRED',
 
   RoleNotFound = 'ROLE_NOT_FOUND',
   RoleNotAssignable = 'ROLE_NOT_ASSIGNABLE',
@@ -47,6 +50,7 @@ export enum ErrorCode {
   SodViolation = 'SOD_VIOLATION',
   DelegationRequiresExpiry = 'DELEGATION_REQUIRES_EXPIRY',
   CannotDelegateRoleNotHeld = 'CANNOT_DELEGATE_ROLE_NOT_HELD',
+  DelegationExceedsSourceValidity = 'DELEGATION_EXCEEDS_SOURCE_VALIDITY',
   HasActiveLoans = 'HAS_ACTIVE_LOANS',
   PersonAffiliationRequired = 'PERSON_AFFILIATION_REQUIRED',
   CostCenterOrgUnitMismatch = 'COST_CENTER_ORG_UNIT_MISMATCH',

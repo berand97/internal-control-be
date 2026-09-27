@@ -12,6 +12,7 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { HashService } from '../../src/shared/crypto/hash.service.js';
+import { SecretCipherService } from '../../src/shared/crypto/secret-cipher.service.js';
 import { scalar } from './helpers.js';
 
 const PASSWORD = 'Clave-Segura-2026!';
@@ -149,6 +150,7 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
   let dataSource: DataSource;
   let tokens: TokenService;
   let hashes: HashService;
+  let cipher: SecretCipherService;
   let ipCounter = 0;
   /** Todo secreto o código que vio el test: al final ninguno puede aparecer en audit_log. */
   const secretsSeen = new Set<string>();
@@ -183,7 +185,15 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
       .set('Authorization', `Bearer ${token}`)
       .then(observe('get', path));
 
-  const totp = async (secret: string): Promise<string> => generate({ secret });
+  /**
+   * Código TOTP como si ya hubiera llegado el siguiente paso de 30 s: desde BE-11 un código (su paso de tiempo) sirve
+   * una sola vez por usuario, y este archivo encadena varias pruebas del factor en segundos. Olvidar el último paso
+   * usado equivale a esperar al código siguiente. La no reutilización se prueba en auth-session-hardening.
+   */
+  const totp = async (secret: string): Promise<string> => {
+    await dataSource.query('UPDATE app_user SET mfa_last_totp_step = NULL WHERE mfa_last_totp_step IS NOT NULL');
+    return generate({ secret });
+  };
   const wrongTotp = async (secret: string): Promise<string> =>
     String((Number(await totp(secret)) + 1) % 1_000_000).padStart(6, '0');
 
@@ -302,7 +312,17 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     if (!row) {
       throw new Error('usuario inexistente');
     }
-    return row;
+    // BE-11: en BD las semillas van cifradas; se comparan en claro tras comprobar que no están legibles.
+    for (const stored of [row.mfa_secret, row.mfa_pending_secret]) {
+      if (stored !== null) {
+        expect(stored.startsWith('enc.v1.')).toBe(true);
+      }
+    }
+    return {
+      ...row,
+      mfa_secret: cipher.decrypt(row.mfa_secret),
+      mfa_pending_secret: cipher.decrypt(row.mfa_pending_secret),
+    };
   };
 
   const recoveryLogin = async (user: TestUser, code: string) => {
@@ -321,6 +341,7 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     dataSource = app.get(DataSource);
     tokens = app.get(TokenService);
     hashes = app.get(HashService);
+    cipher = app.get(SecretCipherService);
   });
 
   afterAll(async () => {

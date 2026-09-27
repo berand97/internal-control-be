@@ -15,23 +15,59 @@ export class RolePrivilegePolicy {
     private readonly permissionsService: PermissionsService,
   ) {}
 
-  isSuperAdmin(actor: AuthenticatedUser): boolean {
-    return actor.roles.includes('SUPER_ADMIN');
+  /**
+   * Roles vigentes del actor leídos de la BD en cada decisión (BE-09): un rol revocado deja de contar de inmediato,
+   * aunque el access token todavía lo liste en `roles`.
+   */
+  private heldRoles(actor: AuthenticatedUser): Promise<ReadonlyArray<Role>> {
+    return this.rolesRepository.findRolesHeldBy(actor.id);
   }
 
-  assertCanReorganize(actor: AuthenticatedUser): void {
-    if (!this.isSuperAdmin(actor)) {
+  async isSuperAdmin(actor: AuthenticatedUser): Promise<boolean> {
+    const held = await this.heldRoles(actor);
+    return held.some((role) => role.code === 'SUPER_ADMIN');
+  }
+
+  async assertCanReorganize(actor: AuthenticatedUser): Promise<void> {
+    if (!(await this.isSuperAdmin(actor))) {
       throw new ApiException(ErrorCode.InsufficientPermissions);
     }
   }
 
   async actorRank(actor: AuthenticatedUser): Promise<number> {
-    const roles = await this.rolesRepository.findAllActive();
-    const held = roles.filter((role) => actor.roles.includes(role.code));
+    const held = await this.heldRoles(actor);
     if (held.length === 0) {
       throw new ApiException(ErrorCode.InsufficientPermissions);
     }
     return Math.min(...held.map((role) => role.hierarchyLevel));
+  }
+
+  /**
+   * Administración en cascada sobre OTRO usuario (BE-07): revocarle roles, desactivarlo o reactivarlo, editarlo,
+   * reenviarle la invitación o restablecer su MFA exige que su rol de mayor rango (menor hierarchy_level) quede por
+   * debajo del rango del actor. SUPER_ADMIN administra a todos. Un usuario sin roles vigentes lo administra
+   * cualquiera con rango. Las acciones sobre uno mismo no pasan por aquí: cada una tiene su propia regla (p. ej. el
+   * autorrestablecimiento de MFA está prohibido; revocarse un rol propio solo reduce privilegios).
+   */
+  async assertCanAdministerUser(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+  ): Promise<void> {
+    if (targetUserId === actor.id) {
+      return;
+    }
+    const held = await this.heldRoles(actor);
+    if (held.some((role) => role.code === 'SUPER_ADMIN')) {
+      return;
+    }
+    if (held.length === 0) {
+      throw new ApiException(ErrorCode.InsufficientPermissions);
+    }
+    const rank = Math.min(...held.map((role) => role.hierarchyLevel));
+    const target = await this.rolesRepository.findRolesHeldBy(targetUserId);
+    if (target.some((role) => role.hierarchyLevel <= rank)) {
+      throw new ApiException(ErrorCode.RolePrivilegeEscalation);
+    }
   }
 
   async listAssignableFor(actor: AuthenticatedUser): Promise<ReadonlyArray<Role>> {
@@ -93,16 +129,12 @@ export class RolePrivilegePolicy {
    * bajo su propio rol de mayor rango, de modo que el rol nuevo queda un nivel por debajo de él (cascada).
    */
   async defaultSuperiorFor(actor: AuthenticatedUser): Promise<Role | null> {
-    if (this.isSuperAdmin(actor)) {
+    if (await this.isSuperAdmin(actor)) {
       return this.rolesRepository.findActiveByCode('SUPER_ADMIN');
     }
     const rank = await this.actorRank(actor);
-    const roles = await this.rolesRepository.findAllActive();
-    return (
-      roles.find(
-        (role) => actor.roles.includes(role.code) && role.hierarchyLevel === rank,
-      ) ?? null
-    );
+    const held = await this.heldRoles(actor);
+    return held.find((role) => role.hierarchyLevel === rank) ?? null;
   }
 
   /**

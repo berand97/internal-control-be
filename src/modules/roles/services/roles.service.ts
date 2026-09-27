@@ -82,7 +82,7 @@ export class RolesService {
       await this.privilege.assertCanInheritFrom(actor, parent);
     }
     if (dto.superiorRoleId !== undefined) {
-      this.privilege.assertCanReorganize(actor);
+      await this.privilege.assertCanReorganize(actor);
     }
     const superior = dto.superiorRoleId
       ? await this.requireRole(dto.superiorRoleId)
@@ -146,7 +146,7 @@ export class RolesService {
     const reorganizing =
       dto.parentRoleId !== undefined || dto.superiorRoleId !== undefined;
     if (reorganizing) {
-      this.privilege.assertCanReorganize(actor);
+      await this.privilege.assertCanReorganize(actor);
       if (role.code === 'SUPER_ADMIN') {
         throw new ApiException(ErrorCode.RoleSystemImmutable);
       }

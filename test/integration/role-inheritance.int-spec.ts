@@ -9,7 +9,7 @@ import { applyTrustProxy } from '../../src/common/http/trust-proxy.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { scalar } from './helpers.js';
+import { scalar, openTestSession } from './helpers.js';
 
 /**
  * BE-02 (herencia evade assertCanGrant y SoD) y BE-03 (permisos de roles borrados siguen vigentes), por HTTP real
@@ -58,7 +58,7 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
       roles: [...roleCodes],
       scopes: [{ type: 'GLOBAL', id: null }],
       mustChangePassword: false,
-      sessionId: randomUUID(),
+      sessionId: await openTestSession(dataSource, id),
     });
     return { id, personId, username: `roles.${suffix}`, token };
   };
@@ -322,7 +322,7 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
         roles: [],
         scopes: [{ type: 'GLOBAL', id: null }],
         mustChangePassword: false,
-        sessionId: randomUUID(),
+        sessionId: await openTestSession(dataSource, holder.id),
       }));
       expect(me.status).toBe(200);
       expect(me.body.data.permissions).not.toContain('user:read:global');

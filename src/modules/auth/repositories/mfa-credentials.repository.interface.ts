@@ -21,7 +21,21 @@ export interface MfaCredentialsRepository {
     manager?: EntityManager,
   ): Promise<MfaPendingEnrollment | null>;
   savePending(userId: string, secret: string, at: Date): Promise<void>;
-  activate(userId: string, secret: string, manager: EntityManager): Promise<void>;
+  /**
+   * Activa el secreto (ya cifrado con MfaService.sealSecret). totpStep: paso del código con que se confirmó; se
+   * guarda como último paso usado para que ese mismo código no sirva otra vez (null deja el valor que había).
+   */
+  activate(
+    userId: string,
+    secret: string,
+    manager: EntityManager,
+    totpStep?: number | null,
+  ): Promise<void>;
+  /**
+   * Registra el paso TOTP aceptado si es posterior al último usado (BE-11). false si ya se usó ese paso o uno
+   * posterior: el mismo código no sirve dos veces dentro de su ventana. Atómico frente a peticiones concurrentes.
+   */
+  recordTotpStep(userId: string, step: number): Promise<boolean>;
   clear(
     userId: string,
     enrollmentRequired: boolean,

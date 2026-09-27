@@ -22,6 +22,13 @@ import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import type { AuthUsersRepository } from '../../auth/repositories/auth-users.repository.interface.js';
 import type { RefreshTokenFamiliesRepository } from '../../auth/repositories/refresh-token-families.repository.interface.js';
+import { invitationExpiryFrom } from '../../auth/services/invitation-policy.js';
+import {
+  MfaAccountService,
+  type AdminMfaResetOutcome,
+  type MfaRequestContext,
+} from '../../auth/services/mfa-account.service.js';
+import { SessionStateService } from '../../auth/services/session-state.service.js';
 import type { CostCentersRepository } from '../../cost-centers/repositories/cost-centers.repository.interface.js';
 import type { OrganizationalUnitsRepository } from '../../organizational-units/repositories/organizational-units.repository.interface.js';
 import { NavigationService } from '../../navigation/services/navigation.service.js';
@@ -66,6 +73,8 @@ export class UsersService {
     private readonly costCentersRepository: CostCentersRepository,
     private readonly navigationService: NavigationService,
     private readonly privilege: RolePrivilegePolicy,
+    private readonly sessions: SessionStateService,
+    private readonly mfaAccount: MfaAccountService,
   ) {}
 
   async list(
@@ -164,6 +173,7 @@ export class UsersService {
         passwordHash,
         status: UserStatus.PendingActivation,
         mustChangePassword: true,
+        invitationExpiresAt: invitationExpiryFrom(new Date()),
       });
       user.person = person;
 
@@ -204,6 +214,7 @@ export class UsersService {
 
   async resendInvitation(id: string, actor: AuthenticatedUser): Promise<null> {
     const user = await this.requireUser(id);
+    await this.privilege.assertCanAdministerUser(actor, user.id);
     if (user.status === UserStatus.Suspended) {
       throw new ApiException(ErrorCode.UserSuspended);
     }
@@ -224,11 +235,16 @@ export class UsersService {
 
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await this.hashService.hash(temporaryPassword);
-    await this.usersRepository.updateInvitationCredentials(user.id, passwordHash);
+    await this.usersRepository.updateInvitationCredentials(
+      user.id,
+      passwordHash,
+      invitationExpiryFrom(new Date()),
+    );
     await this.refreshTokenFamiliesRepository.revokeAllForUser(
       user.id,
       new Date(),
     );
+    this.sessions.invalidate(user.id);
     this.permissionsService.invalidate(user.id);
     const activeRoles = await this.usersRepository.findActiveRoles(user.id);
     const invitationSent = await this.mailService.sendUserInvitation(
@@ -266,6 +282,7 @@ export class UsersService {
     actor: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
     const user = await this.requireUser(id);
+    await this.privilege.assertCanAdministerUser(actor, user.id);
     const affiliationPatch =
       dto.organizationalUnitId !== undefined || dto.costCenterId !== undefined
         ? await this.resolveAffiliation({
@@ -307,6 +324,7 @@ export class UsersService {
 
   async deactivate(id: string, actor: AuthenticatedUser): Promise<null> {
     const user = await this.requireUser(id);
+    await this.privilege.assertCanAdministerUser(actor, user.id);
     const activeLoans = await this.activeLoans.countActiveByResponsibleUserId(
       user.id,
     );
@@ -316,6 +334,7 @@ export class UsersService {
     const now = new Date();
     await this.usersRepository.updateStatus(user.id, UserStatus.Inactive);
     await this.refreshTokenFamiliesRepository.revokeAllForUser(user.id, now);
+    this.sessions.invalidate(user.id);
     this.permissionsService.invalidate(user.id);
     await this.auditLogsRepository.record({
       action: AuditAction.UserDeactivated,
@@ -328,9 +347,22 @@ export class UsersService {
     return null;
   }
 
+  /**
+   * Solo devuelve a ACTIVE una cuenta INACTIVE o SUSPENDED, y solo si el actor puede administrar al usuario (BE-07).
+   * Una cuenta ACTIVE o pendiente de activación no se "reactiva": en la pendiente, saltarse la activación dejaría
+   * viva una contraseña temporal como si fuera definitiva.
+   */
   async reactivate(id: string, actor: AuthenticatedUser): Promise<null> {
     const user = await this.requireUser(id);
+    await this.privilege.assertCanAdministerUser(actor, user.id);
+    if (
+      user.status !== UserStatus.Inactive &&
+      user.status !== UserStatus.Suspended
+    ) {
+      throw new ApiException(ErrorCode.InvalidState);
+    }
     await this.usersRepository.updateStatus(user.id, UserStatus.Active);
+    this.sessions.invalidate(user.id);
     this.permissionsService.invalidate(user.id);
     await this.auditLogsRepository.record({
       action: AuditAction.UserReactivated,
@@ -339,8 +371,20 @@ export class UsersService {
       performedBy: actor.id,
       ipAddress: null,
       userAgent: null,
+      changes: { previousStatus: user.status },
     });
     return null;
+  }
+
+  /** Restablecer el MFA de otro usuario: además de las reglas de MfaAccountService, exige poder administrarlo. */
+  async resetMfa(
+    id: string,
+    reason: string,
+    actor: AuthenticatedUser,
+    context: MfaRequestContext,
+  ): Promise<AdminMfaResetOutcome> {
+    await this.privilege.assertCanAdministerUser(actor, id);
+    return this.mfaAccount.resetByAdmin(actor, id, reason, context);
   }
 
   async assignRole(
@@ -387,18 +431,21 @@ export class UsersService {
     }
 
     try {
-      const assignment = await this.usersRepository.insertUserRole({
-        userId,
-        roleId: role.id,
-        scopeType,
-        scopeId,
-        validFrom,
-        validUntil,
-        isDelegated: false,
-        delegatedFromUserId: null,
-        delegationReason: null,
-        grantedBy: actor.id,
-      });
+      const assignment = await this.usersRepository.insertUserRoleWithinLimit(
+        {
+          userId,
+          roleId: role.id,
+          scopeType,
+          scopeId,
+          validFrom,
+          validUntil,
+          isDelegated: false,
+          delegatedFromUserId: null,
+          delegationReason: null,
+          grantedBy: actor.id,
+        },
+        role.maxConcurrentUsers,
+      );
       assignment.role = role;
       this.permissionsService.invalidate(userId);
       await this.auditLogsRepository.record({
@@ -435,13 +482,16 @@ export class UsersService {
     if (assignment.revokedAt) {
       throw new ApiException(ErrorCode.InvalidState);
     }
-    await this.usersRepository.revokeUserRole(
+    // BE-07: quitarle un rol a otro exige poder administrarlo (revocarse uno propio solo reduce privilegios).
+    await this.privilege.assertCanAdministerUser(actor, userId);
+    // BE-08: las delegaciones hechas desde esta asignación caen con ella, en la misma transacción.
+    const affected = await this.usersRepository.revokeUserRoleCascade(
       assignment.id,
       actor.id,
       new Date(),
       null,
     );
-    this.permissionsService.invalidate(userId);
+    this.permissionsService.invalidateMany([userId, ...affected]);
     await this.auditLogsRepository.record({
       action: AuditAction.UserRoleRevoked,
       entityType: USER_ENTITY_TYPE,
@@ -449,7 +499,10 @@ export class UsersService {
       performedBy: actor.id,
       ipAddress: null,
       userAgent: null,
-      changes: { userRoleId },
+      changes: {
+        userRoleId,
+        cascadedUserIds: affected.filter((id) => id !== userId),
+      },
     });
     return null;
   }
@@ -468,39 +521,49 @@ export class UsersService {
       throw new ApiException(ErrorCode.DelegationRequiresExpiry);
     }
     const holder = await this.requireUser(userId);
+    if (dto.toUserId === holder.id) {
+      throw new ApiException(ErrorCode.InvalidState);
+    }
     const target = await this.requireUser(dto.toUserId);
     const assignment = await this.usersRepository.findUserRoleById(userRoleId);
     if (!assignment || assignment.userId !== holder.id || assignment.revokedAt) {
       throw new ApiException(ErrorCode.CannotDelegateRoleNotHeld);
     }
     const now = new Date();
-    if (assignment.validUntil && assignment.validUntil <= now) {
+    if (
+      assignment.validFrom > now ||
+      (assignment.validUntil && assignment.validUntil <= now)
+    ) {
       throw new ApiException(ErrorCode.CannotDelegateRoleNotHeld);
     }
     const validUntil = new Date(dto.validUntil);
     if (validUntil <= now) {
       throw new ApiException(ErrorCode.DelegationRequiresExpiry);
     }
-
-    const role = await this.usersRepository.findActiveRole(assignment.roleId);
-    if (!role) {
-      throw new ApiException(ErrorCode.RoleNotFound);
+    // BE-08: la delegación nunca sobrevive a la asignación de la que sale; al vencer el origen vence ella también.
+    if (assignment.validUntil && validUntil > assignment.validUntil) {
+      throw new ApiException(ErrorCode.DelegationExceedsSourceValidity);
     }
-    await this.privilege.assertCanAdminister(actor, role);
+
+    // BE-08: delegar es otorgar: mismas reglas que asignar (isAssignable, rango y cupo max_concurrent_users).
+    const role = await this.requireAssignableRole(assignment.roleId, actor);
 
     try {
-      const delegated = await this.usersRepository.insertUserRole({
-        userId: target.id,
-        roleId: assignment.roleId,
-        scopeType: assignment.scopeType,
-        scopeId: assignment.scopeId,
-        validFrom: now,
-        validUntil,
-        isDelegated: true,
-        delegatedFromUserId: holder.id,
-        delegationReason: dto.reason ?? null,
-        grantedBy: actor.id,
-      });
+      const delegated = await this.usersRepository.insertUserRoleWithinLimit(
+        {
+          userId: target.id,
+          roleId: assignment.roleId,
+          scopeType: assignment.scopeType,
+          scopeId: assignment.scopeId,
+          validFrom: now,
+          validUntil,
+          isDelegated: true,
+          delegatedFromUserId: holder.id,
+          delegationReason: dto.reason ?? null,
+          grantedBy: actor.id,
+        },
+        role.maxConcurrentUsers,
+      );
       delegated.role = role;
       this.permissionsService.invalidate(target.id);
       await this.auditLogsRepository.record({
@@ -556,18 +619,21 @@ export class UsersService {
   ): Promise<UserRole> {
     const fallback = this.affiliationScope(user);
     try {
-      const assignment = await this.usersRepository.insertUserRole({
-        userId: user.id,
-        roleId: role.id,
-        scopeType: fallback.type,
-        scopeId: fallback.id,
-        validFrom: new Date(),
-        validUntil: null,
-        isDelegated: false,
-        delegatedFromUserId: null,
-        delegationReason: null,
-        grantedBy: actor.id,
-      });
+      const assignment = await this.usersRepository.insertUserRoleWithinLimit(
+        {
+          userId: user.id,
+          roleId: role.id,
+          scopeType: fallback.type,
+          scopeId: fallback.id,
+          validFrom: new Date(),
+          validUntil: null,
+          isDelegated: false,
+          delegatedFromUserId: null,
+          delegationReason: null,
+          grantedBy: actor.id,
+        },
+        role.maxConcurrentUsers,
+      );
       assignment.role = role;
       this.permissionsService.invalidate(user.id);
       return assignment;

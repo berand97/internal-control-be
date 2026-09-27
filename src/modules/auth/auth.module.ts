@@ -22,6 +22,7 @@ import { AuthService } from './services/auth.service.js';
 import { MfaAccountService } from './services/mfa-account.service.js';
 import { MfaService } from './services/mfa.service.js';
 import { RefreshCookieService } from './services/refresh-cookie.service.js';
+import { SessionStateService } from './services/session-state.service.js';
 import { TokenService } from './services/token.service.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
 
@@ -49,6 +50,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
     MfaService,
     MfaAccountService,
     RefreshCookieService,
+    SessionStateService,
     JwtStrategy,
     { provide: 'AuthUsersRepository', useClass: TypeOrmAuthUsersRepository },
     {
@@ -68,6 +70,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
   exports: [
     AuthService,
     MfaAccountService,
+    SessionStateService,
     'AuthUsersRepository',
     'RefreshTokenFamiliesRepository',
     'AuditLogsRepository',

@@ -40,6 +40,10 @@ export class AppUser {
   @Column({ name: 'must_change_password', type: 'boolean', default: false })
   mustChangePassword!: boolean;
 
+  /** Vencimiento de la contraseña temporal de la invitación (BE-14); null si la cuenta no tiene una. */
+  @Column({ name: 'invitation_expires_at', type: 'timestamptz', nullable: true })
+  invitationExpiresAt!: Date | null;
+
   @Column({ name: 'mfa_enabled', type: 'boolean' })
   mfaEnabled!: boolean;
 

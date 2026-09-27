@@ -92,7 +92,7 @@ export class TypeOrmAuthUsersRepository implements AuthUsersRepository {
   async updatePassword(userId: string, passwordHash: string): Promise<void> {
     await this.users.update(
       { id: userId },
-      { passwordHash, mustChangePassword: false },
+      { passwordHash, mustChangePassword: false, invitationExpiresAt: null },
     );
   }
 

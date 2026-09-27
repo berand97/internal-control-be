@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
+import { ErrorCode } from '../../../common/constants/error-code.enum.js';
+import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { AppUser } from '../../auth/entities/app-user.entity.js';
 import { Person } from '../../auth/entities/person.entity.js';
 import { Role } from '../../auth/entities/role.entity.js';
@@ -26,6 +28,7 @@ export class TypeOrmUsersRepository implements UsersRepository {
     private readonly userRoles: Repository<UserRole>,
     @InjectRepository(Role)
     private readonly roles: Repository<Role>,
+    private readonly dataSource: DataSource,
   ) {}
 
   findByIdWithPerson(id: string): Promise<AppUser | null> {
@@ -137,10 +140,11 @@ export class TypeOrmUsersRepository implements UsersRepository {
   async updateInvitationCredentials(
     userId: string,
     passwordHash: string,
+    invitationExpiresAt: Date,
   ): Promise<void> {
     await this.users.update(
       { id: userId },
-      { passwordHash, mustChangePassword: true },
+      { passwordHash, mustChangePassword: true, invitationExpiresAt },
     );
   }
 
@@ -164,8 +168,81 @@ export class TypeOrmUsersRepository implements UsersRepository {
   }
 
   insertUserRole(record: CreateUserRoleRecord): Promise<UserRole> {
-    return this.userRoles.save(
-      this.userRoles.create({
+    return this.userRoles.save(this.newUserRole(record));
+  }
+
+  insertUserRoleWithinLimit(
+    record: CreateUserRoleRecord,
+    maxConcurrentUsers: number | null,
+  ): Promise<UserRole> {
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT id FROM role WHERE id = $1 FOR UPDATE', [
+        record.roleId,
+      ]);
+      if (maxConcurrentUsers !== null) {
+        const [row] = (await manager.query(
+          `SELECT count(DISTINCT ur.user_id)::int AS holders
+           FROM user_role ur
+           WHERE ur.role_id = $1
+             AND ur.user_id <> $2
+             AND ur.revoked_at IS NULL
+             AND ur.valid_from <= NOW()
+             AND (ur.valid_until IS NULL OR ur.valid_until > NOW())`,
+          [record.roleId, record.userId],
+        )) as Array<{ holders: number }>;
+        if ((row?.holders ?? 0) >= maxConcurrentUsers) {
+          throw new ApiException(ErrorCode.RoleMaxUsersReached);
+        }
+      }
+      return manager.getRepository(UserRole).save(this.newUserRole(record));
+    });
+  }
+
+  async revokeUserRoleCascade(
+    id: string,
+    revokedBy: string,
+    at: Date,
+    reason: string | null,
+  ): Promise<ReadonlyArray<string>> {
+    return this.dataSource.transaction(async (manager) => {
+      const affected = new Set<string>();
+      let frontier = (await manager.query(
+        `UPDATE user_role SET revoked_at = $2, revoked_by = $3, revocation_reason = $4
+         WHERE id = $1 AND revoked_at IS NULL
+         RETURNING id, user_id`,
+        [id, at, revokedBy, reason],
+      )) as [Array<{ id: string; user_id: string }>, number];
+      // Cada vuelta revoca las delegaciones hechas desde las asignaciones recién revocadas (cadenas incluidas).
+      while (frontier[0].length > 0) {
+        for (const row of frontier[0]) {
+          affected.add(row.user_id);
+        }
+        frontier = (await manager.query(
+          `UPDATE user_role d
+           SET revoked_at = $2, revoked_by = $3, revocation_reason = $4
+           FROM user_role src
+           WHERE src.id = ANY($1::uuid[])
+             AND d.is_delegated
+             AND d.delegated_from_user_id = src.user_id
+             AND d.role_id = src.role_id
+             AND d.scope_type = src.scope_type
+             AND d.scope_id IS NOT DISTINCT FROM src.scope_id
+             AND d.revoked_at IS NULL
+           RETURNING d.id, d.user_id`,
+          [
+            frontier[0].map((row) => row.id),
+            at,
+            revokedBy,
+            'Revocada en cascada: se revocó la asignación de origen de la delegación',
+          ],
+        )) as [Array<{ id: string; user_id: string }>, number];
+      }
+      return [...affected];
+    });
+  }
+
+  private newUserRole(record: CreateUserRoleRecord): UserRole {
+    return this.userRoles.create({
         userId: record.userId,
         roleId: record.roleId,
         scopeType: record.scopeType,
@@ -180,23 +257,7 @@ export class TypeOrmUsersRepository implements UsersRepository {
         revokedAt: null,
         revokedBy: null,
         revocationReason: null,
-      }),
-    );
+      });
   }
 
-  async revokeUserRole(
-    id: string,
-    revokedBy: string,
-    at: Date,
-    reason: string | null,
-  ): Promise<void> {
-    await this.userRoles.update(
-      { id },
-      {
-        revokedAt: at,
-        revokedBy,
-        revocationReason: reason,
-      },
-    );
-  }
 }

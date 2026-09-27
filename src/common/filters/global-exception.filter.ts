@@ -49,6 +49,17 @@ const isValidationResponseBody = (
   'message' in value &&
   Array.isArray((value as { message: unknown }).message);
 
+/** Segundos de espera que trae una ApiException de bloqueo (p. ej. AccountLockedException); null si no trae. */
+const retryAfterSecondsOf = (exception: unknown): number | null => {
+  if (!(exception instanceof ApiException) || !('retryAfterSeconds' in exception)) {
+    return null;
+  }
+  const value: unknown = exception.retryAfterSeconds;
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+};
+
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
@@ -73,6 +84,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       response.clearCookie(REFRESH_TOKEN_COOKIE_NAME, {
         path: REFRESH_TOKEN_COOKIE_PATH,
       });
+    }
+
+    const retryAfter = retryAfterSecondsOf(exception);
+    if (resolved.status === 429 && retryAfter !== null) {
+      response.setHeader('Retry-After', String(retryAfter));
     }
 
     const details = resolved.details;
