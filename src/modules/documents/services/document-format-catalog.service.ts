@@ -7,6 +7,7 @@ import {
   type DocumentFormat,
   processBindingViolations,
   type ProcessFormatBinding,
+  SGC_VERSION_PATTERN,
   SIGNER_SOURCE_VALUES,
   type SignerSource,
   type SignerSpec,
@@ -426,10 +427,10 @@ export class DocumentFormatCatalogService {
           'Código SGC de 1 a 20 caracteres (letras, dígitos, punto, guion)',
       });
     }
-    if (!text(input.sgcVersion) || text(input.sgcVersion).length > 10) {
+    if (!SGC_VERSION_PATTERN.test(text(input.sgcVersion))) {
       errors.push({
         field: 'sgcVersion',
-        message: 'Versión SGC de 1 a 10 caracteres',
+        message: 'Versión SGC de 1 a 10 caracteres (letras, dígitos, punto, guion), sin "/" ni ".."',
       });
     }
     if (text(input.name).length < 3 || text(input.name).length > 200) {
