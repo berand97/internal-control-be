@@ -28,6 +28,17 @@ const SEEDED: Partial<Record<EmailTemplateType, string>> = {
   INVENTORY_ALERT: 'Hola {{user.email}},\n{{alerta.mensaje}}\n{{app.loginUrl}}',
 };
 
+const TYPES_AT_MIGRATION: ReadonlyArray<EmailTemplateType> = [
+  'USER_INVITATION',
+  'PASSWORD_RESET',
+  'GENERIC_NOTIFICATION',
+  'SYSTEM_ALERT',
+  'LOAN_STATUS_NOTIFICATION',
+  'INVENTORY_ALERT',
+  'SIGNATURE_LINK',
+  'IMPORT_FINISHED',
+];
+
 const seeded = (type: EmailTemplateType): ReadonlyArray<EmailBlock> =>
   upgradeBlocks(legacyBodyToBlocks(SEEDED[type] ?? '')) as ReadonlyArray<EmailBlock>;
 
@@ -35,7 +46,9 @@ const link = (text: string, href: string) => ({ type: 'text', text, marks: [{ ty
 
 describe('migración 1767225840000: variables de enlace como texto → enlaces', () => {
   it('su copia de las variables de enlace coincide con el catálogo vivo', () => {
-    for (const type of EMAIL_TEMPLATE_TYPES) {
+    // Solo los tipos que existían al escribir la migración: los posteriores (tomas físicas) nacieron con el enlace
+    // como botón y no tienen versiones en BD que convertir.
+    for (const type of TYPES_AT_MIGRATION) {
       const live = Object.fromEntries([...urlVariables(type).values()].map((item) => [item.name, item.linkText]));
       expect(LINK_VARIABLES[type] ?? {}).toEqual(live);
     }

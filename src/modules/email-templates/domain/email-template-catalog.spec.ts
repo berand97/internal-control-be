@@ -25,7 +25,7 @@ describe('email-template-catalog', () => {
     expect(EMAIL_PLACEHOLDER_CATALOG.PASSWORD_RESET.required).toContain('auth.resetUrl');
   });
 
-  it('son exactamente los 8 tipos que el sistema envía', () => {
+  it('son exactamente los 12 tipos que el sistema envía', () => {
     expect(EMAIL_TEMPLATE_TYPES).toEqual([
       'USER_INVITATION',
       'PASSWORD_RESET',
@@ -35,6 +35,10 @@ describe('email-template-catalog', () => {
       'INVENTORY_ALERT',
       'SIGNATURE_LINK',
       'IMPORT_FINISHED',
+      'INVENTORY_SCHEDULED',
+      'INVENTORY_RESCHEDULED',
+      'INVENTORY_REMINDER',
+      'INVENTORY_CANCELLED',
     ]);
   });
 

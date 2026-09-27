@@ -18,6 +18,10 @@ export const EMAIL_TEMPLATE_TYPES = [
   'INVENTORY_ALERT',
   'SIGNATURE_LINK',
   'IMPORT_FINISHED',
+  'INVENTORY_SCHEDULED',
+  'INVENTORY_RESCHEDULED',
+  'INVENTORY_REMINDER',
+  'INVENTORY_CANCELLED',
 ] as const;
 
 export type EmailTemplateType = (typeof EMAIL_TEMPLATE_TYPES)[number];
@@ -31,12 +35,26 @@ export const EMAIL_TEMPLATE_LABEL: Record<EmailTemplateType, string> = {
   INVENTORY_ALERT: 'Alerta de toma física',
   SIGNATURE_LINK: 'Enlace para firmar un acta',
   IMPORT_FINISHED: 'Fin de una importación desde Excel',
+  INVENTORY_SCHEDULED: 'Aviso de toma física programada',
+  INVENTORY_RESCHEDULED: 'Aviso de toma física reprogramada',
+  INVENTORY_REMINDER: 'Recordatorio de toma física',
+  INVENTORY_CANCELLED: 'Aviso de toma física cancelada',
 };
 
 export interface EmailPlaceholderCatalog {
   readonly required: ReadonlyArray<string>;
   readonly optional: ReadonlyArray<string>;
 }
+
+/** Opcionales comunes de los avisos de toma física (InventoryNoticesService). */
+const INVENTORY_OPTIONAL = [
+  'centro.codigo',
+  'centro.nombre',
+  'toma.responsable',
+  'user.fullName',
+  'app.name',
+  'app.loginUrl',
+] as const;
 
 export const EMAIL_PLACEHOLDER_CATALOG: Record<
   EmailTemplateType,
@@ -79,6 +97,22 @@ export const EMAIL_PLACEHOLDER_CATALOG: Record<
     required: ['importacion.estado', 'importacion.destino', 'importacion.resumen'],
     optional: ['importacion.archivo', 'user.fullName', 'app.name', 'app.loginUrl'],
   },
+  INVENTORY_SCHEDULED: {
+    required: ['toma.codigo', 'toma.nombre', 'toma.alcance', 'toma.inicio', 'toma.fin'],
+    optional: [...INVENTORY_OPTIONAL],
+  },
+  INVENTORY_RESCHEDULED: {
+    required: ['toma.codigo', 'toma.nombre', 'toma.alcance', 'toma.inicio', 'toma.fin', 'toma.motivo'],
+    optional: ['toma.inicioAnterior', 'toma.finAnterior', ...INVENTORY_OPTIONAL],
+  },
+  INVENTORY_REMINDER: {
+    required: ['toma.codigo', 'toma.nombre', 'toma.alcance', 'toma.inicio', 'toma.fin', 'recordatorio.cuando'],
+    optional: ['recordatorio.dias', ...INVENTORY_OPTIONAL],
+  },
+  INVENTORY_CANCELLED: {
+    required: ['toma.codigo', 'toma.nombre', 'toma.alcance', 'toma.motivo'],
+    optional: ['toma.inicio', 'toma.fin', ...INVENTORY_OPTIONAL],
+  },
 };
 
 export const EMAIL_VARIABLE_KINDS = ['url', 'text'] as const;
@@ -102,8 +136,8 @@ const urlVar = (label: string, linkText: string): Omit<EmailVariableSpec, 'name'
 
 /**
  * Significado de cada variable, tomado de quien la pone en el contexto: MailService (src/shared/mail/mail.service.ts:
- * invitación, restablecimiento, enlace de firma), ImportJobsService.notify (importaciones) y MailOutboxService (agrega
- * user.fullName). GENERIC_NOTIFICATION, SYSTEM_ALERT, LOAN_STATUS_NOTIFICATION e INVENTORY_ALERT aún no los envía
+ * invitación, restablecimiento, enlace de firma), ImportJobsService.notify (importaciones), InventoryNoticesService
+ * (avisos y recordatorios de tomas físicas) y MailOutboxService (agrega user.fullName). GENERIC_NOTIFICATION, SYSTEM_ALERT, LOAN_STATUS_NOTIFICATION e INVENTORY_ALERT aún no los envía
  * ningún código: su significado sale de su diseño por defecto y sus datos de ejemplo. Una variable significa lo mismo
  * en todos los tipos que la usan.
  */
@@ -141,6 +175,19 @@ const EMAIL_VARIABLES: Readonly<Record<string, Omit<EmailVariableSpec, 'name'>>>
   'importacion.destino': textVar('Qué se importó (por ejemplo, activos)'),
   'importacion.archivo': textVar('Archivo y hoja importados'),
   'importacion.resumen': textVar('Resumen de la importación'),
+  'toma.codigo': textVar('Código de la toma física'),
+  'toma.nombre': textVar('Nombre de la toma física'),
+  'toma.alcance': textVar('Qué cubre la toma (centro de costo, ubicación, unidad o toda la institución)'),
+  'toma.inicio': textVar('Fecha de inicio de la toma'),
+  'toma.fin': textVar('Fecha de fin de la toma'),
+  'toma.inicioAnterior': textVar('Fecha de inicio antes de reprogramar'),
+  'toma.finAnterior': textVar('Fecha de fin antes de reprogramar'),
+  'toma.responsable': textVar('Responsable de la toma'),
+  'toma.motivo': textVar('Motivo de la reprogramación o de la cancelación'),
+  'centro.codigo': textVar('Código del centro de costo (solo tomas de un centro)'),
+  'centro.nombre': textVar('Nombre del centro de costo (solo tomas de un centro)'),
+  'recordatorio.cuando': textVar('Cuándo empieza la toma (hoy, mañana, en 15 días)'),
+  'recordatorio.dias': textVar('Días que faltan para el inicio'),
 };
 
 const variableSpec = (name: string): EmailVariableSpec => {
@@ -164,6 +211,10 @@ export const EMAIL_TEMPLATE_VARIABLES: Record<EmailTemplateType, ReadonlyArray<E
   INVENTORY_ALERT: typeVariables('INVENTORY_ALERT'),
   SIGNATURE_LINK: typeVariables('SIGNATURE_LINK'),
   IMPORT_FINISHED: typeVariables('IMPORT_FINISHED'),
+  INVENTORY_SCHEDULED: typeVariables('INVENTORY_SCHEDULED'),
+  INVENTORY_RESCHEDULED: typeVariables('INVENTORY_RESCHEDULED'),
+  INVENTORY_REMINDER: typeVariables('INVENTORY_REMINDER'),
+  INVENTORY_CANCELLED: typeVariables('INVENTORY_CANCELLED'),
 };
 
 /** Variables de enlace (kind = url) del tipo. */
@@ -271,6 +322,90 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
       paragraph('{{app.name}}'),
     ],
   },
+  INVENTORY_SCHEDULED: {
+    subject: 'Toma física programada: {{toma.alcance}}',
+    blocks: [
+      { type: 'heading', text: 'Toma física programada' },
+      paragraph('Hola {{user.fullName}},'),
+      paragraph('Control Interno programó la toma física {{toma.codigo}} ({{toma.nombre}}).'),
+      {
+        type: 'keyValueList',
+        items: [
+          { label: 'Alcance', value: '{{toma.alcance}}' },
+          { label: 'Inicio', value: '{{toma.inicio}}' },
+          { label: 'Fin', value: '{{toma.fin}}' },
+          { label: 'Responsable', value: '{{toma.responsable}}' },
+        ],
+      },
+      { type: 'button', label: 'Abrir Control Interno', url: '{{app.loginUrl}}' },
+      paragraph('{{app.name}}'),
+    ],
+  },
+  INVENTORY_RESCHEDULED: {
+    subject: 'Toma física reprogramada: {{toma.codigo}}',
+    blocks: [
+      { type: 'heading', text: 'Toma física reprogramada' },
+      paragraph('Hola {{user.fullName}},'),
+      paragraph('La toma física {{toma.codigo}} ({{toma.nombre}}) cambió de fechas.'),
+      {
+        type: 'keyValueList',
+        items: [
+          { label: 'Alcance', value: '{{toma.alcance}}' },
+          { label: 'Nuevo inicio', value: '{{toma.inicio}}' },
+          { label: 'Nuevo fin', value: '{{toma.fin}}' },
+          { label: 'Fechas anteriores', value: '{{toma.inicioAnterior}} a {{toma.finAnterior}}' },
+          { label: 'Responsable', value: '{{toma.responsable}}' },
+        ],
+      },
+      { type: 'callout', tone: 'info', text: 'Motivo: {{toma.motivo}}' },
+      { type: 'button', label: 'Abrir Control Interno', url: '{{app.loginUrl}}' },
+      paragraph('{{app.name}}'),
+    ],
+  },
+  INVENTORY_REMINDER: {
+    subject: 'Recordatorio: la toma física {{toma.codigo}} empieza {{recordatorio.cuando}}',
+    blocks: [
+      paragraph('Hola {{user.fullName}},'),
+      paragraph('Le recordamos que la toma física {{toma.codigo}} ({{toma.nombre}}) empieza {{recordatorio.cuando}}.'),
+      {
+        type: 'keyValueList',
+        items: [
+          { label: 'Alcance', value: '{{toma.alcance}}' },
+          { label: 'Inicio', value: '{{toma.inicio}}' },
+          { label: 'Fin', value: '{{toma.fin}}' },
+          { label: 'Responsable', value: '{{toma.responsable}}' },
+        ],
+      },
+      { type: 'button', label: 'Abrir Control Interno', url: '{{app.loginUrl}}' },
+      paragraph('{{app.name}}'),
+    ],
+  },
+  INVENTORY_CANCELLED: {
+    subject: 'Toma física cancelada: {{toma.codigo}}',
+    blocks: [
+      { type: 'heading', text: 'Toma física cancelada' },
+      paragraph('Hola {{user.fullName}},'),
+      paragraph('Control Interno canceló la toma física {{toma.codigo}} ({{toma.nombre}}) de {{toma.alcance}}.'),
+      { type: 'callout', tone: 'warning', text: 'Motivo: {{toma.motivo}}' },
+      paragraph('No recibirá más recordatorios de esta toma.'),
+      { type: 'button', label: 'Abrir Control Interno', url: '{{app.loginUrl}}' },
+      paragraph('{{app.name}}'),
+    ],
+  },
+};
+
+const INVENTORY_SAMPLE: Readonly<Record<string, string>> = {
+  'user.fullName': 'Juliana Pérez',
+  'toma.codigo': 'TF-2026-014',
+  'toma.nombre': 'Toma física Talento Humano 2026',
+  'toma.alcance': 'Centro de costo 3060 · Talento Humano',
+  'toma.inicio': '19 de octubre de 2026',
+  'toma.fin': '23 de octubre de 2026',
+  'toma.responsable': 'Carolina Gómez',
+  'centro.codigo': '3060',
+  'centro.nombre': 'Talento Humano',
+  'app.loginUrl': 'http://localhost:4200',
+  'app.name': 'Control Interno UNAC',
 };
 
 export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, string>> =
@@ -338,6 +473,15 @@ export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, stri
       'app.loginUrl': 'http://localhost:4200',
       'app.name': 'Control Interno UNAC',
     },
+    INVENTORY_SCHEDULED: { ...INVENTORY_SAMPLE },
+    INVENTORY_RESCHEDULED: {
+      ...INVENTORY_SAMPLE,
+      'toma.inicioAnterior': '5 de octubre de 2026',
+      'toma.finAnterior': '9 de octubre de 2026',
+      'toma.motivo': 'Coincide con el cierre contable',
+    },
+    INVENTORY_REMINDER: { ...INVENTORY_SAMPLE, 'recordatorio.cuando': 'en 15 días', 'recordatorio.dias': '15' },
+    INVENTORY_CANCELLED: { ...INVENTORY_SAMPLE, 'toma.motivo': 'Se hará dentro de la toma general de la sede' },
   };
 
 

@@ -13,6 +13,17 @@ import { validateEmailBlocks } from './email-blocks.js';
 import { EMAIL_TEMPLATE_TYPES, extractEmailPlaceholders } from './email-template-catalog.js';
 import { richTextToText, textToRichText, type RichTextDoc } from './rich-text.js';
 
+const TYPES_AT_MIGRATION = [
+  'USER_INVITATION',
+  'PASSWORD_RESET',
+  'GENERIC_NOTIFICATION',
+  'SYSTEM_ALERT',
+  'LOAN_STATUS_NOTIFICATION',
+  'INVENTORY_ALERT',
+  'SIGNATURE_LINK',
+  'IMPORT_FINISHED',
+] as const;
+
 // Textos sembrados por 1767225619000 y 1767225622000 (los que existen en las BD desplegadas).
 const LEGACY_BODIES: ReadonlyArray<string> = [
   'Se creó su cuenta en {{app.name}}.\n\nRol: {{user.role}}\nCorreo: {{user.email}}\nUsuario: {{user.username}}\nContraseña temporal: {{auth.temporaryPassword}}\n\nInicie sesión en {{auth.loginUrl}} y cambie la contraseña.',
@@ -53,7 +64,8 @@ describe('migración 1767225800000: texto → bloques', () => {
         { type: 'spacer', size: 'sm' },
       ]),
     ).toBe('T {{a}}\n\nIr: {{b}}\n\nX: {{c}}');
-    expect(EMAIL_TEMPLATE_TYPES.length).toBe(8);
+    // Los 8 tipos que existían cuando corrió esta migración siguen en el catálogo (los posteriores nunca tuvieron texto).
+    expect(EMAIL_TEMPLATE_TYPES).toEqual(expect.arrayContaining([...TYPES_AT_MIGRATION]));
   });
 });
 
