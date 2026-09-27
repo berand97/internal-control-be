@@ -85,7 +85,63 @@ export interface DocumentRequestPayload {
   readonly fields?: Record<string, string>;
   /** Campos por activo: la plantilla los lee como activos[].campos.<nombre> ({} si el activo no trae). */
   readonly assetFields?: Record<string, Record<string, string>>;
+  /**
+   * Tablas adicionales: la plantilla las recorre como {{#tablas.<nombre>}}…{{/tablas.<nombre>}} y lee cada columna
+   * por su nombre. Solo texto; nombres de tabla y columna como identificadores (assertPayloadTables acota la forma).
+   */
+  readonly tables?: Record<string, ReadonlyArray<Record<string, string>>>;
 }
+
+const TABLE_IDENTIFIER = /^[a-zA-Z][a-zA-Z0-9_]{0,39}$/;
+export const MAX_PAYLOAD_TABLES = 10;
+export const MAX_PAYLOAD_TABLE_ROWS = 20_000;
+const MAX_PAYLOAD_TABLE_COLUMNS = 30;
+const MAX_PAYLOAD_CELL_LENGTH = 2_000;
+
+/** Forma de payload.tables; lanza VALIDATION_FAILED con el primer problema. */
+export const assertPayloadTables = (tables: unknown): void => {
+  if (tables === undefined) {
+    return;
+  }
+  const fail = (message: string): never => {
+    throw new ApiException(ErrorCode.ValidationFailed, `Tablas del acta: ${message}`);
+  };
+  if (typeof tables !== 'object' || tables === null || Array.isArray(tables)) {
+    return fail('deben ser un objeto nombre → filas');
+  }
+  const entries = Object.entries(tables as Record<string, unknown>);
+  if (entries.length > MAX_PAYLOAD_TABLES) {
+    fail(`a lo sumo ${MAX_PAYLOAD_TABLES} tablas`);
+  }
+  for (const [name, rows] of entries) {
+    if (!TABLE_IDENTIFIER.test(name)) {
+      fail(`nombre de tabla inválido (${name.slice(0, 40)})`);
+    }
+    if (!Array.isArray(rows)) {
+      return fail(`${name} debe ser una lista de filas`);
+    }
+    if (rows.length > MAX_PAYLOAD_TABLE_ROWS) {
+      fail(`${name} supera ${MAX_PAYLOAD_TABLE_ROWS} filas`);
+    }
+    for (const row of rows as unknown[]) {
+      if (typeof row !== 'object' || row === null || Array.isArray(row)) {
+        return fail(`${name}: cada fila es un objeto columna → texto`);
+      }
+      const cells = Object.entries(row as Record<string, unknown>);
+      if (cells.length > MAX_PAYLOAD_TABLE_COLUMNS) {
+        fail(`${name}: a lo sumo ${MAX_PAYLOAD_TABLE_COLUMNS} columnas`);
+      }
+      for (const [column, value] of cells) {
+        if (!TABLE_IDENTIFIER.test(column)) {
+          fail(`${name}: columna inválida (${column.slice(0, 40)})`);
+        }
+        if (typeof value !== 'string' || value.length > MAX_PAYLOAD_CELL_LENGTH) {
+          fail(`${name}.${column}: texto de hasta ${MAX_PAYLOAD_CELL_LENGTH} caracteres`);
+        }
+      }
+    }
+  }
+};
 
 export interface GeneratedDocument {
   readonly id: string;
@@ -324,6 +380,7 @@ export class DocumentEngineService {
 
   async enqueue(manager: EntityManager, payload: DocumentRequestPayload, requestedBy: string | null): Promise<string> {
     this.assertReady(await this.catalog.current(payload.formatKey, manager));
+    assertPayloadTables(payload.tables);
     const rows = (await manager.query(
       `INSERT INTO document_request (format_key, payload, requested_by) VALUES ($1, $2, $3) RETURNING id`,
       [payload.formatKey, JSON.stringify(payload), requestedBy],
@@ -418,6 +475,7 @@ export class DocumentEngineService {
     // La versión vigente al generar queda enlazada al acta (format_version_id): firmantes y etiquetas salen de ella.
     const format = await this.catalog.current(payload.formatKey, manager);
     this.assertReady(format);
+    assertPayloadTables(payload.tables);
     const now = new Date();
     const template = await this.activeTemplate(format.key, now.toISOString().slice(0, 10), manager);
     if (!template) {
@@ -1463,6 +1521,11 @@ export class DocumentEngineService {
     return Number(row.current_value);
   }
 
+  /** Si el formato tiene plantilla vigente hoy (sin ella, la solicitud del outbox falla con TEMPLATE_NOT_ACTIVE). */
+  async hasActiveTemplate(formatKey: string, manager: EntityManager = this.dataSource.manager): Promise<boolean> {
+    return (await this.activeTemplate(formatKey, new Date().toISOString().slice(0, 10), manager)) !== undefined;
+  }
+
   private async activeTemplate(formatKey: string, date: string, manager: EntityManager): Promise<TemplateRow | undefined> {
     const [row] = (await manager.query(
       `SELECT id, sgc_version, to_char(effective_date, 'YYYY-MM-DD') AS effective_date, storage_driver, storage_key
@@ -1594,6 +1657,8 @@ export class DocumentEngineService {
       })),
       totalElementos: ordered.length,
       campos: payload.fields ?? {},
+      // Solo con tables: las actas que no las usan conservan su data tal cual.
+      ...(payload.tables ? { tablas: payload.tables } : {}),
     };
   }
 
