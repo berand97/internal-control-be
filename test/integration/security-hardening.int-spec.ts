@@ -109,6 +109,7 @@ describe('Endurecimiento BE-01 / BE-05 / BE-06 (HTTP real + PostgreSQL real)', (
       ['/api/v1/cost-centers/sync', UPLOAD_LIMITS.COST_CENTER_CSV.maxFileBytes, 'grande.csv', 1],
       ['/api/v1/document-templates?documentType=ACTA_BAJA', UPLOAD_LIMITS.DOCX_TEMPLATE.maxFileBytes, 'grande.docx', 10],
       ['/api/v1/documents/formats/OCI-01-55/templates', UPLOAD_LIMITS.DOCX_TEMPLATE.maxFileBytes, 'grande.docx', 10],
+      ['/api/v1/email-templates/assets', UPLOAD_LIMITS.EMAIL_IMAGE.maxFileBytes, 'grande.png', 1],
     ] as const)('POST %s con un archivo de más de su tope responde 400 FILE_TOO_LARGE', async (url, limit, name, mb) => {
       const response = await http().post(url).set(auth('director')).attach('file', oversize(limit), name).expect(400);
       expect(response.body.error).toMatchObject({

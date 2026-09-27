@@ -1,20 +1,29 @@
 // Plantillas de correo por bloques (HTTP real + PostgreSQL real): permisos nuevos y su delegación, migración
 // texto → bloques sin pérdida, versionado y activación, validación estricta, escape de variables maliciosas, correo
 // de prueba y envío multipart por el outbox (sin SMTP queda FAILED y visible), menú sembrado y contrato OpenAPI.
+// Párrafo enriquecido (documento Tiptap de esquema cerrado) e imágenes subidas servidas por un endpoint público.
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import request from 'supertest';
 import { DataSource, type QueryRunner } from 'typeorm';
 import { vi } from 'vitest';
 import { AppModule } from '../../src/app.module.js';
 import { EmailTemplatesSuperAdmin1767225810000 } from '../../src/database/migrations/1767225810000-email-templates-super-admin.js';
+import {
+  EmailRichParagraphAndAssets1767225820000,
+  docToText,
+} from '../../src/database/migrations/1767225820000-email-rich-paragraph-and-assets.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { FeatureFlagsService } from '../../src/modules/features/services/feature-flags.service.js';
 import { DEFAULT_EMAIL_DESIGNS } from '../../src/modules/email-templates/domain/email-template-catalog.js';
+import { textToRichText } from '../../src/modules/email-templates/domain/rich-text.js';
+import { PUBLIC_EMAIL_ASSET_THROTTLE } from '../../src/modules/email-templates/email-assets-public.controller.js';
 import { MailOutboxService } from '../../src/shared/mail/mail-outbox.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
 import { prepareSmtpMessage } from '../../src/shared/mail/smtp-client.js';
@@ -237,7 +246,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
     it('cada plantilla de texto quedó en párrafos sin perder nada (unidos con línea en blanco = texto original)', async () => {
       const rows = (await dataSource.query(
         `SELECT template_type, body, blocks, placeholders FROM email_template WHERE body IS NOT NULL ORDER BY template_type`,
-      )) as Array<{ template_type: string; body: string; blocks: Array<{ type: string; text: string }>; placeholders: string[] }>;
+      )) as Array<{ template_type: string; body: string; blocks: Array<{ type: string; content: Parameters<typeof docToText>[0] }>; placeholders: string[] }>;
       expect(rows.map((row) => row.template_type)).toEqual([
         'GENERIC_NOTIFICATION',
         'INVENTORY_ALERT',
@@ -248,11 +257,46 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       ]);
       for (const row of rows) {
         expect(row.blocks.every((block) => block.type === 'paragraph')).toBe(true);
-        expect(row.blocks.map((block) => block.text).join('\n\n')).toBe(row.body);
+        // 1767225820000 los pasó a documento; volver a texto da el cuerpo original.
+        expect(row.blocks.map((block) => docToText(block.content)).join('\n\n')).toBe(row.body);
       }
       const invitation = rows.find((row) => row.template_type === 'USER_INVITATION');
       expect(invitation?.blocks).toHaveLength(3);
-      expect(invitation?.blocks[1]?.text).toContain('Contraseña temporal: {{auth.temporaryPassword}}');
+      expect(docToText(invitation?.blocks[1]?.content ?? { type: 'doc' })).toContain('Contraseña temporal: {{auth.temporaryPassword}}');
+    });
+
+    it('1767225820000: ningún párrafo queda con text; down() los devuelve a texto y up() otra vez al mismo documento', async () => {
+      const snapshot = async (runner: QueryRunner) =>
+        (await runner.query(`SELECT id, blocks FROM email_template ORDER BY id`)) as Array<{ id: string; blocks: Array<Record<string, unknown>> }>;
+      const before = (await dataSource.query(`SELECT id, blocks FROM email_template ORDER BY id`)) as Array<{
+        id: string;
+        blocks: Array<Record<string, unknown>>;
+      }>;
+      expect(before.length).toBeGreaterThan(0);
+      for (const row of before) {
+        for (const block of row.blocks.filter((item) => item['type'] === 'paragraph')) {
+          expect(Object.keys(block).sort()).toEqual(['content', 'type']);
+        }
+      }
+      const runner = dataSource.createQueryRunner();
+      await runner.connect();
+      await runner.startTransaction();
+      try {
+        const migration = new EmailRichParagraphAndAssets1767225820000();
+        await migration.down(runner);
+        const down = await snapshot(runner);
+        for (const row of down) {
+          for (const block of row.blocks.filter((item) => item['type'] === 'paragraph')) {
+            expect(Object.keys(block).sort()).toEqual(['text', 'type']);
+          }
+        }
+        expect(await runner.query(`SELECT to_regclass('email_asset') AS t`)).toEqual([{ t: null }]);
+        await migration.up(runner);
+        expect(await snapshot(runner)).toEqual(before);
+      } finally {
+        await runner.rollbackTransaction();
+        await runner.release();
+      }
     });
 
     it('permisos nuevos con etiqueta en español, para INTERNAL_CONTROL_DIRECTOR y (1767225810000) SUPER_ADMIN', async () => {
@@ -349,8 +393,13 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       expectConforms('get', '/api/v1/email-templates/catalog', 200, catalog.body);
       expect(catalog.body.data.types).toHaveLength(8);
       expect(catalog.body.data.blocks.map((block: { type: string }) => block.type)).toEqual([
-        'heading', 'paragraph', 'button', 'divider', 'keyValueList', 'callout', 'spacer',
+        'heading', 'paragraph', 'button', 'divider', 'keyValueList', 'callout', 'spacer', 'image',
       ]);
+      expect(catalog.body.data.blocks.find((block: { type: string }) => block.type === 'paragraph').fields).toEqual([
+        expect.objectContaining({ name: 'content', kind: 'richText', maxLength: 2000, allowsVariables: true }),
+      ]);
+      expect(catalog.body.data.imageAligns).toEqual(['left', 'center']);
+      expect(catalog.body.data.limits).toMatchObject({ paragraphMaxNodes: 200, maxImages: 10, imageMinWidth: 50, imageMaxWidth: 560 });
       const superCatalog = await http().get('/api/v1/email-templates/catalog').set(auth(superAdmin)).expect(200);
       expectConforms('get', '/api/v1/email-templates/catalog', 200, superCatalog.body);
       const denied = await http().get('/api/v1/email-templates/catalog').set(auth(viewer));
@@ -460,7 +509,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const url = await post({
         templateType: 'SYSTEM_ALERT',
         subject: '{{alert.title}}',
-        blocks: [{ type: 'paragraph', text: '{{alert.message}}' }, { type: 'button', label: 'Ir', url: 'javascript:alert(1)' }],
+        blocks: [{ type: 'paragraph', content: textToRichText('{{alert.message}}') }, { type: 'button', label: 'Ir', url: 'javascript:alert(1)' }],
       });
       expect(url.body.error.code).toBe('EMAIL_TEMPLATE_INVALID_DESIGN');
       expect(url.body.error.details).toEqual([expect.objectContaining({ field: 'blocks[1].url' })]);
@@ -468,17 +517,70 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const unknown = await post({
         templateType: 'SYSTEM_ALERT',
         subject: '{{alert.title}}',
-        blocks: [{ type: 'paragraph', text: '{{alert.message}} {{auth.temporaryPassword}}' }],
+        blocks: [{ type: 'paragraph', content: textToRichText('{{alert.message}} {{auth.temporaryPassword}}') }],
       });
       expect(unknown.body.error.code).toBe('EMAIL_TEMPLATE_UNKNOWN_VARIABLE');
 
       const missing = await post({
         templateType: 'PASSWORD_RESET',
         subject: 'Sin enlace',
-        blocks: [{ type: 'paragraph', text: 'Hola {{user.email}}' }],
+        blocks: [{ type: 'paragraph', content: textToRichText('Hola {{user.email}}') }],
       });
       expect(missing.body.error.code).toBe('EMAIL_TEMPLATE_MISSING_VARIABLE');
       expect(missing.body.error.details).toEqual([expect.objectContaining({ field: 'auth.resetUrl' })]);
+
+      // Párrafo: el texto plano de antes, HTML o atributos que Tiptap agrega por defecto se rechazan con la ruta exacta.
+      const legacy = await post({ templateType: 'SYSTEM_ALERT', subject: '{{alert.title}}', blocks: [{ type: 'paragraph', text: '{{alert.message}}' }] });
+      expect(legacy.body.error.code).toBe('EMAIL_TEMPLATE_INVALID_DESIGN');
+      expect(legacy.body.error.details.map((item: { field: string }) => item.field)).toEqual(['blocks[0].text', 'blocks[0].content']);
+      const tiptapDefaults = await post({
+        templateType: 'SYSTEM_ALERT',
+        subject: '{{alert.title}}',
+        blocks: [
+          {
+            type: 'paragraph',
+            content: {
+              type: 'doc',
+              content: [
+                {
+                  type: 'paragraph',
+                  attrs: { textAlign: null },
+                  content: [
+                    {
+                      type: 'text',
+                      text: '{{alert.message}}',
+                      marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)', target: '_blank', rel: 'noopener noreferrer nofollow', class: null } }],
+                    },
+                  ],
+                },
+                { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'x' }] },
+              ],
+            },
+          },
+        ],
+      });
+      expect(tiptapDefaults.status).toBe(400);
+      expect(tiptapDefaults.body.error.code).toBe('EMAIL_TEMPLATE_INVALID_DESIGN');
+      expect(tiptapDefaults.body.error.details.map((item: { field: string }) => item.field)).toEqual([
+        'blocks[0].content.content[0].attrs',
+        'blocks[0].content.content[0].content[0].marks[0].attrs.target',
+        'blocks[0].content.content[0].content[0].marks[0].attrs.rel',
+        'blocks[0].content.content[0].content[0].marks[0].attrs.class',
+        'blocks[0].content.content[0].content[0].marks[0].attrs.href',
+        'blocks[0].content.content[1].type',
+      ]);
+      const unknownImage = await post({
+        templateType: 'SYSTEM_ALERT',
+        subject: '{{alert.title}}',
+        blocks: [
+          { type: 'paragraph', content: textToRichText('{{alert.message}}') },
+          { type: 'image', assetId: randomUUID(), alt: 'No existe', align: 'left' },
+        ],
+      });
+      expect(unknownImage.body.error).toMatchObject({
+        code: 'EMAIL_TEMPLATE_INVALID_DESIGN',
+        details: [{ field: 'blocks[1].assetId', message: 'La imagen no existe; súbala de nuevo' }],
+      });
 
       const extraField = await post({ templateType: 'SYSTEM_ALERT', subject: 'x', blocks: [], body: 'texto' });
       expect(extraField.status).toBe(400);
@@ -509,6 +611,209 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         .expect(200);
       expectConforms('get', '/api/v1/email-templates/{id}/preview', 200, saved.body);
       expect(saved.body.data.text).toContain('Usuario: juliana.perez@unac.edu.co');
+    });
+  });
+
+  describe('imágenes y párrafo enriquecido', () => {
+    const png = (width: number, height: number, color = { r: 48, g: 105, b: 153 }) =>
+      sharp({ create: { width, height, channels: 3, background: color } }).png().toBuffer();
+    const upload = (actor: Actor | null, file: Buffer, name: string, contentType: string) => {
+      const req = http().post('/api/v1/email-templates/assets');
+      return (actor ? req.set(auth(actor)) : req).attach('file', file, { filename: name, contentType });
+    };
+    const publicPath = (id: string) => `/api/v1/public/email-assets/${id}`;
+    let asset: { id: string; url: string; width: number; height: number; byteSize: number };
+
+    it('subir: director 201 con el contrato; la misma imagen devuelve la existente; lectura o viewer 403', async () => {
+      const file = await png(1500, 300);
+      const created = await upload(director, file, 'C:\\fakepath\\Logo <UNAC>.png', 'image/png').expect(201);
+      expectConforms('post', '/api/v1/email-templates/assets', 201, created.body);
+      asset = created.body.data;
+      expect(created.body.data).toMatchObject({
+        mime: 'image/png',
+        width: 1200,
+        height: 240,
+        originalName: 'Logo _UNAC_.png',
+        url: `${app.get(ConfigService).getOrThrow('apiPublicUrl')}/api/v1/public/email-assets/${asset.id}`,
+      });
+      const count = async () => scalar<string>(dataSource, 'SELECT count(*)::text FROM email_asset');
+      const before = await count();
+      const again = await upload(superAdmin, file, 'otra.png', 'image/png').expect(201);
+      expect(again.body.data.id).toBe(asset.id);
+      expect(await count()).toBe(before);
+      const row = (await dataSource.query(
+        `SELECT sha256, byte_size, octet_length(content) AS length, created_by FROM email_asset WHERE id = $1`,
+        [asset.id],
+      )) as Array<{ sha256: string; byte_size: number; length: number; created_by: string }>;
+      expect(row[0]).toMatchObject({ byte_size: asset.byteSize, length: asset.byteSize, created_by: director.userId });
+
+      const reader = await createActor([], ['email_template:read:global']);
+      const readOnly = await upload(reader, file, 'x.png', 'image/png');
+      expect(readOnly.status).toBe(403);
+      expect(readOnly.body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
+      expect((await upload(viewer, file, 'x.png', 'image/png')).status).toBe(403);
+      expect((await upload(null, file, 'x.png', 'image/png')).status).toBe(401);
+
+      const listed = await http().get('/api/v1/email-templates/assets?limit=5').set(auth(reader)).expect(200);
+      expectConforms('get', '/api/v1/email-templates/assets', 200, listed.body);
+      expect(listed.body.data[0].id).toBe(again.body.data.id);
+      expect((await http().get('/api/v1/email-templates/assets?limit=101').set(auth(reader))).status).toBe(400);
+    });
+
+    it('rechaza por los bytes: SVG, GIF y HTML renombrados; más de 1 MB; más de 2000 px', async () => {
+      const svg = await upload(director, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), 'logo.png', 'image/png');
+      expect(svg.status).toBe(400);
+      expect(svg.body.error).toMatchObject({ code: 'FILE_TYPE_NOT_ALLOWED', message: 'Solo se admiten imágenes PNG o JPEG' });
+      const gif = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#fff' } }).gif().toBuffer();
+      expect((await upload(director, gif, 'anim.jpg', 'image/jpeg')).body.error.code).toBe('FILE_TYPE_NOT_ALLOWED');
+      const html = await upload(director, Buffer.from('<!DOCTYPE html><p>hola</p>'), 'foto.jpg', 'image/jpeg');
+      expect(html.body.error.code).toBe('FILE_TYPE_NOT_ALLOWED');
+      const big = await upload(director, Buffer.alloc(1024 * 1024 + 1, 0x41), 'grande.png', 'image/png');
+      expect(big.status).toBe(400);
+      expect(big.body.error).toMatchObject({ code: 'FILE_TOO_LARGE', message: 'El archivo supera el máximo de 1 MB' });
+      const wide = await upload(director, await png(2001, 10), 'ancha.png', 'image/png');
+      expect(wide.status).toBe(400);
+      expect(wide.body.error).toMatchObject({ code: 'EMAIL_ASSET_INVALID_IMAGE', message: 'La imagen supera 2000 × 2000 px' });
+      const noFile = await http().post('/api/v1/email-templates/assets').set(auth(director)).field('x', '1');
+      expect(noFile.body.error.code).toBe('FILE_TYPE_NOT_ALLOWED');
+    });
+
+    it('endpoint público sin cookie ni token: 200 con todas las cabeceras; 304 con If-None-Match; 404 sin filtrar nada', async () => {
+      const response = await http().get(publicPath(asset.id)).buffer(true).parse((res, done) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => done(null, Buffer.concat(chunks)));
+      });
+      expect(response.status).toBe(200);
+      const stored = (await dataSource.query(`SELECT content, sha256 FROM email_asset WHERE id = $1`, [asset.id])) as Array<{
+        content: Buffer;
+        sha256: string;
+      }>;
+      expect(Buffer.compare(response.body as Buffer, stored[0]?.content ?? Buffer.alloc(0))).toBe(0);
+      expect(createHash('sha256').update(response.body as Buffer).digest('hex')).toBe(stored[0]?.sha256);
+      expect(response.headers).toMatchObject({
+        'content-type': 'image/png',
+        'content-length': String(asset.byteSize),
+        'cache-control': 'public, max-age=31536000, immutable',
+        etag: `"${stored[0]?.sha256}"`,
+        'x-content-type-options': 'nosniff',
+        'content-disposition': 'inline',
+        'content-security-policy': "default-src 'none'",
+        'cross-origin-resource-policy': 'cross-origin',
+      });
+      expect(response.headers['set-cookie']).toBeUndefined();
+
+      const cached = await http().get(publicPath(asset.id)).set('If-None-Match', `W/"x", "${stored[0]?.sha256}"`);
+      expect(cached.status).toBe(304);
+      expect(cached.headers['etag']).toBe(`"${stored[0]?.sha256}"`);
+      expect(cached.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+      expect(cached.headers['cross-origin-resource-policy']).toBe('cross-origin');
+      expect((await http().get(publicPath(asset.id)).set('If-None-Match', '"otro"')).status).toBe(200);
+
+      for (const id of [randomUUID(), 'no-es-uuid', `${asset.id}.png`, "1' OR '1'='1"]) {
+        const missing = await http().get(publicPath(encodeURIComponent(id)));
+        expect(missing.status).toBe(404);
+        expect(missing.body.error.code).toBe('RESOURCE_NOT_FOUND');
+        expect(missing.headers['cache-control'] ?? '').not.toContain('immutable');
+        expect(JSON.stringify(missing.body)).not.toContain(id.slice(0, 8));
+      }
+    });
+
+    it('no la bloquea el módulo Correo apagado ni el límite global de 100/min por IP', async () => {
+      const flags = app.get(FeatureFlagsService);
+      await flags.setEnabled('mail', false);
+      try {
+        expect((await http().get(publicPath(asset.id))).status).toBe(200);
+      } finally {
+        await flags.setEnabled('mail', true);
+      }
+      expect(PUBLIC_EMAIL_ASSET_THROTTLE.default.limit).toBeGreaterThan(100);
+      const sha = await scalar<string>(dataSource, 'SELECT sha256 FROM email_asset WHERE id = $1', [asset.id]);
+      const statuses = new Map<number, number>();
+      for (let index = 0; index < 130; index += 1) {
+        const response = await http().get(publicPath(asset.id)).set('If-None-Match', index % 2 === 0 ? '"x"' : `"${sha}"`);
+        statuses.set(response.status, (statuses.get(response.status) ?? 0) + 1);
+      }
+      expect(statuses.get(429)).toBeUndefined();
+      expect((statuses.get(200) ?? 0) + (statuses.get(304) ?? 0)).toBe(130);
+    });
+
+    it('guardar, previsualizar y enviar una versión con párrafo enriquecido e imagen', async () => {
+      const content = {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Alerta: ', marks: [{ type: 'bold' }] },
+              { type: 'text', text: '{{alert.title}}', marks: [{ type: 'italic' }, { type: 'underline' }] },
+              { type: 'hardBreak' },
+              { type: 'text', text: 'Portal', marks: [{ type: 'link', attrs: { href: 'https://www.unac.edu.co/portal' } }] },
+            ],
+          },
+          {
+            type: 'bulletList',
+            content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: '{{alert.message}}' }] }] }],
+          },
+        ],
+      };
+      const blocks = [
+        { type: 'image', assetId: asset.id.toUpperCase(), alt: 'Logo de {{app.name}}', align: 'center', width: 300, href: 'https://www.unac.edu.co' },
+        { type: 'paragraph', content },
+      ];
+      const saved = await http()
+        .post('/api/v1/email-templates')
+        .set(auth(director))
+        .send({ templateType: 'SYSTEM_ALERT', subject: 'Rica: {{alert.title}}', blocks })
+        .expect(201);
+      expectConforms('post', '/api/v1/email-templates', 201, saved.body);
+      expect(saved.body.data.blocks[0]).toEqual({ ...blocks[0], assetId: asset.id });
+      expect(saved.body.data.blocks[1]).toEqual({ type: 'paragraph', content });
+      expect(saved.body.data.placeholders).toEqual(['alert.title', 'app.name', 'alert.message']);
+      const listed = await http().get('/api/v1/email-templates?templateType=SYSTEM_ALERT').set(auth(director)).expect(200);
+      expectConforms('get', '/api/v1/email-templates', 200, listed.body);
+
+      const src = `${app.get(ConfigService).getOrThrow('apiPublicUrl')}/api/v1/public/email-assets/${asset.id}`;
+      const expectedImage = `<a href="https://www.unac.edu.co" target="_blank" rel="noopener" style="text-decoration:none;"><img src="${src}" alt="Logo de Control Interno UNAC" width="300" height="60" border="0" style="display:block;width:300px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;margin:0 auto;"></a>`;
+      const preview = await http()
+        .post('/api/v1/email-templates/preview')
+        .set(auth(director))
+        .send({ templateType: 'SYSTEM_ALERT', subject: 'Rica: {{alert.title}}', blocks })
+        .expect(200);
+      expectConforms('post', '/api/v1/email-templates/preview', 200, preview.body);
+      expect(preview.body.data.html).toContain(expectedImage);
+      expect(preview.body.data.html).toContain('<strong>Alerta: </strong><em><u>Servicio interrumpido</u></em><br><a href="https://www.unac.edu.co/portal"');
+      expect(preview.body.data.html).toContain('<li style="margin:0;">El almacenamiento no responde.</li></ul>');
+      expect(preview.body.data.text).toContain('[Imagen: Logo de Control Interno UNAC] (https://www.unac.edu.co)');
+      expect(preview.body.data.text).toContain('Alerta: Servicio interrumpido\nPortal (https://www.unac.edu.co/portal)\n\n- El almacenamiento no responde.');
+      const savedPreview = await http().get(`/api/v1/email-templates/${saved.body.data.id}/preview`).set(auth(director)).expect(200);
+      expect(savedPreview.body.data.html).toBe(preview.body.data.html);
+
+      await dataSource.query(
+        `UPDATE mail_settings SET enabled = TRUE, host = 'smtp.unac.test', port = 587, from_email = 'noreply@unac.edu.co'`,
+      );
+      const mail = app.get(MailService);
+      const captured: Array<{ html?: string; text: string }> = [];
+      const spy = vi
+        .spyOn(mail as unknown as { dispatch: (...args: unknown[]) => Promise<void> }, 'dispatch')
+        .mockImplementation((_row: unknown, _to: unknown, _subject: unknown, text: unknown, html: unknown) => {
+          captured.push({ text: text as string, ...(html ? { html: html as string } : {}) });
+          return Promise.resolve();
+        });
+      try {
+        const sent = await http()
+          .post('/api/v1/email-templates/test-send')
+          .set(auth(director))
+          .send({ templateType: 'SYSTEM_ALERT', templateId: saved.body.data.id })
+          .expect(200);
+        expect(sent.body.data).toMatchObject({ status: 'SENT', templateId: saved.body.data.id });
+        expect(captured.at(-1)?.html).toContain(expectedImage);
+        expect(captured.at(-1)?.html).toContain('<strong>Alerta: </strong>');
+        expect(captured.at(-1)?.text).toContain('[Imagen: Logo de Control Interno UNAC]');
+      } finally {
+        spy.mockRestore();
+        await dataSource.query('UPDATE mail_settings SET enabled = FALSE');
+      }
     });
   });
 
