@@ -6,6 +6,11 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig, StorageDriver } from '../../../config/configuration.js';
 import { StorageService } from '../../../shared/storage/storage.service.js';
+import {
+  signaturePreparedPdfKey,
+  signatureRubricKey,
+  signatureStampedPdfKey,
+} from '../../../shared/storage/storage-keys.js';
 import { methodLabel, type SignatureMethod } from '../domain/signing-channel.js';
 import { isPng, prepareForSignature, stampSignature } from './pdf-stamp.js';
 import type {
@@ -108,7 +113,11 @@ export class InternalSignatureProvider implements SignatureProvider {
       slots: signers.map((signer) => ({ order: signer.order, label: signer.roleLabel ?? signer.role })),
     });
     const stored = await this.storage.put({
-      key: `signatures/${input.documentId}/${code}/v0.pdf`,
+      key: signaturePreparedPdfKey({
+        documentCreatedAt: input.documentCreatedAt,
+        documentId: input.documentId,
+        verificationCode: code,
+      }),
       body: prepared,
       contentType: 'application/pdf',
     });
@@ -175,8 +184,13 @@ export class InternalSignatureProvider implements SignatureProvider {
       const signer = await this.nextSigner(manager, envelope, capture.order, capture.signerPersonId);
       const current = await this.currentPdf(envelope);
       const signedAt = new Date();
+      const keyRef = {
+        documentCreatedAt: await this.documentCreatedAt(manager, envelope.document_id),
+        documentId: envelope.document_id,
+        verificationCode: envelope.verification_code,
+      };
       const rubric = await this.storage.put({
-        key: `signatures/${envelope.document_id}/${envelope.verification_code}/rubrica-${capture.order}.png`,
+        key: signatureRubricKey({ ...keyRef, order: capture.order }),
         body: capture.rubricPng,
         contentType: 'image/png',
       });
@@ -192,7 +206,7 @@ export class InternalSignatureProvider implements SignatureProvider {
         methodLabel: methodLabel(capture.method) ?? capture.method,
       });
       const stored = await this.storage.put({
-        key: `signatures/${envelope.document_id}/${envelope.verification_code}/v${capture.order}.pdf`,
+        key: signatureStampedPdfKey({ ...keyRef, order: capture.order }),
         body: stamped,
         contentType: 'application/pdf',
       });
@@ -295,7 +309,12 @@ export class InternalSignatureProvider implements SignatureProvider {
       slots: signers.map((signer) => ({ order: signer.order, label: signer.roleLabel ?? signer.role })),
     });
     const stored = await this.storage.put({
-      key: `signatures/${input.documentId}/${envelope.verification_code}/v0-${originalSha256.slice(0, 12)}.pdf`,
+      key: signaturePreparedPdfKey({
+        documentCreatedAt: input.documentCreatedAt,
+        documentId: input.documentId,
+        verificationCode: envelope.verification_code,
+        originalSha256Prefix: originalSha256.slice(0, 12),
+      }),
       body: prepared,
       contentType: 'application/pdf',
     });
@@ -403,6 +422,17 @@ export class InternalSignatureProvider implements SignatureProvider {
       throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la solicitud de firma');
     }
     return envelope;
+  }
+
+  /** Creación del documento del sobre: sus firmas van en la carpeta de ese año (storage-keys.ts). */
+  private async documentCreatedAt(manager: EntityManager, documentId: string): Promise<Date> {
+    const [row] = (await manager.query('SELECT created_at FROM document WHERE id = $1', [documentId])) as Array<{
+      created_at: Date;
+    }>;
+    if (!row) {
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el documento de la solicitud de firma');
+    }
+    return row.created_at;
   }
 
   private signers(manager: EntityManager, envelopeId: string): Promise<SignerRow[]> {

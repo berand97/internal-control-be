@@ -8,6 +8,7 @@ import type { AuthenticatedUser } from '../../../common/types/authenticated-user
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig, StorageDriver } from '../../../config/configuration.js';
 import { StorageService } from '../../../shared/storage/storage.service.js';
+import { documentFileKey, documentTemplateKey, signedDocumentKey } from '../../../shared/storage/storage-keys.js';
 import { readDocxPlaceholders, renderDocx } from '../../document-templates/domain/docx-template.js';
 import { MfaAccountService } from '../../auth/services/mfa-account.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
@@ -297,7 +298,7 @@ export class DocumentEngineService {
     const placeholders = readDocxPlaceholders(file.buffer);
     const stored = await this.storage.put({
       // El sufijo lo genera el servidor: dos cargas con la misma fecha y versión ya no se pisan el archivo.
-      key: `document-templates/${format.key}/${meta.effectiveDate}-v${sgcVersion}-${randomUUID()}.docx`,
+      key: documentTemplateKey({ formatKey: format.key, effectiveDate: meta.effectiveDate, version: sgcVersion, id: randomUUID() }),
       body: file.buffer,
       contentType: DOCX_MIME,
     });
@@ -432,14 +433,24 @@ export class DocumentEngineService {
 
     const docx = renderDocx(source, data);
     const pdf = await this.pdf.toPdf(docx, `${format.key}-${number}.docx`);
-    const base = `documents/${format.key}/${period || 'unico'}/${number}`;
-    const storedDocx = await this.storage.put({ key: `${base}.docx`, body: docx, contentType: DOCX_MIME });
-    const storedPdf = await this.storage.put({ key: `${base}.pdf`, body: pdf, contentType: 'application/pdf' });
+    // created_at explícito (no el NOW() de la transacción): la carpeta del acta es el año de este instante.
+    const keyInput = { createdAt: now, formatKey: format.key, number };
+    const storedDocx = await this.storage.put({
+      key: documentFileKey({ ...keyInput, extension: 'docx' }),
+      body: docx,
+      contentType: DOCX_MIME,
+    });
+    const storedPdf = await this.storage.put({
+      key: documentFileKey({ ...keyInput, extension: 'pdf' }),
+      body: pdf,
+      contentType: 'application/pdf',
+    });
 
     const [row] = (await manager.query(
       `INSERT INTO document (format_key, number, period, sequence_value, template_version_id, status, entity_type,
-         entity_id, data, docx_driver, docx_key, docx_hash, pdf_driver, pdf_key, pdf_hash, created_by, format_version_id)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING_SIGNATURE', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         entity_id, data, docx_driver, docx_key, docx_hash, pdf_driver, pdf_key, pdf_hash, created_by, format_version_id,
+         created_at)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING_SIGNATURE', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
        RETURNING id`,
       [
         format.key,
@@ -458,6 +469,7 @@ export class DocumentEngineService {
         storedPdf.checksumSha256,
         actorId,
         format.versionId,
+        now,
       ],
     )) as Array<{ id: string }>;
     const documentId = row?.id ?? '';
@@ -505,7 +517,7 @@ export class DocumentEngineService {
 
   private async signatureRequestFor(
     manager: EntityManager,
-    document: { readonly id: string; readonly number: string; readonly format_key: string },
+    document: { readonly id: string; readonly number: string; readonly format_key: string; readonly created_at: Date },
     pdf: Buffer,
   ): Promise<SignatureRequest> {
     const signers = (await manager.query(
@@ -525,6 +537,7 @@ export class DocumentEngineService {
     const format = await this.catalog.forDocument(document.id, manager);
     return {
       documentId: document.id,
+      documentCreatedAt: document.created_at,
       documentNumber: document.number,
       formatKey: document.format_key,
       title: `${format.sgcCode ?? format.key} · ${format.name} · ${document.number}`,
@@ -1034,7 +1047,8 @@ export class DocumentEngineService {
         }
       }
       const [locked] = (await manager.query(
-        `SELECT id, number, period, format_key, status, data, template_version_id, pdf_hash, signature_reference
+        `SELECT id, number, period, format_key, status, data, template_version_id, pdf_hash, signature_reference,
+           created_at
          FROM document WHERE id = $1 FOR UPDATE`,
         [documentId],
       )) as Array<{
@@ -1047,6 +1061,7 @@ export class DocumentEngineService {
         template_version_id: string;
         pdf_hash: string;
         signature_reference: string | null;
+        created_at: Date;
       }>;
       if (locked?.status !== 'PENDING_SIGNATURE') {
         throw new ApiException(ErrorCode.InvalidState, 'El documento no está pendiente de firma');
@@ -1115,6 +1130,7 @@ export class DocumentEngineService {
       readonly format_key: string;
       readonly data: ActContext;
       readonly template_version_id: string;
+      readonly created_at: Date;
     },
     format: DocumentFormat,
     order: number,
@@ -1157,9 +1173,22 @@ export class DocumentEngineService {
     )) as Array<{ total: number }>;
     const docx = renderDocx(await this.storage.getFrom(template.storage_driver, template.storage_key), data);
     const pdf = await this.pdf.toPdf(docx, `${format.key}-${document.number}.docx`);
-    const base = `documents/${format.key}/${document.period || 'unico'}/${document.number}-r${(revisions?.total ?? 0) + 1}`;
-    const storedDocx = await this.storage.put({ key: `${base}.docx`, body: docx, contentType: DOCX_MIME });
-    const storedPdf = await this.storage.put({ key: `${base}.pdf`, body: pdf, contentType: 'application/pdf' });
+    const keyInput = {
+      createdAt: document.created_at,
+      formatKey: format.key,
+      number: document.number,
+      revision: (revisions?.total ?? 0) + 1,
+    };
+    const storedDocx = await this.storage.put({
+      key: documentFileKey({ ...keyInput, extension: 'docx' }),
+      body: docx,
+      contentType: DOCX_MIME,
+    });
+    const storedPdf = await this.storage.put({
+      key: documentFileKey({ ...keyInput, extension: 'pdf' }),
+      body: pdf,
+      contentType: 'application/pdf',
+    });
     await manager.query(
       `UPDATE document SET data = $2, docx_driver = $3, docx_key = $4, docx_hash = $5, pdf_driver = $6, pdf_key = $7, pdf_hash = $8
        WHERE id = $1`,
@@ -1285,7 +1314,7 @@ export class DocumentEngineService {
     }
     const signed = await this.signatures.signedDocument(document.signature_reference);
     const stored = await this.storage.put({
-      key: `documents/${document.format_key}/${document.period || 'unico'}/${document.number}-firmado.pdf`,
+      key: signedDocumentKey({ createdAt: document.created_at, formatKey: document.format_key, number: document.number }),
       body: signed,
       contentType: 'application/pdf',
     });
@@ -1617,6 +1646,7 @@ export class DocumentEngineService {
       lifecycle_error: string | null;
       lifecycle_failed_at: Date | null;
       voided_at: Date | null;
+      created_at: Date;
       voided_by: string | null;
       void_reason: string | null;
     }>;

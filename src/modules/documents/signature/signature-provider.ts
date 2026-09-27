@@ -17,6 +17,8 @@ export interface SignerRequest {
 
 export interface SignatureRequest {
   readonly documentId: string;
+  /** Creación del documento (document.created_at): las firmas se guardan en la carpeta de su año. */
+  readonly documentCreatedAt: Date;
   readonly documentNumber: string;
   readonly formatKey: string;
   readonly title?: string;
