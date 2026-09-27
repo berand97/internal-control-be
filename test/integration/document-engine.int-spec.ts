@@ -1,7 +1,7 @@
 import type { Type } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import PizZip from 'pizzip';
 import { DataSource } from 'typeorm';
@@ -301,6 +301,34 @@ describe('Motor de documentos (PostgreSQL real)', () => {
     expect(file.fileName).toBe(`OCI-01-55-${document.number}.pdf`);
     await expect(engine.download(document.id, 'pdf', outsider.id)).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
     await expect(engine.generate(request(), outsider.id)).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+  });
+
+  it('las claves nuevas van en documents/<año de creación en Bogotá>/<formato>/<número>', async () => {
+    const document = await engine.generate(request(), director.id);
+    const [row] = (await dataSource.query(
+      `SELECT docx_key, pdf_key, to_char(created_at AT TIME ZONE 'America/Bogota', 'YYYY') AS year
+       FROM document WHERE id = $1`,
+      [document.id],
+    )) as Array<{ docx_key: string; pdf_key: string; year: string }>;
+    expect(row?.docx_key).toBe(`documents/${row?.year}/OCI-01-55/${document.number}.docx`);
+    expect(row?.pdf_key).toBe(`documents/${row?.year}/OCI-01-55/${document.number}.pdf`);
+    expect(await readFile(join(storageDir, row?.pdf_key ?? ''))).toBeInstanceOf(Buffer);
+  });
+
+  it('un documento con clave de la organización anterior se sigue descargando con esa clave', async () => {
+    const document = await engine.generate(request(), director.id);
+    const current = await scalar<string>(dataSource, 'SELECT pdf_key FROM document WHERE id = $1', [document.id]);
+    const legacyKey = `documents/OCI-01-55/unico/${document.number}-legacy.pdf`;
+    const legacyBody = Buffer.from('%PDF-1.7 clave antigua');
+    await mkdir(join(storageDir, 'documents/OCI-01-55/unico'), { recursive: true });
+    await writeFile(join(storageDir, legacyKey), legacyBody);
+    await dataSource.query('UPDATE document SET pdf_key = $2 WHERE id = $1', [document.id, legacyKey]);
+    try {
+      const file = await engine.download(document.id, 'pdf', director.id);
+      expect(file.body.equals(legacyBody)).toBe(true);
+    } finally {
+      await dataSource.query('UPDATE document SET pdf_key = $2 WHERE id = $1', [document.id, current]);
+    }
   });
 });
 

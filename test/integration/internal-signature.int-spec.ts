@@ -253,6 +253,28 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     expect(sha256(unsigned)).toBe(row?.pdf_hash);
     const pages = async (pdf: Buffer) => (await PDFDocument.load(pdf)).getPageCount();
     expect(await pages(signed.body)).toBe((await pages(unsigned)) + 1);
+
+    // Organización del almacenamiento: todo en la carpeta del año de creación del acta (Bogotá).
+    const [keys] = (await dataSource.query(
+      `SELECT d.format_key, d.number, d.signed_pdf_key, e.current_pdf_key, e.verification_code,
+         to_char(d.created_at AT TIME ZONE 'America/Bogota', 'YYYY') AS year,
+         (SELECT array_agg(rubric_key ORDER BY sign_order) FROM signature_envelope_signer WHERE envelope_id = e.id) AS rubrics
+       FROM document d JOIN signature_envelope e ON e.document_id = d.id WHERE d.id = $1`,
+      [document.id],
+    )) as Array<{
+      format_key: string;
+      number: string;
+      signed_pdf_key: string;
+      current_pdf_key: string;
+      verification_code: string;
+      year: string;
+      rubrics: string[];
+    }>;
+    const folder = `signatures/${keys?.year}/${document.id}/${keys?.verification_code}`;
+    expect(keys?.signed_pdf_key).toBe(`documents/${keys?.year}/${keys?.format_key}/${keys?.number}-firmado.pdf`);
+    expect(keys?.current_pdf_key).toBe(`${folder}/v2.pdf`);
+    expect(keys?.rubrics).toEqual([`${folder}/rubrica-1.png`, `${folder}/rubrica-2.png`]);
+    expect(await readFile(join(storageDir, `${folder}/v0.pdf`))).toBeInstanceOf(Buffer);
   });
 
   it('alterar el PDF almacenado hace fallar la verificación y bloquea nuevas firmas', async () => {
