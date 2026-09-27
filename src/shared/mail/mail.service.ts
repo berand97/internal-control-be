@@ -15,8 +15,17 @@ import type { UpdateMailSettingsDto } from './dto/update-mail-settings.dto.js';
 import type { EmailTemplateType } from './domain/email-template-catalog.js';
 import { EmailTemplatesService } from './email-templates.service.js';
 import { MailSettings } from './entities/mail-settings.entity.js';
-import { UnsafeMailFieldError } from './mail-address.js';
+import {
+  assertDestinationAllowed,
+  isOutboundForbidden,
+  type OutboundPolicy,
+} from '../net/outbound-destination.js';
+import { maskEmail, redactEmails, UnsafeMailFieldError } from './mail-address.js';
 import { sendSmtpMail, verifySmtp } from './smtp-client.js';
+
+/** Pila o mensaje de un error de SMTP sin correos de personas (la respuesta del servidor suele repetir el RCPT). */
+const describeError = (error: unknown): string =>
+  redactEmails(error instanceof Error ? (error.stack ?? error.message) : String(error));
 
 const SECRET_FIELDS = ['host', 'username', 'password', 'fromName', 'fromEmail'] as const;
 
@@ -45,6 +54,9 @@ export class MailService {
     dto: UpdateMailSettingsDto,
     actorId: string,
   ): Promise<MailSettingsResponseDto> {
+    if (dto.host !== undefined && dto.host.trim() !== '') {
+      await this.assertHostAllowed(dto.host.trim());
+    }
     const row = await this.loadSettings();
     const password =
       dto.password !== undefined && dto.password.length > 0
@@ -80,12 +92,13 @@ export class MailService {
         secure: row.secure || row.port === 465,
         username: row.username,
         password: row.password,
+        outbound: this.outboundPolicy(),
       });
     } catch (error) {
-      this.logger.error(
-        'smtp verify failed',
-        error instanceof Error ? error.stack : String(error),
-      );
+      this.logger.error('smtp verify failed', describeError(error));
+      if (isOutboundForbidden(error)) {
+        throw new ApiException(ErrorCode.OutboundDestinationForbidden);
+      }
       throw new ApiException(ErrorCode.MailSendFailed);
     }
     return { ok: true };
@@ -118,7 +131,8 @@ export class MailService {
         'auth.expiresInHours': '1',
         'app.name': 'Control Interno UNAC',
       },
-      `password-reset to=${email}`,
+      // Ley 1581: el log de respaldo no lleva el correo completo.
+      `password-reset to=${maskEmail(email)}`,
     );
   }
 
@@ -145,7 +159,7 @@ export class MailService {
         'auth.loginUrl': loginUrl,
         'app.name': 'Control Interno UNAC',
       },
-      `user-invitation to=${email}`,
+      `user-invitation to=${maskEmail(email)}`,
     );
   }
 
@@ -227,6 +241,7 @@ export class MailService {
         to,
         subject,
         text,
+        outbound: this.outboundPolicy(),
       });
     } catch (error) {
       if (error instanceof UnsafeMailFieldError) {
@@ -234,11 +249,28 @@ export class MailService {
         this.logger.warn(`smtp send rejected before connecting: unsafe ${error.field}`);
         throw new ApiException(ErrorCode.MailAddressInvalid);
       }
-      this.logger.error(
-        `smtp send failed to=${to} subject=${subject}`,
-        error instanceof Error ? error.stack : String(error),
-      );
+      // Ley 1581: ni el destinatario completo ni el asunto (puede llevar nombres) van al log.
+      this.logger.error(`smtp send failed to=${maskEmail(to)}`, describeError(error));
+      if (isOutboundForbidden(error)) {
+        throw new ApiException(ErrorCode.OutboundDestinationForbidden);
+      }
       throw new ApiException(ErrorCode.MailSendFailed);
+    }
+  }
+
+  private outboundPolicy(): OutboundPolicy {
+    return this.config.getOrThrow('outbound', { infer: true });
+  }
+
+  /** El host SMTP no puede apuntar a la red interna del despliegue (BE-16). */
+  private async assertHostAllowed(host: string): Promise<void> {
+    try {
+      await assertDestinationAllowed(host, this.outboundPolicy());
+    } catch (error) {
+      if (isOutboundForbidden(error)) {
+        throw new ApiException(ErrorCode.OutboundDestinationForbidden);
+      }
+      throw error;
     }
   }
 
@@ -260,11 +292,14 @@ export class MailService {
 
   private async loadSettings(): Promise<MailSettings> {
     const stored = await this.requireStored();
-    if (this.hasPlaintextSecrets(stored)) {
-      this.seal(stored);
-      await this.settings.save(stored);
+    const revealed = this.reveal(stored);
+    // En claro (legado) o cifrado con SETTINGS_ENCRYPTION_KEY_PREVIOUS: se vuelve a sellar con la clave actual.
+    if (this.needsReseal(stored)) {
+      const resealed = this.settings.create({ ...revealed });
+      this.seal(resealed);
+      await this.settings.save(resealed);
     }
-    return this.reveal(stored);
+    return revealed;
   }
 
   private async requireStored(): Promise<MailSettings> {
@@ -287,11 +322,8 @@ export class MailService {
     return this.settings.save(created);
   }
 
-  private hasPlaintextSecrets(row: MailSettings): boolean {
-    return SECRET_FIELDS.some((field) => {
-      const value = row[field];
-      return value !== null && value !== '' && !this.cipher.isEncrypted(value);
-    });
+  private needsReseal(row: MailSettings): boolean {
+    return SECRET_FIELDS.some((field) => this.cipher.needsReseal(row[field]));
   }
 
   private seal(row: MailSettings): void {

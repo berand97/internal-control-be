@@ -1,9 +1,11 @@
+import { timingSafeEqual } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { type EntityManager, type QueryDeepPartialEntity, Repository } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
+import { csvCell } from '../../../common/csv/csv-cell.js';
 import type { AppConfig } from '../../../config/configuration.js';
 import { AssetMovement } from '../../assets/entities/asset-movement.entity.js';
 import type { CreateMovementRecord } from '../../assets/repositories/assets.repository.interface.js';
@@ -203,16 +205,19 @@ export class MovementsService {
       order: { executedAt: 'DESC' },
     });
     const header = 'id,type,executedAt,reason,documentReference,fromStatus,toStatus';
+    // Toda celda pasa por csvCell: motivo y referencia son texto libre y no pueden abrirse como fórmula (BE-10).
     const rows = items.map((item) =>
       [
         item.id,
         item.movementType,
         item.executedAt.toISOString(),
-        csvCell(item.reason),
-        csvCell(item.documentReference),
-        item.fromOperationalStatus ?? '',
-        item.toOperationalStatus ?? '',
-      ].join(','),
+        item.reason,
+        item.documentReference,
+        item.fromOperationalStatus,
+        item.toOperationalStatus,
+      ]
+        .map((value) => csvCell(value))
+        .join(','),
     );
     return [header, ...rows].join('\n');
   }
@@ -300,12 +305,16 @@ export class MovementsService {
     if (movement.metadata?.['signatureVersion'] !== SIGNATURE_VERSION) {
       return 'LEGACY_SCHEME';
     }
-    return this.signatureOf(movement) === movement.eventSignature
-      ? null
-      : 'SIGNATURE_MISMATCH';
+    // La clave actual y, durante una rotación, las de MOVEMENT_SIGNING_SECRET_PREVIOUS (BE-12). Solo se firma con la actual.
+    const stored = Buffer.from(movement.eventSignature, 'utf8');
+    const matches = this.verificationSecrets().some((secret) => {
+      const expected = Buffer.from(this.signatureOf(movement, secret), 'utf8');
+      return expected.length === stored.length && timingSafeEqual(expected, stored);
+    });
+    return matches ? null : 'SIGNATURE_MISMATCH';
   }
 
-  private signatureOf(movement: AssetMovement): string {
+  private signatureOf(movement: AssetMovement, secret: string = this.secret()): string {
     const canonical = canonicalMovementPayload({
       assetId: movement.assetId,
       movementType: movement.movementType,
@@ -332,20 +341,18 @@ export class MovementsService {
       previousMovementId: movement.previousMovementId ?? null,
       metadata: movement.metadata ?? {},
     });
-    return signMovement(this.secret(), canonical);
+    return signMovement(secret, canonical);
   }
 
   private secret(): string {
     return this.config.getOrThrow('movementSigningSecret', { infer: true });
   }
-}
 
-const csvCell = (value: string | null): string => {
-  if (!value) {
-    return '';
+  private verificationSecrets(): ReadonlyArray<string> {
+    const previous: unknown = this.config.get('movementSigningPreviousSecrets', { infer: true });
+    return [
+      this.secret(),
+      ...(Array.isArray(previous) ? previous.filter((item): item is string => typeof item === 'string') : []),
+    ];
   }
-  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-    return `"${value.replaceAll('"', '""')}"`;
-  }
-  return value;
-};
+}

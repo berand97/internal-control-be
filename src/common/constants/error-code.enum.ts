@@ -160,4 +160,5 @@ export enum ErrorCode {
   StorageProjectPathLocked = 'STORAGE_PROJECT_PATH_LOCKED',
   ArchiveTooLarge = 'ARCHIVE_TOO_LARGE',
   MailAddressInvalid = 'MAIL_ADDRESS_INVALID',
+  OutboundDestinationForbidden = 'OUTBOUND_DESTINATION_FORBIDDEN',
 }

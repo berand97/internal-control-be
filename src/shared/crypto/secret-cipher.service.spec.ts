@@ -39,3 +39,31 @@ describe('SecretCipherService', () => {
     expect(() => cipherFor('clave-b').decrypt(sealed)).toThrow();
   });
 });
+
+describe('SecretCipherService: rotación de SETTINGS_ENCRYPTION_KEY (BE-12)', () => {
+  const rotating = (current: string, previous: string[]) =>
+    new SecretCipherService({
+      getOrThrow: (key: string) => (key === 'settingsEncryptionKey' ? current : previous),
+    } as never);
+
+  it('descifra con la clave anterior y avisa que hay que volver a sellar', () => {
+    const sealed = cipherFor('clave-vieja').encrypt('secreto');
+    const cipher = rotating('clave-nueva', ['clave-vieja']);
+    expect(cipher.decrypt(sealed)).toBe('secreto');
+    expect(cipher.needsReseal(sealed)).toBe(true);
+    const resealed = cipher.encrypt(cipher.decrypt(sealed));
+    expect(cipher.needsReseal(resealed)).toBe(false);
+    expect(cipherFor('clave-nueva').decrypt(resealed)).toBe('secreto');
+  });
+
+  it('texto en claro también necesita sellarse; vacío no', () => {
+    const cipher = rotating('clave', []);
+    expect(cipher.needsReseal('plano')).toBe(true);
+    expect(cipher.needsReseal(null)).toBe(false);
+  });
+
+  it('sin la clave anterior el dato viejo no se puede leer', () => {
+    const sealed = cipherFor('clave-vieja').encrypt('secreto');
+    expect(() => rotating('clave-nueva', []).decrypt(sealed)).toThrow();
+  });
+});

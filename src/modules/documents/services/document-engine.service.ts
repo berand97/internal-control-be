@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { identityDocumentAbbreviation } from '../../../common/identity/identity-document-types.js';
@@ -17,6 +17,7 @@ import {
   formatNumber,
   initialSequenceValue,
   periodFor,
+  SGC_VERSION_PATTERN,
 } from '../domain/document-formats.js';
 import {
   IDENTITY_AUTHORIZATION_MINUTES,
@@ -284,9 +285,19 @@ export class DocumentEngineService {
       throw new ApiException(ErrorCode.DocumentFormatNotReady, `El formato ${format.key} aún no tiene código SGC institucional`);
     }
     const sgcVersion = meta.sgcVersion?.trim() || format.version || '';
+    // BE-17: la versión va en la clave; se valida aunque venga del catálogo (filas anteriores a la regla).
+    if (!SGC_VERSION_PATTERN.test(sgcVersion)) {
+      throw new ApiException(ErrorCode.ValidationFailed, undefined, [
+        {
+          field: 'sgcVersion',
+          message: 'Versión SGC de 1 a 10 caracteres (letras, dígitos, punto, guion), sin "/" ni ".."',
+        },
+      ]);
+    }
     const placeholders = readDocxPlaceholders(file.buffer);
     const stored = await this.storage.put({
-      key: `document-templates/${format.key}/${meta.effectiveDate}-v${sgcVersion}.docx`,
+      // El sufijo lo genera el servidor: dos cargas con la misma fecha y versión ya no se pisan el archivo.
+      key: `document-templates/${format.key}/${meta.effectiveDate}-v${sgcVersion}-${randomUUID()}.docx`,
       body: file.buffer,
       contentType: DOCX_MIME,
     });

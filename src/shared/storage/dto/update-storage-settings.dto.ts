@@ -101,9 +101,15 @@ export class UpdateStorageSettingsDto {
   @IsIn(S3_PROVIDERS)
   readonly s3Provider?: (typeof S3_PROVIDERS)[number];
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'URL http(s) del servicio S3, sin usuario ni parámetros. En producción no puede apuntar a una red privada, loopback o link-local salvo OUTBOUND_ALLOWED_HOSTS (400 OUTBOUND_DESTINATION_FORBIDDEN)',
+  })
   @IsOptional()
   @Transform(emptyToNull)
+  @IsString()
+  @MaxLength(2048)
   readonly s3Endpoint?: string | null;
 
   @ApiPropertyOptional()

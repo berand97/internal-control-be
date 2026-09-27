@@ -33,11 +33,13 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
+import { SGC_VERSION_PATTERN } from './domain/document-formats.js';
 import type { Response } from 'express';
 import { ErrorCode } from '../../common/constants/error-code.enum.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
@@ -167,6 +169,9 @@ export class UploadTemplateDto {
   @IsOptional()
   @IsString()
   @MaxLength(10)
+  @Matches(SGC_VERSION_PATTERN, {
+    message: 'sgcVersion admite de 1 a 10 letras, dígitos, punto, guion o guion bajo, sin "/" ni ".."',
+  })
   readonly sgcVersion?: string;
 
   @IsDateString()
@@ -289,7 +294,7 @@ export class DocumentsController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Subir una versión de plantilla DOCX con su fecha de vigencia',
     description:
-      'Se registra con el código SGC de la versión del formato que regirá cuando la plantilla empiece a usarse. sgcVersion es opcional: por defecto, la versión SGC de esa versión del formato. 409 DOCUMENT_FORMAT_NOT_READY si esa versión no tiene código SGC.' })
+      'Se registra con el código SGC de la versión del formato que regirá cuando la plantilla empiece a usarse. sgcVersion es opcional (1 a 10 letras, dígitos, punto, guion o guion bajo; sin "/" ni "..": si no, 400 VALIDATION_FAILED): por defecto, la versión SGC de esa versión del formato. 409 DOCUMENT_FORMAT_NOT_READY si esa versión no tiene código SGC.' })
   @ApiCreatedResponse({ schema: envelopedSchema(UploadedTemplateResponseDto) })
   uploadTemplate(
     @Param('formatKey') formatKey: string,

@@ -90,6 +90,7 @@ import { AuthAttemptLockout1767225751000 } from './migrations/1767225751000-auth
 import { PersonEmailSingleLine1767225760000 } from './migrations/1767225760000-person-email-single-line.js';
 import { InvitationExpiryAndTotpStep1767225770000 } from './migrations/1767225770000-invitation-expiry-and-totp-step.js';
 import { EncryptMfaSecrets1767225771000 } from './migrations/1767225771000-encrypt-mfa-secrets.js';
+import { StorageSecretsAndOauthState1767225780000 } from './migrations/1767225780000-storage-secrets-and-oauth-state.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -206,6 +207,7 @@ const dataSource = new DataSource({
     PersonEmailSingleLine1767225760000,
     InvitationExpiryAndTotpStep1767225770000,
     EncryptMfaSecrets1767225771000,
+    StorageSecretsAndOauthState1767225780000,
   ],
 });
 

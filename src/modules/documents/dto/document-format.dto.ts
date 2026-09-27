@@ -17,6 +17,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  SGC_VERSION_PATTERN,
   SIGNER_SOURCE_VALUES,
   type SignerSource,
 } from '../domain/document-formats.js';
@@ -116,10 +117,16 @@ export class DocumentFormatVersionInputDto {
   @Matches(/^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$/)
   readonly sgcCode!: string;
 
-  @ApiProperty({ example: '2', description: 'Versión SGC (1 a 10 caracteres)' })
+  @ApiProperty({
+    example: '2',
+    description: 'Versión SGC: 1 a 10 letras, dígitos, punto, guion o guion bajo; sin "/" ni ".."',
+  })
   @IsString()
   @MinLength(1)
   @MaxLength(10)
+  @Matches(SGC_VERSION_PATTERN, {
+    message: 'sgcVersion admite de 1 a 10 letras, dígitos, punto, guion o guion bajo, sin "/" ni ".."',
+  })
   readonly sgcVersion!: string;
 
   @ApiProperty({ example: 'Acta de préstamo temporal de activos fijos' })

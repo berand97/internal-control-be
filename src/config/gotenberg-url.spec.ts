@@ -35,6 +35,10 @@ describe('configuration() en producción', () => {
       DATABASE_URL: 'postgres://u:p@control-interno-database:5432/db',
       JWT_ACCESS_SECRET: 'a',
       JWT_REFRESH_SECRET: 'b',
+      // Obligatorias en producción desde BE-12 (ver dedicated-secrets.spec.ts).
+      QR_SIGNING_SECRET: 'qr',
+      MOVEMENT_SIGNING_SECRET: 'mov',
+      SETTINGS_ENCRYPTION_KEY: 'set',
       ...extra,
     };
   };

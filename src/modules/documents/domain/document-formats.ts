@@ -197,3 +197,10 @@ export const findFormat = (
   INITIAL_FORMAT_NAMES[key]
     ? { key, name: INITIAL_FORMAT_NAMES[key] }
     : undefined;
+
+/**
+ * Versión SGC (formato.version): 1 a 10 letras, dígitos, punto, guion o guion bajo, sin `..`. Va dentro de la clave de
+ * almacenamiento de la plantilla (`document-templates/<formato>/<fecha>-v<versión>-<id>.docx`): una `/` o un `..` la
+ * sacaban de la carpeta de su formato (BE-17).
+ */
+export const SGC_VERSION_PATTERN = /^(?!.*\.\.)[0-9A-Za-z._-]{1,10}$/;
