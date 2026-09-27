@@ -160,8 +160,8 @@ export class EmailLinkVariablesAsLinks1767225840000 implements MigrationInterfac
       await queryRunner.query(
         `INSERT INTO email_template
            (template_type, version, subject, blocks, placeholders, is_active, created_at, created_by, activated_at, activated_by)
-         SELECT $1, max(version) + 1, $2, $3::jsonb, $4::jsonb, TRUE, now(), NULL, now(), NULL
-         FROM email_template WHERE template_type = $1`,
+         SELECT $1::varchar, max(version) + 1, $2, $3::jsonb, $4::jsonb, TRUE, now(), NULL, now(), NULL
+         FROM email_template WHERE template_type = $1::varchar`,
         [row.template_type, row.subject, JSON.stringify(blocks), JSON.stringify(row.placeholders)],
       );
     }
