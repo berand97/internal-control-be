@@ -264,12 +264,14 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
     const schemas = (openapi.components?.schemas ?? {}) as Record<string, Record<string, unknown>>;
     expect(schemas['NavigationIcon']).toMatchObject({ type: 'string', enum: [...NAVIGATION_ICONS] });
     for (const dto of ['NavigationItemResponseDto', 'NavigationAdminItemResponseDto', 'CreateNavigationItemDto']) {
-      const icon = (schemas[dto]?.['properties'] as Record<string, Record<string, unknown>>)['icon'];
+      const properties = (schemas[dto]?.['properties'] ?? {}) as Record<string, Record<string, unknown>>;
+      const icon = properties['icon'];
       expect(JSON.stringify(icon), dto).toContain('#/components/schemas/NavigationIcon');
       expect(JSON.stringify(icon), dto).toContain('"nullable":true');
     }
     expect(schemas['NavigationItemResponseDto']?.['required']).toContain('icon');
-    const catalog = (schemas['NavigationIconCatalogResponseDto']?.['properties'] as Record<string, Record<string, unknown>>)['icons'];
+    const catalogProperties = (schemas['NavigationIconCatalogResponseDto']?.['properties'] ?? {}) as Record<string, Record<string, unknown>>;
+    const catalog = catalogProperties['icons'];
     expect(catalog).toMatchObject({ type: 'array', items: { $ref: '#/components/schemas/NavigationIcon' } });
     const list = JSON.stringify(openapi.paths['/api/v1/navigation']?.get?.responses?.['200']);
     expect(list).toContain('"type":"array"');
