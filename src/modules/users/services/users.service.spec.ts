@@ -181,6 +181,26 @@ describe('UsersService', () => {
     ).rejects.toMatchObject({ code: ErrorCode.RoleNotAssignable });
   });
 
+  it('nadie se asigna un rol a sí mismo, tampoco SUPER_ADMIN', async () => {
+    await expect(
+      service.assignRole(actor.id, { roleId: 'role-x' }, actor),
+    ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
+    expect(usersRepository.insertUserRole).not.toHaveBeenCalled();
+  });
+
+  it('nadie se delega a sí mismo el rol de otro', async () => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    await expect(
+      service.delegateRole(
+        'user-1',
+        'ur-1',
+        { toUserId: actor.id, validUntil: future },
+        actor,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
+    expect(usersRepository.insertUserRole).not.toHaveBeenCalled();
+  });
+
   it('exige vencimiento al delegar', async () => {
     vi.mocked(usersRepository.findByIdWithPerson).mockResolvedValue(
       buildUser('user-1'),

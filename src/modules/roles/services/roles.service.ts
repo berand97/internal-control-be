@@ -161,7 +161,7 @@ export class RolesService {
         parentRoleId = null;
       } else {
         const parent = await this.requireRole(dto.parentRoleId);
-        await this.privilege.assertCanInheritFrom(actor, parent);
+        await this.privilege.assertCanInheritFrom(actor, parent, role.id);
         parentRoleId = parent.id;
       }
     }
@@ -364,6 +364,7 @@ export class RolesService {
     await this.privilege.assertCanAdminister(actor, role);
     const permissions = await this.requirePermissions(dto.permissionIds);
     await this.privilege.assertCanGrant(actor, permissions);
+    await this.privilege.assertDoesNotWidenOwn(actor, role.id, permissions);
     const permissionIds = permissions.map((permission) => permission.id);
     for (const permissionId of permissionIds) {
       await this.rolesRepository.assignPermission(
@@ -397,6 +398,7 @@ export class RolesService {
     const currentIds = new Set(current.map((permission) => permission.id));
     const added = permissions.filter((permission) => !currentIds.has(permission.id));
     await this.privilege.assertCanGrant(actor, added);
+    await this.privilege.assertDoesNotWidenOwn(actor, role.id, added);
     const permissionIds = permissions.map((permission) => permission.id);
     await this.rolesRepository.replacePermissions(
       role.id,

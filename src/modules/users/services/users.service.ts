@@ -348,6 +348,10 @@ export class UsersService {
     dto: AssignUserRoleDto,
     actor: AuthenticatedUser,
   ): Promise<UserRoleResponseDto> {
+    // Nadie se autoasigna roles, tampoco SUPER_ADMIN: siempre lo hace otro administrador.
+    if (userId === actor.id) {
+      throw new ApiException(ErrorCode.RoleSelfAssignmentForbidden);
+    }
     const user = await this.requireUser(userId);
     const role = await this.requireAssignableRole(dto.roleId, actor);
 
@@ -456,6 +460,10 @@ export class UsersService {
     dto: DelegateUserRoleDto,
     actor: AuthenticatedUser,
   ): Promise<UserRoleResponseDto> {
+    // Delegarse a uno mismo el rol de otro es autoasignación. Delegar el propio rol a otra persona sí se permite.
+    if (dto.toUserId === actor.id) {
+      throw new ApiException(ErrorCode.RoleSelfAssignmentForbidden);
+    }
     if (!dto.validUntil) {
       throw new ApiException(ErrorCode.DelegationRequiresExpiry);
     }

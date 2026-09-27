@@ -82,6 +82,7 @@ describe('RolesService', () => {
       findLineage: vi.fn().mockResolvedValue([]),
       findPermissionsForRoles: vi.fn().mockResolvedValue([]),
       countActiveChildren: vi.fn().mockResolvedValue(0),
+      findHolderScopesReachingRole: vi.fn().mockResolvedValue([]),
       countActiveAssignees: vi.fn().mockResolvedValue(0),
       insertPermission: vi.fn(),
       updatePermission: vi.fn(),
@@ -460,6 +461,33 @@ describe('RolesService', () => {
           hierarchyLevel: 2,
         }),
       );
+    });
+  });
+
+  describe('nadie se amplía permisos a sí mismo', () => {
+    beforeEach(() => {
+      vi.mocked(rolesRepository.findActiveById).mockResolvedValue(customRole());
+      vi.mocked(rolesRepository.findPermissionsByIds).mockResolvedValue([
+        { id: 'perm-1', code: 'asset:read:global' } as never,
+      ]);
+      vi.mocked(permissionsService.getEffectivePermissions).mockResolvedValue([
+        { permissionCode: 'asset:read:global', userScopeType: 'COST_CENTER', userScopeId: 'cc-1' },
+      ]);
+    });
+
+    it('no agrega a un rol propio (asignación GLOBAL) un permiso que el actor solo tiene en un centro de costo', async () => {
+      vi.mocked(rolesRepository.findHolderScopesReachingRole).mockResolvedValue([
+        { scopeType: 'GLOBAL', scopeId: null },
+      ]);
+      await expect(
+        service.assignPermissions('role-1', { permissionIds: ['perm-1'] }, actor),
+      ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
+      expect(rolesRepository.assignPermission).not.toHaveBeenCalled();
+    });
+
+    it('sí lo agrega si el actor no tiene el rol', async () => {
+      await service.assignPermissions('role-1', { permissionIds: ['perm-1'] }, actor);
+      expect(rolesRepository.assignPermission).toHaveBeenCalled();
     });
   });
 

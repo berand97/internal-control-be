@@ -263,6 +263,24 @@ export class TypeOrmRolesRepository implements RolesRepository {
     return [...unique.values()];
   }
 
+  async findHolderScopesReachingRole(
+    userId: string,
+    roleId: string,
+  ): Promise<
+    ReadonlyArray<{ readonly scopeType: string; readonly scopeId: string | null }>
+  > {
+    const rows = (await this.userRoles.query(
+      `SELECT DISTINCT ur.scope_type, ur.scope_id
+       FROM user_role ur
+       CROSS JOIN LATERAL fn_role_lineage(ur.role_id) l
+       WHERE ur.user_id = $1
+         AND ur.revoked_at IS NULL
+         AND l.role_id = $2`,
+      [userId, roleId],
+    )) as Array<{ scope_type: string; scope_id: string | null }>;
+    return rows.map((row) => ({ scopeType: row.scope_type, scopeId: row.scope_id }));
+  }
+
   countActiveChildren(parentRoleId: string): Promise<number> {
     return this.roles.count({ where: { parentRoleId, deletedAt: IsNull() } });
   }

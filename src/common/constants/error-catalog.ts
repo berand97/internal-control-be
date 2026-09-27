@@ -188,6 +188,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Otros roles heredan de este rol; quítales la herencia o elimínalos antes',
   },
+  [ErrorCode.RoleSelfAssignmentForbidden]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Nadie puede asignarse roles ni ampliarse permisos a sí mismo; lo hace otro administrador',
+  },
   [ErrorCode.RoleSystemImmutable]: {
     httpStatus: 406,
     action: 'CANCEL',

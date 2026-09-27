@@ -70,6 +70,8 @@ export class RolePrivilegePolicy {
   async assertCanInheritFrom(
     actor: AuthenticatedUser,
     parent: Pick<Role, 'id' | 'hierarchyLevel'>,
+    /** Rol existente que pasaría a heredar: si el actor lo tiene, no puede ampliarse con la herencia. */
+    inheritingRoleId?: string,
   ): Promise<void> {
     await this.assertCanAdminister(actor, parent);
     const lineage = await this.rolesRepository.findLineage(parent.id);
@@ -81,6 +83,9 @@ export class RolePrivilegePolicy {
       lineage.map((role) => role.id),
     );
     await this.assertCanGrant(actor, inherited);
+    if (inheritingRoleId !== undefined) {
+      await this.assertDoesNotWidenOwn(actor, inheritingRoleId, inherited);
+    }
   }
 
   /**
@@ -98,6 +103,45 @@ export class RolePrivilegePolicy {
         (role) => actor.roles.includes(role.code) && role.hierarchyLevel === rank,
       ) ?? null
     );
+  }
+
+  /**
+   * Nadie se amplía permisos a sí mismo. Si el actor tiene el rol (directo o heredado), lo que se le agregue al rol
+   * llega también al actor con el alcance de esa asignación: solo se permite si el actor ya tenía cada permiso con
+   * ese mismo alcance (o GLOBAL). assertCanGrant compara solo códigos; esto cierra la ampliación de alcance. Quitar
+   * permisos de un rol propio no pasa por aquí.
+   */
+  async assertDoesNotWidenOwn(
+    actor: AuthenticatedUser,
+    roleId: string,
+    permissions: ReadonlyArray<Pick<Permission, 'code'>>,
+  ): Promise<void> {
+    if (permissions.length === 0) {
+      return;
+    }
+    const scopes = await this.rolesRepository.findHolderScopesReachingRole(
+      actor.id,
+      roleId,
+    );
+    if (scopes.length === 0) {
+      return;
+    }
+    const held = await this.permissionsService.getEffectivePermissions(actor.id);
+    const covered = (code: string, scope: { scopeType: string; scopeId: string | null }) =>
+      held.some(
+        (item) =>
+          item.permissionCode === code &&
+          (item.userScopeType === 'GLOBAL' ||
+            (item.userScopeType === scope.scopeType &&
+              item.userScopeId === scope.scopeId)),
+      );
+    if (
+      permissions.some((permission) =>
+        scopes.some((scope) => !covered(permission.code, scope)),
+      )
+    ) {
+      throw new ApiException(ErrorCode.RoleSelfAssignmentForbidden);
+    }
   }
 
   async assertCanGrant(
