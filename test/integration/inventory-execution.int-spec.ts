@@ -640,12 +640,12 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       .send({ label: 'HURTO con denuncia' });
     expect(errorCode(repeated)).toBe('INVENTORY_CATALOG_ENTRY_EXISTS');
 
+    // 1767225895000: SUPER_ADMIN no tiene permisos operativos; solo el director administra los catálogos.
     expect(
-      await scalar<number>(
-        dataSource,
-        `SELECT count(*)::int FROM role_permission rp JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id
-         WHERE p.code = 'inventory_catalog:manage:global'`,
+      await dataSource.query(
+        `SELECT r.code FROM role_permission rp JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id
+         WHERE p.code = 'inventory_catalog:manage:global' ORDER BY r.code`,
       ),
-    ).toBe(2);
+    ).toEqual([{ code: 'INTERNAL_CONTROL_DIRECTOR' }]);
   });
 });
