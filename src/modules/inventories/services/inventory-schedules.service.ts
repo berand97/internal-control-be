@@ -23,7 +23,7 @@ import {
   type NoticeWarning,
 } from './inventory-notices.service.js';
 import { InventoryRemindersService, type ReminderView } from './inventory-reminders.service.js';
-import { inventorySummary, type InventorySummary } from './inventory-summary.js';
+import { inventorySummary, loadResponsibleNames, type InventorySummary } from './inventory-summary.js';
 
 export type InventoryScheduleResult = InventorySummary & {
   readonly reminders: ReadonlyArray<ReminderView>;
@@ -129,7 +129,7 @@ export class InventorySchedulesService {
         manager,
       );
       return {
-        ...inventorySummary(inventory),
+        ...inventorySummary(inventory, await loadResponsibleNames(manager, [inventory.responsibleUserId])),
         reminders,
         noticeRecipients: notice.audience.recipients,
         warnings,
@@ -192,7 +192,7 @@ export class InventorySchedulesService {
         manager,
       );
       return {
-        ...inventorySummary(inventory),
+        ...inventorySummary(inventory, await loadResponsibleNames(manager, [inventory.responsibleUserId])),
         reminders,
         noticeRecipients: notice.audience.recipients,
         warnings,
@@ -230,7 +230,7 @@ export class InventorySchedulesService {
         manager,
       );
       return {
-        ...inventorySummary(inventory),
+        ...inventorySummary(inventory, await loadResponsibleNames(manager, [inventory.responsibleUserId])),
         noticeRecipients: notice.audience.recipients,
         warnings: notice.audience.warnings,
       };

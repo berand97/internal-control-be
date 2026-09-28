@@ -34,6 +34,14 @@ const WARNING_DESCRIPTION =
 
 // ---------- Resumen de la toma (común) ----------
 
+export class InventoryResponsibleDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly id!: string;
+
+  @ApiProperty({ description: 'Nombres y apellidos de la persona del usuario; si no tiene persona, su usuario' })
+  readonly name!: string;
+}
+
 export class InventorySummaryDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
@@ -67,6 +75,12 @@ export class InventorySummaryDto {
 
   @ApiProperty({ format: 'uuid' })
   readonly responsibleUserId!: string;
+
+  @ApiProperty({
+    type: InventoryResponsibleDto,
+    description: 'Responsable de la toma con su nombre (no exige user:read:global para mostrarlo)',
+  })
+  readonly responsible!: InventoryResponsibleDto;
 
   @ApiProperty({ type: 'string', nullable: true })
   readonly notes!: string | null;

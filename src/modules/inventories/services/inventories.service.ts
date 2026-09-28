@@ -40,7 +40,7 @@ import { InventoryCatalogsService } from './inventory-catalogs.service.js';
 import { InventoryActService } from './inventory-act.service.js';
 import { type ItemViewContext, mergeFrozenReport, toItemView, toProgressView, toReportView } from './inventory-item-view.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
-import { inventorySummary } from './inventory-summary.js';
+import { inventorySummary, loadResponsibleNames } from './inventory-summary.js';
 
 const ENTITY_TYPE = 'INVENTORY';
 
@@ -102,8 +102,12 @@ export class InventoriesService {
       .skip((page - 1) * pageSize)
       .take(pageSize)
       .getMany();
+    const names = await loadResponsibleNames(
+      this.dataSource,
+      rows.map((row) => row.responsibleUserId),
+    );
     return {
-      items: rows.map((row) => this.toSummary(row)),
+      items: rows.map((row) => inventorySummary(row, names)),
       total,
       page,
       pageSize,
@@ -119,7 +123,7 @@ export class InventoriesService {
     });
     const context = await this.valuation.viewContext(inventory, items);
     return {
-      ...this.toSummary(inventory),
+      ...(await this.toSummary(inventory)),
       items: items.map((item) => toItemView(item, context)),
       progress: toProgressView(items),
       report: this.frozenOrLiveReport(inventory, items, context),
@@ -782,7 +786,10 @@ export class InventoriesService {
     return asset;
   }
 
-  private toSummary(inventory: PhysicalInventory) {
-    return inventorySummary(inventory);
+  private async toSummary(inventory: PhysicalInventory) {
+    return inventorySummary(
+      inventory,
+      await loadResponsibleNames(this.dataSource, [inventory.responsibleUserId]),
+    );
   }
 }

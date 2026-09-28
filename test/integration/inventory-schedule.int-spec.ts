@@ -579,6 +579,64 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     ).rejects.toThrow(/chk_mail_outbox_recipient/);
   });
 
+  it('programar, listar y detalle traen el nombre del responsable; la Directora no necesita user:read:global', async () => {
+    // Causa del UUID en pantalla: el frontend pedía GET /users, que exige user:read:global y la Directora no tiene.
+    expect((await http().get('/api/v1/users').set(auth())).status).toBe(403);
+    const created = await schedule({ scope: 'GLOBAL', plannedStartDate: day(200), plannedEndDate: day(201) });
+    const expected = { id: responsible.userId, name: 'Responsable Programación' };
+    expect(created.data['responsible']).toEqual(expected);
+    const detail = await http().get(`/api/v1/inventories/${created.data.id}`).set(auth());
+    expect(detail.status).toBe(200);
+    expect(detail.body.data.responsible).toEqual(expected);
+    expectConforms('get', '/api/v1/inventories/{id}', 200, detail.body);
+    const list = await http().get('/api/v1/inventories').query({ pageSize: 100 }).set(auth());
+    const item = (list.body.data.items as Array<{ id: string; responsible: unknown }>).find((row) => row.id === created.data.id);
+    expect(item?.responsible).toEqual(expected);
+  });
+
+  it('candidatos a responsable: activos con inventory:execute:global; con alcance, sin jefes ni custodios auditados', async () => {
+    const tag = randomUUID().slice(0, 6);
+    const withRole = async (label: string, role: string | null) => {
+      const who = await person(`Cand${tag}${label}`, true);
+      if (role) {
+        await dataSource.query(
+          `INSERT INTO user_role (user_id, role_id, scope_type) SELECT $1, id, 'GLOBAL' FROM role WHERE code = $2`,
+          [who.userId, role],
+        );
+      }
+      return who;
+    };
+    const free = await withRole('A', 'CUSTODIAN');
+    const headOf = await withRole('B', 'CUSTODIAN');
+    const keeper = await withRole('C', 'CUSTODIAN');
+    await withRole('D', 'VIEWER');
+    const inactive = await withRole('E', 'CUSTODIAN');
+    await dataSource.query(`UPDATE app_user SET status = 'INACTIVE' WHERE id = $1`, [inactive.userId]);
+    const centerId = await center('Centro candidatos');
+    await head(headOf.personId, centerId);
+    const asset = await newAsset(centerId, base.roomA);
+    await dataSource.query('UPDATE asset SET current_responsible_id = $1 WHERE id = $2', [keeper.personId, asset.id]);
+
+    const candidates = (query: Record<string, unknown>, token = director.token ?? '') =>
+      http().get('/api/v1/inventories/responsible-candidates').query({ q: `cand${tag}`, ...query }).set({ Authorization: `Bearer ${token}` });
+    const ids = (body: { data: { items: Array<{ id: string }> } }) => body.data.items.map((item) => item.id);
+
+    const all = await candidates({});
+    expect(all.status).toBe(200);
+    expectConforms('get', '/api/v1/inventories/responsible-candidates', 200, all.body);
+    expect(ids(all.body)).toEqual([free.userId, headOf.userId, keeper.userId]);
+    expect(all.body.data.items[0]).toEqual({ id: free.userId, name: `Cand${tag}A Programación`, username: expect.stringMatching(/^prog\./) });
+
+    const scoped = await candidates({ scope: 'COST_CENTER', scopeId: centerId });
+    expect(ids(scoped.body)).toEqual([free.userId]);
+    const paged = await candidates({ pageSize: 1, page: 2 });
+    expect(ids(paged.body)).toEqual([headOf.userId]);
+    expect(paged.body.data.pagination).toMatchObject({ page: 2, pageSize: 1, totalItems: 3, totalPages: 3 });
+
+    expect((await candidates({ scope: 'COST_CENTER' })).status).toBe(400);
+    expect((await candidates({}, free.token ?? '')).status).toBe(403);
+  });
+
   it('el menú trae "Calendario de tomas" con el recurso y el ícono existentes', async () => {
     const [row] = (await dataSource.query(
       `SELECT module, resource, label, required_action, icon FROM navigation_item WHERE path = '/inventories/calendar'`,

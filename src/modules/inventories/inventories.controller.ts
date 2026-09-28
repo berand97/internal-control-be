@@ -51,6 +51,10 @@ import {
 } from './dto/inventory-schedule.responses.js';
 import { ResolveSurplusDto, SetInventoryAccountingCutDto } from './dto/inventory-reconciliation.dto.js';
 import {
+  InventoryResponsibleCandidatesPageDto,
+  QueryInventoryResponsibleCandidatesDto,
+} from './dto/inventory-responsible-candidates.dto.js';
+import {
   InventoryAccountingCutResponseDto,
   InventoryActStateDto,
   InventoryDetailResponseDto,
@@ -68,6 +72,7 @@ import { InventoryActService } from './services/inventory-act.service.js';
 import { InventorySurplusService } from './services/inventory-surplus.service.js';
 import { InventoryCorrectionsService } from './services/inventory-corrections.service.js';
 import { InventoryPlanningService } from './services/inventory-planning.service.js';
+import { InventoryResponsibleCandidatesService } from './services/inventory-responsible-candidates.service.js';
 import { InventorySchedulesService } from './services/inventory-schedules.service.js';
 
 const ACTOR_RULE =
@@ -81,6 +86,7 @@ const ACTOR_RULE =
   ApiErrorEnvelope,
   InventoryScheduleResponseDto,
   InventoryCancelResponseDto,
+  InventoryResponsibleCandidatesPageDto,
   InventoryCalendarResponseDto,
   InventoryCoverageResponseDto,
   InventorySummaryDto,
@@ -105,6 +111,7 @@ export class InventoriesController {
     private readonly cuts: AccountingCutsService,
     private readonly surplus: InventorySurplusService,
     private readonly act: InventoryActService,
+    private readonly responsibleCandidates: InventoryResponsibleCandidatesService,
   ) {}
 
   @Get()
@@ -126,6 +133,21 @@ export class InventoriesController {
   @ApiOkResponse({ schema: envelopedSchema(InventoryCalendarResponseDto) })
   calendar(@Query() query: InventoryCalendarQueryDto) {
     return this.planning.calendar(query);
+  }
+
+  @Get('responsible-candidates')
+  @RequirePermission('inventory:create:global')
+  @ApiOperation({
+    summary: 'Candidatos a responsable de una toma',
+    description:
+      'Usuarios activos con inventory:execute:global (sin él no podrían operar la toma), paginados y filtrables por ' +
+      'nombre o usuario (q). Con scope/scopeId excluye a quien sería auditado por la toma: jefe vigente de un centro ' +
+      'auditado o custodio de un activo del alcance (misma regla que InventoryActorPolicy, sobre el alcance de hoy). ' +
+      'Requiere inventory:create:global, no user:read:global.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryResponsibleCandidatesPageDto) })
+  listResponsibleCandidates(@Query() query: QueryInventoryResponsibleCandidatesDto) {
+    return this.responsibleCandidates.list(query);
   }
 
   @Get('coverage')
