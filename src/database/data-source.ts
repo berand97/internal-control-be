@@ -102,6 +102,7 @@ import { InventoryFindingsAndCorrections1767225870000 } from './migrations/17672
 import { InventoryValuationSurplusAndAct1767225880000 } from './migrations/1767225880000-inventory-valuation-surplus-and-act.js';
 import { CostCenterStructureHistory1767225890000 } from './migrations/1767225890000-cost-center-structure-history.js';
 import { RevokeSuperAdminInventoryCatalog1767225895000 } from './migrations/1767225895000-revoke-super-admin-inventory-catalog.js';
+import { RoleGrantsAuditPermission1767225900000 } from './migrations/1767225900000-role-grants-audit-permission.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -236,6 +237,7 @@ const dataSource = new DataSource({
     InventoryValuationSurplusAndAct1767225880000,
     CostCenterStructureHistory1767225890000,
     RevokeSuperAdminInventoryCatalog1767225895000,
+    RoleGrantsAuditPermission1767225900000,
   ],
 });
 

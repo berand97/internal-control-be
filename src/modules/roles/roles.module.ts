@@ -13,6 +13,7 @@ import { TypeOrmPermissionsRepository } from './repositories/permissions.reposit
 import { TypeOrmRolesRepository } from './repositories/roles.repository.js';
 import { PermissionsCache } from './services/permissions-cache.service.js';
 import { PermissionsService } from './services/permissions.service.js';
+import { RoleGrantsHistoryService } from './services/role-grants-history.service.js';
 import { RolePrivilegePolicy } from './services/role-privilege.policy.js';
 import { RolesService } from './services/roles.service.js';
 
@@ -34,6 +35,7 @@ import { RolesService } from './services/roles.service.js';
     PermissionsService,
     RolePrivilegePolicy,
     RolesService,
+    RoleGrantsHistoryService,
     { provide: 'PermissionsRepository', useClass: TypeOrmPermissionsRepository },
     { provide: 'RolesRepository', useClass: TypeOrmRolesRepository },
   ],
