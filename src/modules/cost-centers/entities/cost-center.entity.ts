@@ -21,6 +21,10 @@ export class CostCenter {
   @Column({ name: 'accepts_assets', type: 'boolean' })
   acceptsAssets!: boolean;
 
+  /** Recibe movimientos contables (true) o es un nodo agrupador (false). Caché de la ubicación vigente. */
+  @Column({ name: 'has_movement', type: 'boolean', default: true })
+  hasMovement!: boolean;
+
   @Column({ name: 'is_active', type: 'boolean' })
   isActive!: boolean;
 

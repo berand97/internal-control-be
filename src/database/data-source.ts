@@ -100,6 +100,7 @@ import { EmailLinkVariablesAsLinks1767225840000 } from './migrations/17672258400
 import { InventorySchedule1767225860000 } from './migrations/1767225860000-inventory-schedule.js';
 import { InventoryFindingsAndCorrections1767225870000 } from './migrations/1767225870000-inventory-findings-and-corrections.js';
 import { InventoryValuationSurplusAndAct1767225880000 } from './migrations/1767225880000-inventory-valuation-surplus-and-act.js';
+import { CostCenterStructureHistory1767225890000 } from './migrations/1767225890000-cost-center-structure-history.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -232,6 +233,7 @@ const dataSource = new DataSource({
     InventorySchedule1767225860000,
     InventoryFindingsAndCorrections1767225870000,
     InventoryValuationSurplusAndAct1767225880000,
+    CostCenterStructureHistory1767225890000,
   ],
 });
 

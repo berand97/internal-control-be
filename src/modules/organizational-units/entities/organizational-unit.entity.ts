@@ -24,6 +24,10 @@ export class OrganizationalUnit {
   @Column({ name: 'hierarchy_path', type: 'text', nullable: true })
   hierarchyPath!: string | null;
 
+  /** Dígito(s) inicial(es) del rango de códigos de sus centros de costo (4 → 4000–4999). */
+  @Column({ name: 'code_prefix', type: 'varchar', length: 4, nullable: true })
+  codePrefix!: string | null;
+
   @Column({ name: 'is_active', type: 'boolean' })
   isActive!: boolean;
 
