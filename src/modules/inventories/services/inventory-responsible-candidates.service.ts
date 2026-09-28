@@ -70,7 +70,7 @@ export class InventoryResponsibleCandidatesService {
           UNION
           SELECT responsible_id FROM audited_assets WHERE responsible_id IS NOT NULL
         )`;
-      where.push(`(u.person_id IS NULL OR u.person_id NOT IN (SELECT person_id FROM audited_people))`);
+      where.push(`NOT EXISTS (SELECT 1 FROM audited_people ap WHERE ap.person_id = u.person_id)`);
     }
     params.push(query.pageSize, (query.page - 1) * query.pageSize);
     const rows = (await this.dataSource.query(
