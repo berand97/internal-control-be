@@ -115,3 +115,48 @@ describe('plan de estructura de centros de costo', () => {
     expect(plan.counts.notInFile).toBe(1);
   });
 });
+
+describe('textos del diagnóstico de estructura', () => {
+  const detailOf = (plan: ReturnType<typeof planCostCenterStructure>, code: string, rawValue: string) =>
+    plan.issues.find((issue) => issue.code === code && issue.rawValue === rawValue)?.detail ?? '';
+  // Lo lee quien importa: sin tipos de unidad ni códigos internos (CC_<n>, VICERECTORATE).
+  const noInternals = (detail: string) => {
+    expect(detail).not.toMatch(/CC_\d|VICERECTORATE|\(VICE|prefijo/u);
+  };
+
+  it('crear, asociar, conflicto y prefijo sin unidad, en lenguaje llano', () => {
+    const plan = planCostCenterStructure(FILE, [], []);
+    const created = detailOf(plan, 'UNIT_CREATED', '4');
+    expect(created).toBe('Se crea la unidad «VICERRECTORÍA FINANCIERA» para los códigos que empiezan por 4 (del 4000 al 4999)');
+    const withoutUnit = detailOf(plan, 'PREFIX_WITHOUT_UNIT', '3');
+    expect(withoutUnit).toContain('del 3000 al 3999 quedan sin unidad');
+    for (const detail of [created, withoutUnit]) {
+      noInternals(detail);
+    }
+
+    const units = [
+      { id: 'u-6', code: 'CC_6', name: 'Extensión', codePrefix: null, isActive: true },
+      { id: 'u-7', code: 'CC_7', name: 'Investigación', codePrefix: '2', isActive: true },
+      { id: 'u-8', code: 'CC_8', name: 'Posgrados', codePrefix: null, isActive: false },
+    ];
+    const other = planCostCenterStructure([row(1, '6', false), row(2, '7', false), row(3, '8', false)], [], units);
+    const associated = detailOf(other, 'UNIT_ASSOCIATED', '6');
+    expect(associated).toBe('La unidad «Extensión», que ya existe, queda para los códigos que empiezan por 6');
+    const taken = detailOf(other, 'UNIT_PREFIX_CONFLICT', '7');
+    expect(taken).toBe(
+      'Ya existe la unidad «Investigación» para los códigos que empiezan por 2: no se crea ni se asigna una unidad para los códigos que empiezan por 7',
+    );
+    const inactive = detailOf(other, 'UNIT_PREFIX_CONFLICT', '8');
+    expect(inactive).toContain('«Posgrados» y está desactivada');
+    for (const detail of [associated, taken, inactive]) {
+      noInternals(detail);
+    }
+  });
+
+  it('el padre con movimiento se explica sin «derivado»', () => {
+    const plan = planCostCenterStructure([row(1, '4300', true), row(2, '4310', true)], [], []);
+    expect(detailOf(plan, 'PARENT_HAS_MOVEMENT', '4310')).toBe(
+      'El centro padre que le corresponde por su código, 4300, recibe movimientos (Movimiento 1): no es agrupador',
+    );
+  });
+});

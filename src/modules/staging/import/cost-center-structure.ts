@@ -148,7 +148,7 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'UNIT_PREFIX_CONFLICT',
         rawValue: row.code,
-        detail: `La unidad ${code} ya existe ${byCode.isActive ? `con el prefijo ${byCode.codePrefix ?? ''}` : 'inactiva'}: no se crea ni se asocia la unidad del prefijo ${row.code}`,
+        detail: `Ya existe la unidad «${byCode.name}» ${byCode.isActive ? `para los códigos que empiezan por ${byCode.codePrefix ?? ''}` : 'y está desactivada'}: no se crea ni se asigna una unidad para los códigos que empiezan por ${row.code}`,
       });
       continue;
     }
@@ -158,7 +158,7 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'UNIT_ASSOCIATED',
         rawValue: row.code,
-        detail: `La unidad existente ${code} «${byCode.name}» recibe el prefijo ${row.code}`,
+        detail: `La unidad «${byCode.name}», que ya existe, queda para los códigos que empiezan por ${row.code}`,
       });
       continue;
     }
@@ -167,7 +167,7 @@ export const planCostCenterStructure = (
       rowNumber: row.rowNumber,
       code: 'UNIT_CREATED',
       rawValue: row.code,
-      detail: `Se crea la unidad ${code} «${row.name}» (VICERECTORATE) con el prefijo ${row.code}: sus centros van de ${prefixRange(row.code).from} a ${prefixRange(row.code).to}`,
+      detail: `Se crea la unidad «${row.name}» para los códigos que empiezan por ${row.code} (del ${prefixRange(row.code).from} al ${prefixRange(row.code).to})`,
     });
   }
   const prefixed: Array<{ codePrefix: string; ref: UnitRef }> = [
@@ -221,7 +221,7 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'PARENT_HAS_MOVEMENT',
         rawValue: row.code,
-        detail: `El padre derivado ${derivedParent} tiene Movimiento 1 (no es agrupador)`,
+        detail: `El centro padre que le corresponde por su código, ${derivedParent}, recibe movimientos (Movimiento 1): no es agrupador`,
       });
     }
     // Unidad: columna unitCode, o prefijo más largo; null = no se sabe (no borra la que tenga).
@@ -298,7 +298,7 @@ export const planCostCenterStructure = (
       rowNumber: null,
       code: 'PREFIX_WITHOUT_UNIT',
       rawValue: digit,
-      detail: `${count} centros del rango ${range.from}–${range.to} quedan sin unidad: el archivo no trae la fila «${digit}» ni hay una unidad con el prefijo ${digit}. No se inventa unidad`,
+      detail: `${count} centros del ${range.from} al ${range.to} quedan sin unidad: el archivo no trae la fila «${digit}» ni hay una unidad para los códigos que empiezan por ${digit}. No se crea ninguna unidad por su cuenta`,
     });
   }
   return {
