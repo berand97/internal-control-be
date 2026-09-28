@@ -465,35 +465,6 @@ export class AssetsService {
     return this.toDetail(updated);
   }
 
-  async reassignCostCenter(
-    id: string,
-    costCenterId: string,
-    documentReference: string,
-    reason: string | undefined,
-    actor: AuthenticatedUser,
-  ): Promise<AssetResponseDto> {
-    const asset = await this.requireMutable(id);
-    await this.assertNotUnderInventory(asset.id);
-    await this.assertNoActiveLoan(asset.id);
-    await this.requireCostCenter(costCenterId);
-    const updated = await this.assetState.apply({
-      assetId: asset.id,
-      actorId: actor.id,
-      patch: { costCenterId },
-      guard: assertMutable,
-      movement: {
-        type: MovementType.Transfer,
-        reason: reason ?? null,
-        documentReference,
-      },
-      audit: {
-        action: AuditAction.AssetTransferred,
-        changes: { from: asset.costCenterId, to: costCenterId },
-      },
-    });
-    return this.toDetail(updated);
-  }
-
   private async currentCustomValues(
     assetId: string,
   ): Promise<Record<string, unknown>> {

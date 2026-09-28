@@ -49,7 +49,6 @@ import { CreateAssetDto } from './dto/create-asset.dto.js';
 import { QueryAssetsDto } from './dto/query-assets.dto.js';
 import { QueryTimelineDto } from './dto/query-timeline.dto.js';
 import { AssetTimelineResponseDto } from './dto/responses/asset-timeline.response.dto.js';
-import { ReassignCostCenterDto } from './dto/reassign-cost-center.dto.js';
 import { ReassignLocationDto } from './dto/reassign-location.dto.js';
 import {
   AcquisitionTypeResponseDto,
@@ -299,7 +298,7 @@ export class AssetsController {
   @ApiOperation({
     summary: 'Actualizar activo',
     description:
-      'internalCode no es editable. Para centro de costo usar reassign-cost-center. Bloqueado (406 ASSET_HAS_ACTIVE_LOAN) si el activo está en un préstamo abierto.',
+      'internalCode no es editable. El centro de costo solo cambia con un traslado firmado (POST /transfers, acta OCI-17-89). Bloqueado (406 ASSET_HAS_ACTIVE_LOAN) si el activo está en un préstamo abierto.',
   })
   update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -350,27 +349,6 @@ export class AssetsController {
     return this.assetsService.reassignLocation(
       id,
       dto.locationId,
-      dto.reason,
-      user,
-    );
-  }
-
-  @Post(':id/reassign-cost-center')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermission('asset:update:global')
-  @ApiOperation({
-    summary: 'Cambiar centro de costo',
-    description: 'Requiere documentReference (acta/oficio). Bloqueado si hay préstamo activo.',
-  })
-  reassignCostCenter(
-    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
-    @Body() dto: ReassignCostCenterDto,
-    @CurrentUser() user: AuthenticatedUser,
-  ): Promise<AssetResponseDto> {
-    return this.assetsService.reassignCostCenter(
-      id,
-      dto.costCenterId,
-      dto.documentReference,
       dto.reason,
       user,
     );

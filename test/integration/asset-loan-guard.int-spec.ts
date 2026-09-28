@@ -1,4 +1,5 @@
-// Un activo retenido por un préstamo abierto no se edita, no se da de baja ni cambia de centro. La definición de
+// Un activo retenido por un préstamo abierto no se edita, no se da de baja ni entra a un traslado de centro de costo
+// (el centro solo cambia con un traslado OCI-17-89 firmado; TransfersService aplica la guarda al crearlo). La definición de
 // "retenido" es la de la solicitud de préstamo (LoansService.create): OPEN_LOAN_STATUSES y el ítem sin received_at.
 // Los activos se dejan IN_USE a propósito: el estado ON_LOAN es otra defensa (assertMutable) y aquí se prueba que la
 // del préstamo se sostiene sola.
@@ -11,20 +12,27 @@ import { AssetsModule } from '../../src/modules/assets/assets.module.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import type { LoanStatus } from '../../src/modules/loans/enums/loan-status.js';
 import { GLOBAL_COST_CENTER_SCOPE } from '../../src/modules/roles/services/cost-center-scope.js';
+import { TransfersService } from '../../src/modules/transfers/services/transfers.service.js';
+import { TransfersModule } from '../../src/modules/transfers/transfers.module.js';
+import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { bootModules, createActor, scalar } from './helpers.js';
 
 describe('Guardas del activo frente a préstamos abiertos (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
   let dataSource: DataSource;
   let assets: AssetsService;
+  let transfers: TransfersService;
+  let reasonId: string;
   let actor: AuthenticatedUser;
   let base: { categoryId: string; costCenterId: string; acquisitionTypeId: string };
   let targetCenter: string;
 
   beforeAll(async () => {
-    moduleRef = await bootModules(AssetsModule);
+    moduleRef = await bootModules(StorageModule, AssetsModule, TransfersModule);
     dataSource = moduleRef.get(DataSource);
     assets = moduleRef.get(AssetsService);
+    transfers = moduleRef.get(TransfersService);
+    reasonId = await scalar<string>(dataSource, `SELECT id FROM asset_transfer_reason WHERE code = 'REUBICACION'`);
     actor = await createActor(dataSource);
     const tag = randomUUID().slice(0, 6).toUpperCase();
     base = {
@@ -85,7 +93,16 @@ describe('Guardas del activo frente a préstamos abiertos (PostgreSQL real)', ()
   const writeOff = (assetId: string) =>
     assets.writeOff(assetId, { reason: 'Baja de prueba', documentReference: 'ACTA-IT-001' }, actor);
   const moveCenter = (assetId: string) =>
-    assets.reassignCostCenter(assetId, targetCenter, 'OFICIO-IT-001', 'Cambio de prueba', actor);
+    transfers.create(
+      {
+        items: [{ assetId, reasonId }],
+        targetCostCenterId: targetCenter,
+        requesterPersonId: actor.personId,
+        ownerPersonId: actor.personId,
+        justification: 'Cambio de prueba',
+      },
+      actor,
+    );
 
   const expectBlocked = async (assetId: string) => {
     await expect(edit(assetId)).rejects.toMatchObject(blocked);
@@ -101,7 +118,7 @@ describe('Guardas del activo frente a préstamos abiertos (PostgreSQL real)', ()
 
   const expectAllowed = async (assetId: string) => {
     await expect(edit(assetId)).resolves.toMatchObject({ id: assetId });
-    await expect(moveCenter(assetId)).resolves.toMatchObject({ id: assetId });
+    await expect(moveCenter(assetId)).resolves.toMatchObject({ status: 'DRAFT', sourceCostCenter: { id: base.costCenterId } });
     await expect(writeOff(assetId)).resolves.toMatchObject({ id: assetId, operationalStatus: 'WRITTEN_OFF' });
   };
 
