@@ -40,7 +40,7 @@ import { InventoryCatalogsService } from './inventory-catalogs.service.js';
 import { InventoryActService } from './inventory-act.service.js';
 import { type ItemViewContext, mergeFrozenReport, toItemView, toProgressView, toReportView } from './inventory-item-view.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
-import { inventorySummary, loadResponsibleNames } from './inventory-summary.js';
+import { inventorySummary, inventorySummaryUserIds, loadResponsibleNames } from './inventory-summary.js';
 
 const ENTITY_TYPE = 'INVENTORY';
 
@@ -104,7 +104,7 @@ export class InventoriesService {
       .getMany();
     const names = await loadResponsibleNames(
       this.dataSource,
-      rows.map((row) => row.responsibleUserId),
+      rows.flatMap(inventorySummaryUserIds),
     );
     return {
       items: rows.map((row) => inventorySummary(row, names)),
@@ -789,7 +789,7 @@ export class InventoriesService {
   private async toSummary(inventory: PhysicalInventory) {
     return inventorySummary(
       inventory,
-      await loadResponsibleNames(this.dataSource, [inventory.responsibleUserId]),
+      await loadResponsibleNames(this.dataSource, inventorySummaryUserIds(inventory)),
     );
   }
 }

@@ -17,9 +17,17 @@ export interface ItemViewContext extends CatalogViewContext {
   readonly valuations: ReadonlyMap<string, AssetValuation>;
   /** Código y descripción de esos mismos activos. */
   readonly assets: ReadonlyMap<string, AssetIdentity>;
+  /** Nombre visible (USER_DISPLAY_NAME_SQL) de quienes verificaron o resolvieron los ítems. */
+  readonly userNames: ReadonlyMap<string, string>;
 }
 
-/** Lo que siempre sale en vivo, aunque el reporte se haya congelado al cerrar. */
+const userName = (context: ItemViewContext, id: string | null | undefined): string | null =>
+  id ? (context.userNames.get(id) ?? null) : null;
+
+/**
+ * Lo que siempre sale en vivo, aunque el reporte se haya congelado al cerrar. Los nombres de verifiedBy/resolvedBy
+ * también: el reporte se congela sin ellos y tras el cierre ya no hay correcciones que cambien verifiedBy.
+ */
 const liveItemFields = (item: PhysicalInventoryItem, context: ItemViewContext) => {
   const valuedAsset = item.assetId ?? item.resolvedAssetId ?? null;
   const valuation = (valuedAsset ? context.valuations.get(valuedAsset) : undefined) ?? NO_VALUATION;
@@ -37,6 +45,8 @@ const liveItemFields = (item: PhysicalInventoryItem, context: ItemViewContext) =
     resolvedAssetId: item.resolvedAssetId ?? null,
     resolvedAt: item.resolvedAt ?? null,
     resolvedBy: item.resolvedBy ?? null,
+    resolvedByName: userName(context, item.resolvedBy),
+    verifiedByName: userName(context, item.verifiedBy),
   };
 };
 

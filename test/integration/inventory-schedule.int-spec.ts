@@ -444,6 +444,7 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
       status: 'CANCELLED',
       cancelReason: 'Se hará dentro de la toma general de la sede',
       cancelledBy: director.userId,
+      cancelledByName: 'Directora Programación',
     });
     expect((await reminders(id)).map((row) => row.status)).toEqual(['CANCELLED', 'CANCELLED', 'CANCELLED']);
     expect(await outbox(id, 'INVENTORY_CANCELLED')).toHaveLength(1);

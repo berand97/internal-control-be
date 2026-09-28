@@ -314,7 +314,14 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     const closed = await post(director, `/${inventoryId}/close`, { allowUnverified: true });
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expectConforms('post', '/api/v1/inventories/{id}/close', 200, closed.body);
-    expect(closed.body.data).toMatchObject({ status: 'CLOSED', actualEndDate: today, closedBy: director.userId });
+    expect(closed.body.data).toMatchObject({
+      status: 'CLOSED',
+      actualEndDate: today,
+      closedBy: director.userId,
+      closedByName: 'Directora Ejecución',
+      cancelledByName: null,
+      reconcileRequestedByName: null,
+    });
     expect(closed.body.data.progress).toMatchObject({ expected: 3, verified: 1, pending: 0, notVerified: 2, notFound: 0 });
     const results = (await dataSource.query(
       `SELECT asset_id, verification_result FROM physical_inventory_item WHERE inventory_id = $1`,
@@ -495,6 +502,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       kind: 'CORRECT',
       reason: 'Estaba en la bodega del piso',
       correctedBy: responsible.userId,
+      correctedByName: 'Responsable Ejecución',
       before: { result: 'MISSING', missingCauseId: causeId },
       after: { result: 'FOUND', actualCondition: 'FAIR', missingCauseId: null },
     });
@@ -521,12 +529,18 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       .set(as(outsiderCustodian));
     expectConforms('get', '/api/v1/inventories/{id}/items/{itemId}/corrections', 200, history.body);
     expect(history.body.data).toHaveLength(1);
+    expect(history.body.data[0]).toMatchObject({ correctedBy: responsible.userId, correctedByName: 'Responsable Ejecución' });
 
     // Anular el sobrante registrado por error.
     const voided = await post(responsible, `/${inventoryId}/items/${mistakenId}/void`, { reason: 'Registrado dos veces' });
     expect(voided.status, JSON.stringify(voided.body)).toBe(200);
     expectConforms('post', '/api/v1/inventories/{id}/items/{itemId}/void', 200, voided.body);
-    expect(voided.body.data.item).toMatchObject({ voided: true, suggestedCategory: null });
+    expect(voided.body.data.item).toMatchObject({
+      voided: true,
+      suggestedCategory: null,
+      verifiedByName: 'Responsable Ejecución',
+      resolvedByName: null,
+    });
     expect(voided.body.data.correction).toMatchObject({ kind: 'VOID', before: { voided: false }, after: { voided: true } });
     expect((await post(responsible, `/${inventoryId}/items/${mistakenId}/void`, { reason: 'Otra vez' })).status).toBe(406);
 

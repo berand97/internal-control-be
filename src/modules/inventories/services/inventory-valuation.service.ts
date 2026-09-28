@@ -11,6 +11,7 @@ import type { PhysicalInventory } from '../entities/physical-inventory.entity.js
 import type { PhysicalInventoryItem } from '../entities/physical-inventory-item.entity.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
 import type { ItemViewContext } from './inventory-item-view.js';
+import { loadResponsibleNames } from './inventory-summary.js';
 
 interface CutRow {
   readonly id: string;
@@ -100,6 +101,10 @@ export class InventoryValuationService {
       ...base,
       valuations: await this.valuations(inventory, assetIds, manager),
       assets: await this.identities(assetIds, manager),
+      userNames: await loadResponsibleNames(
+        manager ?? this.dataSource,
+        items.flatMap((item) => [item.verifiedBy, item.resolvedBy]),
+      ),
     };
   }
 

@@ -12,9 +12,9 @@ export type ResponsibleNames = ReadonlyMap<string, string>;
  */
 export const loadResponsibleNames = async (
   runner: { query(sql: string, parameters?: unknown[]): Promise<unknown> },
-  userIds: ReadonlyArray<string>,
+  userIds: ReadonlyArray<string | null | undefined>,
 ): Promise<ResponsibleNames> => {
-  const ids = [...new Set(userIds)];
+  const ids = [...new Set(userIds.filter((id): id is string => typeof id === 'string'))];
   if (ids.length === 0) {
     return new Map();
   }
@@ -26,6 +26,19 @@ export const loadResponsibleNames = async (
   )) as Array<{ id: string; name: string }>;
   return new Map(rows.map((row) => [row.id, row.name]));
 };
+
+/** Usuarios citados en el resumen de una toma (responsable y cada `*By`), para resolver sus nombres de una vez. */
+export const inventorySummaryUserIds = (inventory: PhysicalInventory): Array<string | null | undefined> => [
+  inventory.responsibleUserId,
+  inventory.closedBy,
+  inventory.reconcileRequestedBy,
+  inventory.reconcileApprovedBy,
+  inventory.cancelledBy,
+  inventory.createdBy,
+];
+
+const nameOf = (names: ResponsibleNames, id: string | null | undefined): string | null =>
+  id ? (names.get(id) ?? null) : null;
 
 /**
  * Resumen de una toma, igual en listado, detalle, programación, reprogramación y cancelación
@@ -48,10 +61,13 @@ export const inventorySummary = (inventory: PhysicalInventory, names: Responsibl
   notes: inventory.scopeNotes,
   closedAt: inventory.closedAt,
   closedBy: inventory.closedBy,
+  closedByName: nameOf(names, inventory.closedBy),
   reconcileRequestedAt: inventory.reconcileRequestedAt,
   reconcileRequestedBy: inventory.reconcileRequestedBy,
+  reconcileRequestedByName: nameOf(names, inventory.reconcileRequestedBy),
   reconcileApprovedAt: inventory.reconcileApprovedAt,
   reconcileApprovedBy: inventory.reconcileApprovedBy,
+  reconcileApprovedByName: nameOf(names, inventory.reconcileApprovedBy),
   rescheduled: (inventory.rescheduleCount ?? 0) > 0,
   rescheduleCount: inventory.rescheduleCount ?? 0,
   rescheduledAt: inventory.rescheduledAt ?? null,
@@ -59,9 +75,11 @@ export const inventorySummary = (inventory: PhysicalInventory, names: Responsibl
   cancelReason: inventory.cancelReason ?? null,
   cancelledAt: inventory.cancelledAt ?? null,
   cancelledBy: inventory.cancelledBy ?? null,
+  cancelledByName: nameOf(names, inventory.cancelledBy),
   accountingCutId: inventory.accountingCutId ?? null,
   createdAt: inventory.createdAt,
   createdBy: inventory.createdBy,
+  createdByName: nameOf(names, inventory.createdBy),
 });
 
 export type InventorySummary = ReturnType<typeof inventorySummary>;

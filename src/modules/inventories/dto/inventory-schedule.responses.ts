@@ -91,17 +91,26 @@ export class InventorySummaryDto {
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly closedBy!: string | null;
 
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien cerró la toma (persona o, sin persona, usuario)' })
+  readonly closedByName!: string | null;
+
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
   readonly reconcileRequestedAt!: string | null;
 
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly reconcileRequestedBy!: string | null;
 
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien solicitó la conciliación' })
+  readonly reconcileRequestedByName!: string | null;
+
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
   readonly reconcileApprovedAt!: string | null;
 
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly reconcileApprovedBy!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien aprobó la conciliación' })
+  readonly reconcileApprovedByName!: string | null;
 
   @ApiProperty({ description: 'Derivado: rescheduleCount > 0 ("reprogramada" no es un estado)' })
   readonly rescheduled!: boolean;
@@ -124,6 +133,9 @@ export class InventorySummaryDto {
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly cancelledBy!: string | null;
 
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien canceló la toma (persona o, sin persona, usuario)' })
+  readonly cancelledByName!: string | null;
+
   @ApiProperty({
     type: 'string',
     format: 'uuid',
@@ -137,6 +149,9 @@ export class InventorySummaryDto {
 
   @ApiProperty({ format: 'uuid' })
   readonly createdBy!: string;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien programó la toma; null si el usuario ya no existe' })
+  readonly createdByName!: string | null;
 }
 
 // ---------- Avisos: destinatarios, advertencias, conflictos, recordatorios ----------

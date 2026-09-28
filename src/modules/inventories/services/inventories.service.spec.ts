@@ -119,7 +119,7 @@ describe('InventoriesService', () => {
     valuation = {
       viewContext: vi
         .fn()
-        .mockResolvedValue({ categories: [], causeLabels: new Map(), valuations: new Map(), assets: new Map() }),
+        .mockResolvedValue({ categories: [], causeLabels: new Map(), valuations: new Map(), assets: new Map(), userNames: new Map() }),
       basis: vi.fn().mockResolvedValue({ kind: 'SYSTEM_SNAPSHOT' }),
     };
     act = { state: vi.fn().mockResolvedValue({ generation: 'NONE' }), enqueueOnApproval: vi.fn() };

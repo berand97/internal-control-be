@@ -23,6 +23,7 @@ import { VerificationResult } from '../enums/verification-result.js';
 import { InventoryActorPolicy } from './inventory-actor-policy.service.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
 import { toItemView } from './inventory-item-view.js';
+import { loadResponsibleNames, type ResponsibleNames } from './inventory-summary.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
 
 const ENTITY_TYPE = 'INVENTORY';
@@ -88,7 +89,7 @@ export class InventoryCorrectionsService {
       throw invalid('result', 'La corrección no cambia nada del ítem');
     }
     const correction = await this.persist(inventory, item, 'CORRECT', before, after, dto.reason, actor);
-    return { item: toItemView(item, await this.valuation.viewContext(inventory, [item])), correction: this.toCorrection(correction) };
+    return { item: toItemView(item, await this.valuation.viewContext(inventory, [item])), correction: await this.withName(correction) };
   }
 
   async voidSurplus(id: string, itemId: string, dto: VoidInventoryItemDto, actor: AuthenticatedUser) {
@@ -103,7 +104,7 @@ export class InventoryCorrectionsService {
     item.findingCategoryCode = null;
     const after = snapshot(item);
     const correction = await this.persist(inventory, item, 'VOID', before, after, dto.reason, actor);
-    return { item: toItemView(item, await this.valuation.viewContext(inventory, [item])), correction: this.toCorrection(correction) };
+    return { item: toItemView(item, await this.valuation.viewContext(inventory, [item])), correction: await this.withName(correction) };
   }
 
   async setFindingCategory(id: string, itemId: string, dto: SetFindingCategoryDto, actor: AuthenticatedUser) {
@@ -138,7 +139,11 @@ export class InventoryCorrectionsService {
     const inventory = await this.requireInventory(id);
     const item = await this.requireItem(inventory.id, itemId);
     const rows = await this.corrections.find({ where: { itemId: item.id }, order: { correctedAt: 'ASC' } });
-    return rows.map((row) => this.toCorrection(row));
+    const names = await loadResponsibleNames(
+      this.dataSource,
+      rows.map((row) => row.correctedBy),
+    );
+    return rows.map((row) => this.toCorrection(row, names));
   }
 
   private async applyResult(item: PhysicalInventoryItem, dto: CorrectInventoryItemDto, actor: AuthenticatedUser) {
@@ -256,7 +261,11 @@ export class InventoryCorrectionsService {
     });
   }
 
-  private toCorrection(row: InventoryItemCorrection) {
+  private async withName(row: InventoryItemCorrection) {
+    return this.toCorrection(row, await loadResponsibleNames(this.dataSource, [row.correctedBy]));
+  }
+
+  private toCorrection(row: InventoryItemCorrection, names: ResponsibleNames) {
     return {
       id: row.id,
       itemId: row.itemId,
@@ -266,6 +275,7 @@ export class InventoryCorrectionsService {
       after: row.after,
       reason: row.reason,
       correctedBy: row.correctedBy,
+      correctedByName: names.get(row.correctedBy) ?? null,
       correctedAt: row.correctedAt,
     };
   }

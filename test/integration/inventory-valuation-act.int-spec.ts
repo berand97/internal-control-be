@@ -500,6 +500,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       assetId: null,
       surplusResolution: 'CREATE_ASSET',
       resolvedBy: director.userId,
+      resolvedByName: 'Directora Valoración',
       acquisitionPrice: 350000,
       bookValue: null,
       assetDescription: 'Silla ergonómica sin placa',

@@ -92,6 +92,9 @@ export class InventoryItemDto {
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly verifiedBy!: string | null;
 
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien verificó (persona o, sin persona, usuario)' })
+  readonly verifiedByName!: string | null;
+
   @ApiProperty({ type: 'string', nullable: true })
   readonly notes!: string | null;
 
@@ -163,6 +166,9 @@ export class InventoryItemDto {
 
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly resolvedBy!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien resolvió el sobrante' })
+  readonly resolvedByName!: string | null;
 }
 
 export class InventoryReconciliationBasisDto {
@@ -474,6 +480,13 @@ export class InventoryItemCorrectionDto {
 
   @ApiProperty({ format: 'uuid' })
   readonly correctedBy!: string;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Nombre de quien corrigió (persona o, sin persona, usuario); null si el usuario ya no existe',
+  })
+  readonly correctedByName!: string | null;
 
   @ApiProperty({ format: 'date-time' })
   readonly correctedAt!: string;
