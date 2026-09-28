@@ -140,3 +140,26 @@ export const openTestSession = async (
   );
   return sessionId;
 };
+
+/** Motivo que exigen los otorgamientos y retiros de roles y permisos (3..500). */
+export const GRANT_REASON = 'Motivo de prueba de integración';
+
+const GRANT_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
+  ['post', /^\/roles$/],
+  ['patch', /^\/roles\/[^/]+$/],
+  ['post', /^\/roles\/[^/]+\/permissions$/],
+  ['put', /^\/roles\/[^/]+\/permissions$/],
+  ['delete', /^\/roles\/[^/]+\/permissions\/[^/]+$/],
+  ['post', /^\/users\/[^/]+\/roles$/],
+  ['delete', /^\/users\/[^/]+\/roles\/[^/]+$/],
+  ['post', /^\/users\/[^/]+\/roles\/[^/]+\/delegate$/],
+];
+
+/**
+ * Si la ruta (sin /api/v1) es un otorgamiento o retiro, adelanta el motivo obligatorio en el cuerpo; un `.send({...})`
+ * posterior se combina con él (superagent fusiona objetos). Para probar el motivo ausente, no use este helper.
+ */
+export const withGrantReason = <T extends { send(body: object): T }>(method: string, path: string, pending: T): T =>
+  GRANT_ROUTES.some(([verb, route]) => verb === method && route.test(path))
+    ? pending.send({ reason: GRANT_REASON })
+    : pending;

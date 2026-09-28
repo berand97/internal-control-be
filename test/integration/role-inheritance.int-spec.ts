@@ -9,7 +9,7 @@ import { applyTrustProxy } from '../../src/common/http/trust-proxy.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { scalar, openTestSession } from './helpers.js';
+import { scalar, openTestSession, withGrantReason } from './helpers.js';
 
 /**
  * BE-02 (herencia evade assertCanGrant y SoD) y BE-03 (permisos de roles borrados siguen vigentes), por HTTP real
@@ -65,10 +65,14 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
 
   const call = (method: 'post' | 'patch' | 'delete' | 'get', path: string, token: string) => {
     ipCounter += 1;
-    return request(app.getHttpServer())
-      [method](`/api/v1${path}`)
-      .set('X-Forwarded-For', `198.18.${Math.floor(ipCounter / 250)}.${(ipCounter % 250) + 1}`)
-      .set('Authorization', `Bearer ${token}`);
+    return withGrantReason(
+      method,
+      path,
+      request(app.getHttpServer())
+        [method](`/api/v1${path}`)
+        .set('X-Forwarded-For', `198.18.${Math.floor(ipCounter / 250)}.${(ipCounter % 250) + 1}`)
+        .set('Authorization', `Bearer ${token}`),
+    );
   };
 
   const permissionId = (code: string): Promise<string> =>

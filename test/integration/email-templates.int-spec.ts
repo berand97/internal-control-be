@@ -571,7 +571,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const created = await http()
         .post('/api/v1/roles')
         .set(auth(delegator))
-        .send({ code, name: 'Lector de plantillas de correo', permissionIds: [readId] });
+        .send({ reason: 'Motivo de prueba', code, name: 'Lector de plantillas de correo', permissionIds: [readId] });
       expect(created.status).toBe(201);
       expect(created.body.data.hierarchyLevel).toBeGreaterThan(1);
 
@@ -590,7 +590,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const granted = await http()
         .post('/api/v1/roles')
         .set(auth(superWithRoles))
-        .send({ code: `${code}_SA`, name: 'Lector concedido por el superadmin', permissionIds: [readId] });
+        .send({ reason: 'Motivo de prueba', code: `${code}_SA`, name: 'Lector concedido por el superadmin', permissionIds: [readId] });
       expect(granted.status).toBe(201);
 
       // Quien administra roles pero no tiene email_template:* no puede concederlo.
@@ -598,7 +598,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const refused = await http()
         .post('/api/v1/roles')
         .set(auth(roleAdminOnly))
-        .send({ code: `${code}_RA`, name: 'Intento sin el permiso', permissionIds: [readId] });
+        .send({ reason: 'Motivo de prueba', code: `${code}_RA`, name: 'Intento sin el permiso', permissionIds: [readId] });
       expect(refused.status).toBe(403);
       expect(refused.body.error.code).toBe('PERMISSION_NOT_HELD');
     });

@@ -9,7 +9,7 @@ import { applyTrustProxy } from '../../src/common/http/trust-proxy.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { scalar, openTestSession } from './helpers.js';
+import { GRANT_REASON, scalar, openTestSession, withGrantReason } from './helpers.js';
 
 /** Regla del desarrollador: nadie se autoasigna roles ni permisos, tampoco SUPER_ADMIN (HTTP real + PostgreSQL real). */
 describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () => {
@@ -55,10 +55,14 @@ describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () 
 
   const post = (path: string, token: string) => {
     ipCounter += 1;
-    return request(app.getHttpServer())
-      .post(`/api/v1${path}`)
-      .set('X-Forwarded-For', `198.19.${Math.floor(ipCounter / 250)}.${(ipCounter % 250) + 1}`)
-      .set('Authorization', `Bearer ${token}`);
+    return withGrantReason(
+      'post',
+      path,
+      request(app.getHttpServer())
+        .post(`/api/v1${path}`)
+        .set('X-Forwarded-For', `198.19.${Math.floor(ipCounter / 250)}.${(ipCounter % 250) + 1}`)
+        .set('Authorization', `Bearer ${token}`),
+    );
   };
 
   const roleId = (code: string): Promise<string> =>
@@ -139,7 +143,8 @@ describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () 
       const admin = await createUser(['SUPER_ADMIN', 'VIEWER']);
       const response = await request(app.getHttpServer())
         .delete(`/api/v1/users/${admin.id}/roles/${await assignmentOf(admin.id, 'VIEWER')}`)
-        .set('Authorization', `Bearer ${admin.token}`);
+        .set('Authorization', `Bearer ${admin.token}`)
+        .send({ reason: GRANT_REASON });
       expect(response.status).toBe(200);
       expect(await activeRoleCount(admin.id)).toBe(1);
     });
@@ -189,7 +194,7 @@ describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () 
   });
 
   describe('permisos de un rol propio', () => {
-    it('agregar a un rol propio un permiso que el actor ya tiene con el mismo alcance no amplía nada: se permite', async () => {
+    it('agregar a un rol propio un permiso, aunque el actor ya lo tenga con el mismo alcance, está prohibido (lo hace otro): 403', async () => {
       const admin = await createUser(['SUPER_ADMIN']);
       const ownRole = await scalar<string>(
         dataSource,
@@ -199,7 +204,8 @@ describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () 
       await dataSource.query(`INSERT INTO user_role (user_id, role_id, scope_type) VALUES ($1, $2, 'GLOBAL')`, [admin.id, ownRole]);
       const permission = await scalar<string>(dataSource, `SELECT id FROM permission WHERE code = 'user:read:global'`);
       const response = await post(`/roles/${ownRole}/permissions`, admin.token).send({ permissionIds: [permission] });
-      expect(response.status).toBe(201);
+      expect(response.status).toBe(403);
+      expect(response.body.error.code).toBe('ROLE_SELF_ASSIGNMENT_FORBIDDEN');
     });
 
     it('agregarlo cuando el actor solo lo tiene en un alcance menor lo ampliaría: 403', async () => {

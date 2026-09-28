@@ -17,7 +17,7 @@ import {
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { HashService } from '../../src/shared/crypto/hash.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
-import { openTestSession, scalar } from './helpers.js';
+import { openTestSession, scalar, withGrantReason } from './helpers.js';
 
 const PASSWORD = 'Clave-Segura-2026!';
 const WRONG_PASSWORD = 'Clave-Incorrecta-2026!';
@@ -54,7 +54,7 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
     token?: string,
     ip = nextIp(),
   ) => {
-    const pending = http()[method](`/api/v1${path}`).set('X-Forwarded-For', ip);
+    const pending = withGrantReason(method, path, http()[method](`/api/v1${path}`).set('X-Forwarded-For', ip));
     return token ? pending.set('Authorization', `Bearer ${token}`) : pending;
   };
   const login = (username: string, password: string, ip = nextIp()) =>
