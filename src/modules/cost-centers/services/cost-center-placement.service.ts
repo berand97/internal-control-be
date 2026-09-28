@@ -11,6 +11,7 @@ import {
   suggestInPrefix,
   suggestUnderParent,
 } from '../domain/code-prefix.js';
+import { validAt } from '../domain/placement-at.js';
 import type {
   CostCenterCodeSuggestionDto,
   CostCenterHistoryDto,
@@ -95,10 +96,6 @@ const PLACEMENT_SELECT = `
   LEFT JOIN organizational_unit u ON u.id = p.organizational_unit_id
   LEFT JOIN cost_center pc ON pc.id = p.parent_cost_center_id`;
 
-/** Condición «vigente en el instante del parámetro» sobre el alias p. */
-const validAt = (param: string): string =>
-  `p.valid_from <= ${param} AND (p.valid_until IS NULL OR p.valid_until > ${param})`;
-
 const unitRef = (id: string | null, code: string | null, name: string | null, prefix: string | null): CostCenterUnitRefDto | null =>
   id ? { id, code: code ?? '', name: name ?? '', codePrefix: prefix } : null;
 
@@ -140,23 +137,6 @@ export const resolveAt = (date: string | undefined): Date => {
 const nextUtcDay = (date: string): string => {
   const [year, month, day] = date.split('-').map(Number);
   return new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, (day ?? 1) + 1)).toISOString().slice(0, 10);
-};
-
-/**
- * Unidad de un centro vigente en un instante (para el acta: la de la fecha de emisión, no la actual). null si el centro
- * no tenía ubicación en esa fecha o no tenía unidad.
- */
-export const unitAt = async (
-  manager: EntityManager,
-  costCenterId: string,
-  at: Date,
-): Promise<{ readonly code: string; readonly name: string } | null> => {
-  const [row] = (await manager.query(
-    `SELECT u.code, u.name FROM cost_center_placement p JOIN organizational_unit u ON u.id = p.organizational_unit_id
-     WHERE p.cost_center_id = $1 AND ${validAt('$2')}`,
-    [costCenterId, at],
-  )) as Array<{ code: string; name: string }>;
-  return row ?? null;
 };
 
 /**

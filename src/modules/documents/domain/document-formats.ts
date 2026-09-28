@@ -21,6 +21,14 @@ import type { DocumentNumberingPolicy } from '../../../config/configuration.js';
  *   MFA (signing-channel.ts); los demás roles son libres.
  * - el contrato de marcadores de cada plantilla (qué campos arma el proceso).
  *
+ * Marcadores comunes del motor (DocumentEngineService.buildContext) sobre el centro de costo de la solicitud:
+ *   centroCosto.codigo / centroCosto.nombre           código y nombre del centro
+ *   centroCosto.unidad.codigo / centroCosto.unidad.nombre
+ *                                                     unidad organizacional del centro VIGENTE A LA FECHA DEL ACTA
+ *                                                     (historial cost_center_placement), no la de hoy; '' si el centro
+ *                                                     no tenía unidad. Queda en document.data: re-renderizar al firmar
+ *                                                     o reasignar sigue mostrando la de la emisión.
+ *
  * Origen de cada firmante (source):
  * - RESPONSIBLE: la persona la pone quien genera el acta en responsiblePersonId (en un proceso, el propio proceso:
  *   quien recibe la entrega, la persona de contacto del préstamo). Todos los turnos RESPONSIBLE son esa persona.

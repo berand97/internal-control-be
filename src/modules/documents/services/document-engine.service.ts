@@ -11,6 +11,7 @@ import { StorageService } from '../../../shared/storage/storage.service.js';
 import { documentFileKey, documentTemplateKey, signedDocumentKey } from '../../../shared/storage/storage-keys.js';
 import { readDocxPlaceholders, renderDocx } from '../../document-templates/domain/docx-template.js';
 import { MfaAccountService } from '../../auth/services/mfa-account.service.js';
+import { unitAt } from '../../cost-centers/domain/placement-at.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import {
   type DocumentFormat,
@@ -1570,6 +1571,9 @@ export class DocumentEngineService {
     if (payload.costCenterId && !costCenter) {
       throw new ApiException(ErrorCode.ResourceNotFound, 'Centro de costo inexistente');
     }
+    // Unidad del centro vigente a la fecha del acta (no la de hoy): queda en el snapshot document.data y un re-render
+    // posterior (firma, reasignación) sigue mostrando la de la emisión aunque el centro se mueva de unidad.
+    const costCenterUnit = payload.costCenterId ? await unitAt(manager, payload.costCenterId, now) : null;
     const assetIds = payload.assetIds ?? [];
     const assets = assetIds.length
       ? ((await manager.query(
@@ -1631,7 +1635,11 @@ export class DocumentEngineService {
         fechaVigencia: template.effective_date,
       },
       documento: { numero: '', fecha: longDate(now), fechaIso: now.toISOString().slice(0, 10) },
-      centroCosto: { codigo: costCenter?.external_code ?? '', nombre: costCenter?.name ?? '' },
+      centroCosto: {
+        codigo: costCenter?.external_code ?? '',
+        nombre: costCenter?.name ?? '',
+        unidad: { codigo: costCenterUnit?.code ?? '', nombre: costCenterUnit?.name ?? '' },
+      },
       responsable: {
         nombre: personName(responsible),
         tipoDocumento: documentType(responsible),
