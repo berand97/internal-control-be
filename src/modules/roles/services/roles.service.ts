@@ -7,10 +7,12 @@ import {
   isUniqueViolation,
 } from '../../../common/exceptions/postgres-error.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
+import type { RequestOrigin } from '../../../common/types/request-origin.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import {
   AssignPermissionsDto,
+  RemovePermissionDto,
   ReplacePermissionsDto,
 } from '../dto/assign-permissions.dto.js';
 import {
@@ -36,6 +38,19 @@ import { descendantRoleIds } from './role-hierarchy.js';
 import { RolePrivilegePolicy } from './role-privilege.policy.js';
 
 const ROLE_ENTITY_TYPE = 'ROLE';
+
+type PermissionRef = { readonly id: string; readonly code: string | null };
+
+/** Permisos agregados y quitados en un otorgamiento, por id y código (sin datos personales). */
+const permissionDiff = (
+  added: ReadonlyArray<PermissionRef>,
+  removed: ReadonlyArray<PermissionRef>,
+) => ({
+  addedPermissionIds: added.map((permission) => permission.id),
+  addedPermissionCodes: added.map((permission) => permission.code),
+  removedPermissionIds: removed.map((permission) => permission.id),
+  removedPermissionCodes: removed.map((permission) => permission.code),
+});
 
 @Injectable()
 export class RolesService {
@@ -74,6 +89,7 @@ export class RolesService {
   async create(
     dto: CreateRoleDto,
     actor: AuthenticatedUser,
+    origin: RequestOrigin,
   ): Promise<RoleResponseDto> {
     const parent = dto.parentRoleId
       ? await this.requireRole(dto.parentRoleId)
@@ -93,7 +109,7 @@ export class RolesService {
     await this.privilege.assertCanCreateLevel(actor, hierarchyLevel);
     try {
       const permissions = await this.requirePermissions(dto.permissionIds ?? []);
-      await this.privilege.assertCanGrant(actor, permissions);
+      await this.privilege.assertCanGrantPermissions(actor, permissions);
       const permissionIds = permissions.map((permission) => permission.id);
       const role = await this.rolesRepository.insert({
         code: dto.code,
@@ -118,9 +134,18 @@ export class RolesService {
         entityType: ROLE_ENTITY_TYPE,
         entityId: role.id,
         performedBy: actor.id,
-        ipAddress: null,
-        userAgent: null,
-        changes: { code: role.code, permissionIds: [...permissionIds] },
+        ...origin,
+        changes: {
+          code: role.code,
+          roleId: role.id,
+          roleCode: role.code,
+          parentRoleId: role.parentRoleId,
+          superiorRoleId: role.superiorRoleId,
+          hierarchyLevel: role.hierarchyLevel,
+          permissionIds: [...permissionIds],
+          ...permissionDiff(permissions, []),
+          reason: dto.reason,
+        },
       });
       return RoleResponseDto.from(role);
     } catch (error) {
@@ -141,6 +166,7 @@ export class RolesService {
     id: string,
     dto: UpdateRoleDto,
     actor: AuthenticatedUser,
+    origin: RequestOrigin,
   ): Promise<RoleResponseDto> {
     const role = await this.requireRole(id);
     const reorganizing =
@@ -228,9 +254,8 @@ export class RolesService {
       entityType: ROLE_ENTITY_TYPE,
       entityId: role.id,
       performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { ...dto },
+      ...origin,
+      changes: { ...dto, roleId: role.id, roleCode: role.code },
     });
     const updated = await this.requireRole(id);
     return RoleResponseDto.from(updated);
@@ -359,11 +384,16 @@ export class RolesService {
     roleId: string,
     dto: AssignPermissionsDto,
     actor: AuthenticatedUser,
+    origin: RequestOrigin,
   ): Promise<RoleDetailResponseDto> {
     const role = await this.requireRole(roleId);
     await this.privilege.assertCanAdminister(actor, role);
-    const permissions = await this.requirePermissions(dto.permissionIds);
-    await this.privilege.assertCanGrant(actor, permissions);
+    const requested = await this.requirePermissions(dto.permissionIds);
+    const current = await this.rolesRepository.findPermissionsForRole(role.id);
+    const currentIds = new Set(current.map((permission) => permission.id));
+    // Solo lo que el rol no tenía es un otorgamiento: lo que ya tenía no cambia nada ni se audita como agregado.
+    const permissions = requested.filter((permission) => !currentIds.has(permission.id));
+    await this.privilege.assertCanGrantPermissions(actor, permissions);
     await this.privilege.assertDoesNotWidenOwn(actor, role.id, permissions);
     const permissionIds = permissions.map((permission) => permission.id);
     for (const permissionId of permissionIds) {
@@ -379,9 +409,13 @@ export class RolesService {
       entityType: ROLE_ENTITY_TYPE,
       entityId: role.id,
       performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { addedPermissionIds: [...permissionIds] },
+      ...origin,
+      changes: {
+        roleId: role.id,
+        roleCode: role.code,
+        ...permissionDiff(permissions, []),
+        reason: dto.reason,
+      },
     });
     return this.getById(role.id);
   }
@@ -390,6 +424,7 @@ export class RolesService {
     roleId: string,
     dto: ReplacePermissionsDto,
     actor: AuthenticatedUser,
+    origin: RequestOrigin,
   ): Promise<RoleDetailResponseDto> {
     const role = await this.requireRole(roleId);
     await this.privilege.assertCanAdminister(actor, role);
@@ -397,7 +432,9 @@ export class RolesService {
     const current = await this.rolesRepository.findPermissionsForRole(role.id);
     const currentIds = new Set(current.map((permission) => permission.id));
     const added = permissions.filter((permission) => !currentIds.has(permission.id));
-    await this.privilege.assertCanGrant(actor, added);
+    const requestedIds = new Set(permissions.map((permission) => permission.id));
+    const removed = current.filter((permission) => !requestedIds.has(permission.id));
+    await this.privilege.assertCanGrantPermissions(actor, added);
     await this.privilege.assertDoesNotWidenOwn(actor, role.id, added);
     const permissionIds = permissions.map((permission) => permission.id);
     await this.rolesRepository.replacePermissions(
@@ -411,9 +448,14 @@ export class RolesService {
       entityType: ROLE_ENTITY_TYPE,
       entityId: role.id,
       performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { permissionIds: [...permissionIds] },
+      ...origin,
+      changes: {
+        roleId: role.id,
+        roleCode: role.code,
+        permissionIds: [...permissionIds],
+        ...permissionDiff(added, removed),
+        reason: dto.reason,
+      },
     });
     return this.getById(role.id);
   }
@@ -421,10 +463,13 @@ export class RolesService {
   async removePermission(
     roleId: string,
     permissionId: string,
+    dto: RemovePermissionDto,
     actor: AuthenticatedUser,
+    origin: RequestOrigin,
   ): Promise<null> {
     const role = await this.requireRole(roleId);
     await this.privilege.assertCanAdminister(actor, role);
+    const [permission] = await this.rolesRepository.findPermissionsByIds([permissionId]);
     const removed = await this.rolesRepository.removePermission(
       role.id,
       permissionId,
@@ -438,9 +483,14 @@ export class RolesService {
       entityType: ROLE_ENTITY_TYPE,
       entityId: role.id,
       performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { removedPermissionId: permissionId },
+      ...origin,
+      changes: {
+        roleId: role.id,
+        roleCode: role.code,
+        removedPermissionId: permissionId,
+        ...permissionDiff([], [permission ?? { id: permissionId, code: null }]),
+        reason: dto.reason,
+      },
     });
     return null;
   }

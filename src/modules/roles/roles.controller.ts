@@ -3,8 +3,10 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
+  Ip,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -30,8 +32,10 @@ import {
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
+import { requestOrigin } from '../../common/types/request-origin.type.js';
 import {
   AssignPermissionsDto,
+  RemovePermissionDto,
   ReplacePermissionsDto,
 } from './dto/assign-permissions.dto.js';
 import { CreateRoleDto } from './dto/create-role.dto.js';
@@ -97,8 +101,10 @@ export class RolesController {
   create(
     @Body() dto: CreateRoleDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
   ): Promise<RoleResponseDto> {
-    return this.rolesService.create(dto, user);
+    return this.rolesService.create(dto, user, requestOrigin(ipAddress, userAgent));
   }
 
   @Patch(':id')
@@ -109,8 +115,10 @@ export class RolesController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateRoleDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
   ): Promise<RoleResponseDto> {
-    return this.rolesService.update(id, dto, user);
+    return this.rolesService.update(id, dto, user, requestOrigin(ipAddress, userAgent));
   }
 
   @Delete(':id')
@@ -141,8 +149,10 @@ export class RolesController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: AssignPermissionsDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
   ): Promise<RoleDetailResponseDto> {
-    return this.rolesService.assignPermissions(id, dto, user);
+    return this.rolesService.assignPermissions(id, dto, user, requestOrigin(ipAddress, userAgent));
   }
 
   @Put(':id/permissions')
@@ -157,14 +167,19 @@ export class RolesController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: ReplacePermissionsDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
   ): Promise<RoleDetailResponseDto> {
-    return this.rolesService.replacePermissions(id, dto, user);
+    return this.rolesService.replacePermissions(id, dto, user, requestOrigin(ipAddress, userAgent));
   }
 
   @Delete(':id/permissions/:permissionId')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('role:manage:global')
-  @ApiOperation({ summary: 'Remover un permiso del rol' })
+  @ApiOperation({
+    summary: 'Remover un permiso del rol',
+    description: 'El cuerpo lleva el motivo obligatorio del retiro ({ reason }), que queda en la bitácora.',
+  })
   @ApiResponse({
     status: 200,
     schema: { $ref: getSchemaPath(ApiSuccessEnvelope) },
@@ -173,9 +188,12 @@ export class RolesController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Param('permissionId', new ParseUUIDPipe({ version: '4' }))
     permissionId: string,
+    @Body() dto: RemovePermissionDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
   ): Promise<null> {
-    return this.rolesService.removePermission(id, permissionId, user);
+    return this.rolesService.removePermission(id, permissionId, dto, user, requestOrigin(ipAddress, userAgent));
   }
 
 }

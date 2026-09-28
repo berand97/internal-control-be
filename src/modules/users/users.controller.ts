@@ -32,9 +32,11 @@ import {
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
+import { requestOrigin } from '../../common/types/request-origin.type.js';
 import { AssignUserRoleDto } from './dto/assign-user-role.dto.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { DelegateUserRoleDto } from './dto/delegate-user-role.dto.js';
+import { RevokeUserRoleDto } from './dto/revoke-user-role.dto.js';
 import { QueryUsersDto } from './dto/query-users.dto.js';
 import { ResetUserMfaDto } from './dto/reset-user-mfa.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
@@ -259,8 +261,10 @@ export class UsersController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: AssignUserRoleDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
   ): Promise<UserRoleResponseDto> {
-    return this.usersService.assignRole(id, dto, user);
+    return this.usersService.assignRole(id, dto, user, requestOrigin(ipAddress, userAgent));
   }
 
   @Delete(':id/roles/:userRoleId')
@@ -269,7 +273,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Revocar asignación de rol',
     description:
-      'Revoca también, en la misma transacción, las delegaciones hechas desde esa asignación (y las que se delegaron desde ellas).',
+      'Revoca también, en la misma transacción, las delegaciones hechas desde esa asignación (y las que se delegaron desde ellas). El cuerpo lleva el motivo obligatorio ({ reason }, 3..500), que queda en user_role.revocation_reason y en la bitácora.',
   })
   @ApiResponse({
     status: 200,
@@ -284,9 +288,12 @@ export class UsersController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Param('userRoleId', new ParseUUIDPipe({ version: '4' }))
     userRoleId: string,
+    @Body() dto: RevokeUserRoleDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
   ): Promise<null> {
-    return this.usersService.revokeRole(id, userRoleId, user);
+    return this.usersService.revokeRole(id, userRoleId, dto, user, requestOrigin(ipAddress, userAgent));
   }
 
   @Post(':id/roles/:userRoleId/delegate')
@@ -321,7 +328,9 @@ export class UsersController {
     userRoleId: string,
     @Body() dto: DelegateUserRoleDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
   ): Promise<UserRoleResponseDto> {
-    return this.usersService.delegateRole(id, userRoleId, dto, user);
+    return this.usersService.delegateRole(id, userRoleId, dto, user, requestOrigin(ipAddress, userAgent));
   }
 }

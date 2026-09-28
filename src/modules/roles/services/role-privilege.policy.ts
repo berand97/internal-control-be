@@ -138,10 +138,9 @@ export class RolePrivilegePolicy {
   }
 
   /**
-   * Nadie se amplía permisos a sí mismo. Si el actor tiene el rol (directo o heredado), lo que se le agregue al rol
-   * llega también al actor con el alcance de esa asignación: solo se permite si el actor ya tenía cada permiso con
-   * ese mismo alcance (o GLOBAL). assertCanGrant compara solo códigos; esto cierra la ampliación de alcance. Quitar
-   * permisos de un rol propio no pasa por aquí.
+   * Nadie se agrega permisos a sí mismo, tampoco SUPER_ADMIN: si el actor tiene el rol (directo o heredado, con una
+   * asignación vigente o que empieza en el futuro, con cualquier alcance), no puede agregarle permisos, ni siquiera
+   * los que ya tiene por otro rol; lo hace otro administrador. Quitar permisos de un rol propio no pasa por aquí.
    */
   async assertDoesNotWidenOwn(
     actor: AuthenticatedUser,
@@ -155,25 +154,25 @@ export class RolePrivilegePolicy {
       actor.id,
       roleId,
     );
-    if (scopes.length === 0) {
-      return;
-    }
-    const held = await this.permissionsService.getEffectivePermissions(actor.id);
-    const covered = (code: string, scope: { scopeType: string; scopeId: string | null }) =>
-      held.some(
-        (item) =>
-          item.permissionCode === code &&
-          (item.userScopeType === 'GLOBAL' ||
-            (item.userScopeType === scope.scopeType &&
-              item.userScopeId === scope.scopeId)),
-      );
-    if (
-      permissions.some((permission) =>
-        scopes.some((scope) => !covered(permission.code, scope)),
-      )
-    ) {
+    if (scopes.length > 0) {
       throw new ApiException(ErrorCode.RoleSelfAssignmentForbidden);
     }
+  }
+
+  /**
+   * Otorgar permisos a un rol (crearlo con permisos, agregarle o reemplazar su set). SUPER_ADMIN es administración
+   * pura: otorga cualquier permiso aunque no lo tenga (no opera). Los demás siguen la cascada: solo lo que tienen.
+   * La herencia (parent_role_id) no pasa por aquí: sigue exigiendo tener cada permiso del linaje
+   * (assertCanInheritFrom), también a SUPER_ADMIN.
+   */
+  async assertCanGrantPermissions(
+    actor: AuthenticatedUser,
+    permissions: ReadonlyArray<Pick<Permission, 'code'>>,
+  ): Promise<void> {
+    if (permissions.length === 0 || (await this.isSuperAdmin(actor))) {
+      return;
+    }
+    await this.assertCanGrant(actor, permissions);
   }
 
   async assertCanGrant(

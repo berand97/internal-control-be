@@ -11,6 +11,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { AuditReason } from '../../../common/validation/audit-reason.decorator.js';
 
 export class CreateRoleDto {
   @ApiProperty({ example: 'ASSET_COORDINATOR', maxLength: 50 })
@@ -63,4 +64,7 @@ export class CreateRoleDto {
   @IsArray()
   @IsUUID('4', { each: true })
   readonly permissionIds?: ReadonlyArray<string>;
+
+  @AuditReason('Motivo de la creación o del cambio del rol.')
+  readonly reason!: string;
 }

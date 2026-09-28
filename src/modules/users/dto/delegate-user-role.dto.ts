@@ -1,5 +1,6 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsOptional, IsString, IsUUID } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsDateString, IsUUID } from 'class-validator';
+import { AuditReason } from '../../../common/validation/audit-reason.decorator.js';
 
 export class DelegateUserRoleDto {
   @ApiProperty({
@@ -15,8 +16,6 @@ export class DelegateUserRoleDto {
   @IsDateString()
   readonly validUntil!: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  readonly reason?: string;
+  @AuditReason('Motivo de la delegación (obligatorio).')
+  readonly reason!: string;
 }

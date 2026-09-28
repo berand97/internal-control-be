@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsDateString, IsIn, IsOptional, IsUUID } from 'class-validator';
+import { AuditReason } from '../../../common/validation/audit-reason.decorator.js';
 
 const SCOPE_TYPES = ['GLOBAL', 'ORG_UNIT', 'COST_CENTER'] as const;
 
@@ -32,4 +33,7 @@ export class AssignUserRoleDto {
   @IsOptional()
   @IsDateString()
   readonly endDate?: string;
+
+  @AuditReason('Motivo de la asignación del rol.')
+  readonly reason!: string;
 }

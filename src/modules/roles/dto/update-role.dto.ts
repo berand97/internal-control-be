@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, IsUUID, MaxLength, ValidateIf } from 'class-validator';
+import { AuditReason } from '../../../common/validation/audit-reason.decorator.js';
 
 export class UpdateRoleDto {
   @ApiPropertyOptional({ maxLength: 100 })
@@ -23,4 +24,7 @@ export class UpdateRoleDto {
   @IsOptional()
   @IsUUID('4')
   readonly superiorRoleId?: string;
+
+  @AuditReason('Motivo de la creación o del cambio del rol.')
+  readonly reason!: string;
 }

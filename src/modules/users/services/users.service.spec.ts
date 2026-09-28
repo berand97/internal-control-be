@@ -15,6 +15,8 @@ import type { ActiveLoansPort } from '../ports/active-loans.port.js';
 import type { UsersRepository } from '../repositories/users.repository.interface.js';
 import { UsersService } from './users.service.js';
 
+const ORIGIN = { ipAddress: null, userAgent: null };
+
 const actor: AuthenticatedUser = {
   id: 'admin-1',
   personId: 'person-admin',
@@ -227,7 +229,7 @@ describe('UsersService', () => {
       vi.mocked(usersRepository.findUserRoleById).mockResolvedValue(assignment);
       const calls = [
         service.reactivate('user-1', actor),
-        service.revokeRole('user-1', 'ur-1', actor),
+        service.revokeRole('user-1', 'ur-1', { reason: 'Motivo de prueba' }, actor, ORIGIN),
         service.update('user-1', { firstName: 'Otra' }, actor),
         service.resendInvitation('user-1', actor),
         service.resetMfa('user-1', 'Perdió el teléfono', actor, {
@@ -318,8 +320,9 @@ describe('UsersService', () => {
         service.delegateRole(
           'user-1',
           'ur-1',
-          { toUserId: 'user-2', validUntil: future(2 * 86_400_000).toISOString() },
+          { reason: 'Motivo de prueba', toUserId: 'user-2', validUntil: future(2 * 86_400_000).toISOString() },
           actor,
+          ORIGIN,
         ),
       ).rejects.toMatchObject({ code: ErrorCode.DelegationExceedsSourceValidity });
       expect(usersRepository.insertUserRoleWithinLimit).not.toHaveBeenCalled();
@@ -334,8 +337,9 @@ describe('UsersService', () => {
         service.delegateRole(
           'user-1',
           'ur-1',
-          { toUserId: 'user-2', validUntil: future(86_400_000).toISOString() },
+          { reason: 'Motivo de prueba', toUserId: 'user-2', validUntil: future(86_400_000).toISOString() },
           actor,
+          ORIGIN,
         ),
       ).rejects.toMatchObject({ code: ErrorCode.RoleNotAssignable });
     });
@@ -345,8 +349,9 @@ describe('UsersService', () => {
         service.delegateRole(
           'user-1',
           'ur-1',
-          { toUserId: 'user-1', validUntil: future(86_400_000).toISOString() },
+          { reason: 'Motivo de prueba', toUserId: 'user-1', validUntil: future(86_400_000).toISOString() },
           actor,
+          ORIGIN,
         ),
       ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
     });
@@ -362,8 +367,9 @@ describe('UsersService', () => {
       await service.delegateRole(
         'user-1',
         'ur-1',
-        { toUserId: 'user-2', validUntil: future(86_400_000).toISOString() },
+        { reason: 'Motivo de prueba', toUserId: 'user-2', validUntil: future(86_400_000).toISOString() },
         actor,
+        ORIGIN,
       );
       expect(usersRepository.insertUserRoleWithinLimit).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -381,12 +387,12 @@ describe('UsersService', () => {
         'user-1',
         'user-2',
       ]);
-      await service.revokeRole('user-1', 'ur-1', actor);
+      await service.revokeRole('user-1', 'ur-1', { reason: 'Motivo de prueba' }, actor, ORIGIN);
       expect(usersRepository.revokeUserRoleCascade).toHaveBeenCalledWith(
         'ur-1',
         actor.id,
         expect.any(Date),
-        null,
+        'Motivo de prueba',
       );
       expect(permissionsService.invalidateMany).toHaveBeenCalledWith(
         expect.arrayContaining(['user-1', 'user-2']),
@@ -402,13 +408,13 @@ describe('UsersService', () => {
     );
     vi.mocked(usersRepository.findActiveRole).mockResolvedValue(role);
     await expect(
-      service.assignRole('user-1', { roleId: role.id }, actor),
+      service.assignRole('user-1', { reason: 'Motivo de prueba', roleId: role.id }, actor, ORIGIN),
     ).rejects.toMatchObject({ code: ErrorCode.RoleNotAssignable });
   });
 
   it('nadie se asigna un rol a sí mismo, tampoco SUPER_ADMIN', async () => {
     await expect(
-      service.assignRole(actor.id, { roleId: 'role-x' }, actor),
+      service.assignRole(actor.id, { reason: 'Motivo de prueba', roleId: 'role-x' }, actor, ORIGIN),
     ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
     expect(usersRepository.insertUserRoleWithinLimit).not.toHaveBeenCalled();
   });
@@ -419,8 +425,9 @@ describe('UsersService', () => {
       service.delegateRole(
         'user-1',
         'ur-1',
-        { toUserId: actor.id, validUntil: future },
+        { reason: 'Motivo de prueba', toUserId: actor.id, validUntil: future },
         actor,
+        ORIGIN,
       ),
     ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
     expect(usersRepository.insertUserRoleWithinLimit).not.toHaveBeenCalled();
@@ -434,8 +441,9 @@ describe('UsersService', () => {
       service.delegateRole(
         'user-1',
         'ur-1',
-        { toUserId: 'user-2', validUntil: '' },
+        { reason: 'Motivo de prueba', toUserId: 'user-2', validUntil: '' },
         actor,
+        ORIGIN,
       ),
     ).rejects.toMatchObject({ code: ErrorCode.DelegationRequiresExpiry });
   });
@@ -450,8 +458,9 @@ describe('UsersService', () => {
       service.delegateRole(
         'user-1',
         'ur-1',
-        { toUserId: 'user-2', validUntil: future },
+        { reason: 'Motivo de prueba', toUserId: 'user-2', validUntil: future },
         actor,
+        ORIGIN,
       ),
     ).rejects.toMatchObject({ code: ErrorCode.CannotDelegateRoleNotHeld });
   });
@@ -615,8 +624,9 @@ describe('UsersService', () => {
     vi.mocked(usersRepository.insertUserRoleWithinLimit).mockResolvedValue(assignment);
     const result = await service.assignRole(
       'user-1',
-      { roleId: role.id },
+      { reason: 'Motivo de prueba', roleId: role.id },
       actor,
+      ORIGIN,
     );
     expect(result.roleCode).toBe('VIEWER');
     expect(privilege.assertCanAdminister).toHaveBeenCalled();
@@ -636,7 +646,7 @@ describe('UsersService', () => {
       }),
     );
     await expect(
-      service.assignRole('user-1', { roleId: role.id }, actor),
+      service.assignRole('user-1', { reason: 'Motivo de prueba', roleId: role.id }, actor, ORIGIN),
     ).rejects.toMatchObject({ code: ErrorCode.RolePrivilegeEscalation });
     expect(usersRepository.insertUserRoleWithinLimit).not.toHaveBeenCalled();
   });
@@ -657,7 +667,7 @@ describe('UsersService', () => {
       ),
     );
     await expect(
-      service.assignRole('user-1', { roleId: role.id }, actor),
+      service.assignRole('user-1', { reason: 'Motivo de prueba', roleId: role.id }, actor, ORIGIN),
     ).rejects.toMatchObject({ code: ErrorCode.SodViolation });
   });
 });

@@ -9,6 +9,8 @@ import { PermissionsService } from './permissions.service.js';
 import { RolePrivilegePolicy } from './role-privilege.policy.js';
 import { RolesService } from './roles.service.js';
 
+const ORIGIN = { ipAddress: null, userAgent: null };
+
 const actor: AuthenticatedUser = {
   id: 'admin-1',
   personId: 'person-1',
@@ -137,8 +139,9 @@ describe('RolesService', () => {
     const created = customRole();
     vi.mocked(rolesRepository.insert).mockResolvedValue(created);
     const result = await service.create(
-      { code: 'ASSET_COORDINATOR', name: 'Coordinador' },
+      { reason: 'Motivo de prueba', code: 'ASSET_COORDINATOR', name: 'Coordinador' },
       actor,
+      ORIGIN,
     );
     expect(result.code).toBe('ASSET_COORDINATOR');
     expect(rolesRepository.insert).toHaveBeenCalledWith(
@@ -163,7 +166,7 @@ describe('RolesService', () => {
     vi.mocked(rolesRepository.findActiveById)
       .mockResolvedValueOnce(current)
       .mockResolvedValueOnce(renamed);
-    const result = await service.update('dir-1', { name: 'Dirección' }, actor);
+    const result = await service.update('dir-1', { reason: 'Motivo de prueba', name: 'Dirección' }, actor, ORIGIN);
     expect(rolesRepository.update).toHaveBeenCalledWith(
       'dir-1',
       expect.objectContaining({ name: 'Dirección' }),
@@ -179,7 +182,7 @@ describe('RolesService', () => {
     vi.mocked(rolesRepository.findActiveById)
       .mockResolvedValueOnce(current)
       .mockResolvedValueOnce(renamed);
-    const result = await service.update('admin-role', { name: 'Super Admin' }, actor);
+    const result = await service.update('admin-role', { reason: 'Motivo de prueba', name: 'Super Admin' }, actor, ORIGIN);
     expect(rolesRepository.update).toHaveBeenCalledWith(
       'admin-role',
       expect.objectContaining({ name: 'Super Admin' }),
@@ -190,12 +193,12 @@ describe('RolesService', () => {
   it('no permite editar un rol igual o superior', async () => {
     vi.mocked(rolesRepository.findActiveById).mockResolvedValue(adminRole());
     await expect(
-      service.replacePermissions('admin-role', { permissionIds: [] }, actor),
+      service.replacePermissions('admin-role', { reason: 'Motivo de prueba', permissionIds: [] }, actor, ORIGIN),
     ).rejects.toMatchObject({ code: ErrorCode.RolePrivilegeEscalation });
     expect(rolesRepository.replacePermissions).not.toHaveBeenCalled();
   });
 
-  it('no permite conceder un permiso que el actor no tiene', async () => {
+  it('SUPER_ADMIN otorga un permiso aunque no lo tenga (administración pura)', async () => {
     vi.mocked(rolesRepository.findActiveById).mockResolvedValue(customRole());
     vi.mocked(rolesRepository.findPermissionsByIds).mockResolvedValue([
       { id: 'perm-admin', code: 'role:manage:global' } as never,
@@ -203,11 +206,21 @@ describe('RolesService', () => {
     await expect(
       service.replacePermissions(
         'role-1',
-        { permissionIds: ['perm-admin'] },
+        { reason: 'Motivo de prueba', permissionIds: ['perm-admin'] },
         actor,
+        ORIGIN,
       ),
-    ).rejects.toMatchObject({ code: ErrorCode.PermissionNotHeld });
-    expect(rolesRepository.replacePermissions).not.toHaveBeenCalled();
+    ).resolves.toBeDefined();
+    expect(rolesRepository.replacePermissions).toHaveBeenCalledWith('role-1', ['perm-admin'], actor.id);
+    expect(auditLogsRepository.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changes: expect.objectContaining({
+          addedPermissionCodes: ['role:manage:global'],
+          removedPermissionCodes: [],
+          reason: 'Motivo de prueba',
+        }),
+      }),
+    );
   });
 
   it('no elimina un rol con usuarios asignados', async () => {
@@ -239,11 +252,13 @@ describe('RolesService', () => {
     vi.mocked(rolesRepository.insert).mockResolvedValue(customRole());
     await service.create(
       {
+        reason: 'Motivo de prueba',
         code: 'ASSET_COORDINATOR',
         name: 'Coordinador',
         parentRoleId: 'parent-1',
       },
       actor,
+      ORIGIN,
     );
     expect(rolesRepository.insert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -264,7 +279,7 @@ describe('RolesService', () => {
       .mockResolvedValueOnce(current)
       .mockResolvedValueOnce(superior)
       .mockResolvedValueOnce(moved);
-    await service.update('role-1', { superiorRoleId: 'admin-role' }, actor);
+    await service.update('role-1', { reason: 'Motivo de prueba', superiorRoleId: 'admin-role' }, actor, ORIGIN);
     expect(rolesRepository.update).toHaveBeenCalledWith('role-1', {
       superiorRoleId: 'admin-role',
       hierarchyLevel: 1,
@@ -283,7 +298,7 @@ describe('RolesService', () => {
       .mockResolvedValueOnce(current)
       .mockResolvedValueOnce(parent)
       .mockResolvedValueOnce(updated);
-    await service.update('role-1', { parentRoleId: 'parent-1' }, actor);
+    await service.update('role-1', { reason: 'Motivo de prueba', parentRoleId: 'parent-1' }, actor, ORIGIN);
     expect(rolesRepository.update).toHaveBeenCalledWith('role-1', {
       parentRoleId: 'parent-1',
     });
@@ -297,7 +312,7 @@ describe('RolesService', () => {
     };
     vi.mocked(rolesRepository.findActiveById).mockResolvedValue(customRole());
     await expect(
-      service.update('role-1', { superiorRoleId: 'admin-role' }, director),
+      service.update('role-1', { reason: 'Motivo de prueba', superiorRoleId: 'admin-role' }, director, ORIGIN),
     ).rejects.toMatchObject({ code: ErrorCode.InsufficientPermissions });
     expect(rolesRepository.update).not.toHaveBeenCalled();
   });
@@ -305,7 +320,7 @@ describe('RolesService', () => {
   it('no reorganiza el rol super admin', async () => {
     vi.mocked(rolesRepository.findActiveById).mockResolvedValue(adminRole());
     await expect(
-      service.update('admin-role', { superiorRoleId: 'role-1' }, actor),
+      service.update('admin-role', { reason: 'Motivo de prueba', superiorRoleId: 'role-1' }, actor, ORIGIN),
     ).rejects.toMatchObject({ code: ErrorCode.RoleSystemImmutable });
     expect(rolesRepository.update).not.toHaveBeenCalled();
   });
@@ -314,7 +329,7 @@ describe('RolesService', () => {
     const role = customRole();
     vi.mocked(rolesRepository.findActiveById).mockResolvedValue(role);
     await expect(
-      service.update('role-1', { parentRoleId: 'role-1' }, actor),
+      service.update('role-1', { reason: 'Motivo de prueba', parentRoleId: 'role-1' }, actor, ORIGIN),
     ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
   });
 
@@ -332,8 +347,9 @@ describe('RolesService', () => {
     ]);
     await service.assignPermissions(
       'role-1',
-      { permissionIds: ['perm-1'] },
+      { reason: 'Motivo de prueba', permissionIds: ['perm-1'] },
       actor,
+      ORIGIN,
     );
     expect(rolesRepository.assignPermission).toHaveBeenCalled();
     expect(permissionsService.invalidateMany).toHaveBeenCalledWith(['user-9']);
@@ -353,8 +369,9 @@ describe('RolesService', () => {
     ]);
     await service.replacePermissions(
       'role-1',
-      { permissionIds: ['perm-1'] },
+      { reason: 'Motivo de prueba', permissionIds: ['perm-1'] },
       actor,
+      ORIGIN,
     );
     expect(rolesRepository.replacePermissions).toHaveBeenCalledWith(
       'role-1',
@@ -372,11 +389,13 @@ describe('RolesService', () => {
     vi.mocked(rolesRepository.insert).mockResolvedValue(created);
     await service.create(
       {
+        reason: 'Motivo de prueba',
         code: 'ASSET_COORDINATOR',
         name: 'Coordinador',
         permissionIds: ['perm-1'],
       },
       actor,
+      ORIGIN,
     );
     expect(rolesRepository.replacePermissions).toHaveBeenCalledWith(
       created.id,
@@ -391,8 +410,9 @@ describe('RolesService', () => {
     await expect(
       service.replacePermissions(
         'role-1',
-        { permissionIds: ['perm-missing'] },
+        { reason: 'Motivo de prueba', permissionIds: ['perm-missing'] },
         actor,
+        ORIGIN,
       ),
     ).rejects.toMatchObject({ code: ErrorCode.ResourceNotFound });
     expect(rolesRepository.replacePermissions).not.toHaveBeenCalled();
@@ -415,8 +435,9 @@ describe('RolesService', () => {
       ]);
       await expect(
         service.create(
-          { code: 'SHADOW', name: 'Sombra', parentRoleId: 'director-role' },
+          { reason: 'Motivo de prueba', code: 'SHADOW', name: 'Sombra', parentRoleId: 'director-role' },
           actor,
+          ORIGIN,
         ),
       ).rejects.toMatchObject({ code: ErrorCode.PermissionNotHeld });
       expect(rolesRepository.insert).not.toHaveBeenCalled();
@@ -435,8 +456,9 @@ describe('RolesService', () => {
       vi.mocked(rolesRepository.findActiveById).mockResolvedValue(director());
       await expect(
         service.create(
-          { code: 'SHADOW', name: 'Sombra', parentRoleId: 'director-role' },
+          { reason: 'Motivo de prueba', code: 'SHADOW', name: 'Sombra', parentRoleId: 'director-role' },
           directorActor,
+          ORIGIN,
         ),
       ).rejects.toMatchObject({ code: ErrorCode.RolePrivilegeEscalation });
     });
@@ -450,7 +472,7 @@ describe('RolesService', () => {
         { id: 'perm-w', code: 'asset:write_off:global' } as never,
       ]);
       await expect(
-        service.update('role-1', { parentRoleId: 'director-role' }, actor),
+        service.update('role-1', { reason: 'Motivo de prueba', parentRoleId: 'director-role' }, actor, ORIGIN),
       ).rejects.toMatchObject({ code: ErrorCode.PermissionNotHeld });
       expect(rolesRepository.update).not.toHaveBeenCalled();
     });
@@ -466,7 +488,7 @@ describe('RolesService', () => {
         director(),
       ]);
       vi.mocked(rolesRepository.insert).mockResolvedValue(customRole());
-      await service.create({ code: 'ASSISTANT', name: 'Asistente' }, directorActor);
+      await service.create({ reason: 'Motivo de prueba', code: 'ASSISTANT', name: 'Asistente' }, directorActor, ORIGIN);
       expect(rolesRepository.insert).toHaveBeenCalledWith(
         expect.objectContaining({
           superiorRoleId: 'director-role',
@@ -492,13 +514,13 @@ describe('RolesService', () => {
         { scopeType: 'GLOBAL', scopeId: null },
       ]);
       await expect(
-        service.assignPermissions('role-1', { permissionIds: ['perm-1'] }, actor),
+        service.assignPermissions('role-1', { reason: 'Motivo de prueba', permissionIds: ['perm-1'] }, actor, ORIGIN),
       ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
       expect(rolesRepository.assignPermission).not.toHaveBeenCalled();
     });
 
     it('sí lo agrega si el actor no tiene el rol', async () => {
-      await service.assignPermissions('role-1', { permissionIds: ['perm-1'] }, actor);
+      await service.assignPermissions('role-1', { reason: 'Motivo de prueba', permissionIds: ['perm-1'] }, actor, ORIGIN);
       expect(rolesRepository.assignPermission).toHaveBeenCalled();
     });
   });
@@ -520,7 +542,8 @@ describe('RolesService', () => {
         'child-holder',
       ]);
       vi.mocked(rolesRepository.removePermission).mockResolvedValue(true);
-      await service.removePermission('role-1', 'perm-1', actor);
+      vi.mocked(rolesRepository.findPermissionsByIds).mockResolvedValue([]);
+      await service.removePermission('role-1', 'perm-1', { reason: 'Motivo de prueba' }, actor, ORIGIN);
       expect(rolesRepository.findActiveHolderIdsInheriting).toHaveBeenCalledWith(
         'role-1',
       );

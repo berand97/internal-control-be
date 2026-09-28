@@ -11,6 +11,7 @@ import {
   type PaginatedResult,
 } from '../../../common/types/paginated-result.type.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
+import type { RequestOrigin } from '../../../common/types/request-origin.type.js';
 import { generateTemporaryPassword } from '../../../shared/crypto/generate-temporary-password.js';
 import { HashService } from '../../../shared/crypto/hash.service.js';
 import { MailService } from '../../../shared/mail/mail.service.js';
@@ -37,6 +38,7 @@ import { RolePrivilegePolicy } from '../../roles/services/role-privilege.policy.
 import { AssignUserRoleDto } from '../dto/assign-user-role.dto.js';
 import { CreateUserDto } from '../dto/create-user.dto.js';
 import { DelegateUserRoleDto } from '../dto/delegate-user-role.dto.js';
+import { RevokeUserRoleDto } from '../dto/revoke-user-role.dto.js';
 import { QueryUsersDto } from '../dto/query-users.dto.js';
 import { UpdateUserDto } from '../dto/update-user.dto.js';
 import { UserAffiliationOptionsResponseDto } from '../dto/responses/user-affiliation-options.response.dto.js';
@@ -391,6 +393,7 @@ export class UsersService {
     userId: string,
     dto: AssignUserRoleDto,
     actor: AuthenticatedUser,
+    origin: RequestOrigin,
   ): Promise<UserRoleResponseDto> {
     // Nadie se autoasigna roles, tampoco SUPER_ADMIN: siempre lo hace otro administrador.
     if (userId === actor.id) {
@@ -453,9 +456,17 @@ export class UsersService {
         entityType: USER_ENTITY_TYPE,
         entityId: userId,
         performedBy: actor.id,
-        ipAddress: null,
-        userAgent: null,
-        changes: { roleId: role.id, scopeType, scopeId },
+        ...origin,
+        changes: {
+          userRoleId: assignment.id,
+          roleId: role.id,
+          roleCode: role.code,
+          scopeType,
+          scopeId,
+          validFrom: validFrom.toISOString(),
+          validUntil: validUntil?.toISOString() ?? null,
+          reason: dto.reason,
+        },
       });
       return UserRoleResponseDto.from(assignment);
     } catch (error) {
@@ -472,7 +483,9 @@ export class UsersService {
   async revokeRole(
     userId: string,
     userRoleId: string,
+    dto: RevokeUserRoleDto,
     actor: AuthenticatedUser,
+    origin: RequestOrigin,
   ): Promise<null> {
     await this.requireUser(userId);
     const assignment = await this.usersRepository.findUserRoleById(userRoleId);
@@ -489,7 +502,7 @@ export class UsersService {
       assignment.id,
       actor.id,
       new Date(),
-      null,
+      dto.reason,
     );
     this.permissionsService.invalidateMany([userId, ...affected]);
     await this.auditLogsRepository.record({
@@ -497,11 +510,15 @@ export class UsersService {
       entityType: USER_ENTITY_TYPE,
       entityId: userId,
       performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
+      ...origin,
       changes: {
         userRoleId,
+        roleId: assignment.roleId,
+        roleCode: assignment.role?.code ?? null,
+        scopeType: assignment.scopeType,
+        scopeId: assignment.scopeId,
         cascadedUserIds: affected.filter((id) => id !== userId),
+        reason: dto.reason,
       },
     });
     return null;
@@ -512,6 +529,7 @@ export class UsersService {
     userRoleId: string,
     dto: DelegateUserRoleDto,
     actor: AuthenticatedUser,
+    origin: RequestOrigin,
   ): Promise<UserRoleResponseDto> {
     // Delegarse a uno mismo el rol de otro es autoasignación. Delegar el propio rol a otra persona sí se permite.
     if (dto.toUserId === actor.id) {
@@ -559,7 +577,7 @@ export class UsersService {
           validUntil,
           isDelegated: true,
           delegatedFromUserId: holder.id,
-          delegationReason: dto.reason ?? null,
+          delegationReason: dto.reason,
           grantedBy: actor.id,
         },
         role.maxConcurrentUsers,
@@ -571,12 +589,17 @@ export class UsersService {
         entityType: USER_ENTITY_TYPE,
         entityId: target.id,
         performedBy: actor.id,
-        ipAddress: null,
-        userAgent: null,
+        ...origin,
         changes: {
           fromUserId: holder.id,
           userRoleId,
+          delegatedUserRoleId: delegated.id,
+          roleId: role.id,
+          roleCode: role.code,
+          scopeType: assignment.scopeType,
+          scopeId: assignment.scopeId,
           validUntil: dto.validUntil,
+          reason: dto.reason,
         },
       });
       return UserRoleResponseDto.from(delegated);

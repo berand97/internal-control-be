@@ -82,7 +82,7 @@ export interface RolesRepository {
   /** Permisos directos de los roles dados, sin repetir. */
   findPermissionsForRoles(roleIds: ReadonlyArray<string>): Promise<ReadonlyArray<Permission>>;
   countActiveChildren(parentRoleId: string): Promise<number>;
-  /** Alcances de las asignaciones activas del usuario que alcanzan al rol (directa o por herencia). */
+  /** Alcances de las asignaciones no revocadas ni vencidas del usuario (vigentes o futuras) que alcanzan al rol (directa o por herencia). */
   findHolderScopesReachingRole(
     userId: string,
     roleId: string,

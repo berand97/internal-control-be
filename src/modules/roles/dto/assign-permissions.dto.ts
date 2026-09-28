@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ArrayNotEmpty, IsArray, IsUUID } from 'class-validator';
+import { AuditReason } from '../../../common/validation/audit-reason.decorator.js';
 
 export class AssignPermissionsDto {
   @ApiProperty({
@@ -11,6 +12,9 @@ export class AssignPermissionsDto {
   @ArrayNotEmpty()
   @IsUUID('4', { each: true })
   readonly permissionIds!: ReadonlyArray<string>;
+
+  @AuditReason('Motivo del otorgamiento.')
+  readonly reason!: string;
 }
 
 export class ReplacePermissionsDto {
@@ -23,4 +27,13 @@ export class ReplacePermissionsDto {
   @IsArray()
   @IsUUID('4', { each: true })
   readonly permissionIds!: ReadonlyArray<string>;
+
+  @AuditReason('Motivo del cambio de permisos (lo agregado y lo quitado).')
+  readonly reason!: string;
+}
+
+/** Cuerpo de DELETE /roles/:id/permissions/:permissionId: el retiro también exige motivo. */
+export class RemovePermissionDto {
+  @AuditReason('Motivo del retiro del permiso.')
+  readonly reason!: string;
 }

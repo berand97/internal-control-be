@@ -137,4 +137,33 @@ describe('RolePrivilegePolicy', () => {
       policy.assertCanGrant(actor, [{ code: 'asset:read:global' }]),
     ).resolves.toBeUndefined();
   });
+
+  describe('otorgar permisos a un rol', () => {
+    const superAdmin = { ...actor, id: 'admin-1', roles: ['SUPER_ADMIN'] };
+
+    it('SUPER_ADMIN otorga cualquier permiso aunque no lo tenga', async () => {
+      await expect(
+        policy.assertCanGrantPermissions(superAdmin, [{ code: 'cost_center:manage:global' }]),
+      ).resolves.toBeUndefined();
+    });
+
+    it('los demás solo otorgan lo que tienen (cascada)', async () => {
+      await expect(
+        policy.assertCanGrantPermissions(actor, [{ code: 'cost_center:manage:global' }]),
+      ).rejects.toMatchObject({ code: ErrorCode.PermissionNotHeld });
+      await expect(
+        policy.assertCanGrantPermissions(actor, [{ code: 'asset:read:global' }]),
+      ).resolves.toBeUndefined();
+    });
+
+    it('nadie agrega permisos a un rol que tiene, aunque ya tenga el permiso por otro rol', async () => {
+      Object.assign(rolesRepository, {
+        findHolderScopesReachingRole: vi.fn().mockResolvedValue([{ scopeType: 'GLOBAL', scopeId: null }]),
+      });
+      await expect(
+        policy.assertDoesNotWidenOwn(superAdmin, 'role-x', [{ code: 'asset:read:global' }]),
+      ).rejects.toMatchObject({ code: ErrorCode.RoleSelfAssignmentForbidden });
+      await expect(policy.assertDoesNotWidenOwn(superAdmin, 'role-x', [])).resolves.toBeUndefined();
+    });
+  });
 });

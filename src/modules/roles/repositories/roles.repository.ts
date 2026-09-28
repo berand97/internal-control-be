@@ -295,6 +295,7 @@ export class TypeOrmRolesRepository implements RolesRepository {
        CROSS JOIN LATERAL fn_role_lineage(ur.role_id) l
        WHERE ur.user_id = $1
          AND ur.revoked_at IS NULL
+         AND (ur.valid_until IS NULL OR ur.valid_until > NOW())
          AND l.role_id = $2`,
       [userId, roleId],
     )) as Array<{ scope_type: string; scope_id: string | null }>;
