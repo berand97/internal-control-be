@@ -46,7 +46,7 @@ describe('OrganizationalUnitsService', () => {
       findActiveByCodePrefix: vi.fn().mockResolvedValue(null),
       findChildren: vi.fn(),
       countActiveChildren: vi.fn().mockResolvedValue(0),
-      countCostCenters: vi.fn().mockResolvedValue(0),
+      countActiveCostCenters: vi.fn().mockResolvedValue(0),
       insert: vi.fn(),
       update: vi.fn(),
       deactivate: vi.fn(),
@@ -188,5 +188,23 @@ describe('OrganizationalUnitsService', () => {
     await expect(service.remove('1', actor)).rejects.toMatchObject({
       code: ErrorCode.OrgUnitHasChildren,
     });
+  });
+
+  it('no desactiva una unidad con centros activos y dice cuántos', async () => {
+    vi.mocked(unitsRepository.findById).mockResolvedValue(unit('1', 'REC', null, 0));
+    vi.mocked(unitsRepository.countActiveCostCenters).mockResolvedValue(3);
+    await expect(service.remove('1', actor)).rejects.toMatchObject({
+      code: ErrorCode.HasDependentEntities,
+      message: 'La unidad tiene 3 centros de costo activos: muévalos a otra unidad o desactívelos antes de desactivar la unidad',
+      details: [{ field: 'activeCostCenters', message: '3' }],
+    });
+    expect(unitsRepository.deactivate).not.toHaveBeenCalled();
+  });
+
+  it('desactiva una unidad cuyos centros están todos inactivos', async () => {
+    vi.mocked(unitsRepository.findById).mockResolvedValue(unit('1', 'REC', null, 0));
+    await expect(service.remove('1', actor)).resolves.toBeNull();
+    expect(unitsRepository.countActiveCostCenters).toHaveBeenCalledWith('1');
+    expect(unitsRepository.deactivate).toHaveBeenCalledWith('1');
   });
 });

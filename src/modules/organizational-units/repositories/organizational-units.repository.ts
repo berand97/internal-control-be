@@ -55,9 +55,9 @@ export class TypeOrmOrganizationalUnitsRepository
     return this.units.count({ where: { parentId, isActive: true } });
   }
 
-  countCostCenters(orgUnitId: string): Promise<number> {
+  countActiveCostCenters(orgUnitId: string): Promise<number> {
     return this.costCenters.count({
-      where: { organizationalUnitId: orgUnitId },
+      where: { organizationalUnitId: orgUnitId, isActive: true },
     });
   }
 

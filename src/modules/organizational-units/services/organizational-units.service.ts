@@ -207,9 +207,15 @@ export class OrganizationalUnitsService {
     if (children > 0) {
       throw new ApiException(ErrorCode.OrgUnitHasChildren);
     }
-    const dependents = await this.unitsRepository.countCostCenters(unit.id);
-    if (dependents > 0) {
-      throw new ApiException(ErrorCode.HasDependentEntities);
+    const activeCenters = await this.unitsRepository.countActiveCostCenters(unit.id);
+    if (activeCenters > 0) {
+      throw new ApiException(
+        ErrorCode.HasDependentEntities,
+        activeCenters === 1
+          ? 'La unidad tiene 1 centro de costo activo: muévalo a otra unidad o desactívelo antes de desactivar la unidad'
+          : `La unidad tiene ${activeCenters} centros de costo activos: muévalos a otra unidad o desactívelos antes de desactivar la unidad`,
+        [{ field: 'activeCostCenters', message: String(activeCenters) }],
+      );
     }
     await this.unitsRepository.deactivate(unit.id);
     await this.auditLogsRepository.record({

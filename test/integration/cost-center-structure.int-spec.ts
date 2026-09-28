@@ -300,6 +300,33 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(row.body.data).toMatchObject({ hasMovement: false, acceptsAssets: false, parentId: ids['c7200'] });
   });
 
+  it('una unidad se desactiva cuando todos sus centros están inactivos; con centros activos dice cuántos', async () => {
+    const tag = randomUUID().slice(0, 4).toUpperCase();
+    const unit = await createUnit(`IT_UNIDAD_BAJA_${tag.replace(/\d/gu, 'X')}`, 'Unidad que se da de baja', null);
+    expect(unit.status).toBe(201);
+    const unitId = unit.body.data.id as string;
+    const center = await createCenter({ externalCode: `BAJA-${tag}`, name: 'Centro que se desactiva', organizationalUnitId: unitId });
+    expect(center.status).toBe(201);
+
+    const blocked = await http().delete(`/api/v1/organizational-units/${unitId}`).set(auth('admin'));
+    expect(blocked.status).toBe(406);
+    expect(blocked.body.error).toMatchObject({
+      code: 'HAS_DEPENDENT_ENTITIES',
+      message: 'La unidad tiene 1 centro de costo activo: muévalo a otra unidad o desactívelo antes de desactivar la unidad',
+      details: [{ field: 'activeCostCenters', message: '1' }],
+    });
+
+    const off = await http().patch(`/api/v1/cost-centers/${center.body.data.id}`).set(auth('admin')).send({ isActive: false });
+    expect(off.status).toBe(200);
+    const removed = await http().delete(`/api/v1/organizational-units/${unitId}`).set(auth('admin'));
+    expect(removed.status).toBe(200);
+    expect(await scalar<boolean>(dataSource, 'SELECT is_active FROM organizational_unit WHERE id = $1', [unitId])).toBe(false);
+    // El centro inactivo conserva su unidad (desactivación lógica).
+    expect(await scalar<string>(dataSource, 'SELECT organizational_unit_id FROM cost_center WHERE id = $1', [center.body.data.id])).toBe(
+      unitId,
+    );
+  });
+
   it('lista los centros cuyo código no cuadra con su unidad, con el motivo', async () => {
     const response = await http().get('/api/v1/cost-centers/prefix-mismatches').set(auth('viewer'));
     expect(response.status).toBe(200);

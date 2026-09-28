@@ -32,7 +32,11 @@ export interface OrganizationalUnitsRepository {
   findActiveByCodePrefix(codePrefix: string): Promise<OrganizationalUnit | null>;
   findChildren(parentId: string): Promise<ReadonlyArray<OrganizationalUnit>>;
   countActiveChildren(parentId: string): Promise<number>;
-  countCostCenters(orgUnitId: string): Promise<number>;
+  /**
+   * Centros activos que hoy están en la unidad. Los inactivos no impiden desactivarla: la desactivación es lógica, así
+   * que conservan su referencia y su historial de ubicación (igual que los hijos, que solo cuentan si están activos).
+   */
+  countActiveCostCenters(orgUnitId: string): Promise<number>;
   insert(record: CreateOrgUnitRecord): Promise<OrganizationalUnit>;
   update(id: string, record: UpdateOrgUnitRecord): Promise<void>;
   deactivate(id: string): Promise<void>;
