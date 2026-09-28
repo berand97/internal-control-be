@@ -90,6 +90,9 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
     await user('reader', { permissions: ['asset:read:global'] });
     await user('orgReader', { permissions: ['asset:read:org_unit'] });
     await user('admin', { permissions: ['navigation:manage:global'] });
+    await user('director', { role: 'INTERNAL_CONTROL_DIRECTOR' });
+    await user('viewer', { role: 'VIEWER' });
+    await user('roleManager', { permissions: ['role:read:global', 'role:manage:global'] });
   });
 
   afterAll(async () => {
@@ -103,6 +106,7 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
     expect(rows.map((row) => [row.path, row.icon])).toEqual([
       ['/users', 'users'],
       ['/roles', 'shield'],
+      ['/roles/grants-history', 'shield'],
       ['/campus', 'map-pinned'],
       ['/organizational-units', 'landmark'],
       ['/cost-centers', 'wallet'],
@@ -152,6 +156,36 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
     // exija asset:read:global (comportamiento previo de actionSatisfies, documentado en el reporte).
     const orgReader = await menu('orgReader');
     expect(orgReader.map((item) => item.path)).toEqual(['/assets', '/handovers']);
+  });
+
+  it('Historial de permisos: lo publica role:audit (la Directora, sin role:read); ni un VIEWER ni administrar roles', async () => {
+    expect(
+      await dataSource.query(
+        `SELECT module, module_label, resource, label, required_action, icon FROM navigation_item WHERE path = '/roles/grants-history'`,
+      ),
+    ).toEqual([
+      {
+        module: 'USER',
+        module_label: 'Administración',
+        resource: 'role',
+        label: 'Historial de permisos',
+        required_action: 'audit',
+        icon: 'shield',
+      },
+    ]);
+    const director = await http().get('/api/v1/auth/me').set(auth('director')).expect(200);
+    expect(director.body.data.permissions).toContain('role:audit:global');
+    expect(director.body.data.permissions).not.toContain('role:read:global');
+    const directorMenu = director.body.data.navigation as ReadonlyArray<MenuItem>;
+    expect(directorMenu.find((item) => item.path === '/roles/grants-history')).toMatchObject({
+      label: 'Historial de permisos',
+      icon: 'shield',
+    });
+    expect(directorMenu.find((item) => item.path === '/roles')).toBeUndefined();
+    expect((await menu('viewer')).find((item) => item.path === '/roles/grants-history')).toBeUndefined();
+    const manager = await menu('roleManager');
+    expect(manager.map((item) => item.path)).toContain('/roles');
+    expect(manager.find((item) => item.path === '/roles/grants-history')).toBeUndefined();
   });
 
   it('el CRUD publica el catálogo de íconos, fija uno válido y rechaza uno fuera del catálogo', async () => {
