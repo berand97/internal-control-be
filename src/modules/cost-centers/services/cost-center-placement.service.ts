@@ -199,6 +199,30 @@ export class CostCenterPlacementService {
     return row.id;
   }
 
+  /** open() para varios centros recién creados en esta transacción (importaciones). */
+  async openMany(manager: EntityManager, costCenterIds: ReadonlyArray<string>, context: PlacementContext): Promise<number> {
+    if (costCenterIds.length === 0) {
+      return 0;
+    }
+    const rows = (await manager.query(
+      `INSERT INTO cost_center_placement (cost_center_id, organizational_unit_id, parent_cost_center_id, has_movement,
+         valid_from, reason, changed_by, ip_address, user_agent, source, staging_import_id)
+       SELECT id, organizational_unit_id, parent_id, has_movement, created_at, $2, $3, $4, $5, $6, $7
+       FROM cost_center WHERE id = ANY($1::uuid[])
+       RETURNING id`,
+      [
+        costCenterIds,
+        context.reason.trim(),
+        context.actorId,
+        context.ip,
+        context.userAgent?.slice(0, USER_AGENT_MAX) ?? null,
+        context.source,
+        context.stagingImportId ?? null,
+      ],
+    )) as unknown[];
+    return rows.length;
+  }
+
   /**
    * Cambia la ubicación vigente. null si no cambia nada. Bloquea el centro (FOR UPDATE) para que dos cambios
    * simultáneos se serialicen; el EXCLUDE de la tabla impide solapes aunque alguien escriba por fuera.

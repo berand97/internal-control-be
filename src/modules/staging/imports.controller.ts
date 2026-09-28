@@ -51,6 +51,7 @@ import {
   UNKNOWN_COST_CENTER_POLICIES,
   type UnknownCostCenterPolicy,
 } from './import/import-fields.js';
+import { STRUCTURE_MODES, type StructureMode } from './import/cost-center-structure.js';
 import { ExcelImportService } from './services/excel-import.service.js';
 import { ImportJobsService } from './services/import-jobs.service.js';
 import { envelopedJobListSchema, ImportJobDto } from './dto/import-job.responses.js';
@@ -102,6 +103,17 @@ export class PreviewImportDto {
   @IsOptional()
   @IsIn(IDENTITY_DOCUMENT_TYPE_CODES)
   readonly documentType?: IdentityDocumentType;
+
+  @ApiPropertyOptional({
+    enum: STRUCTURE_MODES,
+    enumName: 'CostCenterImportStructureMode',
+    default: 'INSERT_ONLY',
+    description:
+      'Solo COST_CENTERS. INSERT_ONLY: solo inserta los códigos nuevos (comportamiento anterior). UPDATE_STRUCTURE: además deriva el padre del código, crea o asocia las unidades de los códigos de un dígito y actualiza padre, unidad y movimiento de los existentes (con historial); nunca cambia código ni nombre de un existente ni desactiva los ausentes. Requiere cost_center:manage:global (también al confirmar). La vista previa trae summary.costCenterStructure con los conteos y los avisos por fila en los problemas',
+  })
+  @IsOptional()
+  @IsIn(STRUCTURE_MODES)
+  readonly structureMode?: StructureMode;
 }
 
 export class IssuesQueryDto {
@@ -217,10 +229,12 @@ export class ImportsController {
       'No escribe en el modelo dentro de la petición: un worker procesa el trabajo en segundo plano (toma trabajos cada 5 s). Consulte el avance con GET /imports/jobs/{id}. Idempotente: confirmar otra vez la misma importación devuelve el mismo trabajo, en el estado en que esté (si FAILED, use POST /imports/jobs/{id}/retry).',
   })
   @ApiAcceptedResponse({ schema: envelopedSchema(ImportJobDto) })
-  confirm(
+  async confirm(
     @Param('importId', ParseUUIDPipe) importId: string,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
+    // Una importación de centros que actualiza la estructura exige cost_center:manage:global también a quien confirma.
+    await this.imports.assertCanConfirm(importId, actor.id);
     return this.jobs.enqueue(importId, actor.id);
   }
 

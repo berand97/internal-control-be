@@ -250,8 +250,9 @@ export const COST_CENTER_IMPORT_FIELDS = {
     required: true,
     header: 'Código',
     kind: 'code',
-    format: 'Texto. Un código repetido en el archivo no se importa (CODE_DUPLICATED); uno que ya existe se omite.',
-    summary: 'No puede repetirse en el archivo; si ya existe, se omite.',
+    format:
+      'Texto. Un código repetido en el archivo no se importa (CODE_DUPLICATED); uno que ya existe se omite (con «actualizar estructura» se actualizan su padre, unidad y movimiento, nunca su código ni su nombre).',
+    summary: 'No puede repetirse en el archivo; si ya existe, se omite o se actualiza su estructura.',
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (REQUIRED_FIELD_MISSING).' },
     example: 'EJ01',
   },
@@ -265,6 +266,30 @@ export const COST_CENTER_IMPORT_FIELDS = {
     maxLength: cut(200),
     whenEmpty: { effect: 'QUARANTINE', text: 'La fila no se importa (REQUIRED_FIELD_MISSING).' },
     example: 'EJEMPLO: oficina de ejemplo (fila de ejemplo, se ignora)',
+  },
+  movement: {
+    label: 'Movimiento (1 recibe movimientos, 0 agrupador)',
+    required: false,
+    header: 'Movimiento',
+    kind: 'integer',
+    format:
+      '1 = recibe movimientos; 0 = nodo agrupador (no recibe activos). Otro valor: la fila no se importa (MOVEMENT_INVALID). Un código de un dígito siempre es agrupador.',
+    summary: '1 recibe movimientos, 0 es agrupador. Vacío cuenta como 1.',
+    whenEmpty: { effect: 'NONE', text: 'Se toma 1 (recibe movimientos).' },
+    example: 1,
+  },
+  unitCode: {
+    label: 'Código de la unidad organizacional',
+    required: false,
+    header: 'Unidad',
+    kind: 'code',
+    format:
+      'Código de una unidad existente (el de Unidades organizacionales). Manda sobre la unidad que sale del prefijo del código. Un código que no existe: la fila no se importa (UNIT_UNKNOWN).',
+    summary: 'Opcional. Si viene, debe ser una unidad existente.',
+    whenEmpty: {
+      effect: 'NONE',
+      text: 'Con «actualizar estructura», la unidad sale del prefijo del código; si no hay, el centro conserva la que tenga.',
+    },
   },
 } as const satisfies Record<string, ImportField>;
 
@@ -375,7 +400,12 @@ export const fieldsFor = (target: ImportTarget): Record<string, ImportField> => 
 /** Reglas del mapeo que no caben en un campo (las aplica targetRuleErrors de ExcelImportService). */
 export const TARGET_RULES: Record<ImportTarget, ReadonlyArray<string>> = {
   ASSETS: [],
-  COST_CENTERS: [],
+  COST_CENTERS: [
+    'Modo (structureMode): INSERT_ONLY (por defecto) solo inserta los códigos nuevos; UPDATE_STRUCTURE además actualiza padre, unidad y movimiento de los existentes (requiere cost_center:manage:global). Nunca cambia código ni nombre de un existente (un nombre distinto se lista, NAME_DIFFERS) ni desactiva los que no vienen',
+    'Padre (UPDATE_STRUCTURE): se deriva del código, el primero que exista en el archivo o en el sistema entre XYZ0 (si es agrupador y no es el propio código), XY00, X000 y X; no se usan los nombres',
+    'Unidad (UPDATE_STRUCTURE): un código de un dígito es agrupador y crea o asocia la unidad CC_<dígito> (VICERECTORATE) con ese prefijo y el nombre de la fila; los demás toman la unidad del prefijo o la de la columna de unidad. Un prefijo sin unidad deja esos centros sin unidad (PREFIX_WITHOUT_UNIT)',
+    'Un existente con activos no pasa a agrupador (GROUPING_HAS_ASSETS); la columna RESPONSABLE no se importa (los jefes se asignan en Jefes de centro de costo)',
+  ],
   PERSONS: [
     'Nombre: fullName (se guarda sin partir, marca NAME_NOT_SPLIT) o firstName + lastName, no ambos',
     'Tipo de documento: columna documentType o documentType declarado en la vista previa, no ambos',

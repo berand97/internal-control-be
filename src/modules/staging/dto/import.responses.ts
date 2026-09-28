@@ -168,6 +168,56 @@ export class ImportTransformationDto {
   readonly limit!: number | null;
 }
 
+export class CostCenterStructureSummaryDto {
+  @ApiProperty({ enum: ['INSERT_ONLY', 'UPDATE_STRUCTURE'], enumName: 'CostCenterImportStructureMode' })
+  readonly mode!: 'INSERT_ONLY' | 'UPDATE_STRUCTURE';
+
+  @ApiProperty({ type: 'integer', description: 'Códigos nuevos que se insertan' })
+  readonly toInsert!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Códigos del archivo que ya existen' })
+  readonly existingInFile!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Existentes que cambian de centro padre' })
+  readonly parentChanges!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Existentes que cambian de unidad' })
+  readonly unitChanges!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Existentes que cambian de movimiento' })
+  readonly movementChanges!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Existentes con otro nombre en el archivo (no se cambia; NAME_DIFFERS)' })
+  readonly nameDifferences!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Códigos de cuatro dígitos sin padre derivable (PARENT_NOT_FOUND)' })
+  readonly orphans!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Centros del archivo que quedan agrupadores' })
+  readonly groupingCenters!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Centros del archivo que quedan con movimiento' })
+  readonly movementCenters!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Unidades que se crean (códigos de un dígito; UNIT_CREATED)' })
+  readonly unitsToCreate!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Unidades existentes que reciben su prefijo (UNIT_ASSOCIATED)' })
+  readonly unitsToAssociate!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Existentes con activos que el archivo marca agrupadores: siguen con movimiento' })
+  readonly groupingWithAssets!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Agrupadores sin hijos por la regla del código (GROUPING_WITHOUT_CHILDREN)' })
+  readonly groupingWithoutChildren!: number;
+
+  @ApiProperty({ type: 'integer', description: 'Centros activos que no vienen en el archivo: no se tocan' })
+  readonly notInFile!: number;
+
+  @ApiProperty({ type: [String], description: 'Prefijos sin unidad: sus centros quedan sin unidad (PREFIX_WITHOUT_UNIT)' })
+  readonly prefixesWithoutUnit!: string[];
+}
+
 export class ImportSummaryDto {
   @ApiProperty({
     type: [ImportUnmappedColumnDto],
@@ -191,7 +241,7 @@ export class ImportSummaryDto {
     type: 'object',
     additionalProperties: { type: 'integer' },
     description:
-      'Filas en cuarentena por motivo. PERSONS: EMPTY_ROW, DOCUMENT_NUMBER_MISSING, DOCUMENT_TYPE_INVALID, DOCUMENT_NUMBER_INVALID, DOCUMENT_NUMBER_DUPLICATED, REQUIRED_FIELD_MISSING, FIELD_TOO_LONG, DOCUMENT_TYPE_CONFLICT, COST_CENTER_UNKNOWN, EMAIL_MISSING, EMAIL_NOT_INSTITUTIONAL',
+      'Filas en cuarentena por motivo. COST_CENTERS: EMPTY_ROW, REQUIRED_FIELD_MISSING, CODE_DUPLICATED, MOVEMENT_INVALID, UNIT_UNKNOWN. PERSONS: EMPTY_ROW, DOCUMENT_NUMBER_MISSING, DOCUMENT_TYPE_INVALID, DOCUMENT_NUMBER_INVALID, DOCUMENT_NUMBER_DUPLICATED, REQUIRED_FIELD_MISSING, FIELD_TOO_LONG, DOCUMENT_TYPE_CONFLICT, COST_CENTER_UNKNOWN, EMAIL_MISSING, EMAIL_NOT_INSTITUTIONAL',
   })
   readonly quarantined!: Record<string, number>;
 
@@ -214,6 +264,13 @@ export class ImportSummaryDto {
 
   @ApiProperty({ type: [ImportMetricDto] })
   readonly metrics!: ImportMetricDto[];
+
+  @ApiProperty({
+    type: CostCenterStructureSummaryDto,
+    nullable: true,
+    description: 'Solo COST_CENTERS con structureMode=UPDATE_STRUCTURE: lo que la confirmación hará con la estructura',
+  })
+  readonly costCenterStructure!: CostCenterStructureSummaryDto | null;
 }
 
 export class ImportPreviewResponseDto {
@@ -250,6 +307,13 @@ export class ImportResultDto {
 
   @ApiProperty({ type: ImportResultSecondsDto })
   readonly seconds!: ImportResultSecondsDto;
+
+  @ApiProperty({
+    type: CostCenterStructureSummaryDto,
+    nullable: true,
+    description: 'Solo COST_CENTERS con structureMode=UPDATE_STRUCTURE: lo que se hizo con la estructura',
+  })
+  readonly costCenterStructure!: CostCenterStructureSummaryDto | null;
 }
 
 export class ImportQuarantineRowDto {

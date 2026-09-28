@@ -350,6 +350,7 @@ export class ImportJobsService {
           costCentersCreated: finalRows.costCentersCreated,
           registrationMovements: progress?.movements_done ?? 0,
           seconds: { rows: finalRows.seconds, movements: progress?.movements_seconds ?? 0 },
+          costCenterStructure: finalRows.costCenterStructure ?? null,
         };
         await this.imports.markConfirmed(manager, claim.importId, claim.requestedBy, result);
         await manager.query(
@@ -421,6 +422,12 @@ export class ImportJobsService {
           `En cuarentena: ${Object.values(result.quarantined).reduce((total, count) => total + count, 0)}`,
           ...quarantineLines(result.quarantined),
           ...(result.costCentersCreated > 0 ? [`Centros de costo creados: ${result.costCentersCreated}`] : []),
+          ...(result.costCenterStructure
+            ? [
+                `Estructura: ${result.costCenterStructure.parentChanges} cambios de padre, ${result.costCenterStructure.unitChanges} de unidad, ${result.costCenterStructure.movementChanges} de movimiento`,
+                `Unidades creadas: ${result.costCenterStructure.unitsToCreate}; nombres distintos (no se cambiaron): ${result.costCenterStructure.nameDifferences}`,
+              ]
+            : []),
           ...(claim.target === 'ASSETS' ? [`Movimientos de registro: ${result.registrationMovements}`] : []),
         ].join('\n')
       : 'La importación se detuvo sin terminar. Puede reintentarla desde el asistente de importación sin volver a subir el archivo; lo que ya quedó escrito no se duplica.';

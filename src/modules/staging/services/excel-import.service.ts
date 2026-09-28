@@ -12,7 +12,9 @@ import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.rep
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
 import type { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import type { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
+import { CostCenterPlacementService, type PlacementContext } from '../../cost-centers/services/cost-center-placement.service.js';
 import { MovementsService } from '../../movements/services/movements.service.js';
+import { PermissionsService } from '../../roles/services/permissions.service.js';
 import {
   type AssetColumn,
   diagnoseAssetSheet,
@@ -20,6 +22,16 @@ import {
   type Metric,
 } from '../diagnostics/asset-report-diagnostics.js';
 import type { RawCellValue } from '../excel/read-workbook.js';
+import {
+  type DbCenter,
+  type DbUnit,
+  type FileCenter,
+  planCostCenterStructure,
+  type StructureMode,
+  type StructurePlan,
+  type StructurePlanCounts,
+  type UnitRef,
+} from '../import/cost-center-structure.js';
 import {
   ASSET_IMPORT_FIELDS,
   type AssetImportField,
@@ -116,6 +128,11 @@ const PERSON_NAME_MAX = PERSON_IMPORT_FIELDS.firstName.maxLength.length;
 const PERSON_LAST_NAME_MAX = PERSON_IMPORT_FIELDS.lastName.maxLength.length;
 const PERSON_POSITION_MAX = PERSON_IMPORT_FIELDS.positionTitle.maxLength.length;
 const PERSON_DOCUMENT_MAX = PERSON_IMPORT_FIELDS.documentNumber.maxLength.length;
+/** Permiso para que una importación de centros cambie la estructura de los existentes (UPDATE_STRUCTURE). */
+const STRUCTURE_PERMISSION = 'cost_center:manage:global';
+/** Encabezado de la columna de jefes de la hoja de Contabilidad: no se importa (los jefes tienen su propio flujo). */
+const RESPONSIBLE_HEADER = 'RESPONSABLE';
+const ORG_UNIT_NAME_MAX = 200;
 
 /** Lo que el importador va a transformar sin avisar de otro modo, por campo (summary.transformations). */
 export interface ImportTransformation {
@@ -215,6 +232,8 @@ export interface PreviewRequest {
   readonly unknownCostCenters?: UnknownCostCenterPolicy;
   /** Solo PERSONS: tipo de documento que el operador declara para todo el lote (el archivo no trae columna). */
   readonly documentType?: IdentityDocumentType;
+  /** Solo COST_CENTERS: INSERT_ONLY (por defecto) o UPDATE_STRUCTURE (requiere cost_center:manage:global). */
+  readonly structureMode?: StructureMode;
 }
 
 /** De dónde sale el tipo de documento de las personas de un lote. */
@@ -222,9 +241,15 @@ export type DocumentTypeSource = 'COLUMN' | 'DECLARED_BY_OPERATOR' | 'UNKNOWN';
 
 interface ImportOptions {
   readonly unknownCostCenters?: UnknownCostCenterPolicy;
+  readonly structureMode?: StructureMode;
   readonly documentTypeSource?: DocumentTypeSource;
   readonly declaredDocumentType?: IdentityDocumentType;
   readonly declaredBy?: string | null;
+}
+
+/** Lo que la importación de centros hace (vista previa) o hizo (resultado) con la estructura. */
+export interface CostCenterStructureSummary extends StructurePlanCounts {
+  readonly mode: StructureMode;
 }
 
 export interface ImportSummary {
@@ -240,6 +265,8 @@ export interface ImportSummary {
   readonly transformations: ReadonlyArray<ImportTransformation>;
   readonly issues: number;
   readonly metrics: ReadonlyArray<Metric>;
+  /** Solo COST_CENTERS en modo UPDATE_STRUCTURE; null en los demás. */
+  readonly costCenterStructure: CostCenterStructureSummary | null;
 }
 
 export interface ImportResult {
@@ -249,6 +276,8 @@ export interface ImportResult {
   readonly costCentersCreated: number;
   readonly registrationMovements: number;
   readonly seconds: { readonly rows: number; readonly movements: number };
+  /** Solo COST_CENTERS en modo UPDATE_STRUCTURE; null en los demás. */
+  readonly costCenterStructure: CostCenterStructureSummary | null;
 }
 
 /** Lo que dejó la fase de filas (writeRows). Se guarda en el trabajo para que un reintento no lo recalcule. */
@@ -261,6 +290,8 @@ export interface ImportRowsResult {
   /** ASSETS: activos de esta importación aún sin movimiento REGISTRATION. */
   readonly pendingMovements: number;
   readonly seconds: number;
+  /** Solo COST_CENTERS en modo UPDATE_STRUCTURE (ausente en trabajos anteriores). */
+  readonly costCenterStructure?: CostCenterStructureSummary | null;
 }
 
 export interface MovementChunkHooks {
@@ -364,6 +395,9 @@ const targetRuleErrors = (
 ): Array<{ field: string; message: string }> => {
   const errors: Array<{ field: string; message: string }> = [];
   const m = request.mapping;
+  if (request.structureMode && request.target !== 'COST_CENTERS') {
+    errors.push({ field: 'structureMode', message: 'Solo aplica a la importación de centros de costo' });
+  }
   if (request.target !== 'PERSONS') {
     if (request.documentType) {
       errors.push({ field: 'documentType', message: 'Solo aplica a la importación de personas' });
@@ -421,7 +455,27 @@ export class ExcelImportService {
     private readonly movements: MovementsService,
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
+    private readonly placements: CostCenterPlacementService,
+    private readonly permissions: PermissionsService,
   ) {}
+
+  /** UPDATE_STRUCTURE cambia centros existentes: exige el permiso de administración de centros de costo. */
+  private async assertStructurePermission(actorId: string | null): Promise<void> {
+    if (!actorId || !(await this.permissions.userHasPermission(actorId, STRUCTURE_PERMISSION))) {
+      throw new ApiException(
+        ErrorCode.InsufficientPermissions,
+        `Actualizar la estructura de los centros de costo requiere ${STRUCTURE_PERMISSION}`,
+      );
+    }
+  }
+
+  /** Quien confirma una importación que actualiza la estructura también necesita el permiso. */
+  async assertCanConfirm(importId: string, actorId: string): Promise<void> {
+    const job = await this.importRow(importId);
+    if (job.options.structureMode === 'UPDATE_STRUCTURE') {
+      await this.assertStructurePermission(actorId);
+    }
+  }
 
   async upload(
     content: Buffer,
@@ -522,11 +576,34 @@ export class ExcelImportService {
 
   async preview(
     batchId: string,
-    request: PreviewRequest,
+    original: PreviewRequest,
     actorId: string | null,
   ): Promise<{ readonly importId: string; readonly summary: ImportSummary }> {
     const detection = await detectTemplate(this.dataSource, batchId);
-    const { headerRow, columns } = await this.validate(batchId, request, detection);
+    let request = original;
+    let validated = await this.validate(batchId, request, detection);
+    // Centros de costo: la columna RESPONSABLE no se importa. Si el operador la asignó a un campo, se quita del mapeo
+    // (y se vuelve a validar: si era el código o el nombre, el mapeo queda incompleto) y se avisa.
+    const responsibleLetters =
+      request.target === 'COST_CENTERS'
+        ? Object.entries(validated.columns)
+            .filter(([, header]) => normalizeHeader(header) === RESPONSIBLE_HEADER)
+            .map(([letter]) => letter)
+        : [];
+    const strippedFields = Object.entries(request.mapping)
+      .filter(([, letter]) => responsibleLetters.includes(letter))
+      .map(([field]) => field);
+    if (strippedFields.length > 0) {
+      request = {
+        ...request,
+        mapping: Object.fromEntries(Object.entries(request.mapping).filter(([field]) => !strippedFields.includes(field))),
+      };
+      validated = await this.validate(batchId, request, detection);
+    }
+    if (request.structureMode === 'UPDATE_STRUCTURE') {
+      await this.assertStructurePermission(actorId);
+    }
+    const { headerRow, columns } = validated;
     const applies = templateApplies(detection, request.sheet, request.target);
     const exampleRows =
       detection && detection.dataSheet === request.sheet && Object.keys(detection.example).length > 0
@@ -548,7 +625,12 @@ export class ExcelImportService {
                 : 'UNKNOWN',
             ...(request.documentType ? { declaredDocumentType: request.documentType, declaredBy: actorId } : {}),
           }
-        : { unknownCostCenters: request.unknownCostCenters ?? 'quarantine' };
+        : request.target === 'COST_CENTERS'
+          ? {
+              unknownCostCenters: request.unknownCostCenters ?? 'quarantine',
+              structureMode: request.structureMode ?? 'INSERT_ONLY',
+            }
+          : { unknownCostCenters: request.unknownCostCenters ?? 'quarantine' };
     const [created] = (await this.dataSource.query(
       `INSERT INTO staging_import (batch_id, sheet_name, header_row, target, mapping, options, created_by,
          template_version, template_example_rows)
@@ -570,11 +652,13 @@ export class ExcelImportService {
 
     let classified: Classified | null = null;
     let transformed: TransformedRow[] = [];
+    let plan: StructurePlan | null = null;
     try {
       await this.dataSource.transaction(async (manager) => {
         await this.prepareCatalogs(manager, job, actorId);
         classified = await this.classify(manager, job);
         transformed = await this.transformations(manager, job);
+        plan = await this.structurePlan(manager, job);
         throw new PreviewRollback();
       });
     } catch (error) {
@@ -586,6 +670,8 @@ export class ExcelImportService {
       throw new Error('La clasificación no produjo resultado');
     }
     const result: Classified = classified;
+    // Asignado dentro de la transacción: TypeScript no sigue la asignación en el callback.
+    const structure = plan as StructurePlan | null;
 
     const diagnosis =
       job.target === 'ASSETS' ? await this.diagnose(job) : { metrics: [], issues: [] as Issue[] };
@@ -682,6 +768,23 @@ export class ExcelImportService {
       ...exampleRows.map((row) =>
         fileIssue('TEMPLATE_EXAMPLE_ROW_IGNORED', null, 'Fila de ejemplo de la plantilla: no se importa', row),
       ),
+      ...responsibleLetters.map((letter) =>
+        fileIssue(
+          'RESPONSIBLE_NOT_IMPORTED',
+          columns[letter] ?? RESPONSIBLE_HEADER,
+          strippedFields.length > 0
+            ? `La columna ${letter} (responsable) no se importa: se quitó del mapeo de ${strippedFields.join(', ')}. Los jefes se asignan en Jefes de centro de costo`
+            : `La columna ${letter} (responsable) no se importa: los jefes se asignan en Jefes de centro de costo`,
+        ),
+      ),
+      ...(structure?.issues ?? []).map((issue) => ({
+        sheet: job.sheet_name,
+        rowNumber: issue.rowNumber,
+        column: null,
+        code: issue.code,
+        rawValue: issue.rawValue,
+        detail: issue.detail,
+      })),
     ];
     issues.unshift(...templateIssues);
     const summary: ImportSummary = {
@@ -695,6 +798,7 @@ export class ExcelImportService {
       transformations,
       issues: issues.length,
       metrics: job.target === 'ASSETS' ? diagnosis.metrics : (result.metrics ?? []),
+      costCenterStructure: structure ? { mode: 'UPDATE_STRUCTURE', ...structure.counts } : null,
     };
     await this.dataSource.transaction(async (manager) => {
       await this.saveIssues(manager, job, issues);
@@ -747,12 +851,13 @@ export class ExcelImportService {
        FROM jsonb_to_recordset($3::jsonb) AS x(row_number int, legacy_id text, reason text, detail text)`,
       [importId, job.sheet_name, JSON.stringify(classified.reasons)],
     );
+    const centers = job.target === 'COST_CENTERS' ? await this.writeCostCenters(manager, job, actorId) : null;
     const inserted =
       job.target === 'ASSETS'
         ? await this.insertAssets(manager, job, actorId)
         : job.target === 'PERSONS'
           ? await this.insertPersons(manager, job, actorId)
-          : await this.insertCostCenters(manager, job);
+          : (centers?.inserted ?? 0);
     const [pending] =
       job.target === 'ASSETS'
         ? ((await manager.query(
@@ -769,6 +874,7 @@ export class ExcelImportService {
       costCentersCreated,
       pendingMovements: pending?.count ?? 0,
       seconds: seconds(rowsStart),
+      costCenterStructure: centers?.structure ?? null,
     };
   }
 
@@ -987,7 +1093,12 @@ export class ExcelImportService {
        ON CONFLICT (external_code) DO NOTHING
        RETURNING id`,
       [job.batch_id, job.sheet_name, job.header_row, job.id, actorId],
-    )) as unknown[];
+    )) as Array<{ id: string }>;
+    await this.placements.openMany(
+      manager,
+      created.map((row) => row.id),
+      this.importPlacementContext(job, actorId, 'Alta por importación de activos (centro que no estaba en el catálogo)'),
+    );
     return created.length;
   }
 
@@ -1001,7 +1112,9 @@ export class ExcelImportService {
         `CREATE TEMP TABLE import_src ON COMMIT DROP AS
          SELECT r.row_number, r.cells,
            NOT EXISTS (SELECT 1 FROM jsonb_each_text(r.cells) e WHERE btrim(e.value) <> '') AS is_blank,
-           ${col(m, 'code')} AS code, ${col(m, 'name')} AS name, NULL::text AS reason, NULL::text AS detail
+           ${col(m, 'code')} AS code, ${col(m, 'name')} AS name,
+           ${col(m, 'movement')} AS movement_raw, ${col(m, 'unitCode')} AS unit_code,
+           NULL::text AS reason, NULL::text AS detail
          FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 ${notExampleRow(job)}`,
         [job.batch_id, job.sheet_name, job.header_row],
       );
@@ -1011,6 +1124,9 @@ export class ExcelImportService {
             WHEN is_blank THEN 'EMPTY_ROW'
             WHEN code IS NULL OR name IS NULL THEN 'REQUIRED_FIELD_MISSING'
             WHEN count(*) OVER (PARTITION BY code) > 1 THEN 'CODE_DUPLICATED'
+            WHEN movement_raw IS NOT NULL AND movement_raw NOT IN ('0', '1') THEN 'MOVEMENT_INVALID'
+            WHEN unit_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organizational_unit u WHERE u.code = unit_code)
+              THEN 'UNIT_UNKNOWN'
           END AS reason FROM import_src) c
         WHERE s.row_number = c.row_number`);
       return this.summarize(manager, 'code', 'SELECT 1 FROM cost_center cc WHERE cc.external_code = s.code', null);
@@ -1420,17 +1536,219 @@ export class ExcelImportService {
     return row?.origin ?? 0;
   }
 
-  private async insertCostCenters(manager: EntityManager, job: ImportRow): Promise<number> {
+  private importPlacementContext(job: ImportRow, actorId: string | null, what: string): PlacementContext {
+    return {
+      reason: `${what}: ${job.file_name} · hoja ${job.sheet_name} (importación ${job.id})`,
+      actorId,
+      ip: null,
+      userAgent: null,
+      source: 'IMPORT',
+      stagingImportId: job.id,
+    };
+  }
+
+  /**
+   * Plan de estructura (solo COST_CENTERS en UPDATE_STRUCTURE) con las filas válidas de import_src (classify) y el
+   * estado de la base dentro de la transacción de quien llama: la vista previa y la confirmación ven lo mismo.
+   */
+  private async structurePlan(manager: EntityManager, job: ImportRow): Promise<StructurePlan | null> {
+    if (job.target !== 'COST_CENTERS' || job.options.structureMode !== 'UPDATE_STRUCTURE') {
+      return null;
+    }
+    const file = (
+      (await manager.query(
+        `SELECT row_number, code, left(name, ${COST_CENTER_NAME_MAX}) AS name, movement_raw, unit_code
+         FROM import_src WHERE reason IS NULL ORDER BY row_number`,
+      )) as Array<{ row_number: number; code: string; name: string; movement_raw: string | null; unit_code: string | null }>
+    ).map(
+      (row): FileCenter => ({
+        rowNumber: row.row_number,
+        code: row.code,
+        name: row.name,
+        hasMovement: row.movement_raw !== '0',
+        unitCode: row.unit_code,
+      }),
+    );
+    const db = (
+      (await manager.query(
+        `SELECT cc.id, cc.external_code, cc.name, cc.parent_id, cc.organizational_unit_id, cc.has_movement, cc.is_active,
+                coalesce(a.count, 0)::int AS active_assets
+         FROM cost_center cc
+         LEFT JOIN (SELECT current_cost_center_id, count(*) AS count FROM asset
+                    WHERE operational_status <> 'WRITTEN_OFF' GROUP BY current_cost_center_id) a
+           ON a.current_cost_center_id = cc.id`,
+      )) as Array<{
+        id: string;
+        external_code: string;
+        name: string;
+        parent_id: string | null;
+        organizational_unit_id: string | null;
+        has_movement: boolean;
+        is_active: boolean;
+        active_assets: number;
+      }>
+    ).map(
+      (row): DbCenter => ({
+        id: row.id,
+        code: row.external_code,
+        name: row.name,
+        parentId: row.parent_id,
+        unitId: row.organizational_unit_id,
+        hasMovement: row.has_movement,
+        isActive: row.is_active,
+        activeAssets: row.active_assets,
+      }),
+    );
+    const units = (await manager.query(
+      `SELECT id, code, name, code_prefix AS "codePrefix", is_active AS "isActive" FROM organizational_unit`,
+    )) as DbUnit[];
+    return planCostCenterStructure(file, db, units);
+  }
+
+  /**
+   * Escribe los centros de costo del lote en la transacción de quien llama. INSERT_ONLY: solo inserta los códigos
+   * nuevos (movimiento y unidad de la columna si vienen). UPDATE_STRUCTURE: además crea/asocia las unidades de los
+   * códigos de un dígito, deriva el padre y aplica padre, unidad y movimiento a los existentes con
+   * CostCenterPlacementService (historial con origen IMPORT). Nunca cambia código ni nombre de un existente ni
+   * desactiva los que no vienen.
+   */
+  private async writeCostCenters(
+    manager: EntityManager,
+    job: ImportRow,
+    actorId: string,
+  ): Promise<{ readonly inserted: number; readonly structure: CostCenterStructureSummary | null }> {
+    const plan = await this.structurePlan(manager, job);
+    if (!plan) {
+      const inserted = (await manager.query(
+        `INSERT INTO cost_center (external_code, name, organizational_unit_id, has_movement, accepts_assets, is_active,
+           sync_source, last_synced_at, external_metadata)
+         SELECT s.code, left(s.name, ${COST_CENTER_NAME_MAX}), u.id, coalesce(s.movement_raw, '1') = '1',
+                coalesce(s.movement_raw, '1') = '1', TRUE, 'IMPORT_EXCEL', NOW(),
+                jsonb_build_object('importId', $1::text, 'row', s.row_number)
+         FROM import_src s LEFT JOIN organizational_unit u ON u.code = s.unit_code
+         WHERE s.reason IS NULL
+         ON CONFLICT (external_code) DO NOTHING
+         RETURNING id`,
+        [job.id],
+      )) as Array<{ id: string }>;
+      await this.placements.openMany(
+        manager,
+        inserted.map((row) => row.id),
+        this.importPlacementContext(job, actorId, 'Alta por importación de centros de costo'),
+      );
+      return { inserted: inserted.length, structure: null };
+    }
+
+    // 1. Unidades de los códigos de un dígito.
+    const unitIdByPrefix = new Map<string, string>();
+    for (const unit of plan.units) {
+      if (unit.action === 'CREATE') {
+        const [created] = (await manager.query(
+          `INSERT INTO organizational_unit (code, name, unit_type, hierarchy_level, hierarchy_path, code_prefix)
+           VALUES ($1, left($2, ${ORG_UNIT_NAME_MAX}), 'VICERECTORATE', 0, $3, $4) RETURNING id`,
+          [unit.code, unit.name, `/${unit.code.toLowerCase()}`, unit.prefix],
+        )) as Array<{ id: string }>;
+        const unitId = created?.id ?? '';
+        unitIdByPrefix.set(unit.prefix, unitId);
+        await this.auditLogsRepository.record(
+          {
+            action: AuditAction.OrgUnitCreated,
+            entityType: 'ORG_UNIT',
+            entityId: unitId,
+            performedBy: actorId,
+            ipAddress: null,
+            userAgent: null,
+            changes: { code: unit.code, codePrefix: unit.prefix, stagingImportId: job.id },
+          },
+          manager,
+        );
+      } else if (unit.unitId) {
+        if (unit.action === 'ASSOCIATE') {
+          await manager.query('UPDATE organizational_unit SET code_prefix = $2, updated_at = NOW() WHERE id = $1', [
+            unit.unitId,
+            unit.prefix,
+          ]);
+          await this.auditLogsRepository.record(
+            {
+              action: AuditAction.OrgUnitUpdated,
+              entityType: 'ORG_UNIT',
+              entityId: unit.unitId,
+              performedBy: actorId,
+              ipAddress: null,
+              userAgent: null,
+              changes: { codePrefix: unit.prefix, stagingImportId: job.id },
+            },
+            manager,
+          );
+        }
+        unitIdByPrefix.set(unit.prefix, unit.unitId);
+      }
+    }
+    const unitId = (unit: UnitRef | null): string | null =>
+      unit === null ? null : 'id' in unit ? unit.id : (unitIdByPrefix.get(unit.prefix) ?? null);
+
+    // 2. Centros nuevos: unidad y movimiento al insertar; el padre después (puede ser otro centro nuevo del lote).
+    const fresh = plan.centers.filter((center) => center.existingId === null);
     const inserted = (await manager.query(
-      `INSERT INTO cost_center (external_code, name, accepts_assets, is_active, sync_source, last_synced_at, external_metadata)
-       SELECT s.code, left(s.name, ${COST_CENTER_NAME_MAX}), TRUE, TRUE, 'IMPORT_EXCEL', NOW(),
-              jsonb_build_object('importId', $1::text, 'row', s.row_number)
-       FROM import_src s WHERE s.reason IS NULL
+      `INSERT INTO cost_center (external_code, name, organizational_unit_id, has_movement, accepts_assets, is_active,
+         sync_source, last_synced_at, external_metadata)
+       SELECT x.code, x.name, x.unit_id, x.has_movement, x.has_movement, TRUE, 'IMPORT_EXCEL', NOW(),
+              jsonb_build_object('importId', $1::text, 'row', x.row_number)
+       FROM jsonb_to_recordset($2::jsonb) AS x(code text, name text, unit_id uuid, has_movement boolean, row_number int)
        ON CONFLICT (external_code) DO NOTHING
-       RETURNING id`,
-      [job.id],
-    )) as unknown[];
-    return inserted.length;
+       RETURNING id, external_code`,
+      [
+        job.id,
+        JSON.stringify(
+          fresh.map((center) => ({
+            code: center.code,
+            name: center.name,
+            unit_id: unitId(center.unit),
+            has_movement: center.hasMovement,
+            row_number: center.rowNumber,
+          })),
+        ),
+      ],
+    )) as Array<{ id: string; external_code: string }>;
+    const idByCode = new Map(
+      ((await manager.query('SELECT id, external_code FROM cost_center')) as Array<{ id: string; external_code: string }>).map(
+        (row) => [row.external_code, row.id],
+      ),
+    );
+    const insertedIds = new Set(inserted.map((row) => row.id));
+    const freshParents = fresh
+      .map((center) => ({ id: idByCode.get(center.code), parent: center.parentCode ? idByCode.get(center.parentCode) : undefined }))
+      .filter((row): row is { id: string; parent: string } => Boolean(row.id && row.parent && insertedIds.has(row.id)));
+    await manager.query(
+      `UPDATE cost_center c SET parent_id = x.parent_id
+       FROM jsonb_to_recordset($1::jsonb) AS x(id uuid, parent_id uuid) WHERE c.id = x.id`,
+      [JSON.stringify(freshParents.map((row) => ({ id: row.id, parent_id: row.parent })))],
+    );
+    await this.placements.openMany(
+      manager,
+      [...insertedIds],
+      this.importPlacementContext(job, actorId, 'Alta por importación de centros de costo'),
+    );
+
+    // 3. Existentes: padre, unidad y movimiento por el historial; de la raíz hacia abajo (X, X000, XY00, XYZ0, XYZn).
+    const depth = (code: string): number => (code.length === 1 ? 0 : 4 - (/0*$/.exec(code)?.[0].length ?? 0));
+    const changes = plan.centers
+      .filter((center) => center.existingId && (center.parentChanges || center.unitChanges || center.movementChanges))
+      .sort((left, right) => depth(left.code) - depth(right.code) || left.code.localeCompare(right.code));
+    const context = this.importPlacementContext(job, actorId, 'Estructura actualizada por importación de centros de costo');
+    for (const center of changes) {
+      await this.placements.change(
+        manager,
+        center.existingId ?? '',
+        {
+          ...(center.parentChanges ? { parentId: center.parentCode ? (idByCode.get(center.parentCode) ?? null) : null } : {}),
+          ...(center.unitChanges ? { unitId: unitId(center.unit) } : {}),
+          ...(center.movementChanges ? { hasMovement: center.hasMovement } : {}),
+        },
+        context,
+      );
+    }
+    return { inserted: inserted.length, structure: { mode: 'UPDATE_STRUCTURE', ...plan.counts } };
   }
 
   /**
