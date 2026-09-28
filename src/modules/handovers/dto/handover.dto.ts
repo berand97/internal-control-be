@@ -17,6 +17,7 @@ import {
 } from 'class-validator';
 import { OPERATIONAL_STATUSES, OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import { DOCUMENT_STATUSES, SIGNATURE_STATUSES } from '../../documents/dto/document.responses.js';
+import { ApiSignerSubstitutions, type SignerSubstitutionsInput } from '../../documents/dto/signer-substitution.dto.js';
 import { HANDOVER_STATUSES, type HandoverStatus } from '../domain/handover.js';
 
 export const DOCUMENT_GENERATION_STATUSES = ['NONE', 'PENDING', 'FAILED', 'GENERATED', 'CANCELLED'] as const;
@@ -58,6 +59,9 @@ export class CreateHandoverDto {
   @ApiProperty({ format: 'uuid', description: 'Persona de Control Interno que firma el turno AUDITA' })
   @IsUUID('all')
   readonly auditorPersonId!: string;
+
+  @ApiSignerSubstitutions()
+  readonly signerSubstitutions?: SignerSubstitutionsInput;
 }
 
 export class CancelHandoverDto {

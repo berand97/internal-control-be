@@ -535,6 +535,7 @@ export class LoansService {
           assetIds,
           movementIds,
           signers,
+          ...(dto.signerSubstitutions ? { signerSubstitutions: dto.signerSubstitutions } : {}),
           ...(Object.keys(assetNotes).length ? { assetNotes } : {}),
           fields,
         },
@@ -592,13 +593,17 @@ export class LoansService {
       await manager.query('UPDATE document_asset SET movement_id = NULL WHERE document_id = $1', [act.documentId]);
       const signers = { ENTREGA: dto.deliveredByPersonId, AUDITA: dto.controlInternoPersonId };
       const payload: DocumentRequestPayload = {
-        ...previousRequest.payload,
+        // Las sustituciones del acta rechazada no se heredan: valen las de esta solicitud.
+        ...(Object.fromEntries(
+          Object.entries(previousRequest.payload).filter(([key]) => key !== 'signerSubstitutions'),
+        ) as DocumentRequestPayload),
         formatKey: LOAN_DELIVERY_FORMAT,
         entityType: LOAN_DOCUMENT_ENTITY,
         entityId: loan.id,
         costCenterId: loan.sourceCostCenterId,
         responsiblePersonId: contactPersonId,
         signers,
+        ...(dto.signerSubstitutions ? { signerSubstitutions: dto.signerSubstitutions } : {}),
       };
       const requestId = await this.documents.enqueue(manager, payload, actor.id);
       await this.addEvent(manager, loan.id, 'DELIVERY_ACT_REGENERATED', actor.id, {

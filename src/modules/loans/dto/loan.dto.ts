@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { ApiSignerSubstitutions, type SignerSubstitutionsInput } from '../../documents/dto/signer-substitution.dto.js';
 import {
   ArrayMinSize,
   IsArray,
@@ -84,6 +85,9 @@ export class DeliverLoanDto {
   @IsOptional()
   @IsObject()
   readonly assetNotes?: Record<string, string>;
+
+  @ApiSignerSubstitutions()
+  readonly signerSubstitutions?: SignerSubstitutionsInput;
 }
 
 export class RegenerateDeliveryActDto {
@@ -108,6 +112,9 @@ export class RegenerateDeliveryActDto {
   @IsString()
   @MinLength(5)
   readonly reason!: string;
+
+  @ApiSignerSubstitutions()
+  readonly signerSubstitutions?: SignerSubstitutionsInput;
 }
 
 export class UndoDeliveryDto {

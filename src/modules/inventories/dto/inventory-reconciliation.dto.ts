@@ -1,3 +1,4 @@
+import { ApiSignerSubstitutions, type SignerSubstitutionsInput } from '../../documents/dto/signer-substitution.dto.js';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -146,4 +147,10 @@ export class ResolveSurplusDto {
   @ValidateNested()
   @Type(() => SurplusAssetDto)
   readonly asset?: SurplusAssetDto;
+}
+
+/** POST /inventories/:id/act/enqueue: cuerpo opcional. */
+export class EnqueueInventoryActDto {
+  @ApiSignerSubstitutions()
+  readonly signerSubstitutions?: SignerSubstitutionsInput;
 }

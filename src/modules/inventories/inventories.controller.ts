@@ -49,7 +49,7 @@ import {
   InventoryScheduleResponseDto,
   InventorySummaryDto,
 } from './dto/inventory-schedule.responses.js';
-import { ResolveSurplusDto, SetInventoryAccountingCutDto } from './dto/inventory-reconciliation.dto.js';
+import { EnqueueInventoryActDto, ResolveSurplusDto, SetInventoryAccountingCutDto } from './dto/inventory-reconciliation.dto.js';
 import {
   InventoryResponsibleCandidatesPageDto,
   QueryInventoryResponsibleCandidatesDto,
@@ -469,13 +469,16 @@ export class InventoriesController {
     description:
       'Solo tomas RECONCILED con acta NOT_ENQUEUED. Firman el responsable de la toma (RESPONSABLE) y quien aprobó la ' +
       'conciliación (AUDITA). Si el formato sigue sin código SGC o firmantes: 409 DOCUMENT_FORMAT_NOT_READY; otro ' +
-      'error al armar el acta: 406 INVALID_STATE. En ambos, error.details[0] = { field: reason, message: <reason> }.',
+      'error al armar el acta: 406 INVALID_STATE. En ambos, error.details[0] = { field: reason, message: <reason> }. ' +
+      'Si el responsable de la toma es quien aprobó la conciliación, la separación de funciones exige un sustituto para ' +
+      'AUDITA (signerSubstitutions); sin él, la razón es ENQUEUE_FAILED con el mensaje DOCUMENT_SIGNER_DUPLICATED.',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryActStateDto) })
   enqueueAct(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EnqueueInventoryActDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.act.retryEnqueue(id, actor);
+    return this.act.retryEnqueue(id, actor, dto.signerSubstitutions);
   }
 }

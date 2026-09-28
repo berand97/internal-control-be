@@ -23,6 +23,7 @@ import {
   type InventoryActReason,
   type InventoryActRetryAction,
 } from '../domain/inventory-act.js';
+import type { SignerSubstitutionsInput } from '../../documents/dto/signer-substitution.dto.js';
 import { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
@@ -111,7 +112,7 @@ export class InventoryActService implements OnModuleInit {
   }
 
   /** POST /inventories/:id/act/enqueue: la toma está RECONCILED y su acta no se encoló. */
-  async retryEnqueue(inventoryId: string, actor: AuthenticatedUser) {
+  async retryEnqueue(inventoryId: string, actor: AuthenticatedUser, signerSubstitutions?: SignerSubstitutionsInput) {
     const outcome = await this.dataSource.transaction(async (manager) => {
       const inventory = await manager
         .getRepository(PhysicalInventory)
@@ -125,7 +126,7 @@ export class InventoryActService implements OnModuleInit {
           'El acta se encola solo en una toma conciliada cuya acta no se encoló',
         );
       }
-      const result = await this.tryEnqueue(manager, inventory, inventory.reconcileApprovedBy ?? actor.id);
+      const result = await this.tryEnqueue(manager, inventory, inventory.reconcileApprovedBy ?? actor.id, signerSubstitutions);
       this.applyOutcome(inventory, result);
       await manager.getRepository(PhysicalInventory).save(inventory);
       await this.auditEnqueue(manager, inventory, actor.id, result);
@@ -236,7 +237,12 @@ export class InventoryActService implements OnModuleInit {
     );
   }
 
-  private async tryEnqueue(manager: EntityManager, inventory: PhysicalInventory, approverUserId: string): Promise<EnqueueOutcome> {
+  private async tryEnqueue(
+    manager: EntityManager,
+    inventory: PhysicalInventory,
+    approverUserId: string,
+    signerSubstitutions?: SignerSubstitutionsInput,
+  ): Promise<EnqueueOutcome> {
     const readiness = await this.engine.formatReadiness(INVENTORY_ACT_FORMAT_KEY, manager).catch((error: unknown) => ({
       ready: false,
       reasons: [error instanceof Error ? error.message : String(error)],
@@ -253,7 +259,13 @@ export class InventoryActService implements OnModuleInit {
       const responsiblePersonId = await this.personOf(manager, inventory.responsibleUserId);
       const approverPersonId = await this.personOf(manager, approverUserId);
       const payload = await this.payload(manager, inventory, responsiblePersonId, approverPersonId);
-      const requestId = await this.engine.enqueue(manager, payload, approverUserId);
+      // Separación de funciones: si quien aprueba (AUDITA) es el responsable de la toma, el acta necesita un sustituto
+      // de Control Interno (POST /inventories/:id/act/enqueue con signerSubstitutions.AUDITA).
+      const requestId = await this.engine.enqueue(
+        manager,
+        signerSubstitutions && Object.keys(signerSubstitutions).length > 0 ? { ...payload, signerSubstitutions } : payload,
+        approverUserId,
+      );
       await manager.query('RELEASE SAVEPOINT inventory_act');
       return { requestId };
     } catch (error) {

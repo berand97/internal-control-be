@@ -122,6 +122,7 @@ export class HandoversService implements OnModuleInit {
             responsiblePersonId: dto.receiverPersonId,
             assetIds,
             signers: { AUDITA: dto.auditorPersonId },
+            ...(dto.signerSubstitutions ? { signerSubstitutions: dto.signerSubstitutions } : {}),
             assetNotes,
           },
           actor.id,
