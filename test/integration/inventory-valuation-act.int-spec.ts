@@ -671,4 +671,43 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(text).toContain('|No encontrado|No encontrado|Sin dato|');
     expect(text).toContain('FIRMAS|Responsable Valoración|Aprobador Valoración|');
   });
+  it('separación de funciones: si quien aprueba es el responsable de la toma, el acta queda sin encolar hasta indicar un sustituto de Control Interno', async () => {
+    const centerId = await center('Centro con conflicto de firmas');
+    await newAsset(centerId, 10);
+    // El aprobador es a la vez el responsable de la toma: firmaría RESPONSABLE y AUDITA.
+    const id = await started(centerId, approver);
+    expect((await post(approver, `/${id}/close`, { allowUnverified: true })).status).toBe(200);
+    const reconcile = await post(approver, `/${id}/reconcile`);
+    expect(reconcile.status, JSON.stringify(reconcile.body)).toBe(200);
+    // El proceso ya lo impide (INVENTORY_RECONCILE_SOD: quien pide conciliar, el responsable, no aprueba); se simula el
+    // dato para probar la defensa del motor: la solicitud de conciliación queda a nombre de la directora.
+    await dataSource.query('UPDATE physical_inventory SET reconcile_requested_by = $2 WHERE id = $1', [id, director.userId]);
+    const approved = await post(approver, `/${id}/reconcile/approve`);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+    expect(approved.body.data.status).toBe('RECONCILED');
+    expect(approved.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
+    expect(String(approved.body.data.act.message)).toContain('Separación de funciones');
+
+    const withoutRole = await person('SinRol', null);
+    const invalid = await post(director, `/${id}/act/enqueue`, {
+      signerSubstitutions: { AUDITA: { personId: withoutRole.personId, reason: 'El responsable aprobó la conciliación' } },
+    });
+    expect(invalid.status).toBe(406);
+    expect(invalid.body.error.message).toContain('rol vigente');
+    const enqueued = await post(director, `/${id}/act/enqueue`, {
+      signerSubstitutions: { AUDITA: { personId: director.personId, reason: 'El responsable aprobó la conciliación' } },
+    });
+    expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
+    expect(enqueued.body.data).toMatchObject({ generation: 'PENDING' });
+    await engine.processPending(1000);
+    const generated = await detail(id);
+    expect(generated.act).toMatchObject({ generation: 'GENERATED' });
+    const firmante = await scalar<Record<string, { nombre: string; sustitucion?: Record<string, string> }>>(
+      dataSource,
+      `SELECT data->'firmante' FROM document WHERE id = $1`,
+      [generated.act['documentId']],
+    );
+    expect(firmante['audita']?.sustitucion).toMatchObject({ motivo: 'El responsable aprobó la conciliación', rol: 'Control Interno' });
+    expect(firmante['responsable']?.nombre).toBe(firmante['audita']?.sustitucion?.['nombre']);
+  });
 });

@@ -362,6 +362,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       `DELETE FROM signature_envelope_signer WHERE envelope_id IN (SELECT id FROM signature_envelope WHERE document_id = ANY($1))`,
       [ids],
     );
+    await dataSource.query('DELETE FROM document_signature_reassignment WHERE document_id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM signature_signing_link WHERE document_id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM signature_envelope WHERE document_id = ANY($1)', [ids]);
     await dataSource.query(`DELETE FROM document_request WHERE payload->>'entityType' = 'LOAN'`);
@@ -1195,5 +1196,36 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       ).rejects.toMatchObject({ code: 'DOCUMENT_FORMAT_NOT_READY' });
       expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE format_key = 'LOAN_RETURN'`)).toBe(0);
     });
+  });
+  it('separación de funciones: quien recibe no firma por Control Interno salvo sustituto con rol vigente, impreso en el acta', async () => {
+    const tag = randomUUID().slice(0, 6).toUpperCase();
+    const assetId = await asset(`SOD-${tag}`, `EQUIPO SOD ${tag}`);
+    const id = await requestLoan([assetId], addDays(bogotaDate(new Date()), 30));
+    await approve(id, 'director').expect(200);
+    const body = { deliveredByPersonId: users['entrega']?.personId, controlInternoPersonId: users['recibe']?.personId };
+    const duplicated = await http().post(`/api/v1/loans/${id}/deliver`).set(auth('director')).send(body);
+    expect([duplicated.status, duplicated.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
+    expect((await detail(id)).status).toBe('APPROVED');
+    const noRole = await http()
+      .post(`/api/v1/loans/${id}/deliver`)
+      .set(auth('director'))
+      .send({ ...body, signerSubstitutions: { AUDITA: { personId: users['nadie']?.personId, reason: 'El contacto es auditor' } } });
+    expect([noRole.status, noRole.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_SUBSTITUTE_INVALID']);
+    await http()
+      .post(`/api/v1/loans/${id}/deliver`)
+      .set(auth('director'))
+      .send({ ...body, signerSubstitutions: { AUDITA: { personId: users['director']?.personId, reason: 'El contacto es auditor' } } })
+      .expect(200);
+    await drain();
+    const loan = await detail(id);
+    const data = await scalar<{
+      firmante: Record<string, { nombre: string; sustitucion?: Record<string, string> }>;
+      tablas: { sustituciones: Array<Record<string, string>> };
+    }>(dataSource, 'SELECT data FROM document WHERE id = $1', [loan.deliveryAct.documentId]);
+    expect(data.firmante['audita']).toMatchObject({
+      nombre: users['director']?.fullName,
+      sustitucion: { nombre: users['recibe']?.fullName, motivo: 'El contacto es auditor' },
+    });
+    expect(data.tablas.sustituciones).toEqual([expect.objectContaining({ sustituido: users['recibe']?.fullName, conflicto: 'Recibe' })]);
   });
 });

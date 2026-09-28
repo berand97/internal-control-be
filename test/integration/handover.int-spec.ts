@@ -768,4 +768,35 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     const denied = await http().get('/api/v1/persons').set(auth(outsider)).expect(403);
     expect(denied.body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
   });
+  it('separación de funciones: quien recibe no audita salvo sustituto de Control Interno con rol vigente, impreso en el acta', async () => {
+    const assetId = await asset();
+    const duplicated = await create([assetId], { auditorPersonId: receiver.personId });
+    expect([duplicated.status, duplicated.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
+    expect(duplicated.body.error.details).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'signerSubstitutions.AUDITA' })]));
+    const noRole = await create([assetId], {
+      auditorPersonId: receiver.personId,
+      signerSubstitutions: { AUDITA: { personId: replacement.personId, reason: 'La receptora es auditora' } },
+    });
+    expect([noRole.status, noRole.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_SUBSTITUTE_INVALID']);
+    const created = await create([assetId], {
+      auditorPersonId: receiver.personId,
+      signerSubstitutions: { AUDITA: { personId: director.personId, reason: 'La receptora es auditora' } },
+    }).expect(201);
+    await drain();
+    const handover = await detail(created.body.data.id);
+    expect(handover.document.signatures.map((signature: { role: string; personId: string }) => [signature.role, signature.personId])).toEqual([
+      ['RECIBE', receiver.personId],
+      ['AUDITA', director.personId],
+    ]);
+    const firmante = await scalar<Record<string, { nombre: string; sustitucion?: Record<string, string> }>>(
+      dataSource,
+      `SELECT data->'firmante' FROM document WHERE id = $1`,
+      [handover.document.documentId],
+    );
+    expect(firmante['audita']).toMatchObject({
+      nombre: director.name,
+      sustitucion: { nombre: receiver.name, rol: 'Control Interno', motivo: 'La receptora es auditora' },
+    });
+    await http().post(`/api/v1/handovers/${created.body.data.id}/cancel`).set(auth(director)).send({ reason: 'Prueba terminada' }).expect(200);
+  });
 });
