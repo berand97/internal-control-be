@@ -88,6 +88,9 @@ export class OrganizationalUnitsService {
     const parent = dto.parentId
       ? await this.requireUnit(dto.parentId)
       : null;
+    if (dto.codePrefix && (dto.isActive ?? true)) {
+      await this.assertPrefixFree(dto.codePrefix, null);
+    }
     try {
       const unit = await this.unitsRepository.insert({
         parentId: parent?.id ?? null,
@@ -97,6 +100,7 @@ export class OrganizationalUnitsService {
         hierarchyLevel: parent ? parent.hierarchyLevel + 1 : 0,
         hierarchyPath: childPath(parent?.hierarchyPath ?? null, dto.code),
         isActive: dto.isActive ?? true,
+        codePrefix: dto.codePrefix ?? null,
       });
       await this.auditLogsRepository.record({
         action: AuditAction.OrgUnitCreated,
@@ -146,6 +150,11 @@ export class OrganizationalUnitsService {
       }
     }
 
+    const nextPrefix = dto.codePrefix !== undefined ? dto.codePrefix : unit.codePrefix;
+    if (nextPrefix && (dto.isActive ?? unit.isActive)) {
+      await this.assertPrefixFree(nextPrefix, unit.id);
+    }
+
     const nextCode = dto.code ?? unit.code;
     const nextPath = childPath(parent?.hierarchyPath ?? null, nextCode);
     const nextLevel = parent ? parent.hierarchyLevel + 1 : 0;
@@ -157,6 +166,7 @@ export class OrganizationalUnitsService {
         ...(dto.type !== undefined ? { unitType: dto.type } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.code !== undefined ? { code: dto.code } : {}),
+        ...(dto.codePrefix !== undefined ? { codePrefix: dto.codePrefix } : {}),
         ...(dto.parentId !== undefined ? { parentId } : {}),
         ...(pathChanged
           ? { hierarchyPath: nextPath, hierarchyLevel: nextLevel }
@@ -212,6 +222,18 @@ export class OrganizationalUnitsService {
       changes: { code: unit.code },
     });
     return null;
+  }
+
+  /** El prefijo de código de centros es único entre unidades activas (uq_org_unit_code_prefix_active). */
+  private async assertPrefixFree(codePrefix: string, unitId: string | null): Promise<void> {
+    const holder = await this.unitsRepository.findActiveByCodePrefix(codePrefix);
+    if (holder && holder.id !== unitId) {
+      throw new ApiException(
+        ErrorCode.OrgUnitCodePrefixExists,
+        `El prefijo ${codePrefix} ya es de la unidad ${holder.name}`,
+        [{ field: 'codePrefix', message: holder.code }],
+      );
+    }
   }
 
   private async requireUnit(id: string): Promise<OrganizationalUnit> {

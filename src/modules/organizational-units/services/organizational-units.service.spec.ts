@@ -43,6 +43,7 @@ describe('OrganizationalUnitsService', () => {
       findById: vi.fn(),
       findActiveById: vi.fn(),
       findByCode: vi.fn(),
+      findActiveByCodePrefix: vi.fn().mockResolvedValue(null),
       findChildren: vi.fn(),
       countActiveChildren: vi.fn().mockResolvedValue(0),
       countCostCenters: vi.fn().mockResolvedValue(0),

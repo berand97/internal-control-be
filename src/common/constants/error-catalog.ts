@@ -822,6 +822,36 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'La jefatura ya terminó',
   },
+  [ErrorCode.CostCenterPlacementCycle]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Ese centro padre está por debajo de este centro: se formaría un ciclo',
+  },
+  [ErrorCode.CostCenterPlacementUnchanged]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'La ubicación indicada es la vigente: no hay nada que cambiar',
+  },
+  [ErrorCode.CostCenterPlacementRequired]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'La unidad y el centro padre se cambian con POST /cost-centers/{id}/placement, indicando el motivo',
+  },
+  [ErrorCode.CostCenterGroupingHasAssets]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'No puede quedar como agrupador: tiene activos asignados',
+  },
+  [ErrorCode.CostCenterCodeOutOfUnitRange]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El código no está en el rango de la unidad',
+  },
+  [ErrorCode.OrgUnitCodePrefixExists]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Otra unidad activa ya usa ese prefijo de código',
+  },
   [ErrorCode.ImportJobNotRetryable]: {
     httpStatus: 409,
     action: 'CANCEL',

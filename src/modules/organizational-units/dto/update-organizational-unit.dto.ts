@@ -53,4 +53,17 @@ export class UpdateOrganizationalUnitDto {
   @IsOptional()
   @IsBoolean()
   readonly isActive?: boolean;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    nullable: true,
+    example: '4',
+    maxLength: 4,
+    description:
+      'Dígito(s) inicial(es) del rango de códigos de sus centros de costo (4 → 4000–4999). Único entre unidades activas. null lo quita; omitir no lo cambia.',
+  })
+  @Transform(({ value }: { value: unknown }) => (value === '' ? null : value))
+  @IsOptional()
+  @Matches(/^[0-9]{1,4}$/, { message: 'El prefijo son de 1 a 4 dígitos' })
+  readonly codePrefix?: string | null;
 }

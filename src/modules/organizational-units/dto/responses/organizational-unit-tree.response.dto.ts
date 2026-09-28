@@ -27,6 +27,13 @@ export class OrganizationalUnitTreeResponseDto {
   @ApiProperty()
   readonly isActive!: boolean;
 
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Dígito(s) inicial(es) del rango de códigos de sus centros de costo',
+  })
+  readonly codePrefix!: string | null;
+
   @ApiProperty({ type: () => [OrganizationalUnitTreeResponseDto] })
   readonly children!: ReadonlyArray<OrganizationalUnitTreeResponseDto>;
 
@@ -43,6 +50,7 @@ export class OrganizationalUnitTreeResponseDto {
       hierarchyLevel: unit.hierarchyLevel,
       hierarchyPath: unit.hierarchyPath,
       isActive: unit.isActive,
+      codePrefix: unit.codePrefix,
       children,
     };
   }

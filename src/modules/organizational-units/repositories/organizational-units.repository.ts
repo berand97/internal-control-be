@@ -40,6 +40,10 @@ export class TypeOrmOrganizationalUnitsRepository
     return this.units.findOne({ where: { code } });
   }
 
+  findActiveByCodePrefix(codePrefix: string): Promise<OrganizationalUnit | null> {
+    return this.units.findOne({ where: { codePrefix, isActive: true } });
+  }
+
   findChildren(parentId: string): Promise<ReadonlyArray<OrganizationalUnit>> {
     return this.units.find({
       where: { parentId },

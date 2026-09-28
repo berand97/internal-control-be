@@ -167,6 +167,12 @@ export enum ErrorCode {
 
   CostCenterHeadOverlap = 'COST_CENTER_HEAD_OVERLAP',
   CostCenterHeadEnded = 'COST_CENTER_HEAD_ENDED',
+  CostCenterPlacementCycle = 'COST_CENTER_PLACEMENT_CYCLE',
+  CostCenterPlacementUnchanged = 'COST_CENTER_PLACEMENT_UNCHANGED',
+  CostCenterPlacementRequired = 'COST_CENTER_PLACEMENT_REQUIRED',
+  CostCenterGroupingHasAssets = 'COST_CENTER_GROUPING_HAS_ASSETS',
+  CostCenterCodeOutOfUnitRange = 'COST_CENTER_CODE_OUT_OF_UNIT_RANGE',
+  OrgUnitCodePrefixExists = 'ORG_UNIT_CODE_PREFIX_EXISTS',
 
   ImportJobNotRetryable = 'IMPORT_JOB_NOT_RETRYABLE',
 

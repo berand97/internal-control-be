@@ -9,6 +9,7 @@ export interface CreateOrgUnitRecord {
   readonly hierarchyLevel: number;
   readonly hierarchyPath: string;
   readonly isActive: boolean;
+  readonly codePrefix: string | null;
 }
 
 export interface UpdateOrgUnitRecord {
@@ -19,6 +20,7 @@ export interface UpdateOrgUnitRecord {
   readonly hierarchyLevel?: number;
   readonly hierarchyPath?: string;
   readonly isActive?: boolean;
+  readonly codePrefix?: string | null;
 }
 
 export interface OrganizationalUnitsRepository {
@@ -26,6 +28,8 @@ export interface OrganizationalUnitsRepository {
   findById(id: string): Promise<OrganizationalUnit | null>;
   findActiveById(id: string): Promise<OrganizationalUnit | null>;
   findByCode(code: string): Promise<OrganizationalUnit | null>;
+  /** Unidad activa con ese prefijo de código de centros. */
+  findActiveByCodePrefix(codePrefix: string): Promise<OrganizationalUnit | null>;
   findChildren(parentId: string): Promise<ReadonlyArray<OrganizationalUnit>>;
   countActiveChildren(parentId: string): Promise<number>;
   countCostCenters(orgUnitId: string): Promise<number>;
