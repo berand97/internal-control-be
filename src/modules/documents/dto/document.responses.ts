@@ -12,6 +12,7 @@ import { DOCUMENT_LIST_STATUSES } from '../services/document-list.service.js';
 
 export const DOCUMENT_STATUSES = ['PENDING_SIGNATURE', 'SIGNED', 'REJECTED', 'VOIDED'] as const;
 export const SIGNATURE_STATUSES = ['PENDING', 'SIGNED', 'REJECTED'] as const;
+export const SIGNER_REASSIGNMENT_SOURCES = ['REASSIGNED', 'AT_ISSUE'] as const;
 export const STORAGE_DRIVERS = ['project', 's3', 'google_drive', 'onedrive'] as const;
 export const SIGNER_SOURCES = ['RESPONSIBLE', 'REQUEST'] as const;
 export const ATTESTATION_STATUSES = ['PENDING', 'SIGNATURES_COLLECTED', 'COMPLETED', 'REJECTED', 'VOIDED'] as const;
@@ -516,6 +517,14 @@ export class DocumentReassignmentDto {
 
   @ApiProperty({ type: 'string', nullable: true, description: 'SHA-256 del PDF reemitido; null en registros previos a la reemisión' })
   readonly newPdfSha256!: string | null;
+
+  @ApiProperty({
+    enum: SIGNER_REASSIGNMENT_SOURCES,
+    enumName: 'SignerReassignmentSource',
+    description:
+      'REASSIGNED: reasignación posterior (POST /documents/:id/signatures/:order/reassign). AT_ISSUE: sustitución de un turno de Control Interno al emitir el acta porque el designado (fromPersonId) ocupaba otra firma (separación de funciones); previousPdfSha256 null y newPdfSha256 el PDF emitido',
+  })
+  readonly source!: (typeof SIGNER_REASSIGNMENT_SOURCES)[number];
 }
 
 export class DocumentSigningLinkDto {

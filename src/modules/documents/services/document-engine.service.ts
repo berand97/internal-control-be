@@ -31,6 +31,12 @@ import {
   type SignatureMethod,
 } from '../domain/signing-channel.js';
 import { DocumentLifecycleRegistry } from '../lifecycle/document-lifecycle.registry.js';
+import {
+  type ResolvedSigner,
+  resolveSigners,
+  SUBSTITUTE_ROLE_CODES,
+  type SignerSubstitution,
+} from '../domain/signer-separation.js';
 import { PDF_CONVERTER, type PdfConverter } from '../pdf/pdf-converter.js';
 import { SIGNATURE_PROVIDER, type SignatureProvider, type SignatureRequest } from '../signature/signature-provider.js';
 import { bogotaToday, DocumentFormatCatalogService } from './document-format-catalog.service.js';
@@ -91,6 +97,11 @@ export interface DocumentRequestPayload {
    * por su nombre. Solo texto; nombres de tabla y columna como identificadores (assertPayloadTables acota la forma).
    */
   readonly tables?: Record<string, ReadonlyArray<Record<string, string>>>;
+  /**
+   * Sustitutos de turnos de Control Interno cuando el designado ocupa otra firma del acta (separación de funciones,
+   * domain/signer-separation.ts): rol → { personId, reason }. Solo AUDITA y CONTROL_INTERNO.
+   */
+  readonly signerSubstitutions?: Record<string, SignerSubstitution>;
 }
 
 const TABLE_IDENTIFIER = /^[a-zA-Z][a-zA-Z0-9_]{0,39}$/;
@@ -172,6 +183,9 @@ interface ActSigner extends ActParty {
   rol: string;
   etiqueta: string;
   personId: string | null;
+  /** Solo en un turno sustituido al emitir (separación de funciones): a quién reemplaza el firmante y en qué turno. */
+  sustituye?: { nombre: string; rol: string };
+  motivoSustitucion?: string;
 }
 
 interface ActContext {
@@ -207,14 +221,30 @@ interface PersonRow {
  * minúsculas: recibe, entrega, audita, responsable, control_interno, contabilidad). Contrato fijo con las
  * plantillas. tipoDocumento es la abreviatura del catálogo (C.C., C.E., …) o '' si el tipo se desconoce: el acta
  * imprime entonces solo el número, nunca un tipo supuesto.
+ *
+ * Turno sustituido al emitir (separación de funciones, domain/signer-separation.ts): además
+ *   firmante.<rol>.sustitucion.nombre   persona designada a la que reemplaza el firmante
+ *   firmante.<rol>.sustitucion.rol      turno en que la reemplaza (etiqueta del formato)
+ *   firmante.<rol>.sustitucion.motivo   motivo de la sustitución
+ * y la tabla {{#tablas.sustituciones}}{{rol}} {{sustituto}} {{sustituido}} {{conflicto}} {{motivo}}{{/tablas.sustituciones}}
+ * (conflicto: las otras firmas que ocupa el sustituido). Sin sustitución, firmante.<rol>.sustitucion no existe y la
+ * tabla no se imprime (el renderizador deja '' en lo que falta).
  */
 const signersByRole = (
   signers: ReadonlyArray<ActSigner & { readonly tipoDocumento?: string }>,
-): Record<string, ActParty & { tipoDocumento: string }> =>
+): Record<string, ActParty & { tipoDocumento: string; sustitucion?: { nombre: string; rol: string; motivo: string } }> =>
   Object.fromEntries(
     signers.map((signer) => [
       signer.rol.toLowerCase(),
-      { nombre: signer.nombre, tipoDocumento: signer.tipoDocumento ?? '', documento: signer.documento, cargo: signer.cargo },
+      {
+        nombre: signer.nombre,
+        tipoDocumento: signer.tipoDocumento ?? '',
+        documento: signer.documento,
+        cargo: signer.cargo,
+        ...(signer.sustituye
+          ? { sustitucion: { nombre: signer.sustituye.nombre, rol: signer.sustituye.rol, motivo: signer.motivoSustitucion ?? '' } }
+          : {}),
+      },
     ]),
   );
 
@@ -379,8 +409,55 @@ export class DocumentEngineService {
     return { id: row?.id, formatKey: format.key, placeholders };
   }
 
+  /**
+   * Firmantes del acta con la separación de funciones aplicada (domain/signer-separation.ts): nadie en dos firmas
+   * salvo sustituto de Control Interno con rol vigente. Lo usan enqueue (el proceso recibe el error al crear, no el
+   * outbox después) y generateWithin (autoridad: el rol del sustituto se vuelve a comprobar al generar).
+   */
+  private async signersFor(
+    manager: EntityManager,
+    format: DocumentFormat,
+    payload: DocumentRequestPayload,
+    actorId: string | null,
+  ): Promise<ResolvedSigner[]> {
+    const resolved = resolveSigners(format.signers, payload);
+    const substitutes = resolved.filter((signer) => signer.substitution);
+    if (substitutes.length === 0) {
+      return resolved;
+    }
+    if (!actorId) {
+      throw new ApiException(ErrorCode.DocumentSignerSubstituteInvalid, 'Una sustitución de firmante necesita un usuario que la haga');
+    }
+    // Sustituto elegible: persona activa con usuario ACTIVE y un rol vigente (user_role sin revocar, dentro de
+    // valid_from / valid_until, rol no borrado) INTERNAL_CONTROL_DIRECTOR o AUDITOR, en cualquier alcance.
+    const eligible = (await manager.query(
+      `SELECT DISTINCT u.person_id FROM app_user u
+       JOIN person p ON p.id = u.person_id AND p.is_active
+       JOIN user_role ur ON ur.user_id = u.id AND ur.revoked_at IS NULL AND ur.valid_from <= NOW()
+         AND (ur.valid_until IS NULL OR ur.valid_until > NOW())
+       JOIN role r ON r.id = ur.role_id AND r.deleted_at IS NULL
+       WHERE u.person_id = ANY($1::uuid[]) AND u.status = 'ACTIVE' AND r.code = ANY($2::text[])`,
+      [substitutes.map((signer) => signer.personId), SUBSTITUTE_ROLE_CODES],
+    )) as Array<{ person_id: string }>;
+    const allowed = new Set(eligible.map((row) => row.person_id));
+    const rejected = substitutes.filter((signer) => !allowed.has(signer.personId ?? ''));
+    if (rejected.length > 0) {
+      throw new ApiException(
+        ErrorCode.DocumentSignerSubstituteInvalid,
+        `El sustituto de ${rejected.map((signer) => signer.spec.label).join(', ')} no tiene usuario activo con rol vigente de Dirección de Control Interno o Auditor`,
+        rejected.map((signer) => ({
+          field: `signerSubstitutions.${signer.spec.role}.personId`,
+          message: 'Sin rol vigente INTERNAL_CONTROL_DIRECTOR o AUDITOR',
+        })),
+      );
+    }
+    return resolved;
+  }
+
   async enqueue(manager: EntityManager, payload: DocumentRequestPayload, requestedBy: string | null): Promise<string> {
-    this.assertReady(await this.catalog.current(payload.formatKey, manager));
+    const format = await this.catalog.current(payload.formatKey, manager);
+    this.assertReady(format);
+    await this.signersFor(manager, format, payload, requestedBy);
     assertPayloadTables(payload.tables);
     const rows = (await manager.query(
       `INSERT INTO document_request (format_key, payload, requested_by) VALUES ($1, $2, $3) RETURNING id`,
@@ -477,13 +554,14 @@ export class DocumentEngineService {
     const format = await this.catalog.current(payload.formatKey, manager);
     this.assertReady(format);
     assertPayloadTables(payload.tables);
+    const resolved = await this.signersFor(manager, format, payload, actorId);
     const now = new Date();
     const template = await this.activeTemplate(format.key, now.toISOString().slice(0, 10), manager);
     if (!template) {
       throw new ApiException(ErrorCode.TemplateNotActive, `No hay plantilla vigente para ${format.key}`);
     }
     const source = await this.storage.getFrom(template.storage_driver, template.storage_key);
-    const context = await this.buildContext(manager, format, template, payload, options.documentDate ?? now);
+    const context = await this.buildContext(manager, format, template, payload, resolved, options.documentDate ?? now);
 
     const period = periodFor(format, now);
     const value = await this.reserve(manager, format, period);
@@ -545,6 +623,25 @@ export class DocumentEngineService {
         `INSERT INTO document_signature (document_id, sign_order, role, signer_person_id, signer_name, signer_document)
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [documentId, signer.orden, signer.rol, signer.personId, signer.nombre || null, signer.documento || null],
+      );
+    }
+    // Sustituciones al emitir: misma bitácora que las reasignaciones posteriores (source = 'AT_ISSUE'), con el PDF que
+    // ya las imprime. reassigned_by es quien generó el acta (signersFor exige usuario si hay sustitución).
+    for (const signer of resolved.filter((item) => item.substitution)) {
+      await manager.query(
+        `INSERT INTO document_signature_reassignment (document_id, sign_order, role, from_person_id, to_person_id, reason,
+           reassigned_by, source, new_pdf_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'AT_ISSUE', $8)`,
+        [
+          documentId,
+          signer.spec.order,
+          signer.spec.role,
+          signer.substitution?.replacedPersonId,
+          signer.personId,
+          signer.substitution?.reason,
+          actorId,
+          storedPdf.checksumSha256,
+        ],
       );
     }
     // Dentro de la transacción del llamador: si el proceso no acepta el acta, no queda documento (ni consecutivo).
@@ -1139,6 +1236,19 @@ export class DocumentEngineService {
       if (slot.signer_person_id === personId) {
         throw new ApiException(ErrorCode.ValidationFailed, 'La persona ya está asignada a ese turno');
       }
+      // Separación de funciones: la reasignación no puede dejar a una persona en dos firmas del acta.
+      const taken = slots.filter((item) => item.sign_order !== order && item.signer_person_id === personId);
+      if (taken.length > 0) {
+        const label = (role: string) => format.signers.find((spec) => spec.role === role)?.label ?? role;
+        throw new ApiException(
+          ErrorCode.DocumentSignerDuplicated,
+          `Separación de funciones: la persona ya firma el acta como ${taken.map((item) => `${label(item.role)} (${item.role})`).join(', ')}`,
+          [
+            { field: 'personId', message: `Ya firma como ${taken.map((item) => item.role).join(', ')}` },
+            ...taken.map((item) => ({ field: `signers.${item.role}`, message: `Misma persona que ${label(slot.role)} (${slot.role})` })),
+          ],
+        );
+      }
       await manager.query(
         `UPDATE document_signature SET signer_person_id = $3, signer_name = $4, signer_document = $5
          WHERE document_id = $1 AND sign_order = $2`,
@@ -1227,7 +1337,7 @@ export class DocumentEngineService {
       throw new ApiException(ErrorCode.TemplateNotActive, 'No se encontró la versión de plantilla del acta');
     }
     const [revisions] = (await manager.query(
-      'SELECT count(*)::int AS total FROM document_signature_reassignment WHERE document_id = $1',
+"SELECT count(*)::int AS total FROM document_signature_reassignment WHERE document_id = $1 AND source = 'REASSIGNED'",
       [document.id],
     )) as Array<{ total: number }>;
     const docx = renderDocx(await this.storage.getFrom(template.storage_driver, template.storage_key), data);
@@ -1430,7 +1540,7 @@ export class DocumentEngineService {
               nullif(trim(concat_ws(' ', pf.first_name, pf.last_name)), '') AS "fromName",
               nullif(trim(concat_ws(' ', pt.first_name, pt.last_name)), '') AS "toName",
               r.reason, r.reassigned_by AS "reassignedBy", r.reassigned_at AS "reassignedAt",
-              r.previous_pdf_hash AS "previousPdfSha256", r.new_pdf_hash AS "newPdfSha256"
+              r.previous_pdf_hash AS "previousPdfSha256", r.new_pdf_hash AS "newPdfSha256", r.source
        FROM document_signature_reassignment r
        LEFT JOIN person pf ON pf.id = r.from_person_id
        JOIN person pt ON pt.id = r.to_person_id
@@ -1543,12 +1653,18 @@ export class DocumentEngineService {
     format: DocumentFormat,
     template: TemplateRow,
     payload: DocumentRequestPayload,
+    resolved: ReadonlyArray<ResolvedSigner>,
     now: Date,
   ) {
     const personIds = [
-      payload.responsiblePersonId,
-      ...Object.values(payload.signers ?? {}),
-    ].filter((id): id is string => Boolean(id));
+      ...new Set(
+        [
+          payload.responsiblePersonId,
+          ...Object.values(payload.signers ?? {}),
+          ...resolved.flatMap((signer) => [signer.personId, signer.substitution?.replacedPersonId]),
+        ].filter((id): id is string => Boolean(id)),
+      ),
+    ];
     const persons = personIds.length
       ? ((await manager.query(
           `SELECT id, first_name, last_name, document_type, document_number, position_title, email FROM person WHERE id = ANY($1)`,
@@ -1602,9 +1718,7 @@ export class DocumentEngineService {
       .filter((asset): asset is (typeof assets)[number] => asset !== undefined);
 
     const responsible = payload.responsiblePersonId ? byId.get(payload.responsiblePersonId) : undefined;
-    const signers = format.signers.map((spec) => {
-      const personId =
-        spec.source === 'RESPONSIBLE' ? (payload.responsiblePersonId ?? null) : (payload.signers?.[spec.role] ?? null);
+    const signers = resolved.map(({ spec, personId, substitution }) => {
       const person = personId ? byId.get(personId) : undefined;
       return {
         orden: spec.order,
@@ -1615,8 +1729,31 @@ export class DocumentEngineService {
         tipoDocumento: documentType(person),
         documento: person?.document_number ?? '',
         cargo: person?.position_title ?? spec.label,
+        ...(substitution
+          ? {
+              sustituye: { nombre: personName(byId.get(substitution.replacedPersonId)), rol: spec.label },
+              motivoSustitucion: substitution.reason,
+            }
+          : {}),
       };
     });
+    // Las otras firmas que ocupaba cada designado sustituido: por qué no pudo firmar el turno de Control Interno.
+    const substitutions = resolved
+      .filter((signer) => signer.substitution)
+      .map((signer) => ({
+        rol: signer.spec.label,
+        sustituto: personName(byId.get(signer.personId ?? '')),
+        sustituido: personName(byId.get(signer.substitution?.replacedPersonId ?? '')),
+        conflicto: resolved
+          .filter((other) => other !== signer && other.personId === signer.substitution?.replacedPersonId)
+          .map((other) => other.spec.label)
+          .join(', '),
+        motivo: signer.substitution?.reason ?? '',
+      }));
+    const tables =
+      payload.tables || substitutions.length > 0
+        ? { ...payload.tables, ...(substitutions.length > 0 ? { sustituciones: substitutions } : {}) }
+        : undefined;
     const unassigned = signers.filter((signer) => !signer.personId).map((signer) => signer.etiqueta);
     if (unassigned.length > 0) {
       throw new ApiException(
@@ -1665,8 +1802,8 @@ export class DocumentEngineService {
       })),
       totalElementos: ordered.length,
       campos: payload.fields ?? {},
-      // Solo con tables: las actas que no las usan conservan su data tal cual.
-      ...(payload.tables ? { tablas: payload.tables } : {}),
+      // Solo con tables (o sustituciones): las actas que no las usan conservan su data tal cual.
+      ...(tables ? { tablas: tables } : {}),
     };
   }
 

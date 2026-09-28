@@ -74,7 +74,14 @@ describe('Motor de documentos (PostgreSQL real)', () => {
   let storageDir: string;
   let director: AuthenticatedUser;
   let outsider: AuthenticatedUser;
-  let fixture: { costCenterId: string; responsibleId: string; auditorId: string; assetIds: string[] };
+  let fixture: {
+    costCenterId: string;
+    responsibleId: string;
+    auditorId: string;
+    deliveryId: string;
+    accountingId: string;
+    assetIds: string[];
+  };
 
   const sequence = (formatKey: string, period = '') =>
     scalar<string | null>(
@@ -88,7 +95,13 @@ describe('Motor de documentos (PostgreSQL real)', () => {
     costCenterId: fixture.costCenterId,
     responsiblePersonId: fixture.responsibleId,
     assetIds: fixture.assetIds,
-    signers: { AUDITA: fixture.auditorId, ENTREGA: fixture.auditorId, CONTROL_INTERNO: fixture.auditorId, CONTABILIDAD: fixture.auditorId },
+    // Una persona por firma: la separación de funciones rechaza a la misma persona en dos turnos.
+    signers: {
+      AUDITA: fixture.auditorId,
+      ENTREGA: fixture.deliveryId,
+      CONTROL_INTERNO: fixture.auditorId,
+      CONTABILIDAD: fixture.accountingId,
+    },
     assetNotes: { [fixture.assetIds[1] ?? '']: 'No activo' },
   });
 
@@ -154,6 +167,8 @@ describe('Motor de documentos (PostgreSQL real)', () => {
       costCenterId,
       responsibleId: await person('Laura', 'Gómez Prueba', '1000000001', 'Asociada de Talento Humano'),
       auditorId: await person('Auditora', 'Control Prueba', '1000000002', 'Control Interno'),
+      deliveryId: await person('Entregador', 'Centro Prueba', '1000000003', 'Jefe de centro'),
+      accountingId: await person('Contadora', 'Contable Prueba', '1000000004', 'Contabilidad'),
       assetIds,
     };
 

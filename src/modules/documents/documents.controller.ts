@@ -63,6 +63,7 @@ import {
   UploadedTemplateResponseDto,
 } from './dto/document.responses.js';
 import { CreateDocumentFormatDto, DocumentFormatVersionInputDto } from './dto/document-format.dto.js';
+import type { SignerSubstitutionsInput } from './dto/signer-substitution.dto.js';
 import { DocumentLifecycleRegistry } from './lifecycle/document-lifecycle.registry.js';
 import { DocumentFormatCatalogService } from './services/document-format-catalog.service.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
@@ -108,6 +109,11 @@ export class GenerateDocumentDto {
   @IsOptional()
   @IsObject()
   readonly fields?: Record<string, string>;
+
+  /** Sustitutos de turnos de Control Interno (separación de funciones); el motor valida la forma. */
+  @IsOptional()
+  @IsObject()
+  readonly signerSubstitutions?: SignerSubstitutionsInput;
 }
 
 export class SignDocumentDto {

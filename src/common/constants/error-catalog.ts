@@ -698,6 +698,75 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El consecutivo de ese periodo ya empezó: el valor inicial solo se puede cambiar antes de emitir la primera acta',
   },
+  [ErrorCode.DocumentSignerDuplicated]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message:
+      'Separación de funciones: una misma persona no puede ocupar dos firmas del acta. Cambie el firmante o, si el conflicto es con Control Interno, indique un sustituto con motivo',
+  },
+  [ErrorCode.DocumentSignerSubstituteInvalid]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message:
+      'El sustituto no es válido: solo se sustituye un turno de Control Interno, por una persona con rol vigente de Dirección de Control Interno o Auditor que no firme otra parte del acta',
+  },
+  [ErrorCode.TransferSameCostCenter]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El centro de costo de destino debe ser distinto al de origen',
+  },
+  [ErrorCode.TransferMixedSourceCostCenter]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'Todos los activos del traslado deben estar en el mismo centro de costo de origen',
+  },
+  [ErrorCode.TransferAssetInOpenTransfer]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El activo ya está en otro traslado abierto',
+  },
+  [ErrorCode.TransferInvalidStateTransition]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'El traslado no admite esa acción en su estado actual',
+  },
+  [ErrorCode.TransferReasonUnavailable]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El motivo de traslado no existe o está inactivo',
+  },
+  [ErrorCode.TransferReasonExists]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Ya existe un motivo de traslado con ese código',
+  },
+  [ErrorCode.TransferReasonInUse]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El motivo ya se usó en algún traslado: no se borra, se desactiva',
+  },
+  [ErrorCode.TransferNoAccountingSigner]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message:
+      'No hay ningún usuario con el rol de Contabilidad (permiso transfer:sign_accounting:global). Pídele al administrador que lo asigne',
+  },
+  [ErrorCode.TransferNoControlSigner]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message:
+      'No hay ningún usuario activo con rol vigente de Dirección de Control Interno o Auditor que firme por Control Interno. Pídele al administrador que lo asigne',
+  },
+  [ErrorCode.TransferSignerNotEligible]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'La persona indicada no puede firmar ese turno del acta de traslado',
+  },
+  [ErrorCode.TransferSignerRequired]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'Hay varias personas que pueden firmar ese turno: indique cuál',
+  },
   [ErrorCode.LoanExtensionNotRequester]: {
     httpStatus: 403,
     action: 'CANCEL',
