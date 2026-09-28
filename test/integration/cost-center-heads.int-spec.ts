@@ -149,6 +149,57 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
     expect(Number(audits)).toBe(2);
   });
 
+  it('nadie se designa jefe a sí mismo: 403 ROLE_SELF_ASSIGNMENT_FORBIDDEN y nada queda escrito', async () => {
+    const response = await assign(users['admin']?.personId ?? '');
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('ROLE_SELF_ASSIGNMENT_FORBIDDEN');
+    const rows = await scalar<number>(
+      dataSource,
+      'SELECT count(*)::int FROM cost_center_head WHERE person_id = $1',
+      [users['admin']?.personId],
+    );
+    expect(rows).toBe(0);
+  });
+
+  it('asignar y terminar exigen motivo (3..500) y quedan auditados con IP, user-agent y motivo, visibles en el historial', async () => {
+    const person = await createActor(dataSource);
+    for (const reason of [undefined, '  ', 'ab', 'x'.repeat(501)]) {
+      const invalid = await assign(person.personId, 'admin', { reason });
+      expect(invalid.status).toBe(400);
+    }
+    const created = await assign(person.personId, 'admin').set('User-Agent', 'it-heads/1.0');
+    expect(created.status).toBe(201);
+    const headId = created.body.data.id as string;
+    const noReason = await http().post(`/api/v1/cost-center-heads/${headId}/end`).set(auth('admin')).send({ reason: 'no' });
+    expect(noReason.status).toBe(400);
+    const ended = await http()
+      .post(`/api/v1/cost-center-heads/${headId}/end`)
+      .set(auth('admin'))
+      .set('User-Agent', 'it-heads/1.0')
+      .send({ reason: '  Terminó el encargo  ' });
+    expect(ended.status).toBe(200);
+    expect(ended.body.data.endReason).toBe('Terminó el encargo');
+
+    const audits = (await dataSource.query(
+      `SELECT ip_address::text AS ip, user_agent, changes, performed_by FROM audit_log
+       WHERE entity_type = 'COST_CENTER_HEAD' AND entity_id = $1 ORDER BY id`,
+      [headId],
+    )) as Array<{ ip: string | null; user_agent: string | null; changes: Record<string, unknown>; performed_by: string }>;
+    expect(audits.map((row) => row.changes['event'])).toEqual(['COST_CENTER_HEAD_ASSIGNED', 'COST_CENTER_HEAD_ENDED']);
+    for (const row of audits) {
+      expect(row.ip).not.toBeNull();
+      expect(row.user_agent).toBe('it-heads/1.0');
+      expect(row.performed_by).toBe(users['admin']?.id);
+    }
+    expect(audits.map((row) => row.changes['reason'])).toEqual(['Resolución de rectoría 045', 'Terminó el encargo']);
+
+    const history = await http().get(`/api/v1/cost-centers/${centerA}/history`).set(auth('admin'));
+    expect(history.status).toBe(200);
+    const event = (history.body.data.events as Array<{ kind: string; head: { id: string; reason: string; endReason: string | null } | null }>)
+      .find((item) => item.kind === 'HEAD' && item.head?.id === headId);
+    expect(event?.head).toMatchObject({ reason: 'Resolución de rectoría 045', endReason: 'Terminó el encargo' });
+  });
+
   it('varias personas pueden dirigir el mismo centro (no se impone jefe único)', async () => {
     const other = await createActor(dataSource);
     const created = await assign(other.personId);

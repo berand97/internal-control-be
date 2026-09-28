@@ -3,6 +3,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
+import type { RequestOrigin } from '../../../common/types/request-origin.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
@@ -58,7 +59,7 @@ export class CostCenterHeadsService {
     private readonly auditLogs: AuditLogsRepository,
   ) {}
 
-  async assign(dto: AssignCostCenterHeadDto, actor: AuthenticatedUser): Promise<CostCenterHeadDto> {
+  async assign(dto: AssignCostCenterHeadDto, actor: AuthenticatedUser, origin: RequestOrigin): Promise<CostCenterHeadDto> {
     const validFrom = dto.validFrom ? new Date(dto.validFrom) : new Date();
     const validUntil = dto.validUntil ? new Date(dto.validUntil) : null;
     if (validUntil && validUntil <= validFrom) {
@@ -79,6 +80,15 @@ export class CostCenterHeadsService {
       if (!person) {
         throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la persona o está inactiva');
       }
+      // Una jefatura amplía el alcance de lectura de quien la tiene: nadie se designa jefe a sí mismo (regla de
+      // autoasignación, como los roles); lo hace otro administrador. Se lee de la BD, no del token.
+      const [self] = (await manager.query('SELECT 1 FROM app_user WHERE id = $1 AND person_id = $2', [
+        actor.id,
+        dto.personId,
+      ])) as unknown[];
+      if (self) {
+        throw new ApiException(ErrorCode.RoleSelfAssignmentForbidden);
+      }
       const [overlap] = (await manager.query(
         `SELECT 1 FROM cost_center_head
          WHERE person_id = $1 AND cost_center_id = $2
@@ -95,7 +105,7 @@ export class CostCenterHeadsService {
         [dto.personId, dto.costCenterId, validFrom, validUntil, dto.reason.trim(), actor.id],
       )) as Array<{ id: string }>;
       const headId = created?.id ?? '';
-      await this.audit(manager, headId, actor.id, {
+      await this.audit(manager, headId, actor.id, origin, {
         event: 'COST_CENTER_HEAD_ASSIGNED',
         personId: dto.personId,
         costCenterId: dto.costCenterId,
@@ -109,7 +119,7 @@ export class CostCenterHeadsService {
     return this.get(id);
   }
 
-  async end(id: string, reason: string, actor: AuthenticatedUser): Promise<CostCenterHeadDto> {
+  async end(id: string, reason: string, actor: AuthenticatedUser, origin: RequestOrigin): Promise<CostCenterHeadDto> {
     const personId = await this.dataSource.transaction(async (manager) => {
       const [head] = (await manager.query(
         `SELECT id, person_id, cost_center_id, ended_at,
@@ -130,7 +140,7 @@ export class CostCenterHeadsService {
          WHERE id = $1`,
         [id, actor.id, reason.trim()],
       );
-      await this.audit(manager, id, actor.id, {
+      await this.audit(manager, id, actor.id, origin, {
         event: 'COST_CENTER_HEAD_ENDED',
         personId: head.person_id,
         costCenterId: head.cost_center_id,
@@ -179,6 +189,7 @@ export class CostCenterHeadsService {
     manager: EntityManager,
     headId: string,
     actorId: string,
+    origin: RequestOrigin,
     changes: Record<string, unknown>,
   ): Promise<void> {
     // AuditAction no tiene acciones propias de jefatura (el enum vive en auth/**): se registra como cambio del
@@ -189,8 +200,7 @@ export class CostCenterHeadsService {
         entityType: 'COST_CENTER_HEAD',
         entityId: headId,
         performedBy: actorId,
-        ipAddress: null,
-        userAgent: null,
+        ...origin,
         changes,
       },
       manager,

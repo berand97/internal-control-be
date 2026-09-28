@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Ip, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiCreatedResponse, ApiExtraModels, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
@@ -6,6 +6,7 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { ApiSuccessEnvelope, envelopedSchema } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
+import { requestOrigin } from '../../common/types/request-origin.type.js';
 import { envelopedArraySchema } from '../documents/dto/document.responses.js';
 import {
   AssignCostCenterHeadDto,
@@ -32,10 +33,18 @@ export class CostCenterHeadsController {
 
   @Post('cost-center-heads')
   @RequirePermission(COST_CENTER_HEAD_PERMISSION)
-  @ApiOperation({ summary: 'Asignar a una persona como jefe de un centro de costo', description: SCOPE_NOTE })
+  @ApiOperation({
+    summary: 'Asignar a una persona como jefe de un centro de costo',
+    description: `${SCOPE_NOTE} Motivo obligatorio (3..500). Nadie se designa jefe a sí mismo: 403 ROLE_SELF_ASSIGNMENT_FORBIDDEN. Queda en la bitácora con IP y user-agent y en GET /cost-centers/:id/history.`,
+  })
   @ApiCreatedResponse({ schema: envelopedSchema(CostCenterHeadDto) })
-  assign(@Body() dto: AssignCostCenterHeadDto, @CurrentUser() actor: AuthenticatedUser) {
-    return this.heads.assign(dto, actor);
+  assign(
+    @Body() dto: AssignCostCenterHeadDto,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
+  ) {
+    return this.heads.assign(dto, actor, requestOrigin(ipAddress, userAgent));
   }
 
   @Post('cost-center-heads/:id/end')
@@ -50,8 +59,10 @@ export class CostCenterHeadsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: EndCostCenterHeadDto,
     @CurrentUser() actor: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Headers('user-agent') userAgent: string | undefined,
   ) {
-    return this.heads.end(id, dto.reason, actor);
+    return this.heads.end(id, dto.reason, actor, requestOrigin(ipAddress, userAgent));
   }
 
   @Get('cost-centers/:costCenterId/heads')

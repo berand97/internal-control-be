@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IDENTITY_DOCUMENT_TYPE_CODES } from '../../../common/identity/identity-document-types.js';
-import { IsBoolean, IsDateString, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsOptional, IsUUID } from 'class-validator';
+import { AuditReason } from '../../../common/validation/audit-reason.decorator.js';
 
 export class AssignCostCenterHeadDto {
   @ApiProperty({ format: 'uuid', description: 'Persona que dirige el centro' })
@@ -22,18 +23,12 @@ export class AssignCostCenterHeadDto {
   @IsDateString()
   readonly validUntil?: string;
 
-  @ApiProperty({ description: 'Motivo o soporte de la designación (acto administrativo, correo, …)' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(500)
+  @AuditReason('Motivo o soporte de la designación (acto administrativo, correo, …).')
   readonly reason!: string;
 }
 
 export class EndCostCenterHeadDto {
-  @ApiProperty({ description: 'Motivo de la terminación' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(500)
+  @AuditReason('Motivo de la terminación.')
   readonly reason!: string;
 }
 
