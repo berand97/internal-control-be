@@ -189,8 +189,20 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       const confirm = await http()
         .post(`/api/v1/imports/previews/${preview.body.data?.importId}/confirm`)
         .set('Authorization', auth(state.director));
-      return { upload: upload.status, preview: preview.status, summary: preview.body.data?.summary, confirm: confirm.status, result: confirm.body.data, error: confirm.body.error ?? preview.body.error ?? upload.body.error };
+      // Confirmar solo encola (202): el worker escribe en segundo plano. Se procesa el trabajo como lo haría el worker
+      // y se espera su estado final por la API, sin depender del tic de 5 s del cron.
+      const jobId = confirm.body.data?.id as string | undefined;
+      if (jobId) {
+        await app.get(ImportJobsService).processJob(jobId);
+      }
+      let job = await http().get(`/api/v1/imports/jobs/${jobId}`).set('Authorization', auth(state.director));
+      for (let tries = 0; tries < 60 && ['QUEUED', 'RUNNING'].includes(job.body.data?.status); tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        job = await http().get(`/api/v1/imports/jobs/${jobId}`).set('Authorization', auth(state.director));
+      }
+      return { upload: upload.status, preview: preview.status, summary: preview.body.data?.summary, confirm: confirm.status, job: job.body.data?.status, result: job.body.data?.result, error: job.body.data?.error ?? confirm.body.error ?? preview.body.error ?? upload.body.error };
     };
+    const { ImportJobsService } = await import('../../src/modules/staging/services/import-jobs.service.js');
     const centers = await importSheet(await workbook('2026', [['', 'Codigo', 'Nombre'], [null, ...REAL_CENTER]]), 'centros de costo.xlsx', '2026', 'COST_CENTERS', { code: 'B', name: 'C' });
     const assets = await importSheet(await workbook('ACTIVOS', [ASSET_HEADER, REAL_ASSET_ROW]), 'informe activos.xlsx', 'ACTIVOS', 'ASSETS', {
       legacyAssetId: 'A',
@@ -208,6 +220,8 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     state.costCenterId = asset?.current_cost_center_id;
     const search = await http().get('/api/v1/assets').query({ q: '01979' }).set('Authorization', auth(state.director));
     record('importación', Boolean(asset), { centers, assets, searchByLegacyCode: search.body.data?.total, identifiers: search.body.data?.items?.[0]?.identifiers });
+    expect([centers.confirm, centers.job]).toEqual([202, 'SUCCEEDED']);
+    expect([assets.confirm, assets.job]).toEqual([202, 'SUCCEEDED']);
     expect(asset).toBeDefined();
     expect(search.body.data?.total).toBe(1);
   });
