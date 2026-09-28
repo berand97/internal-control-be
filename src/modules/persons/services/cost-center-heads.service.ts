@@ -13,7 +13,8 @@ export const COST_CENTER_HEAD_PERMISSION = 'cost_center:manage:global';
 /** Consultar jefaturas: el permiso existente de lectura de centros de costo; asignar y terminar siguen con manage. */
 export const COST_CENTER_HEAD_READ_PERMISSION = 'cost_center:read:global';
 
-const HEAD_SELECT = `
+/** Jefatura con persona y centro; lo reutiliza el historial del centro (CostCenterPlacementService). */
+export const HEAD_SELECT = `
   SELECT h.id, h.person_id AS "personId", trim(p.first_name || ' ' || p.last_name) AS "personName",
          p.position_title AS "positionTitle",
          h.cost_center_id AS "costCenterId", cc.external_code AS "costCenterCode", cc.name AS "costCenterName",
@@ -27,14 +28,14 @@ const HEAD_SELECT = `
 
 const CURRENT = '(h.valid_from <= NOW() AND (h.valid_until IS NULL OR h.valid_until > NOW()))';
 
-type HeadRow = Omit<CostCenterHeadDto, 'validFrom' | 'validUntil' | 'assignedAt' | 'endedAt'> & {
+export type HeadRow = Omit<CostCenterHeadDto, 'validFrom' | 'validUntil' | 'assignedAt' | 'endedAt'> & {
   validFrom: Date;
   validUntil: Date | null;
   assignedAt: Date;
   endedAt: Date | null;
 };
 
-const toDto = (row: HeadRow): CostCenterHeadDto => ({
+export const toDto = (row: HeadRow): CostCenterHeadDto => ({
   ...row,
   validFrom: row.validFrom.toISOString(),
   validUntil: row.validUntil?.toISOString() ?? null,

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, type EntityManager, Repository } from 'typeorm';
 import { OrganizationalUnit } from '../../organizational-units/entities/organizational-unit.entity.js';
 import { CostCenter } from '../entities/cost-center.entity.js';
 import { CostCenterSyncLog } from '../entities/cost-center-sync-log.entity.js';
@@ -66,15 +66,16 @@ export class TypeOrmCostCentersRepository implements CostCentersRepository {
     return this.orgUnits.findOne({ where: { code } });
   }
 
-  insert(record: CreateCostCenterRecord): Promise<CostCenter> {
+  insert(record: CreateCostCenterRecord, manager?: EntityManager): Promise<CostCenter> {
+    const repository = manager ? manager.getRepository(CostCenter) : this.costCenters;
     const now = new Date();
-    const entity = this.costCenters.create({
+    const entity = repository.create({
       ...record,
       externalMetadata: null,
       createdAt: now,
       updatedAt: now,
     });
-    return this.costCenters.save(entity);
+    return repository.save(entity);
   }
 
   async update(id: string, record: UpdateCostCenterRecord): Promise<void> {

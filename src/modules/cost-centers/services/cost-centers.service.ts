@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { isUniqueViolation } from '../../../common/exceptions/postgres-error.js';
@@ -6,6 +7,7 @@ import type { AuthenticatedUser } from '../../../common/types/authenticated-user
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import { parseCostCenterCsv } from '../csv/parse-cost-center-csv.js';
+import { codeMatchesPrefix, prefixRangeMessage } from '../domain/code-prefix.js';
 import { CreateCostCenterDto } from '../dto/create-cost-center.dto.js';
 import { QueryCostCentersDto } from '../dto/query-cost-centers.dto.js';
 import { CostCenterSyncResponseDto } from '../dto/responses/cost-center-sync.response.dto.js';
@@ -13,6 +15,7 @@ import { CostCenterResponseDto } from '../dto/responses/cost-center.response.dto
 import { UpdateCostCenterDto } from '../dto/update-cost-center.dto.js';
 import { CostCenterSyncSource } from '../enums/cost-center-sync-source.enum.js';
 import type { CostCentersRepository } from '../repositories/cost-centers.repository.interface.js';
+import { CostCenterPlacementService, NO_REQUEST, type RequestMeta } from './cost-center-placement.service.js';
 
 const COST_CENTER_ENTITY_TYPE = 'COST_CENTER';
 
@@ -28,6 +31,8 @@ export class CostCentersService {
     private readonly costCentersRepository: CostCentersRepository,
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
+    private readonly dataSource: DataSource,
+    private readonly placements: CostCenterPlacementService,
   ) {}
 
   async list(
@@ -47,35 +52,62 @@ export class CostCentersService {
     return CostCenterResponseDto.from(await this.requireCenter(id));
   }
 
+  /**
+   * Un centro nuevo con unidad que tiene prefijo de código debe estar en su rango (los existentes nunca se corrigen:
+   * GET /cost-centers/prefix-mismatches los lista). El historial de ubicación se abre en la misma transacción.
+   */
   async create(
     dto: CreateCostCenterDto,
     actor: AuthenticatedUser,
+    request: RequestMeta = NO_REQUEST,
   ): Promise<CostCenterResponseDto> {
     if (dto.organizationalUnitId) {
-      await this.requireOrgUnit(dto.organizationalUnitId);
+      const unit = await this.requireOrgUnit(dto.organizationalUnitId);
+      if (unit.codePrefix && !codeMatchesPrefix(dto.externalCode, unit.codePrefix)) {
+        const message = prefixRangeMessage(unit.name, unit.codePrefix);
+        throw new ApiException(ErrorCode.CostCenterCodeOutOfUnitRange, message, [{ field: 'externalCode', message }]);
+      }
     }
     if (dto.parentId) {
       await this.requireCenter(dto.parentId);
     }
+    const hasMovement = dto.hasMovement ?? true;
     try {
-      const center = await this.costCentersRepository.insert({
-        externalCode: dto.externalCode,
-        name: dto.name,
-        organizationalUnitId: dto.organizationalUnitId ?? null,
-        parentId: dto.parentId ?? null,
-        acceptsAssets: dto.acceptsAssets ?? true,
-        isActive: dto.isActive ?? true,
-        syncSource: CostCenterSyncSource.Manual,
-        lastSyncedAt: null,
-      });
-      await this.auditLogsRepository.record({
-        action: AuditAction.CostCenterCreated,
-        entityType: COST_CENTER_ENTITY_TYPE,
-        entityId: center.id,
-        performedBy: actor.id,
-        ipAddress: null,
-        userAgent: null,
-        changes: { externalCode: center.externalCode },
+      const center = await this.dataSource.transaction(async (manager) => {
+        const created = await this.costCentersRepository.insert(
+          {
+            externalCode: dto.externalCode,
+            name: dto.name,
+            organizationalUnitId: dto.organizationalUnitId ?? null,
+            parentId: dto.parentId ?? null,
+            acceptsAssets: hasMovement ? (dto.acceptsAssets ?? true) : false,
+            hasMovement,
+            isActive: dto.isActive ?? true,
+            syncSource: CostCenterSyncSource.Manual,
+            lastSyncedAt: null,
+          },
+          manager,
+        );
+        await this.placements.open(manager, created.id, {
+          reason: 'Alta del centro de costo',
+          actorId: actor.id,
+          ip: request.ip,
+          userAgent: request.userAgent,
+          source: 'MANUAL',
+        });
+        await this.auditLogsRepository.record(
+          {
+            action: AuditAction.CostCenterCreated,
+            entityType: COST_CENTER_ENTITY_TYPE,
+            entityId: created.id,
+            performedBy: actor.id,
+            ipAddress: request.ip,
+            userAgent: request.userAgent,
+            changes: { externalCode: created.externalCode },
+          },
+          manager,
+        );
+        return created;
       });
       return CostCenterResponseDto.from(center);
     } catch (error) {
@@ -86,35 +118,33 @@ export class CostCentersService {
     }
   }
 
+  /**
+   * Nombre, aceptación de activos y estado. La unidad y el padre son parte del historial de ubicación: aquí solo se
+   * aceptan iguales a los vigentes; cambiarlos es POST /cost-centers/:id/placement (con motivo).
+   */
   async update(
     id: string,
     dto: UpdateCostCenterDto,
     actor: AuthenticatedUser,
+    request: RequestMeta = NO_REQUEST,
   ): Promise<CostCenterResponseDto> {
     const center = await this.requireCenter(id);
-    if (dto.organizationalUnitId) {
-      await this.requireOrgUnit(dto.organizationalUnitId);
-    }
-    if (dto.parentId) {
-      if (dto.parentId === center.id) {
-        throw new ApiException(ErrorCode.InvalidState);
-      }
-      await this.requireCenter(dto.parentId);
+    const structural = [
+      ...(dto.organizationalUnitId !== undefined && dto.organizationalUnitId !== center.organizationalUnitId
+        ? [{ field: 'organizationalUnitId', message: 'Use POST /cost-centers/{id}/placement' }]
+        : []),
+      ...(dto.parentId !== undefined && dto.parentId !== center.parentId
+        ? [{ field: 'parentId', message: 'Use POST /cost-centers/{id}/placement' }]
+        : []),
+    ];
+    if (structural.length > 0) {
+      throw new ApiException(ErrorCode.CostCenterPlacementRequired, undefined, structural);
     }
     if (dto.isActive === false && center.isActive) {
-      const assets = await this.costCentersRepository.countActiveAssets(
-        center.id,
-      );
-      if (assets > 0) {
-        throw new ApiException(ErrorCode.CostCenterHasActiveAssets);
-      }
+      await this.assertNoActiveAssets(center.id);
     }
     await this.costCentersRepository.update(center.id, {
       ...(dto.name !== undefined ? { name: dto.name } : {}),
-      ...(dto.organizationalUnitId !== undefined
-        ? { organizationalUnitId: dto.organizationalUnitId }
-        : {}),
-      ...(dto.parentId !== undefined ? { parentId: dto.parentId } : {}),
       ...(dto.acceptsAssets !== undefined
         ? { acceptsAssets: dto.acceptsAssets }
         : {}),
@@ -125,32 +155,37 @@ export class CostCentersService {
       entityType: COST_CENTER_ENTITY_TYPE,
       entityId: center.id,
       performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
+      ipAddress: request.ip,
+      userAgent: request.userAgent,
       changes: { ...dto },
     });
     return CostCenterResponseDto.from(await this.requireCenter(id));
   }
 
-  async remove(id: string, actor: AuthenticatedUser): Promise<null> {
+  async remove(id: string, actor: AuthenticatedUser, request: RequestMeta = NO_REQUEST): Promise<null> {
     const center = await this.requireCenter(id);
-    const assets = await this.costCentersRepository.countActiveAssets(
-      center.id,
-    );
-    if (assets > 0) {
-      throw new ApiException(ErrorCode.CostCenterHasActiveAssets);
-    }
+    await this.assertNoActiveAssets(center.id);
     await this.costCentersRepository.deactivate(center.id);
     await this.auditLogsRepository.record({
       action: AuditAction.CostCenterDeleted,
       entityType: COST_CENTER_ENTITY_TYPE,
       entityId: center.id,
       performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
+      ipAddress: request.ip,
+      userAgent: request.userAgent,
       changes: { externalCode: center.externalCode },
     });
     return null;
+  }
+
+  /** 406 COST_CENTER_HAS_ACTIVE_ASSETS con el número de activos (no dados de baja) en details[activeAssets]. */
+  private async assertNoActiveAssets(costCenterId: string): Promise<void> {
+    const assets = await this.costCentersRepository.countActiveAssets(costCenterId);
+    if (assets > 0) {
+      throw new ApiException(ErrorCode.CostCenterHasActiveAssets, undefined, [
+        { field: 'activeAssets', message: String(assets) },
+      ]);
+    }
   }
 
   async sync(

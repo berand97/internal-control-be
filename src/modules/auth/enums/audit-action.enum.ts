@@ -45,6 +45,7 @@ export enum AuditAction {
   CostCenterUpdated = 'COST_CTR_UPDATED',
   CostCenterDeleted = 'COST_CTR_DELETED',
   CostCenterSynced = 'COST_CTR_SYNCED',
+  CostCenterPlaced = 'COST_CTR_PLACED',
   CategoryCreated = 'CATEGORY_CREATED',
   CategoryUpdated = 'CATEGORY_UPDATED',
   CategoryDeleted = 'CATEGORY_DELETED',

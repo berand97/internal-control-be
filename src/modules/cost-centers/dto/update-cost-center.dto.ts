@@ -8,12 +8,18 @@ export class UpdateCostCenterDto {
   @MaxLength(200)
   readonly name?: string;
 
-  @ApiPropertyOptional({ format: 'uuid' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Solo se acepta igual al vigente: la unidad se cambia con POST /cost-centers/{id}/placement (400 COST_CENTER_PLACEMENT_REQUIRED)',
+  })
   @IsOptional()
   @IsUUID('4')
   readonly organizationalUnitId?: string;
 
-  @ApiPropertyOptional({ format: 'uuid' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Solo se acepta igual al vigente: el padre se cambia con POST /cost-centers/{id}/placement (400 COST_CENTER_PLACEMENT_REQUIRED)',
+  })
   @IsOptional()
   @IsUUID('4')
   readonly parentId?: string;

@@ -20,6 +20,9 @@ export class CostCenterResponseDto {
   @ApiProperty()
   readonly acceptsAssets!: boolean;
 
+  @ApiProperty({ description: 'true: recibe movimientos; false: nodo agrupador' })
+  readonly hasMovement!: boolean;
+
   @ApiProperty()
   readonly isActive!: boolean;
 
@@ -37,6 +40,7 @@ export class CostCenterResponseDto {
       organizationalUnitId: center.organizationalUnitId,
       parentId: center.parentId,
       acceptsAssets: center.acceptsAssets,
+      hasMovement: center.hasMovement,
       isActive: center.isActive,
       syncSource: center.syncSource,
       lastSyncedAt: center.lastSyncedAt,

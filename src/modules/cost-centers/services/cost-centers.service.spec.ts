@@ -1,3 +1,4 @@
+import type { DataSource } from 'typeorm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
@@ -7,6 +8,7 @@ import { CostCenter } from '../entities/cost-center.entity.js';
 import { CostCenterSyncLog } from '../entities/cost-center-sync-log.entity.js';
 import { CostCenterSyncSource } from '../enums/cost-center-sync-source.enum.js';
 import type { CostCentersRepository } from '../repositories/cost-centers.repository.interface.js';
+import type { CostCenterPlacementService } from './cost-center-placement.service.js';
 import { CostCentersService } from './cost-centers.service.js';
 
 const actor: AuthenticatedUser = {
@@ -69,7 +71,12 @@ describe('CostCentersService', () => {
       record: vi.fn().mockResolvedValue(undefined),
       findLastLogins: vi.fn(),
     };
-    service = new CostCentersService(costCentersRepository, auditLogsRepository);
+    service = new CostCentersService(
+      costCentersRepository,
+      auditLogsRepository,
+      {} as DataSource,
+      {} as CostCenterPlacementService,
+    );
   });
 
   it('sincroniza creación, actualización, desactivación y reactivación', async () => {
@@ -115,6 +122,8 @@ describe('CostCentersService', () => {
     vi.mocked(costCentersRepository.countActiveAssets).mockResolvedValue(4);
     await expect(service.remove('cc-4330', actor)).rejects.toMatchObject({
       code: ErrorCode.CostCenterHasActiveAssets,
+      details: [{ field: 'activeAssets', message: '4' }],
     });
+    expect(costCentersRepository.deactivate).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,4 @@
+import type { EntityManager } from 'typeorm';
 import type { OrganizationalUnit } from '../../organizational-units/entities/organizational-unit.entity.js';
 import type { CostCenter } from '../entities/cost-center.entity.js';
 import type { CostCenterSyncLog } from '../entities/cost-center-sync-log.entity.js';
@@ -9,6 +10,8 @@ export interface CreateCostCenterRecord {
   readonly organizationalUnitId: string | null;
   readonly parentId: string | null;
   readonly acceptsAssets: boolean;
+  /** Omitido: el valor por defecto de la columna (true). */
+  readonly hasMovement?: boolean;
   readonly isActive: boolean;
   readonly syncSource: CostCenterSyncSource;
   readonly lastSyncedAt: Date | null;
@@ -48,7 +51,8 @@ export interface CostCentersRepository {
   findByExternalCode(externalCode: string): Promise<CostCenter | null>;
   findOrgUnitById(id: string): Promise<OrganizationalUnit | null>;
   findOrgUnitByCode(code: string): Promise<OrganizationalUnit | null>;
-  insert(record: CreateCostCenterRecord): Promise<CostCenter>;
+  /** Con manager, dentro de la transacción de quien llama. */
+  insert(record: CreateCostCenterRecord, manager?: EntityManager): Promise<CostCenter>;
   update(id: string, record: UpdateCostCenterRecord): Promise<void>;
   deactivate(id: string): Promise<void>;
   countActiveAssets(costCenterId: string): Promise<number>;
