@@ -81,6 +81,9 @@ export class CostCenterPlacementDto {
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Usuario que hizo el cambio' })
   readonly changedBy!: string | null;
 
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien hizo el cambio (nombres y apellidos, o su usuario)' })
+  readonly changedByName!: string | null;
+
   @ApiProperty({ format: 'date-time' })
   readonly changedAt!: string;
 }

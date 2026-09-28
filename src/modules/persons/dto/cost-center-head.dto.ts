@@ -85,6 +85,9 @@ export class CostCenterHeadDto {
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Usuario que la asignó' })
   readonly assignedBy!: string | null;
 
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien la asignó (nombres y apellidos, o su usuario)' })
+  readonly assignedByName!: string | null;
+
   @ApiProperty({ format: 'date-time' })
   readonly assignedAt!: string;
 
@@ -93,6 +96,9 @@ export class CostCenterHeadDto {
 
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Usuario que la terminó' })
   readonly endedBy!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien la terminó (nombres y apellidos, o su usuario)' })
+  readonly endedByName!: string | null;
 
   @ApiProperty({ type: 'string', nullable: true })
   readonly endReason!: string | null;

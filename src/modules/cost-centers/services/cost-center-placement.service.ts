@@ -4,7 +4,7 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
-import { HEAD_SELECT, type HeadRow, toDto as headToDto } from '../../persons/services/cost-center-heads.service.js';
+import { HEAD_SELECT, type HeadRow, toDto as headToDto, userDisplayNameSubquery } from '../../persons/services/cost-center-heads.service.js';
 import {
   codeMatchesPrefix,
   longestPrefix,
@@ -76,6 +76,7 @@ interface PlacementRow {
   source: PlacementSource;
   staging_import_id: string | null;
   changed_by: string | null;
+  changed_by_name: string | null;
   changed_at: Date;
   unit_id: string | null;
   unit_code: string | null;
@@ -89,7 +90,8 @@ interface PlacementRow {
 const PLACEMENT_SELECT = `
   SELECT p.id, p.cost_center_id, p.has_movement, p.valid_from, p.valid_until,
          (p.valid_from <= NOW() AND (p.valid_until IS NULL OR p.valid_until > NOW())) AS is_current,
-         p.reason, p.source, p.staging_import_id, p.changed_by, p.changed_at,
+         p.reason, p.source, p.staging_import_id, p.changed_by,
+         ${userDisplayNameSubquery('p.changed_by')} AS changed_by_name, p.changed_at,
          u.id AS unit_id, u.code AS unit_code, u.name AS unit_name, u.code_prefix AS unit_prefix,
          pc.id AS parent_id, pc.external_code AS parent_code, pc.name AS parent_name
   FROM cost_center_placement p
@@ -112,6 +114,7 @@ const toPlacementDto = (row: PlacementRow): CostCenterPlacementDto => ({
   source: row.source,
   stagingImportId: row.staging_import_id,
   changedBy: row.changed_by,
+  changedByName: row.changed_by_name,
   changedAt: row.changed_at.toISOString(),
 });
 

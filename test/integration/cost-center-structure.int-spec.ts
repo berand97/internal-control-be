@@ -14,6 +14,7 @@ import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
+import { userDisplayNameSubquery } from '../../src/modules/persons/services/cost-center-heads.service.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { createActor, openTestSession, scalar } from './helpers.js';
@@ -188,6 +189,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
       source: 'MANUAL',
       reason: 'Resolución rectoral 12 de 2026',
       changedBy: admin.id,
+      changedByName: `Integración ${admin.username.slice(3)}`,
     });
     const same = await place(ids['c7100'] ?? '', { organizationalUnitId: ids['u8'], reason: 'Otra vez lo mismo' });
     expect(same.status).toBe(409);
@@ -330,9 +332,30 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
       ['PLACEMENT', '2026-03-01'],
       ['PLACEMENT', '2026-01-10'],
     ]);
+    const adminName = `Integración ${admin.username.slice(3)}`;
+    // Quién, legible: el visor no administra usuarios y aun así ve el nombre de quien hizo cada cambio.
+    expect(
+      (history.body.data.events as Array<{ placement: { changedBy: string | null; changedByName: string | null } }>).map((event) => [
+        event.placement.changedBy,
+        event.placement.changedByName,
+      ]),
+    ).toEqual([
+      [admin.id, adminName],
+      [admin.id, adminName],
+    ]);
     const headed = await http().get(`/api/v1/cost-centers/${ids['c7200']}/history`).set(auth('viewer'));
     const kinds = (headed.body.data.events as Array<{ kind: string; validFrom: string }>).map((event) => event.kind);
     expect(kinds).toEqual(['HEAD', 'PLACEMENT']);
+    expect(headed.body.data.events[0].head).toMatchObject({ assignedBy: admin.id, assignedByName: adminName, endedBy: null, endedByName: null });
+
+    // Sin nombres en la persona, el nombre legible es el usuario; sin usuario, null.
+    const nameless = await createActor(dataSource);
+    await dataSource.query(`UPDATE person SET first_name = '', last_name = '' WHERE id = $1`, [nameless.personId]);
+    const [names] = (await dataSource.query(
+      `SELECT ${userDisplayNameSubquery('$1::uuid')} AS nameless, ${userDisplayNameSubquery('NULL::uuid')} AS nobody`,
+      [nameless.id],
+    )) as Array<{ nameless: string | null; nobody: string | null }>;
+    expect(names).toEqual({ nameless: nameless.username, nobody: null });
 
     const tree = await http().get('/api/v1/cost-centers/tree').set(auth('viewer'));
     expect(tree.status).toBe(200);

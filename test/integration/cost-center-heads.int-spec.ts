@@ -111,6 +111,8 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
       isCurrent: true,
       validUntil: null,
       assignedBy: users['admin']?.id,
+      assignedByName: `Integración ${users['admin']?.username.slice(3)}`,
+      endedByName: null,
       endedAt: null,
     });
     const headId = created.body.data.id as string;
@@ -132,7 +134,12 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
 
     const ended = await http().post(`/api/v1/cost-center-heads/${headId}/end`).set(auth('admin')).send({ reason: 'Cambio de cargo' });
     expect(ended.status).toBe(200);
-    expect(ended.body.data).toMatchObject({ isCurrent: false, endedBy: users['admin']?.id, endReason: 'Cambio de cargo' });
+    expect(ended.body.data).toMatchObject({
+      isCurrent: false,
+      endedBy: users['admin']?.id,
+      endedByName: `Integración ${users['admin']?.username.slice(3)}`,
+      endReason: 'Cambio de cargo',
+    });
 
     const after = await listAssets('jefe');
     expect(after.status).toBe(403);
@@ -197,7 +204,13 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
     expect(history.status).toBe(200);
     const event = (history.body.data.events as Array<{ kind: string; head: { id: string; reason: string; endReason: string | null } | null }>)
       .find((item) => item.kind === 'HEAD' && item.head?.id === headId);
-    expect(event?.head).toMatchObject({ reason: 'Resolución de rectoría 045', endReason: 'Terminó el encargo' });
+    const adminName = `Integración ${users['admin']?.username.slice(3)}`;
+    expect(event?.head).toMatchObject({
+      reason: 'Resolución de rectoría 045',
+      endReason: 'Terminó el encargo',
+      assignedByName: adminName,
+      endedByName: adminName,
+    });
   });
 
   it('varias personas pueden dirigir el mismo centro (no se impone jefe único)', async () => {

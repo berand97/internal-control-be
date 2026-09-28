@@ -14,6 +14,14 @@ export const COST_CENTER_HEAD_PERMISSION = 'cost_center:manage:global';
 /** Consultar jefaturas: el permiso existente de lectura de centros de costo; asignar y terminar siguen con manage. */
 export const COST_CENTER_HEAD_READ_PERMISSION = 'cost_center:read:global';
 
+/**
+ * Nombre legible de un app_user (nombres y apellidos de su persona, o su username) como subconsulta escalar sobre la
+ * columna dada; null si la columna es null. Mismo criterio que USER_DISPLAY_NAME_SQL de inventarios.
+ */
+export const userDisplayNameSubquery = (column: string): string =>
+  `(SELECT coalesce(nullif(trim(coalesce(up.first_name, '') || ' ' || coalesce(up.last_name, '')), ''), uu.username)
+      FROM app_user uu LEFT JOIN person up ON up.id = uu.person_id WHERE uu.id = ${column})`;
+
 /** Jefatura con persona y centro; lo reutiliza el historial del centro (CostCenterPlacementService). */
 export const HEAD_SELECT = `
   SELECT h.id, h.person_id AS "personId", trim(p.first_name || ' ' || p.last_name) AS "personName",
@@ -21,8 +29,9 @@ export const HEAD_SELECT = `
          h.cost_center_id AS "costCenterId", cc.external_code AS "costCenterCode", cc.name AS "costCenterName",
          h.valid_from AS "validFrom", h.valid_until AS "validUntil",
          (h.valid_from <= NOW() AND (h.valid_until IS NULL OR h.valid_until > NOW())) AS "isCurrent",
-         h.reason, h.assigned_by AS "assignedBy", h.assigned_at AS "assignedAt",
-         h.ended_at AS "endedAt", h.ended_by AS "endedBy", h.end_reason AS "endReason"
+         h.reason, h.assigned_by AS "assignedBy", ${userDisplayNameSubquery('h.assigned_by')} AS "assignedByName",
+         h.assigned_at AS "assignedAt", h.ended_at AS "endedAt", h.ended_by AS "endedBy",
+         ${userDisplayNameSubquery('h.ended_by')} AS "endedByName", h.end_reason AS "endReason"
   FROM cost_center_head h
   JOIN person p ON p.id = h.person_id
   JOIN cost_center cc ON cc.id = h.cost_center_id`;
