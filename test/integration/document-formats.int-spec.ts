@@ -384,7 +384,15 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
     });
     expect(byKey.get('OCI-01-55')?.process?.name).toBe('Entregas de activos');
     expect(byKey.get('LOAN_RETURN')?.process).toEqual({ name: 'Préstamos (acta de devolución)', requiredSigners: null });
-    expect(byKey.get('OCI-17-89')?.process).toBeNull();
+    expect(byKey.get('OCI-17-89')?.process).toEqual({
+      name: 'Traslados de activos',
+      requiredSigners: [
+        { role: 'ENTREGA', source: 'REQUEST' },
+        { role: 'RECIBE', source: 'RESPONSIBLE' },
+        { role: 'CONTROL_INTERNO', source: 'REQUEST' },
+        { role: 'CONTABILIDAD', source: 'REQUEST' },
+      ],
+    });
     // Orden: por código SGC, el formato sin código al final (como el catálogo en código).
     const seeded = formats.map((format) => format.key).filter((key) => !key.startsWith('IT-'));
     expect(seeded.slice(0, 6)).toEqual(['OCI-01-55', 'OCI-01-65', 'OCI-17-89', 'OCI-17-90-BAJA', 'OCI-17-90-INFORME', 'OCI-21-37']);
