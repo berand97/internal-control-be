@@ -127,16 +127,16 @@ export const resolveAt = (date: string | undefined): Date => {
     return new Date();
   }
   const at = new Date(`${date}${BOGOTA_END_OF_DAY}`);
-  if (Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== nextUtcDay(date)) {
+  if (Number.isNaN(at.getTime()) || !isCalendarDate(date)) {
     throw new ApiException(ErrorCode.ValidationFailed, 'Fecha inválida', [{ field: 'at', message: 'Use AAAA-MM-DD' }]);
   }
   return at;
 };
 
-/** 23:59:59.999 de Bogotá cae al día siguiente en UTC: sirve para descartar fechas como 2026-02-31. */
-const nextUtcDay = (date: string): string => {
+/** Descarta fechas que el calendario corre (2026-02-31 → 3 de marzo). */
+const isCalendarDate = (date: string): boolean => {
   const [year, month, day] = date.split('-').map(Number);
-  return new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, (day ?? 1) + 1)).toISOString().slice(0, 10);
+  return new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1)).toISOString().slice(0, 10) === date;
 };
 
 /**
