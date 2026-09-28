@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig } from '../../../config/configuration.js';
+import { validAt } from '../../cost-centers/domain/placement-at.js';
 import {
   MAX_CALENDAR_DAYS,
   bogotaDate,
@@ -35,6 +36,8 @@ interface CalendarRow {
   cc_name: string | null;
   target_code: string | null;
   target_name: string | null;
+  unit_code: string | null;
+  unit_name: string | null;
 }
 
 interface CoverageRow {
@@ -52,6 +55,10 @@ interface CoverageRow {
   not_found: number | null;
   misplaced: number | null;
   unexpected: number | null;
+  unit_code: string | null;
+  unit_name: string | null;
+  last_unit_code: string | null;
+  last_unit_name: string | null;
 }
 
 interface PlannedRow {
@@ -64,6 +71,19 @@ interface PlannedRow {
 }
 
 const OPEN: ReadonlyArray<InventoryStatus> = [InventoryStatus.Planned, InventoryStatus.InProgress];
+
+/**
+ * Unidad organizacional de un centro vigente en un instante (historial de ubicaciones de BE-A, cost_center_placement).
+ * `center` y `at` son expresiones SQL. Sin ubicación o sin unidad en ese instante, no hay fila.
+ */
+const unitAtSql = (center: string, at: string): string =>
+  `SELECT u.code, u.name FROM cost_center_placement p JOIN organizational_unit u ON u.id = p.organizational_unit_id
+   WHERE p.cost_center_id = ${center} AND ${validAt(at)}`;
+
+/** Instante de una fecha (columna date): el final de ese día en Colombia, igual que resolveAt de BE-A. */
+const endOfBogotaDay = (column: string): string => `((${column})::text || 'T23:59:59.999-05:00')::timestamptz`;
+
+const unitRef = (code: string | null, name: string | null) => (code === null ? null : { code, name: name ?? '' });
 
 /** Calendario de tomas y cobertura por centro de costo (solo lectura). */
 @Injectable()
@@ -89,13 +109,15 @@ export class InventoryPlanningService {
     const rows = (await this.dataSource.query(
       `SELECT i.id, i.code, i.name, i.status, i.scope_type, i.scope_id, i.reschedule_count, i.responsible_user_id,
               to_char(i.scheduled_start_date, 'YYYY-MM-DD') AS start, to_char(i.scheduled_end_date, 'YYYY-MM-DD') AS end,
-              nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') AS responsible_name,
+              nullif(trim(concat_ws(' ', rp.first_name, rp.last_name)), '') AS responsible_name,
               cc.id AS cc_id, cc.external_code AS cc_code, cc.name AS cc_name,
-              coalesce(l.code, ou.code) AS target_code, coalesce(l.name, ou.name) AS target_name
+              coalesce(l.code, ou.code) AS target_code, coalesce(l.name, ou.name) AS target_name,
+              coalesce(cu.code, ou.code) AS unit_code, coalesce(cu.name, ou.name) AS unit_name
        FROM physical_inventory i
-       LEFT JOIN app_user u ON u.id = i.responsible_user_id
-       LEFT JOIN person p ON p.id = u.person_id
+       LEFT JOIN app_user ru ON ru.id = i.responsible_user_id
+       LEFT JOIN person rp ON rp.id = ru.person_id
        LEFT JOIN cost_center cc ON i.scope_type = 'COST_CENTER' AND cc.id = i.scope_id
+       LEFT JOIN LATERAL (${unitAtSql('cc.id', endOfBogotaDay('i.scheduled_start_date'))}) cu ON TRUE
        LEFT JOIN location l ON i.scope_type = 'LOCATION' AND l.id = i.scope_id
        LEFT JOIN organizational_unit ou ON i.scope_type = 'ORG_UNIT' AND ou.id = i.scope_id
        WHERE i.scheduled_start_date <= $2::date AND i.scheduled_end_date >= $1::date
@@ -131,6 +153,7 @@ export class InventoryPlanningService {
         scope: row.scope_type,
         scopeLabel: scopeLabel(row),
         costCenter: row.cc_id ? { id: row.cc_id, code: row.cc_code ?? '', name: row.cc_name ?? '' } : null,
+        organizationalUnit: unitRef(row.unit_code, row.unit_name),
         plannedStartDate: row.start,
         plannedEndDate: row.end,
         rescheduled: Number(row.reschedule_count) > 0,
@@ -184,10 +207,13 @@ export class InventoryPlanningService {
               l.scope_type,
               to_char((l.closed_at AT TIME ZONE 'America/Bogota')::date, 'YYYY-MM-DD') AS closed_day,
               r.expected, r.not_found, r.misplaced,
-              CASE WHEN l.scope_type = 'COST_CENTER' AND l.scope_id = c.id THEN r.unexpected END AS unexpected
+              CASE WHEN l.scope_type = 'COST_CENTER' AND l.scope_id = c.id THEN r.unexpected END AS unexpected,
+              cu.code AS unit_code, cu.name AS unit_name, lu.code AS last_unit_code, lu.name AS last_unit_name
        FROM centers c
        JOIN cost_center cc ON cc.id = c.id
+       LEFT JOIN LATERAL (${unitAtSql('c.id', 'NOW()')}) cu ON TRUE
        LEFT JOIN last l ON l.cost_center_id = c.id
+       LEFT JOIN LATERAL (${unitAtSql('c.id', 'l.closed_at')}) lu ON l.id IS NOT NULL
        LEFT JOIN LATERAL (
          SELECT count(*) FILTER (WHERE x.expected_cost_center_id = c.id AND x.verification_result <> 'SURPLUS')::int AS expected,
                 count(*) FILTER (WHERE x.expected_cost_center_id = c.id AND x.verification_result = 'MISSING')::int AS not_found,
@@ -212,6 +238,7 @@ export class InventoryPlanningService {
               };
         return {
           costCenter: { id: row.id, code: row.code, name: row.name },
+          organizationalUnit: unitRef(row.unit_code, row.unit_name),
           activeAssets: Number(row.assets),
           lastInventory:
             row.inventory_id === null || row.closed_at === null || row.inventory_status === null
@@ -222,6 +249,7 @@ export class InventoryPlanningService {
                   closedAt: row.closed_at,
                   status: row.inventory_status,
                   scope: row.scope_type ?? InventoryScopeType.CostCenter,
+                  organizationalUnit: unitRef(row.last_unit_code, row.last_unit_name),
                 },
           lastResult,
           notFoundRate: lastResult ? notFoundRate(lastResult) : null,

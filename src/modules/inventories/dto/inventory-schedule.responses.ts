@@ -258,6 +258,14 @@ export class InventoryCostCenterRefDto {
   readonly name!: string;
 }
 
+export class InventoryUnitRefDto {
+  @ApiProperty({ example: 'VRF' })
+  readonly code!: string;
+
+  @ApiProperty()
+  readonly name!: string;
+}
+
 export class InventoryPersonRefDto {
   @ApiProperty({ format: 'uuid', description: 'Usuario responsable' })
   readonly id!: string;
@@ -287,6 +295,14 @@ export class InventoryCalendarItemDto {
 
   @ApiProperty({ type: InventoryCostCenterRefDto, nullable: true, description: 'Solo en alcance COST_CENTER' })
   readonly costCenter!: InventoryCostCenterRefDto | null;
+
+  @ApiProperty({
+    type: InventoryUnitRefDto,
+    nullable: true,
+    description:
+      'COST_CENTER: unidad del centro vigente al inicio de la toma (fin del día de plannedStartDate, hora de Colombia, historial de ubicaciones); ORG_UNIT: la unidad del alcance; null en GLOBAL, LOCATION o si el centro no tenía unidad en esa fecha',
+  })
+  readonly organizationalUnit!: InventoryUnitRefDto | null;
 
   @ApiProperty({ format: 'date' })
   readonly plannedStartDate!: string;
@@ -369,6 +385,13 @@ export class InventoryCoverageLastDto {
 
   @ApiProperty({ enum: INVENTORY_SCOPE_TYPES, enumName: 'InventoryScopeType' })
   readonly scope!: InventoryScopeType;
+
+  @ApiProperty({
+    type: InventoryUnitRefDto,
+    nullable: true,
+    description: 'Unidad del centro vigente al cierre de esa toma (closedAt); null si no tenía unidad entonces',
+  })
+  readonly organizationalUnit!: InventoryUnitRefDto | null;
 }
 
 export class InventoryCoverageResultDto {
@@ -409,6 +432,9 @@ export class InventoryCoverageNextDto {
 export class InventoryCoverageItemDto {
   @ApiProperty({ type: InventoryCostCenterRefDto })
   readonly costCenter!: InventoryCostCenterRefDto;
+
+  @ApiProperty({ type: InventoryUnitRefDto, nullable: true, description: 'Unidad actual del centro; null si no tiene' })
+  readonly organizationalUnit!: InventoryUnitRefDto | null;
 
   @ApiProperty({ type: 'integer', description: 'Activos actuales del centro, sin dados de baja (WRITTEN_OFF)' })
   readonly activeAssets!: number;

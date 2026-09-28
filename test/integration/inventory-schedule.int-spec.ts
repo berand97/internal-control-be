@@ -637,6 +637,68 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     expect((await candidates({}, free.token ?? '')).status).toBe(403);
   });
 
+  it('calendario y cobertura resuelven la unidad del centro a la fecha: inicio de cada toma, hoy y cierre de la última', async () => {
+    const tag = randomUUID().slice(0, 5).toUpperCase();
+    const unit = (code: string) =>
+      scalar<string>(dataSource, `INSERT INTO organizational_unit (code, name, unit_type) VALUES ($1, $2, 'AREA') RETURNING id`, [
+        code,
+        `Unidad ${code}`,
+      ]);
+    const [old, current, next] = [await unit(`U1${tag}`), await unit(`U2${tag}`), await unit(`U3${tag}`)];
+    const centerId = await center('Centro que cambia de unidad');
+    await newAsset(centerId, base.roomB);
+    // Historial: U1 hasta hace 5 días, U2 hasta el día 60 y U3 desde entonces (fin del día, hora de Colombia).
+    const boundary = (offset: number) => `${day(offset)}T23:59:59.999-05:00`;
+    await dataSource.query('DELETE FROM cost_center_placement WHERE cost_center_id = $1', [centerId]);
+    for (const [unitId, from, until] of [
+      [old, '2020-01-01T00:00:00-05:00', boundary(-5)],
+      [current, boundary(-5), boundary(60)],
+      [next, boundary(60), null],
+    ] as Array<[string, string, string | null]>) {
+      await dataSource.query(
+        `INSERT INTO cost_center_placement (cost_center_id, organizational_unit_id, has_movement, valid_from, valid_until, reason, source)
+         VALUES ($1, $2, TRUE, $3, $4, 'Prueba de unidad a la fecha', 'MANUAL')`,
+        [centerId, unitId, from, until],
+      );
+    }
+    const before = await schedule({ scope: 'COST_CENTER', scopeId: centerId, plannedStartDate: day(50), plannedEndDate: day(51) });
+    const after = await schedule({ scope: 'COST_CENTER', scopeId: centerId, plannedStartDate: day(70), plannedEndDate: day(71) });
+
+    const calendar = await http().get('/api/v1/inventories/calendar').query({ from: day(45), to: day(75) }).set(auth()).expect(200);
+    expectConforms('get', '/api/v1/inventories/calendar', 200, calendar.body);
+    const byId = new Map(
+      (calendar.body.data.items as Array<{ id: string; organizationalUnit: unknown }>).map((item) => [item.id, item.organizationalUnit]),
+    );
+    expect(byId.get(before.data.id)).toEqual({ code: `U2${tag}`, name: `Unidad U2${tag}` });
+    expect(byId.get(after.data.id)).toEqual({ code: `U3${tag}`, name: `Unidad U3${tag}` });
+
+    // Última toma cerrada hace 10 días, cuando el centro estaba en U1.
+    const closedId = await scalar<string>(
+      dataSource,
+      `INSERT INTO physical_inventory (code, name, scheduled_start_date, scheduled_end_date, status, responsible_user_id,
+         created_by, scope_type, scope_id, closed_at, closed_by)
+       VALUES ($1, 'Toma cerrada', $2, $2, 'CLOSED', $3, $3, 'COST_CENTER', $4, NOW() - interval '10 days', $3) RETURNING id`,
+      [`TF-IT-U${randomUUID().slice(0, 6)}`, day(-12), director.userId, centerId],
+    );
+    const assetId = await scalar<string>(dataSource, 'SELECT id FROM asset WHERE current_cost_center_id = $1', [centerId]);
+    await dataSource.query(
+      `INSERT INTO physical_inventory_item (inventory_id, asset_id, verification_result, expected_cost_center_id)
+       VALUES ($1, $2, 'FOUND', $3)`,
+      [closedId, assetId, centerId],
+    );
+    const coverage = await http().get('/api/v1/inventories/coverage').set(auth()).expect(200);
+    expectConforms('get', '/api/v1/inventories/coverage', 200, coverage.body);
+    const row = (
+      coverage.body.data.items as Array<{
+        costCenter: { id: string };
+        organizationalUnit: unknown;
+        lastInventory: { id: string; organizationalUnit: unknown } | null;
+      }>
+    ).find((item) => item.costCenter.id === centerId);
+    expect(row?.organizationalUnit).toEqual({ code: `U2${tag}`, name: `Unidad U2${tag}` });
+    expect(row?.lastInventory).toMatchObject({ id: closedId, organizationalUnit: { code: `U1${tag}`, name: `Unidad U1${tag}` } });
+  });
+
   it('el menú trae "Calendario de tomas" con el recurso y el ícono existentes', async () => {
     const [row] = (await dataSource.query(
       `SELECT module, resource, label, required_action, icon FROM navigation_item WHERE path = '/inventories/calendar'`,
