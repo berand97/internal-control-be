@@ -92,6 +92,15 @@ export class RoleGrantPermissionDto {
 
   @ApiProperty({ type: 'string', nullable: true, description: 'Código del permiso (null si se borró y no quedó registrado)' })
   readonly code!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description:
+      'Nombre legible en español, del catálogo de permisos (su descripción o, si no tiene, el nombre del recurso); null si el permiso ya no existe',
+    example: 'Ver historial de permisos otorgados',
+  })
+  readonly label!: string | null;
 }
 
 export class RoleGrantHistoryItemDto {

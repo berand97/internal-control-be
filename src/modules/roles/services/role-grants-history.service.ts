@@ -57,6 +57,12 @@ const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
+/** Lo que el catálogo de permisos (GET /permissions/catalog, tabla permission) dice de un permiso citado. */
+interface PermissionInfo {
+  readonly code: string;
+  readonly label: string;
+}
+
 /**
  * Historial de otorgamientos y retiros (permiso a rol, rol a usuario, creación/edición/borrado de rol), leído de
  * audit_log. Nunca devuelve `changes` crudo: solo campos estructurados (sin correos, documentos ni secretos).
@@ -119,13 +125,17 @@ export class RoleGrantsHistoryService {
        LIMIT ${limit} OFFSET ${offset}`,
       params,
     )) as Row[];
-    const codes = await this.permissionCodes(rows);
+    const codes = await this.permissionInfo(rows);
     const items = rows.map((row) => this.toItem(row, codes));
     return paginatedResult(items, query.page, query.pageSize, Number(rows[0]?.total ?? 0)) as RoleGrantsHistoryPageDto;
   }
 
-  /** Códigos de los permisos citados por id en registros que no guardaron el código (anteriores a este cambio). */
-  private async permissionCodes(rows: ReadonlyArray<Row>): Promise<ReadonlyMap<string, string>> {
+  /**
+   * Código y nombre legible de los permisos citados por id, de la misma tabla que arma el catálogo de permisos: el
+   * nombre es su descripción en español o, si no tiene, el nombre del recurso (resource_label). El código sirve a los
+   * registros que no lo guardaron (anteriores a este cambio).
+   */
+  private async permissionInfo(rows: ReadonlyArray<Row>): Promise<ReadonlyMap<string, PermissionInfo>> {
     const ids = new Set<string>();
     for (const row of rows) {
       const changes = row.changes ?? {};
@@ -140,28 +150,35 @@ export class RoleGrantsHistoryService {
     if (ids.size === 0) {
       return new Map();
     }
-    const found = (await this.dataSource.query(`SELECT id, code FROM permission WHERE id = ANY($1::uuid[])`, [
-      [...ids],
-    ])) as Array<{ id: string; code: string }>;
-    return new Map(found.map((item) => [item.id, item.code]));
+    const found = (await this.dataSource.query(
+      `SELECT id, code, coalesce(nullif(trim(description), ''), resource_label) AS label
+       FROM permission WHERE id = ANY($1::uuid[])`,
+      [[...ids]],
+    )) as Array<{ id: string; code: string; label: string }>;
+    return new Map(found.map((item) => [item.id, { code: item.code, label: item.label }]));
   }
 
-  private toItem(row: Row, codes: ReadonlyMap<string, string>): RoleGrantHistoryItemDto {
+  private toItem(row: Row, codes: ReadonlyMap<string, PermissionInfo>): RoleGrantHistoryItemDto {
     const changes = row.changes ?? {};
+    const permission = (id: string, storedCode: string | null = null): RoleGrantPermissionDto => ({
+      id,
+      code: storedCode ?? codes.get(id)?.code ?? null,
+      label: codes.get(id)?.label ?? null,
+    });
     const refs = (idsKey: string, codesKey: string): RoleGrantPermissionDto[] => {
       const ids = strings(changes[idsKey]);
       const stored = Array.isArray(changes[codesKey]) ? (changes[codesKey] as unknown[]) : [];
-      return ids.map((id, index) => ({ id, code: text(stored[index]) ?? codes.get(id) ?? null }));
+      return ids.map((id, index) => permission(id, text(stored[index])));
     };
     let added = refs('addedPermissionIds', 'addedPermissionCodes');
     let removed = refs('removedPermissionIds', 'removedPermissionCodes');
     // Registros anteriores: la creación guardaba permissionIds y el retiro removedPermissionId.
     if (row.action === AuditAction.RoleCreated && added.length === 0) {
-      added = strings(changes['permissionIds']).map((id) => ({ id, code: codes.get(id) ?? null }));
+      added = strings(changes['permissionIds']).map((id) => permission(id));
     }
     const legacyRemoved = text(changes['removedPermissionId']);
     if (legacyRemoved && removed.length === 0) {
-      removed = [{ id: legacyRemoved, code: codes.get(legacyRemoved) ?? null }];
+      removed = [permission(legacyRemoved)];
     }
     const isRoleEvent = ROLE_ACTIONS.has(row.action);
     const roleId = row.role_id ?? (isRoleEvent ? row.entity_id : text(changes['roleId']));

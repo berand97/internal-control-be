@@ -426,9 +426,37 @@ describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HT
       expect(byRole.body.data.pagination).toMatchObject({ page: 1, pageSize: 1, totalItems: 2, totalPages: 2 });
       expect(byRole.body.data.items[0]).toMatchObject({
         event: 'ROLE_PERMISSIONS_CHANGED',
-        addedPermissions: [{ id: second, code: 'loan:read:global' }],
-        removedPermissions: [{ id: first, code: 'inventory:read:global' }],
+        addedPermissions: [{ id: second, code: 'loan:read:global', label: 'Ver todos los préstamos' }],
+        removedPermissions: [{ id: first, code: 'inventory:read:global', label: 'Consultar tomas físicas' }],
       });
+      // La etiqueta es la del catálogo de permisos (GET /permissions/catalog), no un mapa aparte.
+      const catalog = await call('get', '/permissions/catalog', admin.token);
+      const catalogDescription = (id: string): unknown =>
+        (catalog.body.data as Array<{ resources: Array<{ permissions: Array<{ id: string; description: string | null }> }> }>)
+          .flatMap((module) => module.resources)
+          .flatMap((resource) => resource.permissions)
+          .find((item) => item.id === id)?.description;
+      expect(catalogDescription(second)).toBe('Ver todos los préstamos');
+      expect(catalogDescription(first)).toBe('Consultar tomas físicas');
+
+      // Un permiso que ya no existe conserva el código guardado en la bitácora, sin etiqueta.
+      const temporary = await scalar<string>(
+        dataSource,
+        `INSERT INTO permission (code, module, resource_type, resource_label, action, scope_level, description)
+         VALUES ('loan:it_label:global', 'LOAN', 'loan', 'Préstamos', 'it_label', 'GLOBAL', NULL) RETURNING id`,
+      );
+      // Quien otorga debe tenerlo (cascada): se le da a SUPER_ADMIN solo para esta prueba.
+      await grantSql('SUPER_ADMIN', 'loan:it_label:global');
+      const grantTemporary = await call('post', `/roles/${role}/permissions`, admin.token).send({ permissionIds: [temporary] });
+      expect(grantTemporary.status, JSON.stringify(grantTemporary.body)).toBe(201);
+      const noDescription = await call('get', '/roles/grants-history', director.token).query({ roleId: role, permissionId: temporary });
+      expect(noDescription.body.data.items[0].addedPermissions).toEqual([
+        { id: temporary, code: 'loan:it_label:global', label: 'Préstamos' },
+      ]);
+      await dataSource.query('DELETE FROM role_permission WHERE permission_id = $1', [temporary]);
+      await dataSource.query('DELETE FROM permission WHERE id = $1', [temporary]);
+      const deleted = await call('get', '/roles/grants-history', director.token).query({ roleId: role, permissionId: temporary });
+      expect(deleted.body.data.items[0].addedPermissions).toEqual([{ id: temporary, code: 'loan:it_label:global', label: null }]);
 
       const byPermission = await call('get', '/roles/grants-history', director.token).query({ roleId: role, permissionId: first });
       expect((byPermission.body.data.items as unknown[]).length).toBe(2);
