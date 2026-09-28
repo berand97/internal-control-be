@@ -13,7 +13,11 @@ import {
   EndCostCenterHeadDto,
   QueryCostCenterHeadsDto,
 } from './dto/cost-center-head.dto.js';
-import { COST_CENTER_HEAD_PERMISSION, CostCenterHeadsService } from './services/cost-center-heads.service.js';
+import {
+  COST_CENTER_HEAD_PERMISSION,
+  COST_CENTER_HEAD_READ_PERMISSION,
+  CostCenterHeadsService,
+} from './services/cost-center-heads.service.js';
 
 const SCOPE_NOTE =
   'Una jefatura vigente amplía el alcance de lectura de quien tenga un rol con el permiso acotado (asset:read:org_unit, y en préstamos loan:approve:org_unit): ve los centros de sus asignaciones COST_CENTER más los que dirige. No da permisos por sí sola. Varias personas pueden dirigir el mismo centro.';
@@ -51,8 +55,11 @@ export class CostCenterHeadsController {
   }
 
   @Get('cost-centers/:costCenterId/heads')
-  @RequirePermission(COST_CENTER_HEAD_PERMISSION)
-  @ApiOperation({ summary: 'Jefes de un centro de costo (vigentes o historial)' })
+  @RequirePermission(COST_CENTER_HEAD_READ_PERMISSION)
+  @ApiOperation({
+    summary: 'Jefes de un centro de costo (vigentes o historial)',
+    description: 'Requiere cost_center:read:global (asignar y terminar jefaturas requieren cost_center:manage:global).',
+  })
   @ApiOkResponse({ schema: envelopedArraySchema(CostCenterHeadDto) })
   byCostCenter(
     @Param('costCenterId', ParseUUIDPipe) costCenterId: string,
@@ -62,8 +69,11 @@ export class CostCenterHeadsController {
   }
 
   @Get('persons/:personId/cost-center-headships')
-  @RequirePermission(COST_CENTER_HEAD_PERMISSION)
-  @ApiOperation({ summary: 'Centros de costo que dirige una persona (vigentes o historial)' })
+  @RequirePermission(COST_CENTER_HEAD_READ_PERMISSION)
+  @ApiOperation({
+    summary: 'Centros de costo que dirige una persona (vigentes o historial)',
+    description: 'Requiere cost_center:read:global (asignar y terminar jefaturas requieren cost_center:manage:global).',
+  })
   @ApiOkResponse({ schema: envelopedArraySchema(CostCenterHeadDto) })
   byPerson(@Param('personId', ParseUUIDPipe) personId: string, @Query() query: QueryCostCenterHeadsDto) {
     return this.heads.byPerson(personId, query.current ?? false);

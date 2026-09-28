@@ -10,6 +10,8 @@ import type { AssignCostCenterHeadDto, CostCenterHeadDto } from '../dto/cost-cen
 
 /** Permiso existente de administración de centros de costo (cost-centers.controller.ts). */
 export const COST_CENTER_HEAD_PERMISSION = 'cost_center:manage:global';
+/** Consultar jefaturas: el permiso existente de lectura de centros de costo; asignar y terminar siguen con manage. */
+export const COST_CENTER_HEAD_READ_PERMISSION = 'cost_center:read:global';
 
 const HEAD_SELECT = `
   SELECT h.id, h.person_id AS "personId", trim(p.first_name || ' ' || p.last_name) AS "personName",

@@ -84,6 +84,7 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
     await userWith('consulta', [{ role: 'VIEWER', scopeType: 'COST_CENTER', scopeId: centerA }]);
     await userWith('sinRol', []);
     await userWith('custodio', [{ role: 'CUSTODIAN', scopeType: 'COST_CENTER', scopeId: centerA }]);
+    await userWith('auditor', [{ role: 'AUDITOR', scopeType: 'GLOBAL' }]);
   });
 
   afterAll(async () => {
@@ -179,6 +180,29 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
       validUntil: '2026-09-01T00:00:00.000Z',
     });
     expect(invalid.status).toBe(400);
+  });
+
+  it('leer jefaturas pide solo cost_center:read:global: el AUDITOR las lee y no puede asignar ni terminar', async () => {
+    const grants = (await dataSource.query(
+      `SELECT p.code FROM role_permission rp JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id
+       WHERE r.code = 'AUDITOR' AND p.code LIKE 'cost_center:%' ORDER BY p.code`,
+    )) as Array<{ code: string }>;
+    expect(grants.map((grant) => grant.code)).toEqual(['cost_center:read:global']);
+
+    const heads = await http().get(`/api/v1/cost-centers/${centerA}/heads`).set(auth('auditor'));
+    expect(heads.status).toBe(200);
+    expect((heads.body.data as unknown[]).length).toBeGreaterThan(0);
+    const headships = await http()
+      .get(`/api/v1/persons/${users['jefe']?.personId}/cost-center-headships`)
+      .set(auth('auditor'));
+    expect(headships.status).toBe(200);
+
+    const denied = await assign(users['auditor']?.personId ?? '', 'auditor');
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
+    const anyHead = (heads.body.data as Array<{ id: string }>)[0]?.id ?? '';
+    const endDenied = await http().post(`/api/v1/cost-center-heads/${anyHead}/end`).set(auth('auditor')).send({ reason: 'Sin permiso' });
+    expect(endDenied.status).toBe(403);
   });
 
   it(':own con asignación COST_CENTER: el custodio acotado puede solicitar un préstamo, no a nombre de otro', async () => {
