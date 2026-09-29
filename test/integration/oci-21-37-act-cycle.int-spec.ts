@@ -626,5 +626,118 @@ describe
           'Sustitución de firmante (separación de funciones): firma por Control Interno Directora Pruebas Acta en lugar de Laura Milena Quintero Ruiz, que firma el acta como Responsable. Motivo: La jefa del centro aprobó la conciliación',
         );
       });
+
+      it('toma por ubicación con activos de tres centros: un PDF por centro con su consecutivo, sus activos y su jefe; el centro sin jefe queda sin acta', async () => {
+        const lab = await scalar<string>(
+          dataSource,
+          `INSERT INTO location (building_id, code, name, location_type)
+           SELECT building_id, 'IT-TF-LAB', 'Laboratorio de sistemas', 'OFFICE' FROM location WHERE id = $1 RETURNING id`,
+          [base.room],
+        );
+        const faculty = await center('FACULTAD DE INGENIERIA');
+        const systems = await center('DEPARTAMENTO DE SISTEMAS');
+        const maintenance = await center('MANTENIMIENTO');
+        const codeOf = (id: string) =>
+          scalar<string>(dataSource, 'SELECT external_code FROM cost_center WHERE id = $1', [id]);
+        const inLab = async (costCenterId: string, description: string, price: number) => {
+          const id = await newAsset(costCenterId, description, price);
+          await dataSource.query('UPDATE asset SET current_location_id = $2 WHERE id = $1', [id, lab]);
+          return id;
+        };
+        const oscilloscope = await inLab(faculty, 'OSCILOSCOPIO DIGITAL TEKTRONIX', 3_200_000);
+        const server = await inLab(systems, 'SERVIDOR DELL POWEREDGE R250', 9_800_000);
+        const drill = await inLab(maintenance, 'TALADRO PERCUTOR DEWALT', 540_000);
+        const dean = await person('Carlos Alberto', 'Restrepo Díaz', 'Decano', null);
+        await headOf(faculty, dean);
+        const systemsHead = await person('Diana Marcela', 'Ospina Loaiza', 'Jefa de Sistemas', null);
+        await headOf(systems, systemsHead);
+        const responsible = await person('Sara', 'Montoya Ríos', 'Profesional de Control Interno', 'INTERNAL_CONTROL_DIRECTOR');
+
+        const created = await http()
+          .post('/api/v1/inventories')
+          .set(as(director))
+          .send({
+            name: 'Toma del laboratorio compartido',
+            scope: 'LOCATION',
+            scopeId: lab,
+            plannedStartDate: today,
+            plannedEndDate: addDays(today, 2),
+            responsibleUserId: responsible.userId,
+            reminderOffsetsDays: [],
+          });
+        expect(created.status, JSON.stringify(created.body)).toBe(201);
+        const id = created.body.data.id as string;
+        expect((await post(responsible, `/${id}/start`)).status).toBe(200);
+        const view = await detail(id);
+        for (const assetId of [oscilloscope, server, drill]) {
+          expect((await post(responsible, `/${id}/verify-asset`, { assetId, condition: 'GOOD' })).status).toBe(200);
+          const itemId = view.items.find((item) => item.assetId === assetId)?.id;
+          const set = await http()
+            .put(`/api/v1/inventories/${id}/items/${itemId}/finding-category`)
+            .set(as(responsible))
+            .send({ code: 'AU' });
+          expect(set.status, JSON.stringify(set.body)).toBe(200);
+        }
+        const closed = await post(responsible, `/${id}/close`, {
+          allowUnverified: true,
+          attendedBy: [
+            { costCenterId: faculty, name: 'Laboratorista de la facultad' },
+            { costCenterId: systems, name: 'Técnico de soporte' },
+          ],
+        });
+        expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+        expect(closed.body.data.acts).toHaveLength(3);
+        expect((await post(responsible, `/${id}/reconcile`)).status).toBe(200);
+        const approved = await post(approver, `/${id}/reconcile/approve`);
+        expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+        await engine.processPending(1000);
+        const acts = new Map(
+          ((await detail(id)) as unknown as { acts: Array<Record<string, unknown> & { costCenter: { id: string } }> }).acts.map(
+            (act) => [act.costCenter.id, act],
+          ),
+        );
+        expect(acts.get(maintenance)).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'NO_COST_CENTER_HEAD' });
+        const pdfOf = async (centerId: string, name: string) => {
+          const act = acts.get(centerId) as Record<string, unknown>;
+          expect(act, JSON.stringify(act)).toMatchObject({ generation: 'GENERATED', status: 'PENDING_SIGNATURE' });
+          const pdf = await binary(`/api/v1/documents/${act['documentId'] as string}/pdf`, director);
+          expect(pdf.status).toBe(200);
+          const text = await pdfText(pdf.body as Buffer);
+          if (OUTPUT) {
+            mkdirSync(OUTPUT, { recursive: true });
+            writeFileSync(join(OUTPUT, `${name}.pdf`), pdf.body as Buffer);
+            writeFileSync(join(OUTPUT, `${name}.txt`), text);
+          }
+          return { text: squash(text), number: act['number'] as string };
+        };
+        const facultyPdf = await pdfOf(faculty, 'acta-oci-21-37-ubicacion-facultad');
+        const systemsPdf = await pdfOf(systems, 'acta-oci-21-37-ubicacion-sistemas');
+        expect(facultyPdf.number).not.toBe(systemsPdf.number);
+        for (const fragment of [
+          `Informe de Hallazgos No. ${facultyPdf.number}`,
+          `Centro de Costos ${await codeOf(faculty)} FACULTAD DE INGENIERIA`,
+          'Responsable Carlos Alberto Restrepo Díaz',
+          'Atendió por el área Laboratorista de la facultad',
+          'OSCILOSCOPIO DIGITAL TEKTRONIX',
+          `AU — Activos en uso 1 ${money(3_200_000)} 100,00 %`,
+        ]) {
+          expect(facultyPdf.text, fragment).toContain(fragment);
+        }
+        expect(facultyPdf.text).not.toContain('SERVIDOR DELL POWEREDGE R250');
+        expect(facultyPdf.text).not.toContain('TALADRO PERCUTOR DEWALT');
+        for (const fragment of [
+          `Informe de Hallazgos No. ${systemsPdf.number}`,
+          `Centro de Costos ${await codeOf(systems)} DEPARTAMENTO DE SISTEMAS`,
+          'Responsable Diana Marcela Ospina Loaiza',
+          'Atendió por el área Técnico de soporte',
+          'SERVIDOR DELL POWEREDGE R250',
+          `AU — Activos en uso 1 ${money(9_800_000)} 100,00 %`,
+        ]) {
+          expect(systemsPdf.text, fragment).toContain(fragment);
+        }
+        expect(systemsPdf.text).not.toContain('OSCILOSCOPIO DIGITAL TEKTRONIX');
+        expect(sampleLeftovers(facultyPdf.text, SAMPLE, { numbers: true })).toEqual([]);
+        expect(sampleLeftovers(systemsPdf.text, SAMPLE, { numbers: true })).toEqual([]);
+      });
     },
   );
