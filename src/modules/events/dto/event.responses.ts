@@ -12,6 +12,7 @@ export const SSE_EVENT_TYPES = [
   'notification.count',
   'session.ended',
   'stream.closed',
+  'ping',
 ] as const;
 export type SseEventType = (typeof SSE_EVENT_TYPES)[number];
 
@@ -44,7 +45,7 @@ export class ReadyEventDataDto {
 
   @ApiProperty({
     type: 'integer',
-    description: 'Cada cuántos ms llega el latido `: ping`. Sin datos en ~2 latidos, dé la conexión por caída',
+    description: 'Cada cuántos ms llega el evento de latido `ping`. Sin ningún evento en ~2 latidos, dé la conexión por caída',
   })
   readonly heartbeatMs!: number;
 }
@@ -88,3 +89,6 @@ export class StreamClosedEventDataDto {
   })
   readonly reason!: StreamClosedReason;
 }
+
+/** `data` del latido `ping`: objeto vacío. Llega cada heartbeatMs, sin `id` (no mueve Last-Event-ID). */
+export class PingEventDataDto {}

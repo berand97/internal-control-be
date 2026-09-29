@@ -37,7 +37,10 @@ interface SseClient {
   readonly messages: SseMessage[];
   /** Cuerpo JSON si la respuesta no fue un stream (errores). */
   readonly body: () => string;
+  /** Latidos: eventos `ping` con data {} y sin id (no entran en messages). */
   pings: () => number;
+  /** Comentarios SSE recibidos (el latido ya no es un comentario: EventSource no los entrega a JavaScript). */
+  comments: () => number;
   isEnded: () => boolean;
   waitFor: (predicate: (message: SseMessage) => boolean, timeoutMs?: number) => Promise<SseMessage>;
   waitEnded: (timeoutMs?: number) => Promise<void>;
@@ -53,6 +56,7 @@ const openSse = (port: number, path: string, headers: Record<string, string> = {
       let raw = '';
       let buffer = '';
       let pings = 0;
+      let comments = 0;
       let ended = false;
       res.setEncoding('utf8');
       res.on('data', (chunk: string) => {
@@ -68,7 +72,7 @@ const openSse = (port: number, path: string, headers: Record<string, string> = {
           let data = '';
           for (const line of block.split('\n')) {
             if (line.startsWith(':')) {
-              pings += 1;
+              comments += 1;
             } else if (line.startsWith('event: ')) {
               event = line.slice(7);
             } else if (line.startsWith('id: ')) {
@@ -77,7 +81,13 @@ const openSse = (port: number, path: string, headers: Record<string, string> = {
               data += line.slice(6);
             }
           }
-          if (data) {
+          if (event === 'ping') {
+            // Latido visible para EventSource: data {} y nunca id (no mueve Last-Event-ID).
+            if (id !== undefined || data !== '{}') {
+              throw new Error(`Latido inesperado: id=${id} data=${data}`);
+            }
+            pings += 1;
+          } else if (data) {
             messages.push({ event, id, data: JSON.parse(data) as Record<string, unknown> });
           }
         }
@@ -102,6 +112,7 @@ const openSse = (port: number, path: string, headers: Record<string, string> = {
         messages,
         body: () => raw,
         pings: () => pings,
+        comments: () => comments,
         isEnded: () => ended,
         waitFor: async (predicate, timeoutMs = 3000) => {
           await waitUntil(() => messages.some(predicate), timeoutMs, 'un evento');
@@ -313,7 +324,7 @@ describe('Canal de eventos SSE (HTTP real + PostgreSQL LISTEN/NOTIFY)', () => {
   });
 
   describe('stream', () => {
-    it('cabeceras para proxies y evento ready con el conteo; latido `: ping`', async () => {
+    it('cabeceras para proxies y evento ready con el conteo; latido como evento `ping` (data {}, sin id), no comentario', async () => {
       const user = await createUser();
       await notify(user.id);
       await notify(user.id);
@@ -334,6 +345,8 @@ describe('Canal de eventos SSE (HTTP real + PostgreSQL LISTEN/NOTIFY)', () => {
       await sleep(700);
       expect(stream.messages.filter((m) => m.event === 'notification')).toHaveLength(0);
       expect(stream.pings()).toBeGreaterThanOrEqual(1);
+      expect(stream.comments()).toBe(0);
+      expect(stream.body()).toContain('event: ping\ndata: {}\n\n');
     });
 
     it('el evento sale DESPUÉS del COMMIT, con lo mismo que la lista (sin cuerpo), y no sale con ROLLBACK', async () => {

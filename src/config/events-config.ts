@@ -5,7 +5,7 @@
 export interface EventsConfig {
   /** Streams abiertos a la vez en esta instancia (EVENTS_MAX_STREAMS). El siguiente recibe 503 EVENTS_CAPACITY_REACHED. */
   readonly maxStreams: number;
-  /** Cada cuánto se manda el latido `: ping` y se revalida la sesión (EVENTS_HEARTBEAT_MS). */
+  /** Cada cuánto se manda el evento de latido `ping` y se revalida la sesión (EVENTS_HEARTBEAT_MS). */
   readonly heartbeatMs: number;
   /** Vida del ticket de un solo uso de POST /events/ticket (EVENTS_TICKET_TTL_SECONDS, máximo 30). */
   readonly ticketTtlSeconds: number;

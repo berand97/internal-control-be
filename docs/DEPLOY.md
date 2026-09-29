@@ -95,7 +95,7 @@ cada una; es preferible que el despliegue falle de inmediato y se vea en Dokploy
 | `TRUST_PROXY` | No | `loopback, linklocal, uniquelocal` | `2` | Proxies de confianza para `X-Forwarded-For` (IP real en firmas, auditoría y throttler). Número de saltos o lista de redes; nunca `true`. |
 | `THROTTLE_USER_LIMIT` | No | `300` | `300` | Peticiones por usuario autenticado, por ruta, en 60 s (ver nota de límite de peticiones). Entero ≥ 1; otro valor impide arrancar. |
 | `EVENTS_MAX_STREAMS` | No | `500` | `500` | Streams SSE (`GET /api/v1/events`) abiertos a la vez en la instancia; el siguiente recibe `503 EVENTS_CAPACITY_REACHED`. Entero 1–100000; otro valor impide arrancar. Ver §11. |
-| `EVENTS_HEARTBEAT_MS` | No | `25000` | `25000` | Latido `: ping` del stream y revalidación de la sesión. Entero 100–55000; debe quedar por debajo de cualquier timeout de inactividad del proxy. Ver §11. |
+| `EVENTS_HEARTBEAT_MS` | No | `25000` | `25000` | Latido del stream (evento `ping`) y revalidación de la sesión. Entero 100–55000; debe quedar por debajo de cualquier timeout de inactividad del proxy. Ver §11. |
 | `EVENTS_TICKET_TTL_SECONDS` | No | `30` | `30` | Vida del ticket de un solo uso de `POST /api/v1/events/ticket`. Entero 1–30. |
 | `API_DOCS_ENABLED` | No | `false` en producción | `false` | `true` publica `/api/openapi.json` y `/api/reference`. |
 | `DATABASE_LOGGING` | No | `false` | `false` | `true` registra el SQL (ruidoso; puede incluir datos personales). |
@@ -642,7 +642,7 @@ ticket de un solo uso (`POST /api/v1/events/ticket`, con la sesión normal). Si 
 abrir, la aplicación sigue funcionando con el sondeo lento de siempre.
 
 **Qué manda el backend** (no hay que configurarlo): `Cache-Control: no-cache, no-transform`,
-`X-Accel-Buffering: no`, `Connection: keep-alive` y un latido `: ping` cada `EVENTS_HEARTBEAT_MS`
+`X-Accel-Buffering: no`, `Connection: keep-alive` y un latido (evento `ping`, `data: {}`, sin `id`) cada `EVENTS_HEARTBEAT_MS`
 (25 s). En cada latido revalida la sesión: una sesión cerrada termina el stream con `session.ended`.
 
 **Reparto entre instancias.** Los eventos viajan por PostgreSQL `LISTEN/NOTIFY` (canal `app_events`,
@@ -683,8 +683,8 @@ curl -N -i "https://<api>/api/v1/events?ticket=$TICKET"
 ```
 
 Debe mostrar enseguida `HTTP/2 200`, `content-type: text/event-stream`, **sin** `content-encoding`, el
-evento `ready` y luego `: ping` cada 25 s sin cortarse en varios minutos. Si `ready` tarda o los
-`: ping` llegan de a varios, hay buffering o compresión en el camino. Un segundo `curl` con el mismo
+evento `ready` y luego `event: ping` / `data: {}` cada 25 s sin cortarse en varios minutos. Si `ready` tarda o los
+`ping` llegan de a varios, hay buffering o compresión en el camino. Un segundo `curl` con el mismo
 ticket debe responder `401 EVENTS_TICKET_INVALID`.
 
 **Límites.** 3 streams por usuario (el 4.º cierra el más viejo con `stream.closed` `REPLACED`) y

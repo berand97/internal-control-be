@@ -27,6 +27,7 @@ import {
   ReadyEventDataDto,
   SessionEndedEventDataDto,
   StreamClosedEventDataDto,
+  PingEventDataDto,
 } from './dto/event.responses.js';
 import { EventStreamsService, MAX_STREAMS_PER_USER } from './services/event-streams.service.js';
 import { EventTicketsService } from './services/event-tickets.service.js';
@@ -55,7 +56,7 @@ const STREAM_DESCRIPTION = `Server-Sent Events del usuario del ticket. Un solo s
 - \`notification.count\` (NotificationCountEventDataDto): cambió el conteo de no leídas.
 - \`session.ended\` (SessionEndedEventDataDto): la sesión se cerró; el servidor cierra el stream. No reconecte: renueve la sesión.
 - \`stream.closed\` (StreamClosedEventDataDto): REPLACED (4.º stream del usuario; máximo ${MAX_STREAMS_PER_USER}) o SHUTDOWN.
-Latido: comentario \`: ping\` cada heartbeatMs (25 s por defecto); en cada latido se revalida la sesión.
+- \`ping\` (PingEventDataDto, \`data: {}\`, sin \`id\`): latido cada heartbeatMs (25 s por defecto); en cada latido se revalida la sesión. Sin ningún evento en ~2 latidos, dé la conexión por caída.
 Ids: número decimal creciente (event_seq de la notificación). Al reconectar mande el último con la cabecera Last-Event-ID o \`lastEventId\`: se reponen hasta 100 notificaciones posteriores (las más recientes) antes de seguir en vivo.
 No cuenta contra el límite de peticiones; el ticket sí.`;
 
@@ -69,6 +70,7 @@ No cuenta contra el límite de peticiones; el ticket sí.`;
   NotificationCountEventDataDto,
   SessionEndedEventDataDto,
   StreamClosedEventDataDto,
+  PingEventDataDto,
 )
 @Controller('events')
 export class EventsController {

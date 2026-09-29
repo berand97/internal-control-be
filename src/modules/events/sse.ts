@@ -5,8 +5,12 @@
 export const formatSseEvent = (event: string, data: unknown, id?: string): string =>
   `${id === undefined ? '' : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
-/** Comentario de latido: el navegador lo ignora, pero mantiene viva la conexión en proxies y detecta clientes caídos. */
-export const SSE_PING = ': ping\n\n';
+/**
+ * Latido como evento con nombre, no como comentario: EventSource entrega `ping` a JavaScript, así el frontend detecta
+ * una conexión medio abierta por silencio. Sin `id`, para no mover el cursor de Last-Event-ID. También mantiene viva
+ * la conexión en proxies y detecta clientes caídos.
+ */
+export const SSE_PING = formatSseEvent('ping', {});
 
 /** Cabeceras del stream: sin caché ni transformación (compresión) y sin buffering en Nginx/Traefik. */
 export const SSE_HEADERS: Readonly<Record<string, string>> = {
