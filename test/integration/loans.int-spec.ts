@@ -948,6 +948,19 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
             reason: 'Se corrige la persona que recibe',
           });
       expect((await regenerate('jefeA')).status).toBe(403);
+      // AUDITA sin act:sign_control:global: 400 antes de tocar el acta rechazada ni el préstamo.
+      const notEligible = await http()
+        .post(`/api/v1/loans/${loan.id}/delivery-act/regenerate`)
+        .set(auth('director'))
+        .send({
+          deliveredByPersonId: users['entrega']?.personId,
+          controlInternoPersonId: users['nadie']?.personId,
+          reason: 'Se corrige la persona que recibe',
+        });
+      expect([notEligible.status, notEligible.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
+      expect(notEligible.body.error.details).toEqual([
+        { field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') },
+      ]);
       const regenerated = await regenerate('director').expect(200);
       expectConforms('post', '/api/v1/loans/{id}/delivery-act/regenerate', 200, regenerated.body);
       expect(regenerated.body.data).toMatchObject({ status: 'PENDING_SIGNATURES', contactPersonId: users['recibe2']?.personId });
@@ -1228,5 +1241,28 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       sustitucion: { nombre: users['recibe']?.fullName, motivo: 'El contacto es auditor' },
     });
     expect(data.tablas.sustituciones).toEqual([expect.objectContaining({ sustituido: users['recibe']?.fullName, conflicto: 'Recibe' })]);
+  });
+
+  it('regla del firmante de Control Interno: AUDITA sin act:sign_control:global se rechaza antes de mover los activos', async () => {
+    const tag = randomUUID().slice(0, 6).toUpperCase();
+    const assetId = await asset(`CI-${tag}`, `EQUIPO CI ${tag}`);
+    const id = await requestLoan([assetId], addDays(bogotaDate(new Date()), 30));
+    await approve(id, 'director').expect(200);
+    const rejected = await http()
+      .post(`/api/v1/loans/${id}/deliver`)
+      .set(auth('director'))
+      .send({ deliveredByPersonId: users['entrega']?.personId, controlInternoPersonId: users['nadie']?.personId });
+    expect([rejected.status, rejected.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
+    expect(rejected.body.error.details).toEqual([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]);
+    expect((await detail(id)).status).toBe('APPROVED');
+    expect(await scalar<string>(dataSource, 'SELECT operational_status FROM asset WHERE id = $1', [assetId])).not.toBe('ON_LOAN');
+    expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE payload->>'entityId' = $1`, [id])).toBe(0);
+    // Con el permiso vigente: la entrega sigue.
+    await http()
+      .post(`/api/v1/loans/${id}/deliver`)
+      .set(auth('director'))
+      .send({ deliveredByPersonId: users['entrega']?.personId, controlInternoPersonId: users['audita']?.personId })
+      .expect(200);
+    expect((await detail(id)).status).toBe('PENDING_SIGNATURES');
   });
 });

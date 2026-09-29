@@ -769,6 +769,17 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     const denied = await http().get('/api/v1/persons').set(auth(outsider)).expect(403);
     expect(denied.body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
   });
+  it('regla del firmante de Control Interno: AUDITA sin act:sign_control:global se rechaza sin crear la entrega', async () => {
+    const assetId = await asset();
+    const before = await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_handover');
+    const rejected = await create([assetId], { auditorPersonId: outsider.personId });
+    expect([rejected.status, rejected.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
+    expect(rejected.body.error.details).toEqual([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]);
+    expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_handover')).toBe(before);
+    // Con el permiso vigente se crea.
+    await create([assetId], { auditorPersonId: auditor.personId }).expect(201);
+  });
+
   it('separación de funciones: quien recibe no audita salvo sustituto de Control Interno con el permiso vigente, impreso en el acta', async () => {
     const assetId = await asset();
     const duplicated = await create([assetId], { auditorPersonId: receiver.personId });
