@@ -199,4 +199,7 @@ export enum ErrorCode {
   ArchiveTooLarge = 'ARCHIVE_TOO_LARGE',
   MailAddressInvalid = 'MAIL_ADDRESS_INVALID',
   OutboundDestinationForbidden = 'OUTBOUND_DESTINATION_FORBIDDEN',
+
+  EventsTicketInvalid = 'EVENTS_TICKET_INVALID',
+  EventsCapacityReached = 'EVENTS_CAPACITY_REACHED',
 }

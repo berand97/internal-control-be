@@ -979,4 +979,15 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     message:
       'El servidor indicado está en una red privada o interna. Use un host público o pida que se habilite al desplegar (OUTBOUND_ALLOWED_HOSTS)',
   },
+  // RETRY y no REAUTH: la sesión puede seguir viva; basta pedir otro ticket con POST /events/ticket.
+  [ErrorCode.EventsTicketInvalid]: {
+    httpStatus: 401,
+    action: 'RETRY',
+    message: 'El ticket del canal de eventos no es válido, ya se usó o venció; pide otro',
+  },
+  [ErrorCode.EventsCapacityReached]: {
+    httpStatus: 503,
+    action: 'RETRY',
+    message: 'El canal de eventos no admite más conexiones en este momento; reintenta más tarde',
+  },
 };
