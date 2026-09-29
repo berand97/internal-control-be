@@ -17,6 +17,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
 import {
@@ -290,6 +291,36 @@ export class ReportUnexpectedDto {
   readonly notes?: string;
 }
 
+/** Firmante ENCARGADO del acta de un centro de la toma, elegido al cerrar. */
+export class ActSignerHeadChoiceDto {
+  @ApiProperty({ format: 'uuid', description: 'Centro de costo del acta (GET /inventories/{id}/acts/head-candidates)' })
+  @IsUUID('all')
+  readonly costCenterId!: string;
+
+  @ApiProperty({ format: 'uuid', description: 'Jefe vigente de ese centro que firma su acta como ENCARGADO' })
+  @IsUUID('all')
+  readonly personId!: string;
+}
+
+/** Quién atendió por el área de un centro de la toma (solo informativo). */
+export class ActAttendedByDto {
+  @ApiProperty({ format: 'uuid', description: 'Centro de costo del acta' })
+  @IsUUID('all')
+  readonly costCenterId!: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Persona del sistema. No junto con name' })
+  @IsOptional()
+  @IsUUID('all')
+  readonly personId?: string;
+
+  @ApiPropertyOptional({ minLength: 3, maxLength: 200, description: 'Nombre en texto, si no está registrado' })
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(200)
+  readonly name?: string;
+}
+
 export class CloseInventoryDto {
   @ApiPropertyOptional({
     description:
@@ -302,17 +333,34 @@ export class CloseInventoryDto {
   @ApiPropertyOptional({
     format: 'uuid',
     description:
-      'Jefe vigente del centro de la toma que firma el acta OCI-21-37 como ENCARGADO (GET /inventories/{id}/head-candidates). ' +
-      'Con un solo jefe vigente se toma por defecto; con varios es obligatorio (400 VALIDATION_FAILED); con ninguno el cierre ' +
-      'procede con el aviso ACT_CANNOT_BE_ISSUED y el acta no se emite hasta indicarlo (PUT /inventories/{id}/signer-head)',
+      'Compatibilidad, solo para una toma con un único centro de costo (un acta): el jefe que la firma como ENCARGADO. ' +
+      'Con varios centros, 400 VALIDATION_FAILED: use signerHeads. No junto con signerHeads',
   })
   @IsOptional()
   @IsUUID('all')
   readonly signerHeadPersonId?: string;
 
   @ApiPropertyOptional({
+    type: () => ActSignerHeadChoiceDto,
+    isArray: true,
+    description:
+      'Un acta OCI-21-37 por centro de costo de la toma. Por centro: con un solo jefe vigente firma él por defecto; con ' +
+      'varios hay que elegir aquí (400 VALIDATION_FAILED, details signerHeads.<costCenterId>); con ninguno el cierre ' +
+      'procede, esa acta no se emite hasta indicarlo (PUT /inventories/{id}/acts/{costCenterId}/signer-head) y las demás ' +
+      'siguen (aviso ACT_CANNOT_BE_ISSUED). Candidatos: GET /inventories/{id}/acts/head-candidates',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => ActSignerHeadChoiceDto)
+  readonly signerHeads?: ActSignerHeadChoiceDto[];
+
+  @ApiPropertyOptional({
     format: 'uuid',
-    description: 'Quién atendió la toma por el área, si es persona del sistema. Solo informativo: no firma. No junto con attendedByName',
+    description:
+      'Quién atendió por el área, si es persona del sistema, para todas las actas que no lo indiquen en attendedBy. ' +
+      'Solo informativo: no firma. No junto con attendedByName',
   })
   @IsOptional()
   @IsUUID('all')
@@ -321,17 +369,34 @@ export class CloseInventoryDto {
   @ApiPropertyOptional({
     minLength: 3,
     maxLength: 200,
-    description: 'Quién atendió la toma por el área, en texto, si no está registrado (encargado o asistente). Solo informativo',
+    description:
+      'Quién atendió por el área, en texto, si no está registrado, para todas las actas que no lo indiquen en attendedBy. ' +
+      'Solo informativo',
   })
   @IsOptional()
   @IsString()
   @MinLength(3)
   @MaxLength(200)
   readonly attendedByName?: string;
+
+  @ApiPropertyOptional({
+    type: () => ActAttendedByDto,
+    isArray: true,
+    description: 'Quién atendió por el área de cada centro (en una toma por ubicación cada área pudo tener el suyo)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => ActAttendedByDto)
+  readonly attendedBy?: ActAttendedByDto[];
 }
 
 export class AssignSignerHeadDto {
-  @ApiProperty({ format: 'uuid', description: 'Jefe vigente del centro de la toma (GET /inventories/{id}/head-candidates)' })
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Jefe vigente del centro del acta (GET /inventories/{id}/acts/head-candidates)',
+  })
   @IsUUID('all')
   readonly signerHeadPersonId!: string;
 }

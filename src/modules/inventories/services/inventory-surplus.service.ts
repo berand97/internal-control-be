@@ -15,6 +15,7 @@ import { InventoryStatus } from '../enums/inventory-status.js';
 import { VerificationResult } from '../enums/verification-result.js';
 import { InventoryActorPolicy } from './inventory-actor-policy.service.js';
 import { toItemView } from './inventory-item-view.js';
+import { InventorySignerHeadService } from './inventory-signer-head.service.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
 
 /** Registrar un activo nuevo exige el mismo permiso que el alta normal. */
@@ -34,6 +35,7 @@ export class InventorySurplusService {
     private readonly permissions: PermissionsService,
     private readonly assets: AssetsService,
     private readonly valuation: InventoryValuationService,
+    private readonly signerHead: InventorySignerHeadService,
     @Inject('AuditLogsRepository')
     private readonly auditLogs: AuditLogsRepository,
   ) {}
@@ -115,6 +117,8 @@ export class InventorySurplusService {
       target.resolvedAt = now;
       target.resolvedBy = actor.id;
       await items.save(target);
+      // El activo creado puede ser de un centro sin acta en la toma: recibe la suya (con su único jefe, si lo tiene).
+      await this.signerHead.sync(manager, inventory, actor);
       await this.auditLogs.record(
         {
           action: AuditAction.InventorySurplusResolved,

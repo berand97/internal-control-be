@@ -42,6 +42,7 @@ const actTemplate = (): Buffer => {
     '{{#tablas.sobrantes}}S|{{descripcion}}|{{resolucion}}|{{/tablas.sobrantes}}',
     '{{#activos}}A|{{codigo}}|{{campos.resultado}}|{{campos.categoria}}|{{campos.valorLibros}}|{{/activos}}',
     'FIRMAS|{{firmante.responsable.nombre}}|{{firmante.audita.nombre}}|',
+    'CENTRO|{{centroCosto.codigo}}|{{campos.atendioPorArea}}|{{documento.numero}}|',
   ];
   zip.file(
     'word/document.xml',
@@ -276,9 +277,9 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
 
   afterAll(async () => {
     // Deja la BD compartida como estaba: OCI-21-37 sin plantilla, sin actas ni solicitudes de tomas, y su consecutivo.
-    await dataSource.query('UPDATE physical_inventory SET act_request_id = NULL, act_document_id = NULL');
+    await dataSource.query('UPDATE physical_inventory_act SET document_request_id = NULL, document_id = NULL');
     const ids = (
-      (await dataSource.query(`SELECT id FROM document WHERE entity_type = 'PHYSICAL_INVENTORY'`)) as Array<{ id: string }>
+      (await dataSource.query(`SELECT id FROM document WHERE entity_type = 'PHYSICAL_INVENTORY_ACT'`)) as Array<{ id: string }>
     ).map((row) => row.id);
     await dataSource.query('DELETE FROM document_signature_reassignment WHERE document_id = ANY($1)', [ids]);
     await dataSource.query(
@@ -287,7 +288,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     );
     await dataSource.query('DELETE FROM signature_signing_link WHERE document_id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM signature_envelope WHERE document_id = ANY($1)', [ids]);
-    await dataSource.query(`DELETE FROM document_request WHERE payload->>'entityType' = 'PHYSICAL_INVENTORY'`);
+    await dataSource.query(`DELETE FROM document_request WHERE payload->>'entityType' = 'PHYSICAL_INVENTORY_ACT'`);
     await dataSource.query('DELETE FROM document WHERE id = ANY($1)', [ids]);
     await dataSource.query('DELETE FROM document_template_version WHERE id = $1', [templateId || null]);
     await dataSource.query(`DELETE FROM document_sequence WHERE format_key = $1`, [ACT_FORMAT]);
@@ -587,7 +588,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       });
       expect(String(reconciled.act['message'])).toContain('sin código SGC institucional');
       expect(
-        await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE payload->>'entityId' = $1`, [orphan]),
+        await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE payload->>'entityId' IN (SELECT id::text FROM physical_inventory_act WHERE inventory_id = $1)`, [orphan]),
       ).toBe(0);
       const blocked = await post(director, `/${orphan}/act/enqueue`);
       expect(blocked.status).toBe(409);
@@ -603,7 +604,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       expectConforms('post', '/api/v1/inventories/{id}/act/enqueue', 200, enqueued.body);
       expect(enqueued.body.data).toMatchObject({ generation: 'PENDING', reason: null, blockedAt: null });
       const [payload] = (await dataSource.query(
-        `SELECT payload FROM document_request WHERE payload->>'entityId' = $1`,
+        `SELECT payload FROM document_request WHERE payload->>'entityId' IN (SELECT id::text FROM physical_inventory_act WHERE inventory_id = $1)`,
         [orphan],
       )) as Array<{ payload: { signers: Record<string, string>; responsiblePersonId: string; costCenterId: string } }>;
       // AUDITA es quien aprobó la conciliación, no quien reintenta; RESPONSABLE (ENCARGADO) es el jefe del centro.
@@ -659,14 +660,19 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     const generated = await detail(id);
     expect(generated.act).toMatchObject({ generation: 'GENERATED', reason: null, retryable: false, status: 'PENDING_SIGNATURE' });
     expect(generated.act['number']).toEqual(expect.any(String));
+    // Toma por centro de costo: una sola acta, la de su centro.
+    expect((generated as unknown as { acts: Array<{ costCenter: { id: string } }> }).acts.map((act) => act.costCenter.id)).toEqual([centerId]);
 
     const [row] = (await dataSource.query(
       'SELECT docx_driver, docx_key, entity_type, entity_id FROM document WHERE id = $1',
       [generated.act['documentId']],
     )) as Array<{ docx_driver: StorageDriver; docx_key: string; entity_type: string; entity_id: string }>;
-    expect(row).toMatchObject({ entity_type: 'PHYSICAL_INVENTORY', entity_id: id });
+    expect(row).toMatchObject({
+      entity_type: 'PHYSICAL_INVENTORY_ACT',
+      entity_id: await scalar<string>(dataSource, 'SELECT id FROM physical_inventory_act WHERE inventory_id = $1', [id]),
+    });
     expect(
-      await scalar<string>(dataSource, 'SELECT act_document_id FROM physical_inventory WHERE id = $1', [id]),
+      await scalar<string>(dataSource, 'SELECT document_id FROM physical_inventory_act WHERE inventory_id = $1', [id]),
     ).toBe(generated.act['documentId']);
     const text = docxText(await app.get(StorageService).getFrom(row?.docx_driver ?? 'project', row?.docx_key ?? ''));
     const code = await scalar<string>(dataSource, 'SELECT code FROM physical_inventory WHERE id = $1', [id]);
@@ -765,7 +771,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
   it('firmante ENCARGADO al cerrar: un jefe firma él; varios, se elige; ninguno, aviso y acta sin emitir hasta asignar y reencolar; quién atendió es aparte', async () => {
     const payloadOf = async (id: string) =>
       (
-        (await dataSource.query(`SELECT payload FROM document_request WHERE payload->>'entityId' = $1`, [id])) as Array<{
+        (await dataSource.query(`SELECT payload FROM document_request WHERE payload->>'entityId' IN (SELECT id::text FROM physical_inventory_act WHERE inventory_id = $1)`, [id])) as Array<{
           payload: { responsiblePersonId: string; fields: Record<string, string> };
         }>
       )[0]?.payload;
@@ -853,7 +859,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     });
     const reconciled = await approve(third);
     expect(reconciled.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'NO_COST_CENTER_HEAD', retryAction: 'ENQUEUE' });
-    expect(reconciled.warnings).toEqual([{ code: 'ACT_CANNOT_BE_ISSUED', message: expect.any(String) }]);
+    expect(reconciled.warnings).toEqual([{ code: 'ACT_CANNOT_BE_ISSUED', message: expect.any(String), costCenterId: headless }]);
     expect(await payloadOf(third)).toBeUndefined();
     const stillBlocked = await post(director, `/${third}/act/enqueue`);
     expect([stillBlocked.status, stillBlocked.body.error.code]).toEqual([406, 'INVALID_STATE']);
@@ -873,5 +879,236 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     // Ya encolada: no se cambia el firmante.
     const late = await put(director, `/${third}/signer-head`, { signerHeadPersonId: newcomer.personId });
     expect(late.status).toBe(406);
+  });
+
+  it('toma por ubicación con activos de 3 centros: un acta por centro, con su consecutivo, sus hallazgos y su jefe; el centro sin jefe no bloquea las demás', async () => {
+    const put = (path: string, body: Record<string, unknown>) =>
+      http().put(`/api/v1/inventories${path}`).set(as(director)).send(body);
+    const lab = await scalar<string>(
+      dataSource,
+      `INSERT INTO location (building_id, code, name, location_type)
+       SELECT building_id, $1, 'Laboratorio compartido', 'OFFICE' FROM location WHERE id = $2 RETURNING id`,
+      [`IT-LAB${randomUUID().slice(0, 4)}`, base.roomA],
+    );
+    const faculty = await center('Facultad');
+    const systems = await center('Sistemas');
+    const maintenance = await center('Mantenimiento');
+    const code = (id: string) => scalar<string>(dataSource, 'SELECT external_code FROM cost_center WHERE id = $1', [id]);
+    const deanHead = await headOf(faculty, await person('Decana', null));
+    const systemsA = await headOf(systems, await person('Jefa Sistemas', null));
+    const systemsB = await headOf(systems, await person('Jefe Sistemas', null));
+    const inLab = async (costCenterId: string, price: number) => {
+      const id = await newAsset(costCenterId, price);
+      await dataSource.query('UPDATE asset SET current_location_id = $2 WHERE id = $1', [id, lab]);
+      return id;
+    };
+    const microscope = await inLab(faculty, 1000);
+    const lostScope = await inLab(faculty, 500);
+    const server = await inLab(systems, 300);
+    const drill = await inLab(maintenance, 200);
+
+    const scheduled = await http()
+      .post('/api/v1/inventories')
+      .set(as(director))
+      .send({
+        name: 'Toma del laboratorio',
+        scope: 'LOCATION',
+        scopeId: lab,
+        plannedStartDate: today,
+        plannedEndDate: addDays(today, 2),
+        responsibleUserId: director.userId,
+        reminderOffsetsDays: [],
+      });
+    expect(scheduled.status, JSON.stringify(scheduled.body)).toBe(201);
+    const id = scheduled.body.data.id as string;
+    expect((await post(director, `/${id}/start`)).status).toBe(200);
+    const view = await detail(id);
+    expect(view.items).toHaveLength(4);
+    for (const assetId of [microscope, server, drill]) {
+      expect((await post(director, `/${id}/verify-asset`, { assetId, condition: 'GOOD' })).status).toBe(200);
+    }
+    expect((await post(director, `/${id}/report-not-found`, { assetId: lostScope, otherCause: 'Se desconoce' })).status).toBe(200);
+    for (const [assetId, category] of [
+      [microscope, 'AU'],
+      [lostScope, 'ANE'],
+      [server, 'AU'],
+      [drill, 'AU'],
+    ] as const) {
+      const set = await http()
+        .put(`/api/v1/inventories/${id}/items/${itemOf(view.items, assetId).id}/finding-category`)
+        .set(as(director))
+        .send({ code: category });
+      expect(set.status, JSON.stringify(set.body)).toBe(200);
+    }
+    const chair = await post(director, `/${id}/report-unexpected`, { notes: 'Silla sin placa', locationId: lab });
+    expect(chair.status).toBe(200);
+    expect((await post(director, `/${id}/report-unexpected`, { notes: 'Caja sin placa', locationId: lab })).status).toBe(200);
+
+    // Jefes candidatos por centro, antes del cierre.
+    const candidates = await http().get(`/api/v1/inventories/${id}/acts/head-candidates`).set(as(director)).expect(200);
+    expectConforms('get', '/api/v1/inventories/{id}/acts/head-candidates', 200, candidates.body);
+    const byCenter = new Map(
+      (candidates.body.data as Array<{ costCenter: { id: string }; candidates: Array<{ personId: string }> }>).map((row) => [
+        row.costCenter.id,
+        row.candidates.map((candidate) => candidate.personId).sort(),
+      ]),
+    );
+    expect(byCenter).toEqual(
+      new Map([
+        [faculty, [deanHead.personId]],
+        [systems, [systemsA.personId, systemsB.personId].sort()],
+        [maintenance, []],
+      ]),
+    );
+    expect((await http().get(`/api/v1/inventories/${id}/head-candidates`).set(as(director)).expect(200)).body.data).toEqual([]);
+
+    // Sistemas tiene dos jefes: hay que elegir; signerHeadPersonId solo sirve con un único centro.
+    const unchosen = await post(director, `/${id}/close`, { allowUnverified: true });
+    expect([unchosen.status, unchosen.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect(unchosen.body.error.details).toEqual([{ field: `signerHeads.${systems}`, message: expect.any(String) }]);
+    const legacy = await post(director, `/${id}/close`, { allowUnverified: true, signerHeadPersonId: systemsB.personId });
+    expect([legacy.status, legacy.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    const wrongCenter = await post(director, `/${id}/close`, {
+      allowUnverified: true,
+      signerHeads: [{ costCenterId: systems, personId: deanHead.personId }],
+    });
+    expect([wrongCenter.status, wrongCenter.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    const closed = await post(director, `/${id}/close`, {
+      allowUnverified: true,
+      signerHeads: [{ costCenterId: systems, personId: systemsB.personId }],
+      attendedByName: 'Auxiliar del laboratorio',
+      attendedBy: [{ costCenterId: systems, name: 'Técnico de sistemas' }],
+    });
+    expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+    expectConforms('post', '/api/v1/inventories/{id}/close', 200, closed.body);
+    const acts = (body: { acts: Array<Record<string, unknown>> }) =>
+      new Map(body.acts.map((act) => [(act['costCenter'] as { id: string }).id, act]));
+    const atClose = acts(closed.body.data);
+    expect(atClose.size).toBe(3);
+    expect(closed.body.data).toMatchObject({
+      act: null,
+      signerHead: null,
+      actIssuable: false,
+      unassignedItems: 2,
+      warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', costCenterId: maintenance, message: expect.stringContaining('no tiene jefe vigente') }],
+    });
+    expect(atClose.get(faculty)).toMatchObject({
+      costCenter: { id: faculty, code: await code(faculty), name: 'Facultad' },
+      signerHead: { personId: deanHead.personId },
+      attendedBy: { personId: null, name: 'Auxiliar del laboratorio' },
+      issuable: true,
+      warnings: [],
+      generation: 'NONE',
+    });
+    expect(atClose.get(systems)).toMatchObject({
+      signerHead: { personId: systemsB.personId },
+      attendedBy: { personId: null, name: 'Técnico de sistemas' },
+      issuable: true,
+    });
+    expect(atClose.get(maintenance)).toMatchObject({ signerHead: null, issuable: false, warnings: [{ costCenterId: maintenance }] });
+
+    // El sobrante registrado como activo de la facultad va a su acta; el otro sigue sin acta.
+    const resolved = await post(director, `/${id}/items/${chair.body.data.id as string}/resolve-surplus`, {
+      action: 'CREATE_ASSET',
+      reason: 'Se registra',
+      costCenterId: faculty,
+      asset: {
+        description: 'Silla del laboratorio',
+        categoryId: base.categoryId,
+        acquisitionTypeId: base.acquisitionTypeId,
+        acquisitionDate: '2024-02-10',
+        acquisitionPrice: 50,
+      },
+    });
+    expect(resolved.status, JSON.stringify(resolved.body)).toBe(200);
+    expect(((await detail(id)) as unknown as { unassignedItems: number }).unassignedItems).toBe(1);
+
+    expect((await post(director, `/${id}/reconcile`)).status).toBe(200);
+    const approved = await post(approver, `/${id}/reconcile/approve`);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+    expectConforms('post', '/api/v1/inventories/{id}/reconcile/approve', 200, approved.body);
+    const afterApproval = acts(approved.body.data);
+    expect(afterApproval.get(faculty)).toMatchObject({ generation: 'PENDING', reason: null });
+    expect(afterApproval.get(systems)).toMatchObject({ generation: 'PENDING', reason: null });
+    expect(afterApproval.get(maintenance)).toMatchObject({
+      generation: 'NOT_ENQUEUED',
+      reason: 'NO_COST_CENTER_HEAD',
+      retryable: true,
+      retryAction: 'ENQUEUE',
+    });
+    await engine.processPending(1000);
+
+    const text = async (documentId: unknown) => {
+      const [row] = (await dataSource.query(
+        'SELECT docx_driver, docx_key, entity_type, entity_id FROM document WHERE id = $1',
+        [documentId],
+      )) as Array<{ docx_driver: StorageDriver; docx_key: string; entity_type: string; entity_id: string }>;
+      expect(row?.entity_type).toBe('PHYSICAL_INVENTORY_ACT');
+      return docxText(await app.get(StorageService).getFrom(row?.docx_driver ?? 'project', row?.docx_key ?? ''));
+    };
+    const generated = acts((await detail(id)) as never);
+    const facultyAct = generated.get(faculty) as Record<string, unknown>;
+    const systemsAct = generated.get(systems) as Record<string, unknown>;
+    expect(facultyAct).toMatchObject({ generation: 'GENERATED', status: 'PENDING_SIGNATURE' });
+    expect(systemsAct).toMatchObject({ generation: 'GENERATED', status: 'PENDING_SIGNATURE' });
+    expect(facultyAct['number']).not.toEqual(systemsAct['number']);
+
+    const facultyText = await text(facultyAct['documentId']);
+    expect(facultyText).toContain(`CENTRO|${await code(faculty)}|Auxiliar del laboratorio|${String(facultyAct['number'])}|`);
+    expect(facultyText).toContain('|Ubicación ');
+    // Solo los activos de la facultad: 2 esperados, 1 verificado, 1 faltante; el sobrante registrado como su activo.
+    expect(facultyText).toContain('TOTALES|2|1|1|1|');
+    // Porcentaje sobre el precio de compra de las categorías de la facultad (1000 y 500).
+    expect(facultyText).toContain(`H|AU|1|${formatMoney(1000)}|66,67 %|`);
+    expect(facultyText).toContain(`H|ANE|1|${formatMoney(500)}|33,33 %|`);
+    expect(facultyText).toContain('S|Silla sin placa|Registrado como activo|');
+    expect(facultyText).not.toContain('Caja sin placa');
+    expect(facultyText).toContain('FIRMAS|Decana Valoración|Aprobador Valoración|');
+
+    const systemsText = await text(systemsAct['documentId']);
+    expect(systemsText).toContain(`CENTRO|${await code(systems)}|Técnico de sistemas|${String(systemsAct['number'])}|`);
+    expect(systemsText).toContain('TOTALES|1|1|0|0|');
+    expect(systemsText).toContain(`H|AU|1|${formatMoney(300)}|100,00 %|`);
+    expect(systemsText).not.toContain('sin placa');
+    expect(systemsText).toContain('FIRMAS|Jefe Sistemas Valoración|Aprobador Valoración|');
+
+    // Mantenimiento: sin jefe no se encola; se le asigna jefe, se indica y se encola sola.
+    const maintenanceId = (generated.get(maintenance) as { id: string }).id;
+    const blocked = await post(director, `/${id}/acts/${maintenance}/enqueue`);
+    expect([blocked.status, blocked.body.error.code]).toEqual([406, 'INVALID_STATE']);
+    expect(blocked.body.error.details).toEqual([{ field: 'reason', message: 'NO_COST_CENTER_HEAD' }]);
+    // Con varias actas, las rutas de compatibilidad piden el centro.
+    expect((await post(director, `/${id}/act/enqueue`)).status).toBe(406);
+    const newcomer = await person('Jefe Mantenimiento', null);
+    const early = await put(`/${id}/acts/${maintenance}/signer-head`, { signerHeadPersonId: newcomer.personId });
+    expect([early.status, early.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    await headOf(maintenance, newcomer);
+    expect((await put(`/${id}/signer-head`, { signerHeadPersonId: newcomer.personId })).status).toBe(406);
+    const assigned = await put(`/${id}/acts/${maintenance}/signer-head`, { signerHeadPersonId: newcomer.personId });
+    expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
+    expectConforms('put', '/api/v1/inventories/{id}/acts/{costCenterId}/signer-head', 200, assigned.body);
+    expect(assigned.body.data).toMatchObject({ actIssuable: true, warnings: [] });
+    // Un acta ya encolada no cambia de firmante.
+    expect((await put(`/${id}/acts/${systems}/signer-head`, { signerHeadPersonId: systemsA.personId })).status).toBe(406);
+    const enqueued = await post(director, `/${id}/acts/${maintenance}/enqueue`);
+    expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
+    expectConforms('post', '/api/v1/inventories/{id}/acts/{costCenterId}/enqueue', 200, enqueued.body);
+    expect(enqueued.body.data).toMatchObject({
+      id: maintenanceId,
+      costCenter: { id: maintenance },
+      signerHead: { personId: newcomer.personId },
+      generation: 'PENDING',
+    });
+    await engine.processPending(1000);
+    const maintenanceAct = acts((await detail(id)) as never).get(maintenance) as Record<string, unknown>;
+    expect(maintenanceAct).toMatchObject({ generation: 'GENERATED' });
+    expect(new Set([facultyAct['number'], systemsAct['number'], maintenanceAct['number']]).size).toBe(3);
+    const maintenanceText = await text(maintenanceAct['documentId']);
+    expect(maintenanceText).toContain('TOTALES|1|1|0|0|');
+    expect(maintenanceText).toContain(`H|AU|1|${formatMoney(200)}|100,00 %|`);
+    expect(maintenanceText).toContain('FIRMAS|Jefe Mantenimiento Valoración|Aprobador Valoración|');
+    expect(
+      await scalar<number>(dataSource, 'SELECT count(*)::int FROM physical_inventory_act WHERE inventory_id = $1', [id]),
+    ).toBe(3);
   });
 });

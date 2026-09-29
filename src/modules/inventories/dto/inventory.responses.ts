@@ -239,7 +239,7 @@ export class InventoryActStateDto {
     enumName: 'InventoryActRetryAction',
     nullable: true,
     description:
-      'ENQUEUE: POST /inventories/{id}/act/enqueue; RETRY_REQUEST: POST /documents/requests/{requestId}/retry',
+      'ENQUEUE: POST /inventories/{id}/acts/{costCenterId}/enqueue; RETRY_REQUEST: POST /documents/requests/{requestId}/retry',
   })
   readonly retryAction!: InventoryActRetryAction | null;
 
@@ -355,12 +355,75 @@ export class InventoryWarningDto {
   @ApiProperty({
     enum: INVENTORY_WARNING_CODES,
     enumName: 'InventoryWarningCode',
-    description: 'ACT_CANNOT_BE_ISSUED: no hay jefe vigente del centro de la toma que firme el acta como ENCARGADO',
+    description: 'ACT_CANNOT_BE_ISSUED: el centro del acta no tiene jefe vigente que la firme como ENCARGADO (o tiene varios y no se eligió)',
   })
   readonly code!: (typeof INVENTORY_WARNING_CODES)[number];
 
   @ApiProperty({ description: 'Explicación para mostrar' })
   readonly message!: string;
+
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Centro de costo del acta que no se puede emitir' })
+  readonly costCenterId!: string | null;
+}
+
+export class InventoryCostCenterRefDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly id!: string;
+
+  @ApiProperty({ description: 'Código del centro (external_code)', example: '1020' })
+  readonly code!: string;
+
+  @ApiProperty()
+  readonly name!: string;
+}
+
+/** Un acta OCI-21-37 de la toma: la de un centro de costo. */
+export class InventoryActDto extends InventoryActStateDto {
+  @ApiProperty({ format: 'uuid', description: 'Acta de la toma para el centro (entityId del documento en el motor)' })
+  readonly id!: string;
+
+  @ApiProperty({
+    type: () => InventoryCostCenterRefDto,
+    nullable: true,
+    description: 'Centro de costo del acta. null solo en el acta única de una toma encolada antes de la división por centro',
+  })
+  readonly costCenter!: InventoryCostCenterRefDto | null;
+
+  @ApiProperty({
+    type: () => InventorySignerHeadDto,
+    nullable: true,
+    description: 'Jefe vigente del centro que firma esta acta como ENCARGADO; null si el centro no tiene jefe o no se eligió',
+  })
+  readonly signerHead!: InventorySignerHeadDto | null;
+
+  @ApiProperty({
+    type: () => InventoryAttendedByDto,
+    nullable: true,
+    description: 'Quién atendió por el área de este centro (persona del sistema o texto libre). Solo informativo: no firma',
+  })
+  readonly attendedBy!: InventoryAttendedByDto | null;
+
+  @ApiProperty({ description: 'El acta tiene quién firme como ENCARGADO (o ya se encoló)' })
+  readonly issuable!: boolean;
+
+  @ApiProperty({
+    type: () => InventoryWarningDto,
+    isArray: true,
+    description: 'Con la toma cerrada o conciliada y sin jefe que firme esta acta: [ACT_CANNOT_BE_ISSUED]',
+  })
+  readonly warnings!: InventoryWarningDto[];
+}
+
+export class InventoryCenterHeadCandidatesDto {
+  @ApiProperty({ type: () => InventoryCostCenterRefDto })
+  readonly costCenter!: InventoryCostCenterRefDto;
+
+  @ApiProperty({
+    type: () => InventorySignerHeadDto,
+    isArray: true,
+    description: 'Jefes vigentes (persona activa) del centro; vacío si no tiene',
+  })
+  readonly candidates!: InventorySignerHeadDto[];
 }
 
 export class InventoryDetailResponseDto extends InventorySummaryDto {
@@ -381,32 +444,56 @@ export class InventoryDetailResponseDto extends InventorySummaryDto {
   @ApiProperty({ type: () => InventoryReconciliationBasisDto, description: 'Contra qué se compara la toma' })
   readonly reconciliationBasis!: InventoryReconciliationBasisDto;
 
-  @ApiProperty({ type: () => InventoryActStateDto, description: 'Acta OCI-21-37 de la toma' })
-  readonly act!: InventoryActStateDto;
+  @ApiProperty({
+    type: () => InventoryActDto,
+    isArray: true,
+    description:
+      'Actas OCI-21-37 de la toma, una por centro de costo presente en sus ítems (por código de centro). Se crean al ' +
+      'cerrar; vacío antes',
+  })
+  readonly acts!: InventoryActDto[];
+
+  @ApiProperty({
+    type: () => InventoryActStateDto,
+    nullable: true,
+    description:
+      'Compatibilidad: estado de la única acta (NONE antes del cierre); null si la toma tiene varias (ver acts)',
+  })
+  readonly act!: InventoryActStateDto | null;
 
   @ApiProperty({
     type: () => InventorySignerHeadDto,
     nullable: true,
-    description: 'Jefe vigente del centro de la toma que firma el acta como ENCARGADO (se resuelve al cerrar); null antes del cierre o si el centro no tenía jefe',
+    description: 'Compatibilidad: firmante de la única acta; null antes del cierre, sin jefe o con varias actas (ver acts)',
   })
   readonly signerHead!: InventorySignerHeadDto | null;
 
   @ApiProperty({
     type: () => InventoryAttendedByDto,
     nullable: true,
-    description: 'Quién atendió la toma por el área (persona del sistema o texto libre). Solo informativo: no firma',
+    description: 'Compatibilidad: quién atendió en la única acta; null con varias actas (ver acts)',
   })
   readonly attendedBy!: InventoryAttendedByDto | null;
 
-  @ApiProperty({ description: 'El acta tiene quién firme como ENCARGADO (o ya se encoló)' })
+  @ApiProperty({ description: 'Todas las actas tienen quién firme como ENCARGADO (o ya se encolaron)' })
   readonly actIssuable!: boolean;
 
   @ApiProperty({
     type: () => InventoryWarningDto,
     isArray: true,
-    description: 'Con la toma cerrada o conciliada y sin jefe que firme: [ACT_CANNOT_BE_ISSUED]. Informativo: la toma sigue',
+    description:
+      'Con la toma cerrada o conciliada, uno ACT_CANNOT_BE_ISSUED por acta sin jefe que firme (con su costCenterId). ' +
+      'Informativo: la toma y las demás actas siguen',
   })
   readonly warnings!: InventoryWarningDto[];
+
+  @ApiProperty({
+    type: 'integer',
+    description:
+      'Ítems vigentes que no van a ninguna acta: sobrantes sin activo ni resolución y activos sin centro en la foto ' +
+      '(solo en tomas que no son de un centro de costo)',
+  })
+  readonly unassignedItems!: number;
 }
 
 // ---------- Corte contable ----------

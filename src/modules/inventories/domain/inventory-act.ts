@@ -6,10 +6,25 @@ import type { AssetValuation, ReconciliationBasis } from './inventory-valuation.
  * Contenido del acta OCI-21-37 (acta de toma física): campos, tablas y campos por activo que la solicitud del motor
  * de actas lleva. Función pura: InventoryActService reúne los datos y esto arma el texto. El contrato de marcadores
  * está documentado en INVENTORY_ACT_PLACEHOLDERS.
+ *
+ * Una toma produce un acta por centro de costo (physical_inventory_act): los ítems de cada acta son los de su centro
+ * (ITEM_ACT_CENTER_SQL) y centroCosto.* del motor es ese centro.
  */
 
 export const INVENTORY_ACT_FORMAT_KEY = 'OCI-21-37';
-export const INVENTORY_ACT_ENTITY_TYPE = 'PHYSICAL_INVENTORY';
+/** Entidad de cada acta en el motor: la fila de physical_inventory_act (una por centro de costo de la toma). */
+export const INVENTORY_ACT_ENTITY_TYPE = 'PHYSICAL_INVENTORY_ACT';
+
+/**
+ * Centro de costo al que va un ítem de la toma (alias i = physical_inventory_item, a = su activo, ra = el activo creado
+ * al resolver el sobrante; $2 = scope_type y $3 = scope_id de la toma). Alcance COST_CENTER: siempre el centro de la
+ * toma (una sola acta). Otro alcance: el centro del activo en la foto (expected_cost_center_id); un sobrante, el centro
+ * actual de su activo o del activo creado al resolverlo. NULL: el ítem no va a ninguna acta (sobrante sin activo ni
+ * resolución, o activo sin centro en la foto).
+ */
+export const ITEM_ACT_CENTER_SQL = `CASE WHEN $2::text = 'COST_CENTER' THEN $3::uuid
+  WHEN i.verification_result = 'SURPLUS' THEN coalesce(a.current_cost_center_id, ra.current_cost_center_id)
+  ELSE i.expected_cost_center_id END`;
 
 export const INVENTORY_ACT_GENERATIONS = ['NONE', 'PENDING', 'FAILED', 'GENERATED', 'NOT_ENQUEUED'] as const;
 export type InventoryActGeneration = (typeof INVENTORY_ACT_GENERATIONS)[number];
@@ -17,12 +32,14 @@ export type InventoryActGeneration = (typeof INVENTORY_ACT_GENERATIONS)[number];
 /**
  * Por qué el acta no está: FORMAT_NOT_READY (sin código SGC o firmantes), ENQUEUE_FAILED (error inesperado al encolar),
  * TEMPLATE_NOT_ACTIVE (encolada, pero sin plantilla vigente), GENERATION_FAILED (otro error del motor),
- * NO_COST_CENTER_HEAD (no hay jefe vigente del centro de la toma que firme como ENCARGADO; se indica con
- * PUT /inventories/:id/signer-head y se encola de nuevo).
+ * NO_COST_CENTER_HEAD (el centro del acta no tiene jefe vigente que firme como ENCARGADO), SIGNER_HEAD_NOT_CHOSEN (el
+ * centro tiene varios jefes vigentes y no se eligió cuál firma). Las dos últimas se resuelven con
+ * PUT /inventories/:id/acts/:costCenterId/signer-head y se encola de nuevo.
  */
 export const INVENTORY_ACT_REASONS = [
   'FORMAT_NOT_READY',
   'NO_COST_CENTER_HEAD',
+  'SIGNER_HEAD_NOT_CHOSEN',
   'ENQUEUE_FAILED',
   'TEMPLATE_NOT_ACTIVE',
   'GENERATION_FAILED',
@@ -92,7 +109,7 @@ export interface ActInput {
   readonly causeLabels: ReadonlyMap<string, string>;
   readonly valuations: ReadonlyMap<string, AssetValuation>;
   readonly conditionLabels: Readonly<Record<string, string>>;
-  /** Quién atendió la toma por el área (persona o texto libre); solo informativo, no firma. */
+  /** Quién atendió la toma por el área del centro del acta (persona o texto libre); solo informativo, no firma. */
   readonly attendedBy?: string | null;
 }
 
@@ -286,7 +303,7 @@ export const buildInventoryActContent = (input: ActInput): ActContent => {
 export const INVENTORY_ACT_PLACEHOLDERS: ReadonlyArray<readonly [string, string]> = [
   ['campos.tomaCodigo', 'Código de la toma (TF-2026-001)'],
   ['campos.tomaNombre', 'Nombre de la toma'],
-  ['campos.alcance', 'Alcance: "Centro de costo 1020 — Nombre", "Ubicación …", "Unidad organizacional …" o "Toda la universidad"'],
+  ['campos.alcance', 'Alcance de la toma (no del acta): "Centro de costo 1020 — Nombre", "Ubicación …", "Unidad organizacional …" o "Toda la universidad". El centro del acta es centroCosto.* (un acta por centro de costo de la toma)'],
   ['campos.fechaProgramadaInicio / campos.fechaProgramadaFin', 'Fechas planeadas ("15 de marzo de 2026")'],
   ['campos.fechaInicio / campos.fechaCierre / campos.fechaAprobacion', 'Fechas reales de inicio, cierre y aprobación de la conciliación'],
   ['campos.corteContable', 'Fecha del corte contable o "Sin corte contable: estado del sistema al <fecha de la foto>"'],
@@ -298,7 +315,7 @@ export const INVENTORY_ACT_PLACEHOLDERS: ReadonlyArray<readonly [string, string]
   ['campos.totalConCategoria / campos.totalSinCategoria', 'Ítems con y sin categoría de hallazgo'],
   ['campos.hallazgosValorCompra / campos.hallazgosValorLibros', 'Totales de la tabla de hallazgos ("Sin dato" si falta algún valor)'],
   ['campos.basePorcentaje', '"Porcentaje calculado sobre el precio de compra": base del porcentaje de hallazgos'],
-  ['campos.atendioPorArea', 'Quién atendió la toma por el área (persona o texto libre; "Sin dato" si no se indicó). Solo informativo: no firma'],
+  ['campos.atendioPorArea', 'Quién atendió la toma por el área del centro del acta (persona o texto libre; "Sin dato" si no se indicó). Solo informativo: no firma'],
   ['tablas.hallazgos[] (codigo, nombre, cantidad, valorCompra, porcentaje, valorLibros, esTotal)', 'Una fila por categoría activa del catálogo y una final TOTAL (esTotal = "Sí"); porcentaje = precio de compra de la categoría / precio de compra total de las categorías ("Sin dato" si falta algún precio o el total es 0). El valor en libros no entra en el porcentaje'],
   ['tablas.sobrantes[] (indice, descripcion, ubicacion, condicion, resolucion, motivoResolucion, activoCreado)', 'Sobrantes sin activo registrado'],
   ['activos[].campos.resultado / categoria / categoriaCodigo / causa / condicionObservada', 'Resultado en español, categoría de hallazgo, causa del faltante y condición observada'],

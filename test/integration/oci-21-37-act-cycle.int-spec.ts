@@ -364,11 +364,11 @@ describe
       afterAll(async () => {
         // Deja la BD compartida como estaba: OCI-21-37 sin plantilla, sin actas ni solicitudes de tomas, y su consecutivo.
         await dataSource.query(
-          'UPDATE physical_inventory SET act_request_id = NULL, act_document_id = NULL',
+          'UPDATE physical_inventory_act SET document_request_id = NULL, document_id = NULL',
         );
         const ids = (
           (await dataSource.query(
-            `SELECT id FROM document WHERE entity_type = 'PHYSICAL_INVENTORY'`,
+            `SELECT id FROM document WHERE entity_type = 'PHYSICAL_INVENTORY_ACT'`,
           )) as Array<{ id: string }>
         ).map((row) => row.id);
         await dataSource.query(
@@ -388,7 +388,7 @@ describe
           [ids],
         );
         await dataSource.query(
-          `DELETE FROM document_request WHERE payload->>'entityType' = 'PHYSICAL_INVENTORY'`,
+          `DELETE FROM document_request WHERE payload->>'entityType' = 'PHYSICAL_INVENTORY_ACT'`,
         );
         await dataSource.query('DELETE FROM document WHERE id = ANY($1)', [
           ids,

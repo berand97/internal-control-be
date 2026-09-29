@@ -89,46 +89,6 @@ export class PhysicalInventory {
   @Column({ name: 'snapshot_taken_at', type: 'timestamptz', nullable: true })
   snapshotTakenAt!: Date | null;
 
-  /** Solicitud del outbox del acta OCI-21-37, encolada al aprobar la conciliación. */
-  @Column({ name: 'act_request_id', type: 'uuid', nullable: true })
-  actRequestId!: string | null;
-
-  /** Acta OCI-21-37 generada (la guarda onGenerated). */
-  @Column({ name: 'act_document_id', type: 'uuid', nullable: true })
-  actDocumentId!: string | null;
-
-  /** Por qué el acta no se encoló (FORMAT_NOT_READY o ENQUEUE_FAILED). */
-  @Column({ name: 'act_blocked_code', type: 'varchar', length: 40, nullable: true })
-  actBlockedCode!: string | null;
-
-  @Column({ name: 'act_blocked_message', type: 'text', nullable: true })
-  actBlockedMessage!: string | null;
-
-  @Column({ name: 'act_blocked_at', type: 'timestamptz', nullable: true })
-  actBlockedAt!: Date | null;
-
-  /**
-   * Jefe vigente del centro de la toma que firma el acta OCI-21-37 como ENCARGADO (turno RESPONSABLE), resuelto al
-   * cerrar (migración 1767225980000). NULL: el centro no tenía jefe vigente (el acta no se emite hasta indicarlo) o la
-   * toma se cerró antes de esta regla.
-   */
-  @Column({ name: 'signer_head_person_id', type: 'uuid', nullable: true })
-  signerHeadPersonId!: string | null;
-
-  @Column({ name: 'signer_head_recorded_at', type: 'timestamptz', nullable: true })
-  signerHeadRecordedAt!: Date | null;
-
-  @Column({ name: 'signer_head_recorded_by', type: 'uuid', nullable: true })
-  signerHeadRecordedBy!: string | null;
-
-  /** Quién atendió la toma por el área, si es persona del sistema. Solo informativo: no firma. */
-  @Column({ name: 'attended_by_person_id', type: 'uuid', nullable: true })
-  attendedByPersonId!: string | null;
-
-  /** Quién atendió por el área, en texto libre, si no está registrado. Nunca junto con attendedByPersonId. */
-  @Column({ name: 'attended_by_name', type: 'varchar', length: 200, nullable: true })
-  attendedByName!: string | null;
-
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

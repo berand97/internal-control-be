@@ -1,5 +1,5 @@
 import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
-import { DataSource, type EntityManager } from 'typeorm';
+import { DataSource, type EntityManager, In } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
@@ -19,17 +19,23 @@ import {
   buildInventoryActContent,
   INVENTORY_ACT_ENTITY_TYPE,
   INVENTORY_ACT_FORMAT_KEY,
+  ITEM_ACT_CENTER_SQL,
   type InventoryActGeneration,
   type InventoryActReason,
   type InventoryActRetryAction,
 } from '../domain/inventory-act.js';
 import type { SignerSubstitutionsInput } from '../../documents/dto/signer-substitution.dto.js';
 import { PhysicalInventory } from '../entities/physical-inventory.entity.js';
+import { PhysicalInventoryAct } from '../entities/physical-inventory-act.entity.js';
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
 import { VerificationResult } from '../enums/verification-result.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
-import { InventorySignerHeadService } from './inventory-signer-head.service.js';
+import {
+  type CostCenterRef,
+  InventorySignerHeadService,
+  type InventoryWarning,
+} from './inventory-signer-head.service.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
 
 /** Reintentos automáticos del outbox (DocumentEngineService.processPending: attempts < 5). */
@@ -44,7 +50,7 @@ const SIGNER_ERRORS: ReadonlyArray<ErrorCode> = [
 
 type BlockedReason = Extract<
   InventoryActReason,
-  'FORMAT_NOT_READY' | 'ENQUEUE_FAILED' | 'NO_COST_CENTER_HEAD'
+  'FORMAT_NOT_READY' | 'ENQUEUE_FAILED' | 'NO_COST_CENTER_HEAD' | 'SIGNER_HEAD_NOT_CHOSEN'
 >;
 
 type EnqueueOutcome =
@@ -73,10 +79,18 @@ interface ActItemRow {
   surplus_resolution_reason: string | null;
 }
 
+export interface PersonRef {
+  readonly personId: string;
+  readonly name: string;
+}
+
 /**
- * Acta de toma física OCI-21-37. Al aprobar la conciliación se encola en la misma transacción; si el formato no está
- * listo o falla armarla, la conciliación sigue y el motivo queda en la toma (act_blocked_*), reintentable con
- * POST /inventories/:id/act/enqueue. La generación es asíncrona (outbox). Los manejadores del ciclo de vida solo
+ * Actas OCI-21-37 de una toma: una por centro de costo (physical_inventory_act). Al aprobar la conciliación se encola
+ * una por centro en la misma transacción, cada una en su SAVEPOINT: si el formato no está listo, el centro no tiene
+ * jefe que firme o falla armarla, esa acta queda NOT_ENQUEUED con su motivo, las demás siguen y la conciliación
+ * también; se reintenta con POST /inventories/:id/acts/:costCenterId/enqueue. Cada acta lleva su propio consecutivo
+ * (lo asigna el motor al generarla), su centroCosto (y unidad a la fecha), los hallazgos y sobrantes de su centro y,
+ * como ENCARGADO, el jefe de ese centro. La generación es asíncrona (outbox). Los manejadores del ciclo de vida solo
  * guardan el vínculo con el acta: firmarla o rechazarla no cambia la toma.
  */
 @Injectable()
@@ -95,7 +109,7 @@ export class InventoryActService implements OnModuleInit {
   onModuleInit(): void {
     this.lifecycle.register({
       entityType: INVENTORY_ACT_ENTITY_TYPE,
-      // RESPONSABLE (ENCARGADO) = jefe vigente del centro de la toma resuelto al cerrar (responsiblePersonId);
+      // RESPONSABLE (ENCARGADO) = jefe vigente del centro del acta resuelto al cerrar (responsiblePersonId);
       // AUDITA (REVISA) = quien aprueba la conciliación (signers), turno de Control Interno.
       formats: [
         {
@@ -111,38 +125,51 @@ export class InventoryActService implements OnModuleInit {
   }
 
   /**
-   * En la transacción de approveReconcile, con la toma ya RECONCILED en `inventory` (sin guardar). Nunca hace fallar
-   * la conciliación por el acta: el intento va en un SAVEPOINT y cualquier problema queda en act_blocked_*. Deja los
-   * campos del acta en `inventory`; quien llama la guarda.
+   * En la transacción de approveReconcile, con la toma ya RECONCILED en `inventory` (sin guardar): alinea las actas con
+   * los ítems y encola cada una sin encolar. Nunca hace fallar la conciliación por un acta.
    */
   async enqueueOnApproval(manager: EntityManager, inventory: PhysicalInventory, approver: AuthenticatedUser): Promise<void> {
-    const outcome = await this.tryEnqueue(manager, inventory, approver.id);
-    this.applyOutcome(inventory, outcome);
-    await this.auditEnqueue(manager, inventory, approver.id, outcome);
+    await this.signerHead.sync(manager, inventory, approver);
+    const acts = await this.orderedActs(manager, inventory.id);
+    for (const act of acts.filter((row) => !row.documentRequestId)) {
+      const outcome = await this.tryEnqueue(manager, inventory, act, approver.id);
+      this.applyOutcome(act, outcome);
+      await manager.getRepository(PhysicalInventoryAct).save(act);
+      await this.auditEnqueue(manager, inventory, act, approver.id, outcome);
+    }
   }
 
-  /** POST /inventories/:id/act/enqueue: la toma está RECONCILED y su acta no se encoló. */
-  async retryEnqueue(inventoryId: string, actor: AuthenticatedUser, signerSubstitutions?: SignerSubstitutionsInput) {
-    const outcome = await this.dataSource.transaction(async (manager) => {
+  /**
+   * POST /inventories/:id/acts/:costCenterId/enqueue: la toma está RECONCILED y el acta de ese centro no se encoló.
+   * costCenterId null (POST /inventories/:id/act/enqueue, compatibilidad): la única acta de la toma.
+   */
+  async retryEnqueue(
+    inventoryId: string,
+    costCenterId: string | null,
+    actor: AuthenticatedUser,
+    signerSubstitutions?: SignerSubstitutionsInput,
+  ) {
+    const { outcome, actId } = await this.dataSource.transaction(async (manager) => {
       const inventory = await manager
         .getRepository(PhysicalInventory)
         .findOne({ where: { id: inventoryId }, lock: { mode: 'pessimistic_write' } });
       if (!inventory) {
         throw new ApiException(ErrorCode.ResourceNotFound);
       }
-      if (inventory.status !== InventoryStatus.Reconciled || inventory.actRequestId) {
+      const act = await this.signerHead.actFor(manager, inventory.id, costCenterId);
+      if (inventory.status !== InventoryStatus.Reconciled || act.documentRequestId) {
         throw new ApiException(
           ErrorCode.InvalidState,
           'El acta se encola solo en una toma conciliada cuya acta no se encoló',
         );
       }
-      const result = await this.tryEnqueue(manager, inventory, inventory.reconcileApprovedBy ?? actor.id, signerSubstitutions, {
+      const result = await this.tryEnqueue(manager, inventory, act, inventory.reconcileApprovedBy ?? actor.id, signerSubstitutions, {
         rethrowSignerErrors: true,
       });
-      this.applyOutcome(inventory, result);
-      await manager.getRepository(PhysicalInventory).save(inventory);
-      await this.auditEnqueue(manager, inventory, actor.id, result);
-      return result;
+      this.applyOutcome(act, result);
+      await manager.getRepository(PhysicalInventoryAct).save(act);
+      await this.auditEnqueue(manager, inventory, act, actor.id, result);
+      return { outcome: result, actId: act.id };
     });
     if ('blocked' in outcome) {
       throw new ApiException(
@@ -152,44 +179,136 @@ export class InventoryActService implements OnModuleInit {
       );
     }
     const inventory = await this.dataSource.getRepository(PhysicalInventory).findOneOrFail({ where: { id: inventoryId } });
-    return this.state(inventory);
+    const views = await this.views(inventory);
+    return views.find((view) => view.id === actId) as InventoryActView;
   }
 
-  /** Estado del acta para la pantalla de la toma (InventoryActStateDto). */
-  async state(inventory: PhysicalInventory) {
-    const base = {
-      reason: null as InventoryActReason | null,
-      message: null as string | null,
-      requestId: inventory.actRequestId ?? null,
+  /**
+   * Para el detalle de la toma: las actas (una por centro) y, por compatibilidad, el estado de la única acta (act,
+   * signerHead, attendedBy; null con varias), si todas se pueden emitir y los avisos de todas.
+   */
+  async detail(inventory: PhysicalInventory) {
+    const acts = await this.views(inventory);
+    const single = acts.length === 1 ? (acts[0] as InventoryActView) : null;
+    return {
+      acts,
+      act: single ? this.stateOf(single) : acts.length === 0 ? this.noneState() : null,
+      signerHead: single?.signerHead ?? null,
+      attendedBy: single?.attendedBy ?? null,
+      actIssuable: acts.every((act) => act.issuable),
+      warnings: acts.flatMap((act) => act.warnings),
+      unassignedItems: await this.signerHead.unassignedItems(inventory),
+    };
+  }
+
+  private stateOf(view: InventoryActView): InventoryActState {
+    const {
+      id: _id,
+      costCenter: _costCenter,
+      signerHead: _signerHead,
+      attendedBy: _attendedBy,
+      issuable: _issuable,
+      warnings: _warnings,
+      ...state
+    } = view;
+    return state;
+  }
+
+  private noneState(): InventoryActState {
+    return {
+      generation: 'NONE',
+      reason: null,
+      message: null,
+      requestId: null,
       attempts: 0,
       retriesAutomatically: false,
       retryable: false,
-      retryAction: null as InventoryActRetryAction | null,
-      documentId: inventory.actDocumentId ?? null,
-      number: null as string | null,
-      status: null as 'PENDING_SIGNATURE' | 'SIGNED' | 'REJECTED' | null,
-      signedAt: null as string | null,
-      blockedAt: null as Date | null,
+      retryAction: null,
+      documentId: null,
+      number: null,
+      status: null,
+      signedAt: null,
+      blockedAt: null,
     };
-    if (!inventory.actRequestId) {
-      if (inventory.actBlockedCode) {
+  }
+
+  /** Actas de la toma con su centro, firmante, quién atendió, estado y avisos, por código de centro. */
+  async views(inventory: PhysicalInventory): Promise<InventoryActView[]> {
+    const manager = this.dataSource.manager;
+    const acts = await this.orderedActs(manager, inventory.id);
+    if (acts.length === 0) {
+      return [];
+    }
+    const centers = acts.map((act) => act.costCenterId).filter((id): id is string => id !== null);
+    const refs = await this.signerHead.costCenters(manager, centers);
+    const names = await this.signerHead.personNames(
+      manager,
+      acts.flatMap((act) => [act.signerHeadPersonId, act.attendedByPersonId]),
+    );
+    const closed = inventory.status === InventoryStatus.Closed || inventory.status === InventoryStatus.Reconciled;
+    const unsigned = acts
+      .filter((act) => closed && !act.signerHeadPersonId && !act.documentRequestId && act.costCenterId)
+      .map((act) => act.costCenterId as string);
+    const candidates = unsigned.length > 0 ? await this.signerHead.candidatesByCenter(manager, unsigned) : new Map();
+    const views: InventoryActView[] = [];
+    for (const act of acts) {
+      const costCenter = act.costCenterId ? (refs.get(act.costCenterId) ?? null) : null;
+      const issuable = act.signerHeadPersonId !== null || act.documentRequestId !== null;
+      const warnings: InventoryWarning[] =
+        closed && !issuable
+          ? [this.signerHead.warning(costCenter, (candidates.get(act.costCenterId as string) ?? []).length)]
+          : [];
+      views.push({
+        id: act.id,
+        costCenter,
+        signerHead: act.signerHeadPersonId
+          ? { personId: act.signerHeadPersonId, name: names.get(act.signerHeadPersonId) ?? '' }
+          : null,
+        attendedBy: act.attendedByPersonId
+          ? { personId: act.attendedByPersonId, name: names.get(act.attendedByPersonId) ?? '' }
+          : act.attendedByName
+            ? { personId: null, name: act.attendedByName }
+            : null,
+        issuable,
+        warnings,
+        ...(await this.state(act)),
+      });
+    }
+    return views;
+  }
+
+  private async orderedActs(manager: EntityManager, inventoryId: string): Promise<PhysicalInventoryAct[]> {
+    const ids = (await manager.query(
+      `SELECT a.id FROM physical_inventory_act a LEFT JOIN cost_center cc ON cc.id = a.cost_center_id
+       WHERE a.inventory_id = $1 ORDER BY cc.external_code NULLS FIRST, a.id`,
+      [inventoryId],
+    )) as Array<{ id: string }>;
+    const rows = await manager.getRepository(PhysicalInventoryAct).findBy({ id: In(ids.map((row) => row.id)) });
+    return ids.map((row) => rows.find((act) => act.id === row.id) as PhysicalInventoryAct);
+  }
+
+  /** Estado de generación de un acta (InventoryActStateDto). */
+  private async state(act: PhysicalInventoryAct): Promise<InventoryActState> {
+    const base = { ...this.noneState(), requestId: act.documentRequestId, documentId: act.documentId };
+    if (!act.documentRequestId) {
+      if (act.blockedCode) {
         return {
           ...base,
-          generation: 'NOT_ENQUEUED' as InventoryActGeneration,
-          reason: inventory.actBlockedCode as InventoryActReason,
-          message: inventory.actBlockedMessage,
+          generation: 'NOT_ENQUEUED',
+          reason: act.blockedCode as InventoryActReason,
+          message: act.blockedMessage,
           retryable: true,
-          retryAction: 'ENQUEUE' as InventoryActRetryAction,
-          blockedAt: inventory.actBlockedAt,
+          retryAction: 'ENQUEUE',
+          blockedAt: act.blockedAt ? new Date(act.blockedAt).toISOString() : null,
         };
       }
-      return { ...base, generation: 'NONE' as InventoryActGeneration };
+      return base;
     }
-    const state = await this.lifecycle.stateFor(INVENTORY_ACT_ENTITY_TYPE, inventory.id, {
+    const state = await this.lifecycle.stateFor(INVENTORY_ACT_ENTITY_TYPE, act.id, {
       formatKey: INVENTORY_ACT_FORMAT_KEY,
     });
-    const request = state.requests.find((item) => item.requestId === inventory.actRequestId);
-    const documentId = inventory.actDocumentId ?? request?.documentId ?? null;
+    const request = state.requests.find((item) => item.requestId === act.documentRequestId);
+    const documentId = act.documentId ?? request?.documentId ?? null;
     const document = documentId ? state.documents.find((item) => item.documentId === documentId) : undefined;
     const generation: InventoryActGeneration = document ? 'GENERATED' : (request?.status ?? 'PENDING');
     const failed = generation === 'FAILED';
@@ -202,7 +321,7 @@ export class InventoryActService implements OnModuleInit {
       attempts: request?.attempts ?? 0,
       retriesAutomatically: failed && (request?.attempts ?? 0) < AUTOMATIC_GENERATION_ATTEMPTS,
       retryable: failed && !documentId,
-      retryAction: failed && !documentId ? ('RETRY_REQUEST' as InventoryActRetryAction) : null,
+      retryAction: failed && !documentId ? 'RETRY_REQUEST' : null,
       documentId,
       number: document?.number ?? null,
       status: document?.status ?? null,
@@ -218,20 +337,28 @@ export class InventoryActService implements OnModuleInit {
     return readiness && !readiness.ready ? 'FORMAT_NOT_READY' : 'GENERATION_FAILED';
   }
 
-  private applyOutcome(inventory: PhysicalInventory, outcome: EnqueueOutcome): void {
+  private applyOutcome(act: PhysicalInventoryAct, outcome: EnqueueOutcome): void {
+    act.updatedAt = new Date();
     if ('requestId' in outcome) {
-      inventory.actRequestId = outcome.requestId;
-      inventory.actBlockedCode = null;
-      inventory.actBlockedMessage = null;
-      inventory.actBlockedAt = null;
+      act.documentRequestId = outcome.requestId;
+      act.blockedCode = null;
+      act.blockedMessage = null;
+      act.blockedAt = null;
       return;
     }
-    inventory.actBlockedCode = outcome.blocked;
-    inventory.actBlockedMessage = outcome.message;
-    inventory.actBlockedAt = new Date();
+    act.blockedCode = outcome.blocked;
+    act.blockedMessage = outcome.message;
+    act.blockedAt = new Date();
   }
 
-  private auditEnqueue(manager: EntityManager, inventory: PhysicalInventory, actorId: string, outcome: EnqueueOutcome) {
+  private auditEnqueue(
+    manager: EntityManager,
+    inventory: PhysicalInventory,
+    act: PhysicalInventoryAct,
+    actorId: string,
+    outcome: EnqueueOutcome,
+  ) {
+    const base = { formatKey: INVENTORY_ACT_FORMAT_KEY, actId: act.id, costCenterId: act.costCenterId };
     return this.auditLogs.record(
       {
         action: AuditAction.InventoryActEnqueued,
@@ -240,10 +367,7 @@ export class InventoryActService implements OnModuleInit {
         performedBy: actorId,
         ipAddress: null,
         userAgent: null,
-        changes:
-          'requestId' in outcome
-            ? { formatKey: INVENTORY_ACT_FORMAT_KEY, requestId: outcome.requestId }
-            : { formatKey: INVENTORY_ACT_FORMAT_KEY, blocked: outcome.blocked },
+        changes: 'requestId' in outcome ? { ...base, requestId: outcome.requestId } : { ...base, blocked: outcome.blocked },
       },
       manager,
     );
@@ -252,6 +376,7 @@ export class InventoryActService implements OnModuleInit {
   private async tryEnqueue(
     manager: EntityManager,
     inventory: PhysicalInventory,
+    act: PhysicalInventoryAct,
     approverUserId: string,
     signerSubstitutions?: SignerSubstitutionsInput,
     options: { readonly rethrowSignerErrors?: boolean } = {},
@@ -266,18 +391,27 @@ export class InventoryActService implements OnModuleInit {
         message: `El formato ${INVENTORY_ACT_FORMAT_KEY} no se puede generar: ${readiness.reasons.join('; ')}`,
       };
     }
-    // Sin jefe del centro que firme como ENCARGADO el acta no se emite (aviso ACT_CANNOT_BE_ISSUED del cierre).
-    const signerHeadPersonId = inventory.signerHeadPersonId;
-    if (!signerHeadPersonId) {
-      return { blocked: 'NO_COST_CENTER_HEAD', message: (await this.signerHead.warning(inventory, manager)).message };
+    // Sin jefe del centro que firme como ENCARGADO esta acta no se emite (aviso ACT_CANNOT_BE_ISSUED); las demás sí.
+    const signerHeadPersonId = act.signerHeadPersonId;
+    if (!signerHeadPersonId || !act.costCenterId) {
+      const center = act.costCenterId
+        ? ((await this.signerHead.costCenters(manager, [act.costCenterId])).get(act.costCenterId) ?? null)
+        : null;
+      const candidates = act.costCenterId
+        ? ((await this.signerHead.candidatesByCenter(manager, [act.costCenterId])).get(act.costCenterId) ?? []).length
+        : 0;
+      return {
+        blocked: candidates > 1 ? 'SIGNER_HEAD_NOT_CHOSEN' : 'NO_COST_CENTER_HEAD',
+        message: this.signerHead.warning(center, candidates).message,
+      };
     }
     await manager.query('SAVEPOINT inventory_act');
     try {
       // app_user.person_id es NOT NULL: el aprobador siempre tiene persona que firme.
       const approverPersonId = await this.personOf(manager, approverUserId);
-      const payload = await this.payload(manager, inventory, signerHeadPersonId, approverPersonId);
+      const payload = await this.payload(manager, inventory, act, signerHeadPersonId, approverPersonId);
       // Separación de funciones: si quien aprueba (AUDITA) es el jefe que firma como ENCARGADO, el acta necesita un
-      // sustituto de Control Interno (POST /inventories/:id/act/enqueue con signerSubstitutions.AUDITA).
+      // sustituto de Control Interno (POST /inventories/:id/acts/:costCenterId/enqueue con signerSubstitutions.AUDITA).
       const requestId = await this.engine.enqueue(
         manager,
         signerSubstitutions && Object.keys(signerSubstitutions).length > 0 ? { ...payload, signerSubstitutions } : payload,
@@ -310,12 +444,15 @@ export class InventoryActService implements OnModuleInit {
     return row.person_id;
   }
 
+  /** Solicitud del acta de un centro: solo los ítems de ese centro (ITEM_ACT_CENTER_SQL). */
   private async payload(
     manager: EntityManager,
     inventory: PhysicalInventory,
+    act: PhysicalInventoryAct,
     responsiblePersonId: string,
     approverPersonId: string,
   ): Promise<DocumentRequestPayload> {
+    const costCenterId = act.costCenterId as string;
     const rows = (await manager.query(
       `
       SELECT i.id, i.asset_id, i.verification_result, i.actual_condition, i.expected_code_temporary,
@@ -324,11 +461,12 @@ export class InventoryActService implements OnModuleInit {
              ra.internal_code AS resolved_asset_code, i.surplus_resolution, i.surplus_resolution_reason
       FROM physical_inventory_item i
       LEFT JOIN location l ON l.id = i.actual_location_id
+      LEFT JOIN asset a ON a.id = i.asset_id
       LEFT JOIN asset ra ON ra.id = i.resolved_asset_id
-      WHERE i.inventory_id = $1
+      WHERE i.inventory_id = $1 AND (${ITEM_ACT_CENTER_SQL}) = $4::uuid
       ORDER BY i.verified_at NULLS LAST, i.id
       `,
-      [inventory.id],
+      [inventory.id, inventory.scopeType, inventory.scopeId, costCenterId],
     )) as ActItemRow[];
     const items: ActItem[] = rows.map((row) => ({
       id: row.id,
@@ -376,15 +514,13 @@ export class InventoryActService implements OnModuleInit {
       causeLabels: catalogs.causeLabels,
       valuations,
       conditionLabels: CONDITION_LABELS,
-      attendedBy: await this.signerHead.attendedName(manager, inventory),
+      attendedBy: await this.signerHead.attendedName(manager, act),
     });
     return {
       formatKey: INVENTORY_ACT_FORMAT_KEY,
       entityType: INVENTORY_ACT_ENTITY_TYPE,
-      entityId: inventory.id,
-      ...(inventory.scopeType === InventoryScopeType.CostCenter && inventory.scopeId
-        ? { costCenterId: inventory.scopeId }
-        : {}),
+      entityId: act.id,
+      costCenterId,
       responsiblePersonId,
       signers: { AUDITA: approverPersonId },
       assetIds: content.assetIds,
@@ -420,42 +556,73 @@ export class InventoryActService implements OnModuleInit {
     }
     const [row] = event.entityId
       ? ((await manager.query(
-          `SELECT id, status, act_request_id, act_document_id FROM physical_inventory WHERE id = $1 FOR UPDATE`,
+          `SELECT a.id, a.inventory_id, pi.status, a.document_request_id, a.document_id
+           FROM physical_inventory_act a JOIN physical_inventory pi ON pi.id = a.inventory_id
+           WHERE a.id = $1 FOR UPDATE OF a`,
           [event.entityId],
-        )) as Array<{ id: string; status: string; act_request_id: string | null; act_document_id: string | null }>)
+        )) as Array<{
+          id: string;
+          inventory_id: string;
+          status: string;
+          document_request_id: string | null;
+          document_id: string | null;
+        }>)
       : [];
     if (!row) {
-      throw new Error(`No existe la toma ${event.entityId ?? '(sin id)'} del acta ${event.number}`);
+      throw new Error(`No existe el acta de toma ${event.entityId ?? '(sin id)'} del documento ${event.number}`);
     }
     return row;
   }
 
-  /** En la transacción que inserta el acta: la toma la adopta si la encoló y aún no tiene otra. */
+  /** En la transacción que inserta el acta: la fila del centro la adopta si la encoló y aún no tiene otra. */
   private async onGenerated(manager: EntityManager, event: DocumentLifecycleEvent): Promise<void> {
-    const inventory = await this.lockFor(manager, event);
-    if (inventory.status !== InventoryStatus.Reconciled || !inventory.act_request_id) {
-      throw new Error(`La toma ${inventory.id} no encoló un acta (${inventory.status})`);
+    const act = await this.lockFor(manager, event);
+    if (act.status !== InventoryStatus.Reconciled || !act.document_request_id) {
+      throw new Error(`La toma ${act.inventory_id} no encoló el acta ${act.id} (${act.status})`);
     }
-    if (inventory.act_document_id && inventory.act_document_id !== event.documentId) {
-      throw new Error(`La toma ${inventory.id} ya tiene acta (${inventory.act_document_id})`);
+    if (act.document_id && act.document_id !== event.documentId) {
+      throw new Error(`El acta ${act.id} de la toma ${act.inventory_id} ya tiene documento (${act.document_id})`);
     }
-    await manager.query('UPDATE physical_inventory SET act_document_id = $2 WHERE id = $1', [
-      inventory.id,
+    await manager.query('UPDATE physical_inventory_act SET document_id = $2, updated_at = NOW() WHERE id = $1', [
+      act.id,
       event.documentId,
     ]);
   }
 
   /** Firmar o rechazar el acta no cambia la toma; solo se comprueba que es la suya. */
   private async assertOwnAct(manager: EntityManager, event: DocumentLifecycleEvent) {
-    const inventory = await this.lockFor(manager, event);
-    if (inventory.act_document_id !== event.documentId) {
+    const act = await this.lockFor(manager, event);
+    if (act.document_id !== event.documentId) {
       throw new Error(
-        `El acta ${event.number} (${event.documentId}) no es la de la toma ${inventory.id} (${inventory.act_document_id ?? 'sin acta'})`,
+        `El documento ${event.number} (${event.documentId}) no es el acta ${act.id} de la toma ${act.inventory_id} (${act.document_id ?? 'sin documento'})`,
       );
     }
-    return inventory;
+    return act;
   }
 }
 
-export type InventoryActState = Awaited<ReturnType<InventoryActService['state']>>;
+export interface InventoryActState {
+  readonly generation: InventoryActGeneration;
+  readonly reason: InventoryActReason | null;
+  readonly message: string | null;
+  readonly requestId: string | null;
+  readonly attempts: number;
+  readonly retriesAutomatically: boolean;
+  readonly retryable: boolean;
+  readonly retryAction: InventoryActRetryAction | null;
+  readonly documentId: string | null;
+  readonly number: string | null;
+  readonly status: 'PENDING_SIGNATURE' | 'SIGNED' | 'REJECTED' | null;
+  readonly signedAt: string | null;
+  readonly blockedAt: string | null;
+}
 
+export interface InventoryActView extends InventoryActState {
+  /** Fila physical_inventory_act (entityId del acta en el motor). */
+  readonly id: string;
+  readonly costCenter: CostCenterRef | null;
+  readonly signerHead: PersonRef | null;
+  readonly attendedBy: { readonly personId: string | null; readonly name: string } | null;
+  readonly issuable: boolean;
+  readonly warnings: InventoryWarning[];
+}

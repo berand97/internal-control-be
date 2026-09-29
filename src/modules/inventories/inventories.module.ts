@@ -17,6 +17,7 @@ import { InventoryItemCorrection } from './entities/inventory-item-correction.en
 import { InventoryMissingCause } from './entities/inventory-missing-cause.entity.js';
 import { PhysicalInventoryItem } from './entities/physical-inventory-item.entity.js';
 import { PhysicalInventoryScope } from './entities/physical-inventory-scope.entity.js';
+import { PhysicalInventoryAct } from './entities/physical-inventory-act.entity.js';
 import { PhysicalInventory } from './entities/physical-inventory.entity.js';
 import { AccountingCutsController } from './accounting-cuts.controller.js';
 import { InventoriesController } from './inventories.controller.js';
@@ -52,6 +53,7 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
       PhysicalInventory,
       PhysicalInventoryItem,
       PhysicalInventoryScope,
+      PhysicalInventoryAct,
       InventoryFindingCategory,
       InventoryMissingCause,
       InventoryItemCorrection,

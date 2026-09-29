@@ -115,11 +115,11 @@ export const dropTestFormat = async (dataSource: DataSource, key: string): Promi
  */
 export const discardInventoryActRequests = async (dataSource: DataSource): Promise<void> => {
   await dataSource.query(
-    `UPDATE physical_inventory SET act_request_id = NULL
-     WHERE act_request_id IN (SELECT id FROM document_request WHERE status <> 'GENERATED' AND payload->>'entityType' = 'PHYSICAL_INVENTORY')`,
+    `UPDATE physical_inventory_act SET document_request_id = NULL
+     WHERE document_request_id IN (SELECT id FROM document_request WHERE status <> 'GENERATED' AND payload->>'entityType' = 'PHYSICAL_INVENTORY_ACT')`,
   );
   await dataSource.query(
-    `DELETE FROM document_request WHERE status <> 'GENERATED' AND payload->>'entityType' = 'PHYSICAL_INVENTORY'`,
+    `DELETE FROM document_request WHERE status <> 'GENERATED' AND payload->>'entityType' = 'PHYSICAL_INVENTORY_ACT'`,
   );
 };
 

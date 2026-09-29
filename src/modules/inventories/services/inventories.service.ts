@@ -130,8 +130,7 @@ export class InventoriesService {
       progress: toProgressView(items),
       report: this.frozenOrLiveReport(inventory, items, context),
       reconciliationBasis: await this.valuation.basis(inventory),
-      act: await this.act.state(inventory),
-      ...(await this.signerHead.view(inventory)),
+      ...(await this.act.detail(inventory)),
     };
   }
 
@@ -352,9 +351,10 @@ export class InventoriesService {
 
   /**
    * Cierra la toma: los ítems que siguen PENDING pasan a NOT_VERIFIED (no son faltantes y la conciliación no los
-   * toca) y se congela el reporte. Se resuelve quién firma el acta como ENCARGADO (jefe vigente del centro de la toma,
-   * InventorySignerHeadService) y se guarda quién atendió por el área. Todo en una transacción. Si el centro no tiene
-   * jefe el cierre procede y la respuesta trae el aviso ACT_CANNOT_BE_ISSUED.
+   * toca) y se congela el reporte. Se crea un acta por centro de costo presente en los ítems, con quién la firma como
+   * ENCARGADO (jefe vigente de ese centro, InventorySignerHeadService) y quién atendió por el área. Todo en una
+   * transacción. Un centro sin jefe no bloquea el cierre ni las demás actas: la respuesta trae su aviso
+   * ACT_CANNOT_BE_ISSUED.
    */
   async close(id: string, dto: CloseInventoryDto, actor: AuthenticatedUser) {
     const inventory = await this.requireInventory(id);
@@ -388,7 +388,7 @@ export class InventoriesService {
       inventory.closedAt = now;
       inventory.closedBy = actor.id;
       inventory.discrepancyReport = report;
-      await this.signerHead.applyOnClose(manager, inventory, dto, actor);
+      const acts = await this.signerHead.applyOnClose(manager, inventory, dto, actor);
       await manager.getRepository(PhysicalInventory).save(inventory);
       // Solo conteos: el reporte completo (con notas y causas en texto libre) queda en la toma, no en la auditoría.
       await this.auditLogsRepository.record(
@@ -402,7 +402,7 @@ export class InventoriesService {
           changes: {
             ...toProgressView(items),
             allowUnverified: dto.allowUnverified === true,
-            signerHeadPersonId: inventory.signerHeadPersonId,
+            acts: acts.map((act) => ({ costCenterId: act.costCenterId, signerHeadPersonId: act.signerHeadPersonId })),
           },
         },
         manager,
@@ -491,7 +491,7 @@ export class InventoriesService {
       inventory.status = InventoryStatus.Reconciled;
       inventory.reconcileApprovedAt = new Date();
       inventory.reconcileApprovedBy = actor.id;
-      // El acta OCI-21-37 se encola aquí; si no se puede, la conciliación sigue y el motivo queda en la toma.
+      // Un acta OCI-21-37 por centro se encola aquí; la que no se pueda queda con su motivo y la conciliación sigue.
       await this.act.enqueueOnApproval(manager, inventory, actor);
       await manager.getRepository(PhysicalInventory).save(inventory);
       await this.auditLogsRepository.record(

@@ -57,7 +57,9 @@ import {
 } from './dto/inventory-responsible-candidates.dto.js';
 import {
   InventoryAccountingCutResponseDto,
+  InventoryActDto,
   InventoryActStateDto,
+  InventoryCenterHeadCandidatesDto,
   InventoryAttendedByDto,
   InventoryDetailResponseDto,
   InventoryItemCorrectionDto,
@@ -108,7 +110,9 @@ const ACTOR_RULE =
   InventoryItemCorrectionDto,
   InventoryItemCorrectionResultDto,
   InventoryAccountingCutResponseDto,
+  InventoryActDto,
   InventoryActStateDto,
+  InventoryCenterHeadCandidatesDto,
   InventorySignerHeadDto,
   InventoryAttendedByDto,
   InventoryWarningDto,
@@ -390,27 +394,63 @@ export class InventoriesController {
     return this.corrections.listCorrections(id, itemId);
   }
 
+  @Get(':id/acts/head-candidates')
+  @RequirePermission('inventory:execute:global')
+  @ApiOperation({
+    summary: 'Jefes vigentes que pueden firmar como ENCARGADO el acta de cada centro de costo de la toma',
+    description:
+      'Un acta OCI-21-37 por centro de costo presente en los ítems de la toma (alcance COST_CENTER: una, la de su centro). ' +
+      'Por centro, las personas activas con jefatura vigente (cost_center_head): una se elige al cerrar (signerHeads) o ' +
+      'después (PUT /inventories/{id}/acts/{costCenterId}/signer-head). Solo id y nombre; candidates vacío si el centro ' +
+      'no tiene jefe. Antes del cierre, los centros de los ítems; después, los de las actas.',
+  })
+  @ApiOkResponse({ schema: envelopedArraySchema(InventoryCenterHeadCandidatesDto) })
+  async actHeadCandidates(@Param('id', ParseUUIDPipe) id: string) {
+    return this.signerHead.candidatesFor(await this.inventoriesService.requireById(id));
+  }
+
   @Get(':id/head-candidates')
   @RequirePermission('inventory:execute:global')
   @ApiOperation({
-    summary: 'Jefes vigentes del centro de la toma que pueden firmar el acta como ENCARGADO',
+    deprecated: true,
+    summary: 'Compatibilidad: jefes vigentes del centro de la única acta de la toma',
     description:
-      'Personas activas con jefatura vigente (cost_center_head) del centro de costo de la toma: una se elige al cerrar ' +
-      '(signerHeadPersonId) o después (PUT /inventories/{id}/signer-head). Solo id y nombre. Vacío si el centro no tiene jefe ' +
-      'o la toma no es de un centro de costo.',
+      'Use GET /inventories/{id}/acts/head-candidates. Devuelve los jefes del centro si la toma tiene un solo centro de ' +
+      'costo (un acta); vacío si tiene varios o ninguno.',
   })
   @ApiOkResponse({ schema: envelopedArraySchema(InventorySignerHeadDto) })
   async headCandidates(@Param('id', ParseUUIDPipe) id: string) {
-    return this.signerHead.candidates(await this.inventoriesService.requireById(id));
+    return this.signerHead.singleCenterCandidates(await this.inventoriesService.requireById(id));
+  }
+
+  @Put(':id/acts/:costCenterId/signer-head')
+  @RequirePermission('inventory:execute:global')
+  @ApiOperation({
+    summary: 'Indicar el jefe que firma como ENCARGADO el acta de un centro después del cierre',
+    description:
+      'Con la toma CLOSED o RECONCILED y el acta de ese centro aún sin encolar (si no, 406 INVALID_STATE; 404 si la toma ' +
+      'no tiene acta para el centro). Debe ser jefe vigente de ese centro (400 VALIDATION_FAILED). Si la toma ya está ' +
+      'conciliada, luego se encola con POST /inventories/{id}/acts/{costCenterId}/enqueue. Las demás actas no cambian.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
+  async assignActSignerHead(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('costCenterId', ParseUUIDPipe) costCenterId: string,
+    @Body() dto: AssignSignerHeadDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    await this.signerHead.assign(id, costCenterId, dto.signerHeadPersonId, actor);
+    return this.inventoriesService.getById(id);
   }
 
   @Put(':id/signer-head')
   @RequirePermission('inventory:execute:global')
   @ApiOperation({
-    summary: 'Indicar el jefe que firma el acta como ENCARGADO después del cierre',
+    deprecated: true,
+    summary: 'Compatibilidad: indicar el firmante ENCARGADO de la única acta de la toma',
     description:
-      'Con la toma CLOSED o RECONCILED y el acta aún sin encolar (si no, 406 INVALID_STATE). Debe ser jefe vigente del centro ' +
-      'de la toma (400 VALIDATION_FAILED). Si la toma ya está conciliada, luego se encola con POST /inventories/{id}/act/enqueue.',
+      'Use PUT /inventories/{id}/acts/{costCenterId}/signer-head. Solo si la toma tiene una sola acta; con varias, 406 ' +
+      'INVALID_STATE. Mismas reglas que la ruta por centro.',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   async assignSignerHead(
@@ -418,7 +458,7 @@ export class InventoriesController {
     @Body() dto: AssignSignerHeadDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    await this.signerHead.assign(id, dto.signerHeadPersonId, actor);
+    await this.signerHead.assign(id, null, dto.signerHeadPersonId, actor);
     return this.inventoriesService.getById(id);
   }
 
@@ -430,10 +470,13 @@ export class InventoriesController {
     description:
       `${ACTOR_RULE} Con más del 5 % pendiente exige allowUnverified e inventory:create:global. Los pendientes pasan a ` +
       'NOT_VERIFIED (no son faltantes; la conciliación no los toca). actualEndDate es la fecha de Bogotá. ' +
-      'Firmante ENCARGADO del acta OCI-21-37 = jefe vigente del centro de la toma: con uno solo se toma por defecto; con varios, ' +
-      'signerHeadPersonId es obligatorio (400 VALIDATION_FAILED); con ninguno el cierre procede y la respuesta trae ' +
-      'warnings [ACT_CANNOT_BE_ISSUED] y actIssuable = false (el acta quedará NOT_ENQUEUED / NO_COST_CENTER_HEAD al conciliar). ' +
-      'attendedByPersonId o attendedByName (no ambos): quién atendió por el área, solo informativo.',
+      'La ubicación define el trabajo de campo, no el acta: se crea un acta OCI-21-37 por centro de costo presente en los ' +
+      'ítems (acts en la respuesta), cada una firmada como ENCARGADO por el jefe vigente de su centro. Por centro: con uno ' +
+      'solo se toma por defecto; con varios, signerHeads debe elegirlo (400 VALIDATION_FAILED, details ' +
+      'signerHeads.<costCenterId>); con ninguno el cierre procede, esa acta trae warnings [ACT_CANNOT_BE_ISSUED] (quedará ' +
+      'NOT_ENQUEUED / NO_COST_CENTER_HEAD al conciliar) y las demás siguen. signerHeadPersonId solo sirve con un único ' +
+      'centro. Quién atendió por el área: attendedBy por centro, o attendedByPersonId / attendedByName (no ambos) para ' +
+      'todas; solo informativo.',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   close(
@@ -518,30 +561,53 @@ export class InventoriesController {
     return this.surplus.resolve(id, itemId, dto, actor);
   }
 
+  @Post(':id/acts/:costCenterId/enqueue')
+  @RequirePermission('inventory:create:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Encolar el acta OCI-21-37 de un centro que la conciliación no pudo encolar',
+    description:
+      'Solo tomas RECONCILED con el acta de ese centro NOT_ENQUEUED (404 si la toma no tiene acta para el centro). Cada ' +
+      'acta lleva su propio consecutivo, su centro de costo (y la unidad a la fecha), los hallazgos y sobrantes de su ' +
+      'centro, y firman el jefe de ese centro indicado al cerrar (RESPONSABLE, ENCARGADO: signerHead) y quien aprobó la ' +
+      'conciliación (AUDITA). Sin jefe indicado: 406 INVALID_STATE con reason NO_COST_CENTER_HEAD o SIGNER_HEAD_NOT_CHOSEN ' +
+      '(indíquelo con PUT /inventories/{id}/acts/{costCenterId}/signer-head). Si el formato sigue sin código SGC o ' +
+      'firmantes: 409 DOCUMENT_FORMAT_NOT_READY; otro error al armar el acta: 406 INVALID_STATE. En todos, ' +
+      'error.details[0] = { field: reason, message: <reason> }. Si el jefe que firma como ENCARGADO es quien aprobó la ' +
+      'conciliación, la separación de funciones exige un sustituto para AUDITA (signerSubstitutions); sin él responde 409 ' +
+      'DOCUMENT_SIGNER_DUPLICATED (details signers.<ROL> y signerSubstitutions.<ROL>), y con un sustituto inválido 400 ' +
+      'DOCUMENT_SIGNER_SUBSTITUTE_INVALID, igual que entregas, préstamos y traslados; la toma no cambia. AUDITA es un turno ' +
+      'de Control Interno: si quien aprobó la conciliación no tiene usuario activo con el permiso vigente ' +
+      'act:sign_control:global, 400 DOCUMENT_SIGNER_NOT_ELIGIBLE (details signers.AUDITA) hasta que lo tenga o venga ' +
+      'signerSubstitutions.AUDITA con alguien que sí lo tenga. Al aprobar la conciliación el acta queda ' +
+      'NOT_ENQUEUED/ENQUEUE_FAILED con ese motivo (la conciliación y las demás actas no se rompen).',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryActDto) })
+  enqueueCenterAct(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('costCenterId', ParseUUIDPipe) costCenterId: string,
+    @Body() dto: EnqueueInventoryActDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.act.retryEnqueue(id, costCenterId, actor, dto.signerSubstitutions);
+  }
+
   @Post(':id/act/enqueue')
   @RequirePermission('inventory:create:global')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Encolar el acta OCI-21-37 que la conciliación no pudo encolar',
+    deprecated: true,
+    summary: 'Compatibilidad: encolar la única acta OCI-21-37 de la toma',
     description:
-      'Solo tomas RECONCILED con acta NOT_ENQUEUED. Firman el jefe del centro de la toma indicado al cerrar (RESPONSABLE, ' +
-      'ENCARGADO: signerHead) y quien aprobó la conciliación (AUDITA). Sin jefe indicado: 406 INVALID_STATE con reason ' +
-      'NO_COST_CENTER_HEAD (indíquelo con PUT /inventories/{id}/signer-head). Si el formato sigue sin código SGC o firmantes: ' +
-      '409 DOCUMENT_FORMAT_NOT_READY; otro error al armar el acta: 406 INVALID_STATE. En todos, error.details[0] = { field: reason, message: <reason> }. ' +
-      'Si el jefe que firma como ENCARGADO es quien aprobó la conciliación, la separación de funciones exige un sustituto para ' +
-      'AUDITA (signerSubstitutions); sin él responde 409 DOCUMENT_SIGNER_DUPLICATED (details signers.<ROL> y ' +
-      'signerSubstitutions.<ROL>), y con un sustituto inválido 400 DOCUMENT_SIGNER_SUBSTITUTE_INVALID, igual que entregas, ' +
-      'préstamos y traslados; la toma no cambia. AUDITA es un turno de Control Interno: si quien aprobó la conciliación no ' +
-      'tiene usuario activo con el permiso vigente act:sign_control:global, 400 DOCUMENT_SIGNER_NOT_ELIGIBLE (details ' +
-      'signers.AUDITA) hasta que lo tenga o venga signerSubstitutions.AUDITA con alguien que sí lo tenga. Al aprobar la ' +
-      'conciliación el acta queda NOT_ENQUEUED/ENQUEUE_FAILED con ese motivo (la conciliación no se rompe).',
+      'Use POST /inventories/{id}/acts/{costCenterId}/enqueue. Solo si la toma tiene una sola acta; con varias, 406 ' +
+      'INVALID_STATE. Mismas reglas y respuestas que la ruta por centro.',
   })
-  @ApiOkResponse({ schema: envelopedSchema(InventoryActStateDto) })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryActDto) })
   enqueueAct(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: EnqueueInventoryActDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.act.retryEnqueue(id, actor, dto.signerSubstitutions);
+    return this.act.retryEnqueue(id, null, actor, dto.signerSubstitutions);
   }
 }

@@ -122,7 +122,18 @@ describe('InventoriesService', () => {
         .mockResolvedValue({ categories: [], causeLabels: new Map(), valuations: new Map(), assets: new Map(), userNames: new Map() }),
       basis: vi.fn().mockResolvedValue({ kind: 'SYSTEM_SNAPSHOT' }),
     };
-    act = { state: vi.fn().mockResolvedValue({ generation: 'NONE' }), enqueueOnApproval: vi.fn() };
+    act = {
+      detail: vi.fn().mockResolvedValue({
+        acts: [],
+        act: { generation: 'NONE' },
+        signerHead: null,
+        attendedBy: null,
+        actIssuable: true,
+        warnings: [],
+        unassignedItems: 0,
+      }),
+      enqueueOnApproval: vi.fn(),
+    };
     service = new InventoriesService(
       inventories as never,
       items as never,
@@ -141,8 +152,7 @@ describe('InventoriesService', () => {
       valuation as never,
       act as never,
       {
-        applyOnClose: vi.fn().mockResolvedValue(undefined),
-        view: vi.fn().mockResolvedValue({ signerHead: null, attendedBy: null, actIssuable: false, warnings: [] }),
+        applyOnClose: vi.fn().mockResolvedValue([]),
       } as never,
     );
   });
