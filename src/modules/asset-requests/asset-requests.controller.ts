@@ -20,6 +20,7 @@ import {
 } from './dto/asset-request.dto.js';
 import {
   ASSET_REQUEST_RESPONSE_MODELS,
+  AssetRequestCentersDto,
   AssetRequestDetailDto,
   AssetRequestListResponseDto,
   EligibleAssetDto,
@@ -43,6 +44,18 @@ const OWNER_ONLY =
 @Controller('asset-requests')
 export class AssetRequestsController {
   constructor(private readonly requests: AssetRequestsService) {}
+
+  @Get('centers')
+  @ApiOperation({
+    summary: 'Centros para crear o corregir una solicitud',
+    description:
+      'Cualquier usuario autenticado, sin cost_center:read:global. headed: centros activos que el usuario dirige hoy (desde ellos solicita); ' +
+      'owners: centros activos que aceptan activos (a ellos pide). Solo id, código y nombre: ni jefes, ni conteos, ni activos.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(AssetRequestCentersDto) })
+  centers(@CurrentUser() actor: AuthenticatedUser) {
+    return this.requests.centers(actor);
+  }
 
   @Get('owner-availability')
   @ApiOperation({

@@ -250,6 +250,40 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     await app.close();
   });
 
+  it('centros para solicitar: un jefe sin cost_center:read:global ve los suyos y los dueños posibles, sin datos de activos ni personas', async () => {
+    expect((await http().get('/api/v1/cost-centers').set(auth(requester))).status).toBe(403);
+    await asset(owner);
+    const inactive = await center('Centro inactivo Solicitudes');
+    const grouping = await center('Centro de agrupación Solicitudes');
+    await dataSource.query('UPDATE cost_center SET is_active = FALSE WHERE id = $1', [inactive]);
+    await dataSource.query('UPDATE cost_center SET accepts_assets = FALSE WHERE id = $1', [grouping]);
+    const expired = await actor('Exjefa', ['DEPARTMENT_HEAD']);
+    await dataSource.query(
+      `INSERT INTO cost_center_head (person_id, cost_center_id, reason, valid_from, valid_until)
+       VALUES ($1, $2, 'Prueba', NOW() - interval '2 days', NOW() - interval '1 day')`,
+      [expired.personId, owner],
+    );
+    await dataSource.query(`INSERT INTO cost_center_head (person_id, cost_center_id, reason) VALUES ($1, $2, 'Prueba')`, [requester.personId, inactive]);
+
+    const response = await http().get('/api/v1/asset-requests/centers').set(auth(requester)).expect(200);
+    expectConforms('get', '/api/v1/asset-requests/centers', 200, response.body);
+    const { headed, owners } = response.body.data as { headed: Array<Record<string, unknown>>; owners: Array<Record<string, unknown>> };
+    expect(headed.map((row) => row.id)).toEqual([requesting]);
+    const ownerIds = owners.map((row) => row.id);
+    expect(ownerIds).toEqual(expect.arrayContaining([owner, requesting, headless]));
+    expect(ownerIds).not.toContain(inactive);
+    expect(ownerIds).not.toContain(grouping);
+    for (const row of [...headed, ...owners]) {
+      expect(Object.keys(row).sort()).toEqual(['code', 'id', 'name']);
+    }
+    // Una jefatura vencida no cuenta; quien no dirige nada igual ve a quién podría pedir.
+    const other = (await http().get('/api/v1/asset-requests/centers').set(auth(expired)).expect(200)).body.data;
+    expect(other.headed).toEqual([]);
+    expect(other.owners.length).toBe(owners.length);
+    await dataSource.query('DELETE FROM cost_center_head WHERE cost_center_id = $1', [inactive]);
+    await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [expired.userId]);
+  });
+
   it('solicitar: solo jefe vigente del centro que solicita; el dueño debe tener jefe (se ve antes de enviar)', async () => {
     const availability = await http().get(`/api/v1/asset-requests/owner-availability?costCenterId=${headless}`).set(auth(requester)).expect(200);
     expect(availability.body.data).toMatchObject({ hasHead: false });

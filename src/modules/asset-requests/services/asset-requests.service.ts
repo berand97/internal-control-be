@@ -29,6 +29,7 @@ import type {
   QueryAssetRequestsDto,
 } from '../dto/asset-request.dto.js';
 import type {
+  AssetRequestCentersDto,
   AssetRequestDetailDto,
   AssetRequestListResponseDto,
   AssetRequestViewerRole,
@@ -230,6 +231,27 @@ export class AssetRequestsService {
   }
 
   // ---------- Crear ----------
+
+  /**
+   * Centros para el formulario de la solicitud (crear o corregir), sin cost_center:read:global: headed con el mismo
+   * criterio que assertCenters (centro activo y jefatura vigente del usuario); owners, los centros activos que aceptan
+   * activos. Solo id, código y nombre: nada de jefes, conteos ni activos.
+   */
+  async centers(actor: AuthenticatedUser): Promise<AssetRequestCentersDto> {
+    const headed = (await this.dataSource.query(
+      `SELECT c.id, c.external_code AS code, c.name FROM cost_center c
+       WHERE c.is_active AND EXISTS (
+         SELECT 1 FROM cost_center_head h JOIN app_user u ON u.person_id = h.person_id
+         WHERE u.id = $1 AND h.cost_center_id = c.id AND ${CURRENT_HEAD})
+       ORDER BY c.name, c.external_code`,
+      [actor.id],
+    )) as AssetRequestCentersDto['headed'];
+    const owners = (await this.dataSource.query(
+      `SELECT c.id, c.external_code AS code, c.name FROM cost_center c
+       WHERE c.is_active AND c.accepts_assets ORDER BY c.name, c.external_code`,
+    )) as AssetRequestCentersDto['owners'];
+    return { headed, owners };
+  }
 
   async ownerAvailability(costCenterId: string, actor: AuthenticatedUser): Promise<OwnerAvailabilityDto> {
     const person = await this.personOf(this.dataSource.manager, actor.id);

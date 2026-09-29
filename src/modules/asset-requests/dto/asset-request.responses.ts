@@ -24,6 +24,23 @@ export class AssetRequestCostCenterDto {
   readonly name!: string;
 }
 
+/** Centros para armar o corregir una solicitud: solo id, código y nombre (sin jefes, conteos ni activos). */
+export class AssetRequestCentersDto {
+  @ApiProperty({
+    type: [AssetRequestCostCenterDto],
+    description:
+      'Centros activos de los que el usuario es jefe vigente hoy: desde ellos puede solicitar (requestingCostCenterId). Vacío si no dirige ninguno',
+  })
+  readonly headed!: AssetRequestCostCenterDto[];
+
+  @ApiProperty({
+    type: [AssetRequestCostCenterDto],
+    description:
+      'Centros activos que aceptan activos, a los que se les puede pedir (ownerCostCenterId). Si tiene jefe vigente que decida lo dice GET /asset-requests/owner-availability',
+  })
+  readonly owners!: AssetRequestCostCenterDto[];
+}
+
 export class AssetRequestUserDto {
   @ApiProperty({ format: 'uuid' })
   readonly userId!: string;
@@ -234,6 +251,7 @@ export class ResolvedScanDto extends EligibleAssetDto {
 
 export const ASSET_REQUEST_RESPONSE_MODELS = [
   AssetRequestCostCenterDto,
+  AssetRequestCentersDto,
   AssetRequestUserDto,
   AssetRequestSummaryDto,
   AssetRequestListResponseDto,
