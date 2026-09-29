@@ -28,6 +28,7 @@ import { InventoryActService } from './services/inventory-act.service.js';
 import { InventorySurplusService } from './services/inventory-surplus.service.js';
 import { InventoryValuationService } from './services/inventory-valuation.service.js';
 import { InventoryActorPolicy } from './services/inventory-actor-policy.service.js';
+import { InventoryReadAccess } from './services/inventory-read-access.service.js';
 import { InventoryCatalogsService } from './services/inventory-catalogs.service.js';
 import { InventoryCorrectionsService } from './services/inventory-corrections.service.js';
 import { InventoryConflictsService } from './services/inventory-conflicts.service.js';
@@ -65,6 +66,7 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
   providers: [
     InventoriesService,
     InventoryActorPolicy,
+    InventoryReadAccess,
     InventoryCatalogsService,
     InventoryCorrectionsService,
     InventoryConflictsService,

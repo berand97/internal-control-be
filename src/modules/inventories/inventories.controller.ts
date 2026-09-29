@@ -74,6 +74,11 @@ import { InventoryCorrectionsService } from './services/inventory-corrections.se
 import { InventoryPlanningService } from './services/inventory-planning.service.js';
 import { InventoryResponsibleCandidatesService } from './services/inventory-responsible-candidates.service.js';
 import { InventorySchedulesService } from './services/inventory-schedules.service.js';
+import { InventoryReadAccess } from './services/inventory-read-access.service.js';
+
+const READ_ACCESS_RULE =
+  'Trae activos: además de inventory:read:global exige asset:read:global, ser responsable o quien programó la toma, o asset:read:org_unit ' +
+  'con todos los centros de la toma (de un solo centro de costo) en su alcance. Si no, 404 RESOURCE_NOT_FOUND, igual que una toma inexistente.';
 
 const ACTOR_RULE =
   'Solo el responsable de la toma o quien tenga inventory:create:global (403 INVENTORY_ACTOR_NOT_ALLOWED), y nunca un ' +
@@ -112,6 +117,7 @@ export class InventoriesController {
     private readonly surplus: InventorySurplusService,
     private readonly act: InventoryActService,
     private readonly responsibleCandidates: InventoryResponsibleCandidatesService,
+    private readonly readAccess: InventoryReadAccess,
   ) {}
 
   @Get()
@@ -165,25 +171,28 @@ export class InventoriesController {
 
   @Get(':id/progress')
   @RequirePermission('inventory:read:global')
-  @ApiOperation({ summary: 'Progreso de verificación' })
+  @ApiOperation({ summary: 'Progreso de verificación', description: READ_ACCESS_RULE })
   @ApiOkResponse({ schema: envelopedSchema(InventoryProgressResponseDto) })
-  progress(@Param('id', ParseUUIDPipe) id: string) {
+  async progress(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    await this.readAccess.assertReadable(id, actor.id);
     return this.inventoriesService.progress(id);
   }
 
   @Get(':id/report')
   @RequirePermission('inventory:read:global')
-  @ApiOperation({ summary: 'Reporte de discrepancias' })
+  @ApiOperation({ summary: 'Reporte de discrepancias', description: READ_ACCESS_RULE })
   @ApiOkResponse({ schema: envelopedSchema(InventoryReportResponseDto) })
-  report(@Param('id', ParseUUIDPipe) id: string) {
+  async report(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    await this.readAccess.assertReadable(id, actor.id);
     return this.inventoriesService.report(id);
   }
 
   @Get(':id')
   @RequirePermission('inventory:read:global')
-  @ApiOperation({ summary: 'Detalle de una toma física' })
+  @ApiOperation({ summary: 'Detalle de una toma física', description: READ_ACCESS_RULE })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
-  getById(@Param('id', ParseUUIDPipe) id: string) {
+  async getById(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    await this.readAccess.assertReadable(id, actor.id);
     return this.inventoriesService.getById(id);
   }
 
@@ -361,12 +370,14 @@ export class InventoriesController {
 
   @Get(':id/items/:itemId/corrections')
   @RequirePermission('inventory:read:global')
-  @ApiOperation({ summary: 'Historial de correcciones y anulaciones de un ítem' })
+  @ApiOperation({ summary: 'Historial de correcciones y anulaciones de un ítem', description: READ_ACCESS_RULE })
   @ApiOkResponse({ schema: envelopedArraySchema(InventoryItemCorrectionDto) })
-  listCorrections(
+  async listCorrections(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('itemId', ParseUUIDPipe) itemId: string,
+    @CurrentUser() actor: AuthenticatedUser,
   ) {
+    await this.readAccess.assertReadable(id, actor.id);
     return this.corrections.listCorrections(id, itemId);
   }
 

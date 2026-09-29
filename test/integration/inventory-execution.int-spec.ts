@@ -231,8 +231,11 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect(closeByAuditedHead.status).toBe(403);
     expect(errorCode(closeByAuditedHead)).toBe('INVENTORY_CONFLICT_OF_INTEREST');
 
-    // Leer sigue abierto con inventory:read:global.
-    const read = await http().get(`/api/v1/inventories/${inventoryId}`).set(as(outsiderCustodian));
+    // Leer el detalle (trae activos) exige alcance sobre el centro de la toma: el custodio de otro centro recibe 404
+    // aunque tenga inventory:read:global; quien tiene asset:read:global sí lo lee. La lista no trae activos.
+    const hidden = await http().get(`/api/v1/inventories/${inventoryId}`).set(as(outsiderCustodian));
+    expect([hidden.status, errorCode(hidden)]).toEqual([404, 'RESOURCE_NOT_FOUND']);
+    const read = await http().get(`/api/v1/inventories/${inventoryId}`).set(as(director));
     expect(read.status).toBe(200);
     expectConforms('get', '/api/v1/inventories/{id}', 200, read.body);
     const list = await http().get('/api/v1/inventories').set(as(outsiderHead));
@@ -339,7 +342,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     );
     expect(frozen.notVerified).toBe(2);
     expect(frozen.notVerifiedItems).toHaveLength(2);
-    const report = await http().get(`/api/v1/inventories/${inventoryId}/report`).set(as(outsiderCustodian));
+    const report = await http().get(`/api/v1/inventories/${inventoryId}/report`).set(as(director));
     expectConforms('get', '/api/v1/inventories/{id}/report', 200, report.body);
     expect(report.body.data.notVerified).toBe(2);
 
@@ -526,7 +529,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect(errorCode(surplusCorrection)).toBe('INVALID_STATE');
     const history = await http()
       .get(`/api/v1/inventories/${inventoryId}/items/${cataloguedItemId}/corrections`)
-      .set(as(outsiderCustodian));
+      .set(as(director));
     expectConforms('get', '/api/v1/inventories/{id}/items/{itemId}/corrections', 200, history.body);
     expect(history.body.data).toHaveLength(1);
     expect(history.body.data[0]).toMatchObject({ correctedBy: responsible.userId, correctedByName: 'Responsable Ejecución' });
