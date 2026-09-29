@@ -14,7 +14,9 @@ import { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js
 import { AssetStateService } from '../../assets/services/asset-state.service.js';
 import type { UpdateAssetRecord } from '../../assets/repositories/assets.repository.interface.js';
 import { CostCenter } from '../../cost-centers/entities/cost-center.entity.js';
+import { CONTROL_SIGNER_PERMISSION } from '../../documents/domain/signer-separation.js';
 import { DocumentLifecycleRegistry } from '../../documents/lifecycle/document-lifecycle.registry.js';
+import { ControlSignersService } from '../../documents/services/control-signers.service.js';
 import {
   type DocumentRequestPayload,
   DocumentEngineService,
@@ -54,7 +56,7 @@ import {
   ReturnLoanDto,
   UndoDeliveryDto,
 } from '../dto/loan.dto.js';
-import type { LoanDeliveryActStatus, LoanReturnActStatus } from '../dto/loan.responses.js';
+import type { LoanDeliveryActStatus, LoanDeliveryOptionsDto, LoanReturnActStatus } from '../dto/loan.responses.js';
 import { AssetLoan } from '../entities/asset-loan.entity.js';
 import {
   AssetLoanEvent,
@@ -103,6 +105,12 @@ export interface LoanDeliveredEvent {
 }
 
 export type LoanDeliveredListener = (manager: EntityManager, event: LoanDeliveredEvent) => Promise<void>;
+
+/**
+ * Quién entrega un préstamo: Control Interno (loan:update:global) elige ENTREGA; el jefe vigente del centro dueño de un
+ * préstamo de solicitud entrega él mismo (ENTREGA = su persona, sin elegir).
+ */
+export type DeliveryRole = { readonly kind: 'CONTROL' } | { readonly kind: 'HEAD'; readonly personId: string };
 
 const LOAN_UPDATE_GLOBAL = 'loan:update:global';
 
@@ -163,6 +171,7 @@ export class LoansService {
     private readonly documents: DocumentEngineService,
     private readonly documentLifecycle: DocumentLifecycleRegistry,
     private readonly permissions: PermissionsService,
+    private readonly controlSigners: ControlSignersService,
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
   ) {}
@@ -531,8 +540,14 @@ export class LoansService {
    */
   async deliver(id: string, dto: DeliverLoanDto, actor: AuthenticatedUser) {
     await this.dataSource.transaction(async (manager) => {
-      await this.assertCanDeliver(manager, id, actor.id);
-      await this.deliverWithin(manager, id, dto, actor.id);
+      const role = await this.deliveryRole(manager, id, actor.id);
+      if (!role) {
+        throw new ApiException(
+          ErrorCode.InsufficientPermissions,
+          `Requiere ${LOAN_UPDATE_GLOBAL}, o ser jefe vigente del centro dueño de un préstamo que salió de una solicitud de activos`,
+        );
+      }
+      await this.deliverWithin(manager, id, dto, actor.id, role);
     });
     return this.detailById(id);
   }
@@ -542,36 +557,124 @@ export class LoansService {
    * centro dueño (ORIGEN) si el préstamo salió de una solicitud de activos y no es quien la pidió (separación de
    * funciones, como al aceptar la solicitud). No existe loan:update:org_unit: la jefatura vigente (cost_center_head) es
    * el mismo criterio con el que ese jefe aceptó la solicitud. Los préstamos directos se entregan como antes (solo
-   * loan:update:global). Sin permiso: 403, exista o no el préstamo.
+   * loan:update:global). null: no puede entregarlo (o el préstamo no existe).
    */
-  private async assertCanDeliver(manager: EntityManager, id: string, actorId: string): Promise<void> {
+  private async deliveryRole(manager: EntityManager, id: string, actorId: string): Promise<DeliveryRole | null> {
     if (await this.permissions.userHasPermission(actorId, LOAN_UPDATE_GLOBAL)) {
-      return;
+      return { kind: 'CONTROL' };
     }
-    const denied = new ApiException(
-      ErrorCode.InsufficientPermissions,
-      `Requiere ${LOAN_UPDATE_GLOBAL}, o ser jefe vigente del centro dueño de un préstamo que salió de una solicitud de activos`,
-    );
     const [loan] = UUID.test(id)
       ? ((await manager.query('SELECT source_cost_center_id, asset_request_id, requested_by FROM asset_loan WHERE id = $1', [
           id,
         ])) as Array<{ source_cost_center_id: string; asset_request_id: string | null; requested_by: string }>)
       : [];
     if (!loan || !loan.asset_request_id || loan.requested_by === actorId) {
-      throw denied;
+      return null;
     }
     const [head] = (await manager.query(
-      `SELECT 1 FROM cost_center_head h JOIN app_user u ON u.person_id = h.person_id
-       WHERE u.id = $1 AND h.cost_center_id = $2 AND ${CURRENT_HEAD}`,
+      `SELECT h.person_id FROM cost_center_head h JOIN app_user u ON u.person_id = h.person_id
+       WHERE u.id = $1 AND h.cost_center_id = $2 AND ${CURRENT_HEAD} LIMIT 1`,
       [actorId, loan.source_cost_center_id],
-    )) as unknown[];
-    if (!head) {
-      throw denied;
-    }
+    )) as Array<{ person_id: string }>;
+    return head ? { kind: 'HEAD', personId: head.person_id } : null;
   }
 
-  /** Entrega dentro de la transacción del llamador (deliver o la generación de una solicitud de activos). */
-  async deliverWithin(manager: EntityManager, id: string, dto: DeliverLoanDto, actorId: string): Promise<void> {
+  /**
+   * Lo que necesita el formulario de entrega, acotado a ESTE préstamo y a quien puede entregarlo (misma regla que
+   * deliver): quién firma ENTREGA (el propio jefe; null si entrega Control Interno, que la elige), quiénes pueden firmar
+   * AUDITA (misma lista que GET /documents/control-signers), quién firma RECIBE y los activos para anotar
+   * observaciones. Así el jefe dueño entrega sin GET /persons, sin GET /loans/:id y sin la lista general de firmantes.
+   * Cualquier otro usuario: 404, igual que un préstamo inexistente.
+   */
+  async deliveryOptions(id: string, actor: AuthenticatedUser): Promise<LoanDeliveryOptionsDto> {
+    const manager = this.dataSource.manager;
+    const role = await this.deliveryRole(manager, id, actor.id);
+    const loan = role ? await this.loans.findOne({ where: { id } }) : null;
+    if (!role || !loan) {
+      throw new ApiException(ErrorCode.ResourceNotFound);
+    }
+    const person = async (personId: string | null) => {
+      if (!personId) {
+        return null;
+      }
+      const [row] = (await manager.query(
+        `SELECT id AS "personId", trim(first_name || ' ' || last_name) AS name FROM person WHERE id = $1`,
+        [personId],
+      )) as Array<{ personId: string; name: string }>;
+      return row ?? null;
+    };
+    const items = (await manager.query(
+      `SELECT a.id AS "assetId", a.internal_code AS code, a.description FROM asset_loan_item i JOIN asset a ON a.id = i.asset_id
+       WHERE i.loan_id = $1 ORDER BY a.internal_code, a.id`,
+      [loan.id],
+    )) as LoanDeliveryOptionsDto['items'];
+    const today = bogotaDate(new Date());
+    return {
+      loanId: loan.id,
+      status: loan.status,
+      startDate: loan.startDate,
+      canDeliverNow: loan.status === 'APPROVED' && (!loan.startDate || loan.startDate <= today),
+      deliverer: role.kind === 'HEAD' ? await person(role.personId) : null,
+      controlSigners: await this.controlSigners.holders(CONTROL_SIGNER_PERMISSION, manager),
+      receiver: await person(loan.contactPersonId),
+      items,
+    };
+  }
+
+  /**
+   * Firmantes ENTREGA y AUDITA de la entrega. ENTREGA: el jefe dueño es él mismo (otra persona: 400); Control Interno
+   * la indica. AUDITA: si viene, la valida el motor (assertSigners, con sus sustituciones); si no, la única persona con
+   * act:sign_control:global, o 400 TRANSFER_SIGNER_REQUIRED si hay varias (409 TRANSFER_NO_CONTROL_SIGNER si ninguna).
+   */
+  private async deliverySigners(
+    manager: EntityManager,
+    dto: DeliverLoanDto,
+    role: DeliveryRole,
+  ): Promise<{ readonly deliveredBy: string; readonly control: string }> {
+    let deliveredBy: string;
+    if (role.kind === 'HEAD') {
+      if (dto.deliveredByPersonId && dto.deliveredByPersonId !== role.personId) {
+        throw new ApiException(
+          ErrorCode.ValidationFailed,
+          'Cuando entrega el jefe del centro dueño, firma ENTREGA él mismo: no puede indicar a otra persona',
+          [{ field: 'deliveredByPersonId', message: 'Debe ser el jefe que entrega (o omitirse)' }],
+        );
+      }
+      deliveredBy = role.personId;
+    } else {
+      if (!dto.deliveredByPersonId) {
+        throw new ApiException(ErrorCode.ValidationFailed, 'Indique quién entrega los activos (firma ENTREGA)', [
+          { field: 'deliveredByPersonId', message: 'Obligatorio cuando entrega Control Interno' },
+        ]);
+      }
+      deliveredBy = dto.deliveredByPersonId;
+    }
+    if (dto.controlInternoPersonId) {
+      return { deliveredBy, control: dto.controlInternoPersonId };
+    }
+    const candidates = await this.controlSigners.holders(CONTROL_SIGNER_PERMISSION, manager);
+    const [only, ...others] = candidates;
+    if (!only) {
+      throw new ApiException(ErrorCode.TransferNoControlSigner);
+    }
+    if (others.length > 0) {
+      throw new ApiException(
+        ErrorCode.TransferSignerRequired,
+        `Hay ${candidates.length} personas que pueden firmar por Control Interno: indique controlInternoPersonId`,
+        [{ field: 'controlInternoPersonId', message: `Elija entre ${candidates.length} personas` }],
+      );
+    }
+    return { deliveredBy, control: only.personId };
+  }
+
+  /** Entrega dentro de la transacción del llamador (deliver), con quién entrega ya resuelto (deliveryRole). */
+  async deliverWithin(
+    manager: EntityManager,
+    id: string,
+    dto: DeliverLoanDto,
+    actorId: string,
+    role: DeliveryRole,
+  ): Promise<void> {
     const actor = { id: actorId };
     {
       const loan = await this.lockLoan(manager, id);
@@ -592,14 +695,15 @@ export class LoansService {
           'El préstamo no tiene persona de contacto: el acta OCI-01-65 necesita quién recibe',
         );
       }
-      await this.requirePersons(manager, [dto.deliveredByPersonId, dto.controlInternoPersonId]);
+      const { deliveredBy, control } = await this.deliverySigners(manager, dto, role);
+      await this.requirePersons(manager, [deliveredBy, control]);
       // Antes de mover activos: AUDITA exige act:sign_control:global y nadie firma dos veces (misma regla que enqueue).
       await this.documents.assertSigners(
         manager,
         {
           formatKey: LOAN_DELIVERY_FORMAT,
           responsiblePersonId: contactPersonId,
-          signers: { ENTREGA: dto.deliveredByPersonId, AUDITA: dto.controlInternoPersonId },
+          signers: { ENTREGA: deliveredBy, AUDITA: control },
           ...(dto.signerSubstitutions ? { signerSubstitutions: dto.signerSubstitutions } : {}),
         },
         actorId,
@@ -689,7 +793,7 @@ export class LoansService {
         updatedAt: deliveredAt,
       });
 
-      const signers = { ENTREGA: dto.deliveredByPersonId, AUDITA: dto.controlInternoPersonId };
+      const signers = { ENTREGA: deliveredBy, AUDITA: control };
       const fields = {
         fechaEntrega: longSpanishDate(deliveryDay),
         fechaEstimadaDevolucion: longSpanishDate(loan.expectedReturnDate),

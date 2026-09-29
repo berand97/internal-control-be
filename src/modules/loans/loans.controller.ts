@@ -40,6 +40,7 @@ import {
 } from './dto/loan.dto.js';
 import {
   LOAN_RESPONSE_MODELS,
+  LoanDeliveryOptionsDto,
   LoanDetailDto,
   LoanListResponseDto,
   LoanSummaryDto,
@@ -95,6 +96,21 @@ export class LoansController {
     return this.loansService.getById(id, actor);
   }
 
+  // Sin @RequirePermission: la misma regla que la entrega (jefe dueño del préstamo de solicitud o loan:update:global).
+  @Get(':id/delivery-options')
+  @ApiOperation({
+    summary: 'Datos del formulario de entrega de ESTE préstamo',
+    description:
+      'Solo para quien puede entregarlo (misma regla que POST /loans/:id/deliver): loan:update:global, o un jefe vigente del centro de ORIGEN si el préstamo salió de una solicitud de activos y no es quien la pidió. ' +
+      'Cualquier otro usuario: 404 RESOURCE_NOT_FOUND, igual que un préstamo inexistente. No exige loan:read, /persons ni la lista general de firmantes: ' +
+      'trae quién firma ENTREGA (deliverer: el propio jefe, o null si entrega Control Interno), quiénes pueden firmar AUDITA (controlSigners), quién firma RECIBE (receiver), ' +
+      'la fecha de inicio, si se puede entregar hoy y los activos (para assetNotes).',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(LoanDeliveryOptionsDto) })
+  deliveryOptions(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.loansService.deliveryOptions(id, actor);
+  }
+
   @Post()
   @RequirePermission('loan:request:own')
   @ApiOperation({
@@ -144,7 +160,9 @@ export class LoansController {
       'Quién: loan:update:global (Control Interno), o un jefe vigente del centro de ORIGEN si el préstamo salió de una solicitud de activos (assetRequest) y no es quien la pidió; si no, 403 INSUFFICIENT_PERMISSIONS (también si el préstamo no existe). ' +
       'Cuándo: un préstamo con startDate se entrega desde esa fecha (America/Bogota); antes, 409 LOAN_NOT_STARTED con la fecha. Sin startDate (préstamo directo), en cualquier momento. ' +
       'En una transacción: activos ON_LOAN con movimiento LOAN fechado en la entrega real (la salida física queda registrada al entregar), préstamo PENDING_SIGNATURES, evento DELIVERED y el acta en el outbox; la solicitud de activos que lo originó pasa de LOAN_SCHEDULED a DOCUMENT_GENERATED. ' +
-      'El préstamo pasa a ACTIVE cuando el acta queda firmada. Firmantes: ENTREGA (deliveredByPersonId) → RECIBE (persona de contacto) → Control Interno (controlInternoPersonId). ' +
+      'El préstamo pasa a ACTIVE cuando el acta queda firmada. Firmantes: ENTREGA → RECIBE (persona de contacto) → AUDITA (controlInternoPersonId). ' +
+      'ENTREGA: si entrega el jefe dueño es él mismo (deliveredByPersonId se omite; otra persona: 400 VALIDATION_FAILED); si entrega Control Interno, deliveredByPersonId es obligatorio. ' +
+      'AUDITA: de controlSigners (GET /loans/:id/delivery-options); omitido con una sola persona elegible se toma esa, con varias 400 TRANSFER_SIGNER_REQUIRED; fuera de la lista 400 DOCUMENT_SIGNER_NOT_ELIGIBLE. ' +
       'El responsable y el centro de costo de los activos no cambian. deliveryAct dice si el acta está pendiente, fallida, generada, firmada o rechazada.',
   })
   @ApiOkResponse({ schema: envelopedSchema(LoanDetailDto) })

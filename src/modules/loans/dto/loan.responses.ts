@@ -424,6 +424,72 @@ export class LoanDetailDto extends LoanSummaryDto {
   readonly returnActs!: LoanReturnActDto[];
 }
 
+// ---------- GET /loans/:id/delivery-options ----------
+
+export class LoanDeliveryPersonDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly personId!: string;
+
+  @ApiProperty({ description: 'Nombre para mostrar' })
+  readonly name!: string;
+}
+
+export class LoanDeliveryItemDto {
+  @ApiProperty({ format: 'uuid', description: 'Llave de assetNotes en POST /loans/:id/deliver' })
+  readonly assetId!: string;
+
+  @ApiProperty({ description: 'Código interno del activo' })
+  readonly code!: string;
+
+  @ApiProperty()
+  readonly description!: string;
+}
+
+export class LoanDeliveryOptionsDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly loanId!: string;
+
+  @ApiProperty({ enum: LOAN_STATUSES, enumName: 'LoanStatus' })
+  readonly status!: (typeof LOAN_STATUSES)[number];
+
+  @ApiProperty({
+    type: 'string',
+    format: 'date',
+    nullable: true,
+    description: 'Desde cuándo se entrega (America/Bogota); null: en cualquier momento',
+  })
+  readonly startDate!: string | null;
+
+  @ApiProperty({ description: 'APPROVED y con la fecha de inicio cumplida: POST /loans/:id/deliver se puede intentar hoy' })
+  readonly canDeliverNow!: boolean;
+
+  @ApiProperty({
+    type: () => LoanDeliveryPersonDto,
+    nullable: true,
+    description:
+      'Quién firma ENTREGA. Si entrega el jefe del centro dueño, es él mismo y no se elige (deliveredByPersonId se omite). null: entrega Control Interno, que indica deliveredByPersonId',
+  })
+  readonly deliverer!: LoanDeliveryPersonDto | null;
+
+  @ApiProperty({
+    type: [LoanDeliveryPersonDto],
+    description:
+      'Quiénes pueden firmar AUDITA por Control Interno (usuario activo con act:sign_control:global vigente; misma lista que GET /documents/control-signers). ' +
+      'Con una sola persona, deliver la toma si se omite controlInternoPersonId; con varias, es obligatorio elegir una',
+  })
+  readonly controlSigners!: LoanDeliveryPersonDto[];
+
+  @ApiProperty({
+    type: () => LoanDeliveryPersonDto,
+    nullable: true,
+    description: 'Quién firma RECIBE: la persona de contacto del destino (en una solicitud de activos, quien la pidió)',
+  })
+  readonly receiver!: LoanDeliveryPersonDto | null;
+
+  @ApiProperty({ type: [LoanDeliveryItemDto], description: 'Activos del préstamo, para las observaciones por activo (assetNotes)' })
+  readonly items!: LoanDeliveryItemDto[];
+}
+
 export const LOAN_RESPONSE_MODELS = [
   ApiSuccessEnvelope,
   LoanUsageDto,
@@ -437,4 +503,7 @@ export const LOAN_RESPONSE_MODELS = [
   LoanReturnActFormatDto,
   LoanReturnActDto,
   LoanDetailDto,
+  LoanDeliveryPersonDto,
+  LoanDeliveryItemDto,
+  LoanDeliveryOptionsDto,
 ] as const;

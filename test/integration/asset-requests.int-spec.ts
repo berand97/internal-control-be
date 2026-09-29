@@ -524,6 +524,78 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     ]);
   });
 
+  it('entrega por el jefe dueño sin permisos generales: opciones acotadas al préstamo, ENTREGA = él mismo, AUDITA de la lista', async () => {
+    // Jefe vigente del centro dueño y nada más: ni loan:update, ni asset:update, ni /persons, ni la lista general de firmantes.
+    const plainHead = await actor('Jefa sin permisos', [], [owner]);
+    const assetId = await asset(owner);
+    const id = (await create(temporary()).expect(201)).body.data.id as string;
+    await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(plainHead)).send({ assetIds: [assetId] }).expect(200);
+    const loanId = (await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(director)).send({}).expect(200)).body.data.document
+      .id as string;
+    expect((await http().get('/api/v1/persons').set(auth(plainHead))).status).toBe(403);
+    expect((await http().get('/api/v1/documents/control-signers').set(auth(plainHead))).status).toBe(403);
+    expect((await http().get(`/api/v1/loans/${loanId}`).set(auth(plainHead))).status).toBe(403);
+
+    const options = await http().get(`/api/v1/loans/${loanId}/delivery-options`).set(auth(plainHead)).expect(200);
+    expectConforms('get', '/api/v1/loans/{id}/delivery-options', 200, options.body);
+    const data = options.body.data as {
+      deliverer: { personId: string; name: string } | null;
+      controlSigners: Array<{ personId: string; name: string }>;
+      receiver: { personId: string; name: string } | null;
+      items: Array<Record<string, unknown>>;
+    };
+    expect(options.body.data).toMatchObject({ loanId, status: 'APPROVED', startDate: bogotaToday(), canDeliverNow: true });
+    expect(data.deliverer).toEqual({ personId: plainHead.personId, name: 'Jefa sin permisos Solicitud' });
+    expect(data.receiver).toEqual({ personId: requester.personId, name: 'Solicitante Solicitud' });
+    expect(data.items).toEqual([{ assetId, code: expect.stringMatching(/^SOL-/), description: expect.stringContaining('PORTATIL') }]);
+    const listed = (await http().get('/api/v1/documents/control-signers').set(auth(director)).expect(200)).body.data;
+    expect(data.controlSigners).toEqual(listed);
+    expect(data.controlSigners.length).toBeGreaterThan(1);
+
+    // Nadie más ve las opciones: otro jefe, el solicitante, un préstamo inexistente → 404 idéntico.
+    const missing = await http().get(`/api/v1/loans/${randomUUID()}/delivery-options`).set(auth(plainHead));
+    for (const who of [outsider, requester]) {
+      const denied = await http().get(`/api/v1/loans/${loanId}/delivery-options`).set(auth(who));
+      expect([denied.status, denied.body.error.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
+    }
+    expect([missing.status, missing.body.error.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
+    // Control Interno: ENTREGA la elige él (deliverer null).
+    expect((await http().get(`/api/v1/loans/${loanId}/delivery-options`).set(auth(director)).expect(200)).body.data.deliverer).toBeNull();
+
+    // ENTREGA no se delega; AUDITA es obligatorio con varias personas en la lista. Nada se mueve.
+    const other = await http()
+      .post(`/api/v1/loans/${loanId}/deliver`)
+      .set(auth(plainHead))
+      .send({ deliveredByPersonId: ownerHead.personId, controlInternoPersonId: auditor.personId });
+    expect([other.status, other.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect(other.body.error.details).toEqual([expect.objectContaining({ field: 'deliveredByPersonId' })]);
+    const noAudit = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(plainHead)).send({});
+    expect([noAudit.status, noAudit.body.error.code]).toEqual([400, 'TRANSFER_SIGNER_REQUIRED']);
+    expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [assetId])).toBe('IN_USE');
+
+    const chosen = data.controlSigners.find((row) => row.personId === auditor.personId)?.personId ?? '';
+    const delivered = await http()
+      .post(`/api/v1/loans/${loanId}/deliver`)
+      .set(auth(plainHead))
+      .send({ controlInternoPersonId: chosen, assetNotes: { [assetId]: 'Con cargador' } })
+      .expect(200);
+    expect(delivered.body.data.status).toBe('PENDING_SIGNATURES');
+    expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [id])).toBe('DOCUMENT_GENERATED');
+    await engine.processPending(1000);
+    const documentId = (await detail(id)).document.documentId as string;
+    const signers = (await dataSource.query('SELECT role, signer_person_id FROM document_signature WHERE document_id = $1 ORDER BY sign_order', [
+      documentId,
+    ])) as Array<{ role: string; signer_person_id: string }>;
+    expect(signers.map((row) => [row.role, row.signer_person_id])).toEqual([
+      ['ENTREGA', plainHead.personId],
+      ['RECIBE', requester.personId],
+      ['AUDITA', auditor.personId],
+    ]);
+    // Ya entregado: las opciones dicen que no se puede entregar hoy.
+    expect((await http().get(`/api/v1/loans/${loanId}/delivery-options`).set(auth(plainHead)).expect(200)).body.data.canDeliverNow).toBe(false);
+    await dataSource.query('UPDATE cost_center_head SET valid_until = NOW() WHERE person_id = $1', [plainHead.personId]);
+  });
+
   it('traslado: aceptar → generar con los datos por activo → cuatro firmas → COMPLETED y aviso a ambos', async () => {
     const assetId = await asset(owner);
     const id = (await create(temporary({ kind: 'PERMANENT', startDate: undefined, expectedReturnDate: undefined })).expect(201)).body.data.id as string;

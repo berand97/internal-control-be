@@ -63,20 +63,26 @@ export class RejectLoanDto {
 }
 
 export class DeliverLoanDto {
-  @ApiProperty({
-    format: 'uuid',
-    description: 'Persona que entrega los activos: firma ENTREGA (turno 1) del acta OCI-01-65',
-  })
-  @IsUUID('4')
-  readonly deliveredByPersonId!: string;
-
-  @ApiProperty({
+  @ApiPropertyOptional({
     format: 'uuid',
     description:
-      'Persona de Control Interno que da el visto bueno: firma AUDITA (turno 3) del acta OCI-01-65. Debe tener usuario activo con el permiso vigente act:sign_control:global (GET /documents/control-signers); si no, 400 DOCUMENT_SIGNER_NOT_ELIGIBLE antes de mover los activos',
+      'Persona que entrega los activos: firma ENTREGA (turno 1) del acta OCI-01-65. Obligatoria cuando entrega Control Interno (loan:update:global). ' +
+      'Cuando entrega el jefe del centro dueño, ENTREGA es siempre él mismo: se omite (o se envía su propia persona); otra persona responde 400 VALIDATION_FAILED',
   })
+  @IsOptional()
   @IsUUID('4')
-  readonly controlInternoPersonId!: string;
+  readonly deliveredByPersonId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Persona de Control Interno que da el visto bueno: firma AUDITA (turno 3) del acta OCI-01-65, elegida de controlSigners (GET /loans/:id/delivery-options). ' +
+      'Debe tener usuario activo con el permiso vigente act:sign_control:global; si no, 400 DOCUMENT_SIGNER_NOT_ELIGIBLE antes de mover los activos. ' +
+      'Si se omite: con una sola persona elegible se toma esa; con varias, 400 TRANSFER_SIGNER_REQUIRED; con ninguna, 409 TRANSFER_NO_CONTROL_SIGNER',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  readonly controlInternoPersonId?: string;
 
   @ApiPropertyOptional({
     type: 'object',
