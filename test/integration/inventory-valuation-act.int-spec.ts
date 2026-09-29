@@ -17,7 +17,7 @@ import { formatMoney } from '../../src/modules/inventories/domain/inventory-act.
 import { addDays, bogotaDate } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import type { StorageDriver } from '../../src/config/configuration.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
-import { openTestSession, scalar, useSharedStorage } from './helpers.js';
+import { createPermissionRole, openTestSession, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 import { conform, type Schema } from './openapi-conform.js';
 
@@ -718,5 +718,34 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     );
     expect(firmante['audita']?.sustitucion).toMatchObject({ motivo: 'El responsable aprobó la conciliación', rol: 'Control Interno' });
     expect(firmante['responsable']?.nombre).toBe(firmante['audita']?.sustitucion?.['nombre']);
+  });
+
+  it('regla del firmante de Control Interno: si quien aprueba no tiene act:sign_control:global, la conciliación sigue y el acta queda sin encolar hasta un sustituto', async () => {
+    // Aprueba conciliaciones (inventory:reconcile:global) pero no firma por Control Interno.
+    const reconciler = await person(
+      'Conciliadora',
+      await createPermissionRole(dataSource, ['inventory:reconcile:global', 'inventory:read:global'], 'IT_CONCILIA'),
+    );
+    const centerId = await center('Centro con aprobador sin permiso de firma');
+    await newAsset(centerId, 10);
+    const id = await started(centerId);
+    expect((await post(director, `/${id}/close`, { allowUnverified: true })).status).toBe(200);
+    expect((await post(director, `/${id}/reconcile`)).status).toBe(200);
+    const approved = await post(reconciler, `/${id}/reconcile/approve`);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+    expect(approved.body.data.status).toBe('RECONCILED');
+    expect(approved.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
+    expect(String(approved.body.data.act.message)).toContain('Firmar actas por Control Interno');
+
+    // Reencolar sin sustituto: el error sale tal cual, con el rol del turno en details.
+    const notEligible = await post(director, `/${id}/act/enqueue`);
+    expect([notEligible.status, notEligible.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
+    expect(notEligible.body.error.details).toEqual([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]);
+    // Con un sustituto que sí tiene el permiso: se encola.
+    const enqueued = await post(director, `/${id}/act/enqueue`, {
+      signerSubstitutions: { AUDITA: { personId: approver.personId, reason: 'Quien aprobó no firma por Control Interno' } },
+    });
+    expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
+    expect(enqueued.body.data).toMatchObject({ generation: 'PENDING' });
   });
 });
