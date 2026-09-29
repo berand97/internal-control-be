@@ -94,6 +94,9 @@ cada una; es preferible que el despliegue falle de inmediato y se vea en Dokploy
 | `REFRESH_COOKIE_SECURE` | No | `true` | `true` | Déjela en `true` en producción (cookie solo por https). |
 | `TRUST_PROXY` | No | `loopback, linklocal, uniquelocal` | `2` | Proxies de confianza para `X-Forwarded-For` (IP real en firmas, auditoría y throttler). Número de saltos o lista de redes; nunca `true`. |
 | `THROTTLE_USER_LIMIT` | No | `300` | `300` | Peticiones por usuario autenticado, por ruta, en 60 s (ver nota de límite de peticiones). Entero ≥ 1; otro valor impide arrancar. |
+| `EVENTS_MAX_STREAMS` | No | `500` | `500` | Streams SSE (`GET /api/v1/events`) abiertos a la vez en la instancia; el siguiente recibe `503 EVENTS_CAPACITY_REACHED`. Entero 1–100000; otro valor impide arrancar. Ver §11. |
+| `EVENTS_HEARTBEAT_MS` | No | `25000` | `25000` | Latido `: ping` del stream y revalidación de la sesión. Entero 100–55000; debe quedar por debajo de cualquier timeout de inactividad del proxy. Ver §11. |
+| `EVENTS_TICKET_TTL_SECONDS` | No | `30` | `30` | Vida del ticket de un solo uso de `POST /api/v1/events/ticket`. Entero 1–30. |
 | `API_DOCS_ENABLED` | No | `false` en producción | `false` | `true` publica `/api/openapi.json` y `/api/reference`. |
 | `DATABASE_LOGGING` | No | `false` | `false` | `true` registra el SQL (ruidoso; puede incluir datos personales). |
 | `DOCUMENT_NUMBERING_POLICY` | No | `continue` | `continue` | `continue` \| `restart`; otro valor impide arrancar. |
@@ -630,3 +633,70 @@ Comprobación (en una ventana privada o con `curl`, sin credenciales):
    (nadie puede listar el bucket).
 3. Con el mismo bucket de documentos: la URL de cualquier objeto fuera de `images/email/` (por ejemplo
    `<URL pública base>/documents/<año>/<formato>/<número>.pdf` o `…/health/x`) debe responder **403**.
+
+## 11. Eventos en tiempo real (SSE): `/api/v1/events`
+
+El backend empuja las notificaciones al navegador con Server-Sent Events: **una conexión HTTP larga
+por navegador** (`GET /api/v1/events?ticket=…`, `text/event-stream`). El frontend pide antes un
+ticket de un solo uso (`POST /api/v1/events/ticket`, con la sesión normal). Si el stream no se puede
+abrir, la aplicación sigue funcionando con el sondeo lento de siempre.
+
+**Qué manda el backend** (no hay que configurarlo): `Cache-Control: no-cache, no-transform`,
+`X-Accel-Buffering: no`, `Connection: keep-alive` y un latido `: ping` cada `EVENTS_HEARTBEAT_MS`
+(25 s). En cada latido revalida la sesión: una sesión cerrada termina el stream con `session.ended`.
+
+**Reparto entre instancias.** Los eventos viajan por PostgreSQL `LISTEN/NOTIFY` (canal `app_events`,
+solo ids). Cada instancia abre **una conexión adicional** a la base (`application_name =
+control-interno-events`) cuando se abre el primer stream; cuéntela al dimensionar `max_connections`.
+Con una sola instancia no hace falta nada más; con varias no se requiere afinidad de sesión (sticky):
+el ticket vive en la base y el `NOTIFY` llega a todas.
+
+**Proxy (Traefik de Dokploy).** Verifique en la instalación real (no está probado contra el Traefik de
+producción):
+
+1. **Sin compresión en `/api/v1/events`.** Si el router del backend usa el middleware `compress`,
+   `text/event-stream` debe quedar excluido. En Traefik v3 ya lo está por defecto
+   (`excludedContentTypes` incluye `text/event-stream`); si se configuró `excludedContentTypes` o
+   `includedContentTypes` a mano, compruebe que el stream no se comprime. La cabecera `no-transform`
+   pide lo mismo a cualquier proxy intermedio.
+2. **Sin buffering.** No aplique el middleware `buffering` al router del API (o excluya la ruta con un
+   router aparte). Traefik reenvía `text/event-stream` sin acumular.
+3. **Timeouts.** Los timeouts de Traefik son por *entrypoint* (`websecure`), no por ruta; para
+   aislar la ruta se puede crear un router propio (`PathPrefix(\`/api/v1/events\`)`) con su servicio y
+   `serversTransport`. Lo que importa:
+   - `entryPoints.websecure.transport.respondingTimeouts.writeTimeout` debe ser `0` (el valor por
+     defecto): un valor distinto corta toda respuesta larga, incluido el stream.
+   - `readTimeout` (60 s por defecto en v3) solo cubre leer la petición; no corta el stream.
+   - `idleTimeout` y los timeouts de inactividad de cualquier CDN o balanceador delante (p. ej.
+     Cloudflare: 100 s) deben ser mayores que `EVENTS_HEARTBEAT_MS`; el latido mantiene viva la conexión.
+   - En `serversTransport`, `forwardingTimeouts.responseHeaderTimeout` debe ser `0` o mayor que unos
+     segundos: el backend envía las cabeceras al abrir, no al final.
+4. **HTTP/2 hacia el navegador** (Traefik lo negocia con TLS): recomendable; con HTTP/1.1 cada stream
+   ocupa una de las 6 conexiones por dominio del navegador (el frontend abre uno por navegador).
+
+**Comprobación** (con una sesión válida):
+
+```bash
+TOKEN='<access token>'
+TICKET=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" https://<api>/api/v1/events/ticket | jq -r .data.ticket)
+curl -N -i "https://<api>/api/v1/events?ticket=$TICKET"
+```
+
+Debe mostrar enseguida `HTTP/2 200`, `content-type: text/event-stream`, **sin** `content-encoding`, el
+evento `ready` y luego `: ping` cada 25 s sin cortarse en varios minutos. Si `ready` tarda o los
+`: ping` llegan de a varios, hay buffering o compresión en el camino. Un segundo `curl` con el mismo
+ticket debe responder `401 EVENTS_TICKET_INVALID`.
+
+**Límites.** 3 streams por usuario (el 4.º cierra el más viejo con `stream.closed` `REPLACED`) y
+`EVENTS_MAX_STREAMS` por instancia (`503 EVENTS_CAPACITY_REACHED`). El stream no cuenta contra el
+límite de peticiones; `POST /events/ticket` sí, por usuario (`THROTTLE_USER_LIMIT`).
+
+**Observabilidad.** Métricas OpenTelemetry (si `OTEL_EXPORTER_OTLP_*` está configurado):
+`events.streams.open`, `events.streams.opened` (atributo `reconnect`), `events.streams.closed`
+(`reason`), `events.streams.rejected` (`reason`), `events.delivered` (`type`) y
+`events.bus.reconnects`. Los logs solo cuentan: nunca tickets, usuarios ni contenido.
+
+**Al desplegar.** Al apagar, cada stream recibe `stream.closed` `SHUTDOWN` y el navegador reconecta con
+un ticket nuevo y su `Last-Event-ID`: lo creado durante el reinicio se repone (hasta 100 por usuario).
+La migración `1767225950000` agrega `notification.event_seq` (id de evento) y la tabla
+`event_stream_ticket`; debe estar aplicada antes de abrir streams.
