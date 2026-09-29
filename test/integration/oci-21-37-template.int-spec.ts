@@ -64,6 +64,8 @@ const EXPECTED_TAGS = [
   '/tablas.sustituciones',
   'activoCreado',
   'campos.alcance',
+  'campos.atendioPorArea',
+  'campos.basePorcentaje',
   'campos.categoriaCodigo',
   'campos.causa',
   'campos.codigoTemporal',
@@ -255,6 +257,7 @@ const context = (options: {
       ['asset-4', valuation(95_000, 0)],
     ]),
     conditionLabels: CONDITION_LABELS,
+    attendedBy: 'AUXILIAR ADMINISTRATIVO DE TURNO',
   });
   const signer = (rol: string, nombre: string, cargo: string) => ({
     nombre,
@@ -449,13 +452,17 @@ describe('Plantilla OCI-21-37 (acta de toma física, construida desde el Excel i
       for (const category of options.categories) {
         expect(text).toContain(`${category.code} — ${category.label}`);
       }
+      // Porcentaje sobre el precio de compra (2 320 000 / 4 670 000), no sobre el número de bienes (2 de 3).
       expect(text).toContain(
-        `AU — En uso\n2\n${formatMoney(2_320_000)}\n66,67 %\n${formatMoney(1_310_000)}`,
+        `AU — En uso\n2\n${formatMoney(2_320_000)}\n49,68 %\n${formatMoney(1_310_000)}`,
       );
-      // Valor en libros desconocido: «Sin dato», nunca 0.
+      // Valor en libros desconocido: «Sin dato», nunca 0; no afecta el porcentaje, que es sobre el precio de compra.
       expect(text).toContain(
-        `ANE — No encontrado\n1\n${formatMoney(2_350_000)}\n33,33 %\nSin dato`,
+        `ANE — No encontrado\n1\n${formatMoney(2_350_000)}\n50,32 %\nSin dato`,
       );
+      expect(text).toContain('Porcentaje calculado sobre el precio de compra: el de cada categoría es su precio de compra');
+      expect(text).toContain('El valor en libros es otro dato y no entra en el porcentaje.');
+      expect(text).toContain('Atendió por el área\nAUXILIAR ADMINISTRATIVO DE TURNO');
       expect(text).toContain(
         `Total\n3\n${formatMoney(4_670_000)}\n100,00 %\nSin dato`,
       );

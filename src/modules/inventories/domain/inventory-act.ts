@@ -16,10 +16,13 @@ export type InventoryActGeneration = (typeof INVENTORY_ACT_GENERATIONS)[number];
 
 /**
  * Por qué el acta no está: FORMAT_NOT_READY (sin código SGC o firmantes), ENQUEUE_FAILED (error inesperado al encolar),
- * TEMPLATE_NOT_ACTIVE (encolada, pero sin plantilla vigente), GENERATION_FAILED (otro error del motor).
+ * TEMPLATE_NOT_ACTIVE (encolada, pero sin plantilla vigente), GENERATION_FAILED (otro error del motor),
+ * NO_COST_CENTER_HEAD (no hay jefe vigente del centro de la toma que firme como ENCARGADO; se indica con
+ * PUT /inventories/:id/signer-head y se encola de nuevo).
  */
 export const INVENTORY_ACT_REASONS = [
   'FORMAT_NOT_READY',
+  'NO_COST_CENTER_HEAD',
   'ENQUEUE_FAILED',
   'TEMPLATE_NOT_ACTIVE',
   'GENERATION_FAILED',
@@ -89,6 +92,8 @@ export interface ActInput {
   readonly causeLabels: ReadonlyMap<string, string>;
   readonly valuations: ReadonlyMap<string, AssetValuation>;
   readonly conditionLabels: Readonly<Record<string, string>>;
+  /** Quién atendió la toma por el área (persona o texto libre); solo informativo, no firma. */
+  readonly attendedBy?: string | null;
 }
 
 export interface ActContent {
@@ -110,6 +115,13 @@ export const formatMoney = (value: number | null): string => (value === null ? N
 
 export const formatPercent = (part: number, total: number): string =>
   `${(total === 0 ? 0 : (part / total) * 100).toFixed(2).replace('.', ',')} %`;
+
+/** Base del porcentaje de hallazgos (campos.basePorcentaje): lo dice el acta. */
+export const FINDINGS_PERCENT_BASE = 'Porcentaje calculado sobre el precio de compra';
+
+/** Parte de un total en pesos: "Sin dato" si falta alguno de los dos o el total es 0 (nunca un 0 % inventado). */
+export const formatValuePercent = (part: number | null, total: number | null): string =>
+  part === null || total === null || total === 0 ? NO_DATA : formatPercent(part, total);
 
 export const formatLongDate = (isoDate: string | null): string => {
   if (!isoDate) {
@@ -178,29 +190,31 @@ export const buildInventoryActContent = (input: ActInput): ActContent => {
     return {
       category,
       count: members.length,
-      price: sumOrNull(members.map((item) => valuationOf(item)?.acquisitionPrice ?? null)),
-      book: sumOrNull(members.map((item) => valuationOf(item)?.bookValue ?? null)),
+      // Una categoría sin bienes suma 0 de verdad; con bienes, null si falta el valor de alguno.
+      price: members.length === 0 ? 0 : sumOrNull(members.map((item) => valuationOf(item)?.acquisitionPrice ?? null)),
+      book: members.length === 0 ? 0 : sumOrNull(members.map((item) => valuationOf(item)?.bookValue ?? null)),
     };
   });
   const categorized = findingRows.reduce((total, row) => total + row.count, 0);
+  const totalPrice = sumOrNull(findingRows.map((row) => row.price));
+  const totalBook = sumOrNull(findingRows.map((row) => row.book));
+  // Porcentaje sobre el precio de compra (no sobre el número de bienes): la parte de la categoría en el precio de
+  // compra total de las categorías. Sin precio de algún bien o con total 0: "Sin dato".
   const hallazgos = findingRows.map((row) => ({
     codigo: row.category.code,
     nombre: row.category.label,
     cantidad: String(row.count),
-    valorCompra: row.count === 0 ? formatMoney(0) : formatMoney(row.price),
-    porcentaje: formatPercent(row.count, categorized),
-    valorLibros: row.count === 0 ? formatMoney(0) : formatMoney(row.book),
+    valorCompra: formatMoney(row.price),
+    porcentaje: formatValuePercent(row.price, totalPrice),
+    valorLibros: formatMoney(row.book),
     esTotal: '',
   }));
-  const withMembers = findingRows.filter((row) => row.count > 0);
-  const totalPrice = sumOrNull(withMembers.map((row) => row.price));
-  const totalBook = sumOrNull(withMembers.map((row) => row.book));
   hallazgos.push({
     codigo: 'TOTAL',
     nombre: 'Total',
     cantidad: String(categorized),
     valorCompra: formatMoney(totalPrice),
-    porcentaje: formatPercent(categorized, categorized),
+    porcentaje: formatValuePercent(totalPrice, totalPrice),
     valorLibros: formatMoney(totalBook),
     esTotal: 'Sí',
   });
@@ -261,6 +275,8 @@ export const buildInventoryActContent = (input: ActInput): ActContent => {
       totalSinCategoria: String(live.length - categorized),
       hallazgosValorCompra: formatMoney(totalPrice),
       hallazgosValorLibros: formatMoney(totalBook),
+      basePorcentaje: FINDINGS_PERCENT_BASE,
+      atendioPorArea: input.attendedBy?.trim() || NO_DATA,
     },
     tables: { hallazgos, sobrantes },
   };
@@ -281,7 +297,9 @@ export const INVENTORY_ACT_PLACEHOLDERS: ReadonlyArray<readonly [string, string]
   ['campos.porcentajeVerificado', 'Verificados / esperados ("93,50 %")'],
   ['campos.totalConCategoria / campos.totalSinCategoria', 'Ítems con y sin categoría de hallazgo'],
   ['campos.hallazgosValorCompra / campos.hallazgosValorLibros', 'Totales de la tabla de hallazgos ("Sin dato" si falta algún valor)'],
-  ['tablas.hallazgos[] (codigo, nombre, cantidad, valorCompra, porcentaje, valorLibros, esTotal)', 'Una fila por categoría activa del catálogo y una final TOTAL (esTotal = "Sí"); porcentaje sobre los ítems con categoría'],
+  ['campos.basePorcentaje', '"Porcentaje calculado sobre el precio de compra": base del porcentaje de hallazgos'],
+  ['campos.atendioPorArea', 'Quién atendió la toma por el área (persona o texto libre; "Sin dato" si no se indicó). Solo informativo: no firma'],
+  ['tablas.hallazgos[] (codigo, nombre, cantidad, valorCompra, porcentaje, valorLibros, esTotal)', 'Una fila por categoría activa del catálogo y una final TOTAL (esTotal = "Sí"); porcentaje = precio de compra de la categoría / precio de compra total de las categorías ("Sin dato" si falta algún precio o el total es 0). El valor en libros no entra en el porcentaje'],
   ['tablas.sobrantes[] (indice, descripcion, ubicacion, condicion, resolucion, motivoResolucion, activoCreado)', 'Sobrantes sin activo registrado'],
   ['activos[].campos.resultado / categoria / categoriaCodigo / causa / condicionObservada', 'Resultado en español, categoría de hallazgo, causa del faltante y condición observada'],
   ['activos[].campos.valorCompra / valorLibros', 'Precio de compra y valor en libros ("Sin dato" si no hay)'],

@@ -223,6 +223,7 @@ const body = (format) => {
       headerRow(format.takeDate, [run('Del '), value('{{campos.fechaInicio}}'), run(' al '), value('{{campos.fechaCierre}}')]),
       headerRow(format.cutDate, [value('{{campos.corteContable}}')]),
       headerRow(format.responsible, [value('{{firmante.responsable.nombre}}')]),
+      headerRow('Atendió por el área', [value('{{campos.atendioPorArea}}')]),
     ],
   );
 
@@ -282,7 +283,8 @@ const body = (format) => {
   const findingsNote = para(
     [
       run(
-        'Porcentaje sobre el número de bienes con categoría de hallazgo. «Sin dato»: el sistema no tiene el valor de al menos uno de los bienes de la fila; no equivale a cero.',
+        '{{campos.basePorcentaje}}: el de cada categoría es su precio de compra sobre el precio de compra total de los bienes con categoría de hallazgo. ' +
+          'El valor en libros es otro dato y no entra en el porcentaje. «Sin dato»: el sistema no tiene el valor de al menos uno de los bienes de la fila, o el total es cero; no equivale a cero.',
         { size: 14 },
       ),
     ],
