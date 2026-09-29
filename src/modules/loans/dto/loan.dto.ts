@@ -72,7 +72,8 @@ export class DeliverLoanDto {
 
   @ApiProperty({
     format: 'uuid',
-    description: 'Persona de Control Interno que da el visto bueno: firma AUDITA (turno 3) del acta OCI-01-65',
+    description:
+      'Persona de Control Interno que da el visto bueno: firma AUDITA (turno 3) del acta OCI-01-65. Debe tener usuario activo con el permiso vigente act:sign_control:global (GET /documents/control-signers); si no, 400 DOCUMENT_SIGNER_NOT_ELIGIBLE antes de mover los activos',
   })
   @IsUUID('4')
   readonly controlInternoPersonId!: string;
@@ -95,7 +96,11 @@ export class RegenerateDeliveryActDto {
   @IsUUID('4')
   readonly deliveredByPersonId!: string;
 
-  @ApiProperty({ format: 'uuid', description: 'Firma AUDITA (turno 3, Control Interno) del acta nueva' })
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Firma AUDITA (turno 3, Control Interno) del acta nueva. Debe tener usuario activo con el permiso vigente act:sign_control:global; si no, 400 DOCUMENT_SIGNER_NOT_ELIGIBLE',
+  })
   @IsUUID('4')
   readonly controlInternoPersonId!: string;
 

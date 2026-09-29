@@ -520,6 +520,17 @@ export class LoansService {
         );
       }
       await this.requirePersons(manager, [dto.deliveredByPersonId, dto.controlInternoPersonId]);
+      // Antes de mover activos: AUDITA exige act:sign_control:global y nadie firma dos veces (misma regla que enqueue).
+      await this.documents.assertSigners(
+        manager,
+        {
+          formatKey: LOAN_DELIVERY_FORMAT,
+          responsiblePersonId: contactPersonId,
+          signers: { ENTREGA: dto.deliveredByPersonId, AUDITA: dto.controlInternoPersonId },
+          ...(dto.signerSubstitutions ? { signerSubstitutions: dto.signerSubstitutions } : {}),
+        },
+        actorId,
+      );
 
       const deliveredAt = new Date();
       const deliveryDay = bogotaDate(deliveredAt);
@@ -674,6 +685,16 @@ export class LoansService {
         throw new ApiException(ErrorCode.ValidationFailed, 'El acta necesita la persona de contacto que firma RECIBE');
       }
       await this.requirePersons(manager, [dto.deliveredByPersonId, dto.controlInternoPersonId, contactPersonId]);
+      await this.documents.assertSigners(
+        manager,
+        {
+          formatKey: LOAN_DELIVERY_FORMAT,
+          responsiblePersonId: contactPersonId,
+          signers: { ENTREGA: dto.deliveredByPersonId, AUDITA: dto.controlInternoPersonId },
+          ...(dto.signerSubstitutions ? { signerSubstitutions: dto.signerSubstitutions } : {}),
+        },
+        actor.id,
+      );
       if (contactPersonId !== loan.contactPersonId) {
         await manager.update(AssetLoan, loan.id, { contactPersonId, updatedAt: new Date() });
       }
@@ -965,6 +986,12 @@ export class LoansService {
     }
     const signers = Object.fromEntries(roles.map((role) => [role, given[role] as string]));
     await this.requirePersons(manager, Object.values(signers));
+    // Antes de recibir los activos: si el formato administrado tiene un turno de Control Interno, exige el permiso.
+    await this.documents.assertSigners(
+      manager,
+      { formatKey: LOAN_RETURN_FORMAT, ...(loan.contactPersonId ? { responsiblePersonId: loan.contactPersonId } : {}), signers },
+      null,
+    );
     return signers;
   }
 

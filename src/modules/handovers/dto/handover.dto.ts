@@ -56,7 +56,11 @@ export class CreateHandoverDto {
   @IsUUID('all')
   readonly costCenterId!: string;
 
-  @ApiProperty({ format: 'uuid', description: 'Persona de Control Interno que firma el turno AUDITA' })
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Persona de Control Interno que firma el turno AUDITA. Debe tener usuario activo con el permiso vigente act:sign_control:global (GET /documents/control-signers); si no, 400 DOCUMENT_SIGNER_NOT_ELIGIBLE',
+  })
   @IsUUID('all')
   readonly auditorPersonId!: string;
 

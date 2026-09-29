@@ -105,6 +105,17 @@ export class HandoversService implements OnModuleInit {
     try {
       await this.dataSource.transaction(async (manager) => {
         await this.assertPersons(manager, dto);
+        // AUDITA exige act:sign_control:global y nadie firma dos veces: el error sale antes de revisar activos.
+        await this.engine.assertSigners(
+          manager,
+          {
+            formatKey: HANDOVER_FORMAT_KEY,
+            responsiblePersonId: dto.receiverPersonId,
+            signers: { AUDITA: dto.auditorPersonId },
+            ...(dto.signerSubstitutions ? { signerSubstitutions: dto.signerSubstitutions } : {}),
+          },
+          actor.id,
+        );
         await this.assertCostCenter(manager, dto.costCenterId);
         await this.assertAssets(manager, assetIds, dto.costCenterId);
         await this.assertNotInOpenHandover(manager, assetIds);
