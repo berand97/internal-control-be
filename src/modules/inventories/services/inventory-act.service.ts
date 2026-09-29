@@ -34,6 +34,9 @@ import { InventoryValuationService } from './inventory-valuation.service.js';
 /** Reintentos automáticos del outbox (DocumentEngineService.processPending: attempts < 5). */
 const AUTOMATIC_GENERATION_ATTEMPTS = 5;
 
+/** Errores de separación de funciones que el encolado manual devuelve tal cual. */
+const SIGNER_ERRORS: ReadonlyArray<ErrorCode> = [ErrorCode.DocumentSignerDuplicated, ErrorCode.DocumentSignerSubstituteInvalid];
+
 type BlockedReason = Extract<
   InventoryActReason,
   'FORMAT_NOT_READY' | 'ENQUEUE_FAILED'
@@ -126,7 +129,9 @@ export class InventoryActService implements OnModuleInit {
           'El acta se encola solo en una toma conciliada cuya acta no se encoló',
         );
       }
-      const result = await this.tryEnqueue(manager, inventory, inventory.reconcileApprovedBy ?? actor.id, signerSubstitutions);
+      const result = await this.tryEnqueue(manager, inventory, inventory.reconcileApprovedBy ?? actor.id, signerSubstitutions, {
+        rethrowSignerErrors: true,
+      });
       this.applyOutcome(inventory, result);
       await manager.getRepository(PhysicalInventory).save(inventory);
       await this.auditEnqueue(manager, inventory, actor.id, result);
@@ -242,6 +247,7 @@ export class InventoryActService implements OnModuleInit {
     inventory: PhysicalInventory,
     approverUserId: string,
     signerSubstitutions?: SignerSubstitutionsInput,
+    options: { readonly rethrowSignerErrors?: boolean } = {},
   ): Promise<EnqueueOutcome> {
     const readiness = await this.engine.formatReadiness(INVENTORY_ACT_FORMAT_KEY, manager).catch((error: unknown) => ({
       ready: false,
@@ -270,6 +276,12 @@ export class InventoryActService implements OnModuleInit {
       return { requestId };
     } catch (error) {
       await manager.query('ROLLBACK TO SAVEPOINT inventory_act');
+      // Encolado manual: los errores de separación de funciones salen tal cual (409 DOCUMENT_SIGNER_DUPLICATED, 400
+      // DOCUMENT_SIGNER_SUBSTITUTE_INVALID, con sus details), como en entregas, préstamos y traslados. Al aprobar la
+      // conciliación nunca se lanza: queda NOT_ENQUEUED/ENQUEUE_FAILED con el motivo.
+      if (options.rethrowSignerErrors && error instanceof ApiException && SIGNER_ERRORS.includes(error.code)) {
+        throw error;
+      }
       return {
         blocked: 'ENQUEUE_FAILED',
         message: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
