@@ -34,7 +34,6 @@ import type { AuthFactor } from './auth-lockout.policy.js';
 import { AuthLockoutService, type AttemptOutcome } from './auth-lockout.service.js';
 import { isInvitationExpired } from './invitation-policy.js';
 import { MfaAccountService, type MfaProofMethod } from './mfa-account.service.js';
-import { requiresMfaEnrollment } from './mfa-policy.js';
 import { MfaService } from './mfa.service.js';
 import { SessionStateService } from './session-state.service.js';
 import { TokenService } from './token.service.js';
@@ -172,12 +171,10 @@ export class AuthService {
       };
     }
 
-    const roleCodes = await this.authUsersRepository.findActiveRoleCodes(
-      user.id,
-    );
     if (
       !user.mustChangePassword &&
-      (requiresMfaEnrollment(roleCodes) || user.mfaEnrollmentRequired)
+      (user.mfaEnrollmentRequired ||
+        (await this.mfaAccount.requiredFor(user.id)))
     ) {
       return {
         response: MfaSetupRequiredResponseDto.from(
@@ -400,7 +397,10 @@ export class AuthService {
       this.navigationService.listActiveDefinitions(),
     ]);
 
-    const mfa = await this.mfaAccount.status(user, dbUser, roles);
+    const mfa = await this.mfaAccount.status(user, dbUser, {
+      roleCodes: roles,
+      permissionCodes: granted.map((permission) => permission.code),
+    });
 
     return MeResponseDto.from(
       dbUser,

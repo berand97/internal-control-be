@@ -15,7 +15,7 @@ import { AuditAction } from '../enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../repositories/audit-logs.repository.interface.js';
 import type { AuthUsersRepository } from '../repositories/auth-users.repository.interface.js';
 import type { MfaCredentialsRepository } from '../repositories/mfa-credentials.repository.interface.js';
-import { requiresMfaEnrollment } from './mfa-policy.js';
+import { type MfaSubject, requiresMfaEnrollment } from './mfa-policy.js';
 import { MfaService } from './mfa.service.js';
 import { SessionStateService } from './session-state.service.js';
 import {
@@ -85,7 +85,7 @@ export class MfaAccountService {
   async status(
     actor: AuthenticatedUser,
     user: AppUser,
-    roles: ReadonlyArray<string>,
+    subject: MfaSubject,
   ): Promise<MfaStatus> {
     const [recoveryCodesRemaining, sessionVerified] = await Promise.all([
       user.mfaEnabled
@@ -95,9 +95,21 @@ export class MfaAccountService {
     ]);
     return {
       recoveryCodesRemaining,
-      requiredByRole: requiresMfaEnrollment(roles),
+      requiredByRole: requiresMfaEnrollment(subject),
       sessionVerified,
     };
+  }
+
+  /**
+   * True si el usuario debe tener MFA: rol SUPER_ADMIN vigente o algún permiso efectivo vigente de
+   * MFA_REQUIRED_PERMISSIONS (mfa-policy.ts). Se lee de la BD en cada decisión, sin caché.
+   */
+  async requiredFor(userId: string): Promise<boolean> {
+    const [roleCodes, permissions] = await Promise.all([
+      this.authUsersRepository.findActiveRoleCodes(userId),
+      this.authUsersRepository.findEffectivePermissions(userId),
+    ]);
+    return requiresMfaEnrollment({ roleCodes, permissionCodes: permissions.map((permission) => permission.code) });
   }
 
   /**
@@ -278,8 +290,9 @@ export class MfaAccountService {
   }
 
   /**
-   * Solo para quien no tiene un rol que exija MFA. Un firmante de Control Interno con rol que lo exige nunca pasa;
-   * cualquier otro que desactive MFA deja de cumplir la condición de sesión con MFA y no podrá firmar.
+   * Solo para quien no tiene un permiso que exija MFA (mfa-policy.ts: MFA_REQUIRED_PERMISSIONS, o SUPER_ADMIN). Quien
+   * firma por Control Interno nunca pasa; cualquier otro que desactive MFA deja de cumplir la condición de sesión con
+   * MFA y no podrá firmar los turnos que la exigen.
    */
   async disable(
     actor: AuthenticatedUser,
@@ -290,8 +303,7 @@ export class MfaAccountService {
     if (!user.mfaEnabled) {
       throw new ApiException(ErrorCode.MfaNotEnabled);
     }
-    const roles = await this.authUsersRepository.findActiveRoleCodes(user.id);
-    if (requiresMfaEnrollment(roles)) {
+    if (await this.requiredFor(user.id)) {
       throw new ApiException(ErrorCode.MfaRequiredByRole);
     }
     const method = await this.assertProof(user, proof, context, 'DISABLE');

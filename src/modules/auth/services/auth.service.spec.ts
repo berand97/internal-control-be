@@ -13,6 +13,7 @@ import type { RefreshTokenFamiliesRepository } from '../repositories/refresh-tok
 import { AuthService, requiresMfaEnrollment } from './auth.service.js';
 import type { AuthLockoutService } from './auth-lockout.service.js';
 import type { MfaAccountService } from './mfa-account.service.js';
+import { MFA_REQUIRED_PERMISSIONS } from './mfa-policy.js';
 import type { MfaService } from './mfa.service.js';
 import type { SessionStateService } from './session-state.service.js';
 import type { TokenService } from './token.service.js';
@@ -82,6 +83,7 @@ describe('AuthService', () => {
     completeSetupEnrollment: ReturnType<typeof vi.fn>;
     consumeForLogin: ReturnType<typeof vi.fn>;
     acceptTotp: ReturnType<typeof vi.fn>;
+    requiredFor: ReturnType<typeof vi.fn>;
   };
   let lockout: {
     registerAttempt: ReturnType<typeof vi.fn>;
@@ -176,6 +178,15 @@ describe('AuthService', () => {
       completeSetupEnrollment: vi.fn().mockResolvedValue(['AAAA-BBBB-CCCC']),
       consumeForLogin: vi.fn().mockResolvedValue(9),
       acceptTotp: vi.fn().mockResolvedValue(true),
+      // Misma regla que MfaAccountService.requiredFor, sobre los repositorios simulados.
+      requiredFor: vi.fn(async (userId: string) =>
+        requiresMfaEnrollment({
+          roleCodes: await authUsersRepository.findActiveRoleCodes(userId),
+          permissionCodes: (
+            await authUsersRepository.findEffectivePermissions(userId)
+          ).map((permission) => permission.code),
+        }),
+      ),
     };
     lockout = {
       registerAttempt: vi.fn().mockResolvedValue({
@@ -393,6 +404,44 @@ describe('AuthService', () => {
         context,
       );
       expect(outcome.response).toMatchObject({ requiresMfaSetup: true });
+    });
+
+    it('fuerza setup MFA a un rol nuevo que tiene act:sign_control:global', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser(),
+      );
+      vi.mocked(authUsersRepository.findActiveRoleCodes).mockResolvedValue([
+        'FIRMANTE_CONTROL',
+      ]);
+      vi.mocked(authUsersRepository.findEffectivePermissions).mockResolvedValue([
+        {
+          code: 'act:sign_control:global',
+          module: 'ASSET',
+          resourceType: 'act',
+          action: 'sign_control',
+          scopeLevel: 'GLOBAL',
+        },
+      ]);
+      const outcome = await service.login(
+        { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+        context,
+      );
+      expect(outcome.refreshToken).toBeNull();
+      expect(outcome.response).toMatchObject({ requiresMfaSetup: true });
+    });
+
+    it('no fuerza setup MFA a un rol sin permisos sensibles, aunque se llame como uno de Control Interno', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser(),
+      );
+      vi.mocked(authUsersRepository.findActiveRoleCodes).mockResolvedValue([
+        'INTERNAL_CONTROL_DIRECTOR',
+      ]);
+      const outcome = await service.login(
+        { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+        context,
+      );
+      expect(outcome.refreshToken).toBe('refresh');
     });
 
     it('fuerza setup MFA tras un reset administrativo aunque el rol no lo exija', async () => {
@@ -712,12 +761,35 @@ describe('AuthService', () => {
 });
 
 describe('requiresMfaEnrollment', () => {
-  it('es verdadero para administradores', () => {
-    expect(requiresMfaEnrollment(['SUPER_ADMIN'])).toBe(true);
-    expect(requiresMfaEnrollment(['INTERNAL_CONTROL_DIRECTOR'])).toBe(true);
+  it('SUPER_ADMIN (rol raíz) siempre lo exige, por nombre', () => {
+    expect(
+      requiresMfaEnrollment({ roleCodes: ['SUPER_ADMIN'], permissionCodes: [] }),
+    ).toBe(true);
   });
 
-  it('es falso para roles operativos', () => {
-    expect(requiresMfaEnrollment(['VIEWER', 'CUSTODIAN'])).toBe(false);
+  it('lo decide cada permiso sensible, con cualquier nombre de rol', () => {
+    for (const code of MFA_REQUIRED_PERMISSIONS) {
+      expect(
+        requiresMfaEnrollment({
+          roleCodes: ['ROL_NUEVO'],
+          permissionCodes: ['asset:read:global', code],
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it('el nombre de un rol no cuenta: sin permisos sensibles no lo exige', () => {
+    expect(
+      requiresMfaEnrollment({
+        roleCodes: ['INTERNAL_CONTROL_DIRECTOR', 'AUDITOR'],
+        permissionCodes: ['asset:read:global', 'audit:read:global'],
+      }),
+    ).toBe(false);
+    expect(
+      requiresMfaEnrollment({
+        roleCodes: ['VIEWER', 'CUSTODIAN'],
+        permissionCodes: ['asset:read:org_unit'],
+      }),
+    ).toBe(false);
   });
 });

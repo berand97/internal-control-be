@@ -551,7 +551,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Desactivar MFA',
     description:
-      'Solo si ningún rol activo del usuario exige MFA (SUPER_ADMIN, INTERNAL_CONTROL_DIRECTOR). Exige code o recoveryCode. Borra secreto y códigos y revoca las demás sesiones. Sin MFA la sesión deja de contar como sesión con MFA, así que el usuario no podrá firmar actas que lo exijan.',
+      'Solo si el usuario no debe tener MFA: ni rol SUPER_ADMIN ni permiso efectivo que lo exija (act:sign_control, transfer:sign_accounting, inventory:reconcile, role:create/manage/assign, user:manage, storage:manage, mail:manage). Exige code o recoveryCode. Borra secreto y códigos y revoca las demás sesiones. Sin MFA la sesión deja de contar como sesión con MFA, así que el usuario no podrá firmar actas que lo exijan.',
   })
   @ApiResponse({
     status: 200,

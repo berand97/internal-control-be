@@ -132,7 +132,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     httpStatus: 403,
     action: 'CANCEL',
     message:
-      'Su rol exige la verificación en dos pasos; no se puede desactivar',
+      'Sus permisos exigen la verificación en dos pasos; no se puede desactivar',
   },
   [ErrorCode.MfaNotEnabled]: {
     httpStatus: 409,

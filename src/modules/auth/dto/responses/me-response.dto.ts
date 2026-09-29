@@ -58,7 +58,7 @@ export class MeResponseDto {
 
   @ApiProperty({
     description:
-      'True si algún rol activo exige MFA: la UI no debe ofrecer desactivarlo (el API responde MFA_REQUIRED_BY_ROLE).',
+      'True si el usuario debe tener MFA: rol SUPER_ADMIN o algún permiso efectivo que lo exige (firmar por Control Interno o por Contabilidad, conciliar inventario, administrar roles, usuarios, almacenamiento o correo). La UI no debe ofrecer desactivarlo (el API responde MFA_REQUIRED_BY_ROLE). El nombre se conserva por compatibilidad: lo deciden los permisos, no el nombre del rol.',
   })
   readonly mfaRequiredByRole!: boolean;
 

@@ -13,7 +13,7 @@ import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { HashService } from '../../src/shared/crypto/hash.service.js';
 import { SecretCipherService } from '../../src/shared/crypto/secret-cipher.service.js';
-import { scalar } from './helpers.js';
+import { createPermissionRole, scalar } from './helpers.js';
 
 const PASSWORD = 'Clave-Segura-2026!';
 const RESET_REASON = 'Pérdida del celular reportada a mesa de ayuda, caso 2026-1432';
@@ -594,6 +594,29 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     expect(refused.status).toBe(403);
     expect(refused.body.error.code).toBe('MFA_REQUIRED_BY_ROLE');
     expect(await dbUser(director.id)).toMatchObject({ mfa_enabled: true, mfa_secret: directorSecret, unused: 10 });
+  });
+
+  it('el MFA obligatorio lo deciden los permisos: un rol nuevo con act:sign_control:global lo exige; uno sin permisos sensibles, no', async () => {
+    const signerRole = await createPermissionRole(dataSource, ['act:sign_control:global', 'asset:read:global'], 'IT_FIRMA_MFA');
+    const signer = await createUser(signerRole);
+    const forced = await login(signer);
+    expect(forced.status).toBe(200);
+    expect(forced.body.data).toMatchObject({ requiresMfaSetup: true });
+    expect(forced.body.data.accessToken).toBeUndefined();
+
+    const plainRole = await createPermissionRole(dataSource, ['asset:read:global', 'audit:read:global'], 'IT_SIN_MFA');
+    const plain = await createUser(plainRole);
+    const session = await passwordSession(plain);
+    const me = await get('/auth/me', session.accessToken);
+    expect(me.body.data).toMatchObject({ mfaEnabled: false, mfaRequiredByRole: false });
+
+    // Otorgarle después al rol un permiso sensible lo vuelve obligatorio en /auth/me, sin cambiar el nombre del rol.
+    await dataSource.query(
+      `INSERT INTO role_permission (role_id, permission_id)
+       SELECT r.id, p.id FROM role r, permission p WHERE r.code = $1 AND p.code = 'inventory:reconcile:global'`,
+      [plainRole],
+    );
+    expect((await get('/auth/me', session.accessToken)).body.data).toMatchObject({ mfaRequiredByRole: true });
   });
 
   it('reset administrativo: exige MFA del admin, prohíbe el propio, revoca sesiones y obliga a enrolar', async () => {
