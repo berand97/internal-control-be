@@ -374,12 +374,15 @@ describe.runIf(Boolean(process.env['GOTENBERG_URL']))('Motor de documentos con G
         { sgcVersion: '2', effectiveDate: '2026-09-09' },
         actor.id,
       );
+      // Separación de funciones: quien audita no puede ser el responsable y debe tener act:sign_control:global.
+      const auditor = await createActor(dataSource);
+      await grantControlSigner(dataSource, auditor.personId);
       const document = await engine.generate(
         {
           formatKey: 'OCI-01-55',
           costCenterId: await scalar<string>(dataSource, `SELECT id FROM cost_center WHERE external_code = '4330'`),
           responsiblePersonId: actor.personId,
-          signers: { AUDITA: actor.personId },
+          signers: { AUDITA: auditor.personId },
         },
         actor.id,
       );
