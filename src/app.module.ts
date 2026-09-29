@@ -33,6 +33,7 @@ import { StagingModule } from './modules/staging/staging.module.js';
 import { DocumentsModule } from './modules/documents/documents.module.js';
 import { HandoversModule } from './modules/handovers/handovers.module.js';
 import { TransfersModule } from './modules/transfers/transfers.module.js';
+import { AssetRequestsModule } from './modules/asset-requests/asset-requests.module.js';
 import { PersonsModule } from './modules/persons/persons.module.js';
 import { LocationsModule } from './modules/locations/locations.module.js';
 import { OrganizationalUnitsModule } from './modules/organizational-units/organizational-units.module.js';
@@ -90,6 +91,7 @@ const nestObserveImports =
     DocumentsModule,
     HandoversModule,
     TransfersModule,
+    AssetRequestsModule,
     PersonsModule,
   ],
   controllers: [AppController],

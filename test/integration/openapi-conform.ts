@@ -11,6 +11,7 @@ export interface Schema {
   readonly properties?: Record<string, Schema>;
   readonly required?: ReadonlyArray<string>;
   readonly items?: Schema;
+  readonly additionalProperties?: boolean | Schema;
 }
 
 /**
@@ -66,7 +67,8 @@ export const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, 
     }
     const declared = resolved.properties ?? {};
     for (const key of Object.keys(value)) {
-      if (!(key in declared)) {
+      // additionalProperties: true declara un objeto libre (payload de un evento): cualquier clave vale.
+      if (!(key in declared) && resolved.additionalProperties !== true) {
         errors.push(`${path}.${key}: la respuesta la trae y el esquema no la declara`);
       }
     }

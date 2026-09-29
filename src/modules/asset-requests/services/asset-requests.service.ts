@@ -456,10 +456,10 @@ export class AssetRequestsService {
           : [];
       await manager.query(
         `UPDATE asset_request SET kind = $2, requesting_cost_center_id = $3, owner_cost_center_id = $4, description = $5, note = $6,
-           start_date = $7, expected_return_date = $8, status = $9,
-           accepted_by = CASE WHEN $9 = 'REQUESTED' THEN NULL ELSE accepted_by END,
-           accepted_at = CASE WHEN $9 = 'REQUESTED' THEN NULL ELSE accepted_at END,
-           expires_at = CASE WHEN $9 = 'ACCEPTED' THEN NOW() + make_interval(days => $10) ELSE NULL END,
+           start_date = $7, expected_return_date = $8, status = $9::varchar,
+           accepted_by = CASE WHEN $9::varchar = 'REQUESTED' THEN NULL ELSE accepted_by END,
+           accepted_at = CASE WHEN $9::varchar = 'REQUESTED' THEN NULL ELSE accepted_at END,
+           expires_at = CASE WHEN $9::varchar = 'ACCEPTED' THEN NOW() + make_interval(days => $10) ELSE NULL END,
            decided_by = $11, decided_at = NOW()
          WHERE id = $1`,
         [

@@ -163,8 +163,9 @@ export class AssetRequestNoticesService {
            JOIN person p ON p.id = h.person_id AND p.is_active
            LEFT JOIN app_user u ON u.person_id = p.id AND u.status = 'ACTIVE'
            WHERE h.cost_center_id = $1 AND h.valid_from <= NOW() AND (h.valid_until IS NULL OR h.valid_until > NOW())
+             AND p.id <> $2
            ORDER BY p.id, u.id`,
-          [request.owner_cost_center_id],
+          [request.owner_cost_center_id, request.requester_person_id],
         )) as RecipientRow[]),
       );
     }
