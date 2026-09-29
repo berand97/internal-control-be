@@ -212,6 +212,9 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       `SELECT id FROM document WHERE (entity_type = 'LOAN' AND entity_id = ANY($1::uuid[])) OR (entity_type = 'TRANSFER' AND entity_id = ANY($2::uuid[]))`,
       [loanIds, transferIds],
     )) as Array<{ id: string }>).map((row) => row.id);
+    // Los avisos no quedan en la cola: otro archivo despacha el outbox por orden de llegada.
+    await dataSource.query(`DELETE FROM mail_outbox WHERE entity_type = 'ASSET_REQUEST'`);
+    await dataSource.query(`DELETE FROM notification WHERE entity_type = 'ASSET_REQUEST'`);
     await dataSource.query('DELETE FROM asset_request_event');
     await dataSource.query('DELETE FROM asset_request_item');
     await dataSource.query('UPDATE asset_loan SET asset_request_id = NULL, delivery_document_id = NULL WHERE id = ANY($1::uuid[])', [loanIds]);

@@ -278,6 +278,8 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
     const docs = ((await dataSource.query(`SELECT id FROM document WHERE entity_type = 'LOAN' AND entity_id = $1`, [ids['loan'] ?? null])) as Array<{
       id: string;
     }>).map((row) => row.id);
+    await dataSource.query(`DELETE FROM mail_outbox WHERE entity_type = 'ASSET_REQUEST' AND entity_id = $1`, [ids['request'] ?? null]);
+    await dataSource.query(`DELETE FROM notification WHERE entity_type = 'ASSET_REQUEST' AND entity_id = $1`, [ids['request'] ?? null]);
     await dataSource.query('DELETE FROM asset_request_event WHERE request_id = $1', [ids['request'] ?? null]);
     await dataSource.query('DELETE FROM asset_request_item WHERE request_id = $1', [ids['request'] ?? null]);
     await dataSource.query('DELETE FROM asset_request WHERE id = $1', [ids['request'] ?? null]);

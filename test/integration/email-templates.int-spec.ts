@@ -530,7 +530,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
     it('director y superadmin sí; viewer recibe 403; las rutas viejas /mail/templates ya no existen', async () => {
       const catalog = await http().get('/api/v1/email-templates/catalog').set(auth(director)).expect(200);
       expectConforms('get', '/api/v1/email-templates/catalog', 200, catalog.body);
-      expect(catalog.body.data.types).toHaveLength(12);
+      expect(catalog.body.data.types).toHaveLength(21);
       expect(catalog.body.data.blocks.map((block: { type: string }) => block.type)).toEqual([
         'heading', 'paragraph', 'button', 'divider', 'keyValueList', 'callout', 'spacer', 'image',
       ]);
