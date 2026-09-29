@@ -17,7 +17,7 @@ import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js'
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
-import { scalar, useSharedStorage } from './helpers.js';
+import { grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter, pdfText, squash } from './pdf-text.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
@@ -191,6 +191,7 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
       [director.userId],
     );
     auditor = await user('Auditora', true, docNumber());
+    await grantControlSigner(dataSource, auditor.personId);
     rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica enlace', { width: 120 })).toString('base64')}`;
     sequenceBefore = await scalar<string | undefined>(
       dataSource,

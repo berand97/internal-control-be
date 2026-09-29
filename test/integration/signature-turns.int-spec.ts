@@ -14,7 +14,7 @@ import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js';
-import { createActor, scalar, useSharedStorage } from './helpers.js';
+import { createActor, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter, pdfText, squash } from './pdf-text.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
@@ -128,8 +128,10 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     );
     responsible = await person('Responsable', true);
     auditor = await person('Auditora', true);
+    await grantControlSigner(dataSource, auditor.personId);
     stranger = await person('Ajeno', true);
     replacement = await person('Reemplazo', true);
+    await grantControlSigner(dataSource, replacement.personId);
     rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica', { width: 120 })).toString('base64')}`;
     await engine.uploadTemplate(
       FORMAT,
@@ -313,5 +315,63 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     const attestation = (await http().get(`/api/v1/public/signatures/${code}`)).body.data;
     expect(attestation).toMatchObject({ status: 'COMPLETED', integrity: 'INTACT' });
     expect(attestation.signers.map((item: { name: string }) => item.name)).toEqual(['Responsable Turnos', 'Reemplazo Turnos']);
+  });
+
+  it('regla del firmante de Control Interno: AUDITA exige act:sign_control:global vigente al emitir (salvo sustituto) y al reasignar', async () => {
+    // Emitir con AUDITA sin el permiso (usuario activo con MFA, pero sin act:sign_control:global): 400 con el rol en details.
+    const withoutPermission = await engine
+      .generate({ formatKey: FORMAT, responsiblePersonId: responsible.personId, signers: { AUDITA: stranger.personId } }, director.userId)
+      .catch((error: unknown) => error);
+    expect(withoutPermission).toMatchObject({
+      code: 'DOCUMENT_SIGNER_NOT_ELIGIBLE',
+      details: [{ field: 'signers.AUDITA', message: expect.stringContaining('AUDITA') }],
+    });
+    // El mismo designado con un sustituto que sí tiene el permiso: se emite y firma el sustituto.
+    const substituted = await engine.generate(
+      {
+        formatKey: FORMAT,
+        responsiblePersonId: responsible.personId,
+        signers: { AUDITA: stranger.personId },
+        signerSubstitutions: { AUDITA: { personId: replacement.personId, reason: 'La designada no tiene el permiso' } },
+      },
+      director.userId,
+    );
+    const [slot] = (await dataSource.query(
+      `SELECT signer_person_id FROM document_signature WHERE document_id = $1 AND role = 'AUDITA'`,
+      [substituted.id],
+    )) as Array<{ signer_person_id: string }>;
+    expect(slot?.signer_person_id).toBe(replacement.personId);
+
+    const document = await generate(true);
+    // Reasignar AUDITA a quien no tiene el permiso: 400, aunque tenga usuario activo con MFA.
+    const notEligible = await reassign(document.id, 2, director, stranger.personId);
+    expect([notEligible.status, notEligible.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
+    expect(notEligible.body.error.details).toEqual([{ field: 'personId', message: expect.stringContaining('AUDITA') }]);
+    // Permiso revocado: deja de estar vigente y la reasignación se rechaza igual.
+    const revoked = await person('Revocada', true);
+    await grantControlSigner(dataSource, revoked.personId);
+    await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE user_id = $1', [revoked.userId]);
+    const afterRevoke = await reassign(document.id, 2, director, revoked.personId);
+    expect([afterRevoke.status, afterRevoke.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
+    // Separación de funciones: nadie queda en dos casillas del acta.
+    // AUDITA a quien ya firma como RESPONSABLE y sí tiene el permiso: 409, no se deja en dos casillas.
+    const holder = await person('Titular', true);
+    await grantControlSigner(dataSource, holder.personId);
+    const otherDocument = await engine.generate(
+      { formatKey: FORMAT, responsiblePersonId: holder.personId, signers: { AUDITA: auditor.personId } },
+      director.userId,
+    );
+    const duplicatedAudit = await reassign(otherDocument.id, 2, director, holder.personId);
+    expect([duplicatedAudit.status, duplicatedAudit.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
+    const duplicatedResponsible = await reassign(document.id, 1, director, auditor.personId);
+    expect([duplicatedResponsible.status, duplicatedResponsible.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
+    // El conflicto es con un turno de Control Interno: el detalle dice que ese turno se resuelve con un sustituto.
+    expect(duplicatedResponsible.body.error.details).toEqual(
+      expect.arrayContaining([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]),
+    );
+    // Con el permiso vigente: se acepta.
+    const accepted = await reassign(document.id, 2, director, replacement.personId);
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.data.reassignments).toEqual([expect.objectContaining({ role: 'AUDITA', toPersonId: replacement.personId })]);
   });
 });

@@ -29,7 +29,7 @@ import { FeaturesModule } from '../../src/modules/features/features.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
 import { DocumentFormatCatalogService } from '../../src/modules/documents/services/document-format-catalog.service.js';
-import { createActor, createFreeTestFormat, dropTestFormat, scalar, useSharedStorage } from './helpers.js';
+import { createActor, createFreeTestFormat, dropTestFormat, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 
 const ENTITY = 'IT_PROCESS';
 /** Formato libre de prueba: RESPONSABLE (RESPONSIBLE) y AUDITA (REQUEST), sin proceso enchufado. */
@@ -258,6 +258,7 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     const tag = Date.now().toString().slice(-7);
     people.responsable = await person('Responsable', `71${tag}`, 'Coordinadora de laboratorio');
     people.auditora = await person('Auditora', `72${tag}`, 'Profesional de Control Interno');
+    await grantControlSigner(dataSource, people.auditora);
     people.entrega = await person('Entregador', `73${tag}`, 'Almacenista');
     people.reemplazo = await person('Reemplazo', `74${tag}`, 'Auxiliar de almacén');
 

@@ -15,7 +15,7 @@ import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
-import { scalar, useSharedStorage } from './helpers.js';
+import { grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 
 const FORMAT = 'OCI-01-55';
@@ -284,6 +284,7 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     );
     receiver = await actor('Receptora', { mfa: true });
     auditor = await actor('Auditora', { mfa: true });
+    await grantControlSigner(dataSource, auditor.personId);
     replacement = await actor('Reemplazo', { mfa: true });
     outsider = await actor('Ajeno', { mfa: true });
     rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica', { width: 120 })).toString('base64')}`;

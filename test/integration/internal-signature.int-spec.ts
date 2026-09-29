@@ -17,7 +17,7 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { GotenbergPdfConverter, PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { prepareForSignature, stampSignature } from '../../src/modules/documents/signature/pdf-stamp.js';
-import { createActor, scalar, useSharedStorage } from './helpers.js';
+import { createActor, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 const SECRET_DESCRIPTION = 'MICROSCOPIO CONFIDENCIAL XK-99';
@@ -169,6 +169,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     );
     responsible = await signer('Responsable', 'Firma', '1000000501');
     auditor = await signer('Auditora', 'Firma', '1000000502');
+    await grantControlSigner(dataSource, auditor.personId);
     outsider = await signer('Ajeno', 'Firma', '1000000503');
     rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica de prueba', { width: 180 })).toString('base64')}`;
 

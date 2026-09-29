@@ -16,7 +16,7 @@ import { SIGNATURE_PROVIDER, StubSignatureProvider } from '../../src/modules/doc
 import { FeaturesModule } from '../../src/modules/features/features.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { DocumentFormatCatalogService } from '../../src/modules/documents/services/document-format-catalog.service.js';
-import { createActor, createFreeTestFormat, dropTestFormat, scalar, useSharedStorage } from './helpers.js';
+import { createActor, createFreeTestFormat, dropTestFormat, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 const CLEANED_FORMATS = ['OCI-01-55', 'OCI-17-89', 'OCI-01-65'];
@@ -171,6 +171,8 @@ describe('Motor de documentos (PostgreSQL real)', () => {
       accountingId: await person('Contadora', 'Contable Prueba', '1000000004', 'Contabilidad'),
       assetIds,
     };
+    // AUDITA y CONTROL_INTERNO exigen act:sign_control:global (regla del firmante de Control Interno).
+    await grantControlSigner(dataSource, fixture.auditorId);
 
     const template = await readFile(TEMPLATE);
     for (const formatKey of ['OCI-01-55', 'OCI-17-89', 'OCI-01-65']) {

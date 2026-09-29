@@ -18,7 +18,7 @@ import { DocumentEngineService } from '../../src/modules/documents/services/docu
 import { bogotaDate, longSpanishDate, usageBetween } from '../../src/modules/loans/domain/loan-dates.js';
 import { LoansService } from '../../src/modules/loans/services/loans.service.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
-import { scalar, useSharedStorage } from './helpers.js';
+import { grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 
 const FORMAT = 'OCI-01-65';
@@ -340,6 +340,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     await user('entrega', 'Entregadora', 'JEFE CENTRO DE IDIOMAS', []);
     await user('recibe', 'Receptor', 'DOCENTE AULA', []);
     await user('audita', 'Auditora', 'PROFESIONAL DE CONTROL INTERNO', []);
+    await grantControlSigner(dataSource, users['audita']?.personId ?? '');
     await user('recibe2', 'ReceptoraDos', 'DOCENTE LABORATORIO', []);
     await user('nadie', 'SinPermisos', 'Auxiliar', []);
     centerC = await scalar<string>(

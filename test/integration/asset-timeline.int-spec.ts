@@ -22,7 +22,7 @@ import { ExcelImportService } from '../../src/modules/staging/services/excel-imp
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
-import { createActor, scalar, useSharedStorage } from './helpers.js';
+import { createActor, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 
@@ -79,6 +79,8 @@ describe('Historia del activo (PostgreSQL real)', () => {
       `INSERT INTO person (first_name, last_name, email, document_type, document_number)
        VALUES ('Responsable', 'Historia', 'responsable.historia@unac.edu.co', 'CC', '1000000077') RETURNING id`,
     );
+    // Firma AUDITA en las actas de prueba: exige act:sign_control:global.
+    await grantControlSigner(dataSource, personId);
     const template = await readFile(TEMPLATE);
     for (const formatKey of ['OCI-17-90-INFORME']) {
       await engine.uploadTemplate(

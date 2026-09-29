@@ -13,7 +13,7 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
-import { createActor, scalar, useSharedStorage } from './helpers.js';
+import { createActor, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 const FORMAT = 'OCI-17-90-INFORME';
@@ -120,6 +120,7 @@ describe('GET /documents y reintento por el outbox (HTTP real + PostgreSQL real)
     directorToken = (await tokenFor(director, false)).token;
     outsiderToken = (await tokenFor(await createActor(dataSource), false)).token;
     signer = await createActor(dataSource);
+    await grantControlSigner(dataSource, signer.personId);
     await dataSource.query('UPDATE app_user SET mfa_enabled = TRUE WHERE id = $1', [signer.id]);
 
     const costCenterId = await scalar<string>(

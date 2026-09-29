@@ -186,3 +186,22 @@ export const createPermissionRole = async (
   );
   return code;
 };
+
+/**
+ * Otorga «Firmar actas por Control Interno» (act:sign_control:global) con un rol propio de prueba: todo turno AUDITA o
+ * CONTROL_INTERNO lo exige (domain/signer-separation.ts). Si la persona no tiene usuario, le crea uno ACTIVE.
+ */
+export const grantControlSigner = async (dataSource: DataSource, personId: string): Promise<void> => {
+  await dataSource.query(
+    `INSERT INTO app_user (person_id, username, password_hash, status)
+     SELECT $1::uuid, 'it.firma.' || substr(md5($1::uuid::text), 1, 12), 'x', 'ACTIVE'
+     WHERE NOT EXISTS (SELECT 1 FROM app_user WHERE person_id = $1::uuid)`,
+    [personId],
+  );
+  const code = await createPermissionRole(dataSource, ['act:sign_control:global'], 'IT_FIRMA_CI');
+  await dataSource.query(
+    `INSERT INTO user_role (user_id, role_id, scope_type)
+     SELECT u.id, r.id, 'GLOBAL' FROM app_user u, role r WHERE u.person_id = $1 AND r.code = $2`,
+    [personId, code],
+  );
+};
