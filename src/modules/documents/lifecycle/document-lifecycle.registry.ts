@@ -120,6 +120,7 @@ export interface EntityDocumentsState {
 export class DocumentLifecycleRegistry {
   private readonly handlers = new Map<string, DocumentLifecycleHandler>();
   private readonly bindings = new Map<string, ProcessFormatBinding>();
+  private readonly observers = new Map<string, DocumentLifecycleCallback[]>();
 
   constructor(private readonly dataSource: DataSource) {}
 
@@ -139,6 +140,16 @@ export class DocumentLifecycleRegistry {
     for (const binding of handler.formats ?? []) {
       this.bindings.set(binding.formatKey, binding);
     }
+  }
+
+  /**
+   * Observador de una fase de otro proceso (p. ej. la solicitud de activos se entera de que el acta de su préstamo o
+   * traslado quedó firmada). Corre DESPUÉS del manejador dueño, en la misma transacción y con las mismas garantías: si
+   * lanza, la transición se revierte igual que si hubiera fallado el manejador.
+   */
+  observe(entityType: string, phase: DocumentLifecyclePhase, callback: DocumentLifecycleCallback): void {
+    const key = `${entityType}:${phase}`;
+    this.observers.set(key, [...(this.observers.get(key) ?? []), callback]);
   }
 
   /** Proceso de negocio que usa el formato (declarado en código), o undefined si es un formato libre. */
@@ -196,6 +207,9 @@ export class DocumentLifecycleRegistry {
     };
     try {
       await callback(manager, event);
+      for (const observer of this.observers.get(`${handler.entityType}:${phase}`) ?? []) {
+        await observer(manager, event);
+      }
     } catch (error) {
       throw new DocumentLifecycleError(handler.entityType, phase, error);
     }

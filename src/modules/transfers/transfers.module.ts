@@ -13,6 +13,6 @@ import { TransfersController } from './transfers.controller.js';
   imports: [AuthModule, AssetsModule, DocumentsModule, RolesModule],
   controllers: [TransfersController],
   providers: [TransfersService, TransferReasonsService, TransferSignersService, TransferActLifecycle],
-  exports: [TransfersService],
+  exports: [TransfersService, TransferSignersService],
 })
 export class TransfersModule {}
