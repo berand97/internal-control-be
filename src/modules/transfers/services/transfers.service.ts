@@ -386,7 +386,14 @@ export class TransfersService {
    * funciones (nadie en dos firmas, salvo sustituto de Control Interno) la exige el motor.
    */
   async generate(id: string, dto: GenerateTransferActDto, actor: AuthenticatedUser): Promise<TransferDetailDto> {
-    await this.dataSource.transaction(async (manager) => {
+    await this.dataSource.transaction((manager) => this.generateWithin(manager, id, dto, actor.id));
+    return this.detail(id);
+  }
+
+  /** Genera el acta dentro de la transacción del llamador (generate o la solicitud de activos). */
+  async generateWithin(manager: EntityManager, id: string, dto: GenerateTransferActDto, actorId: string): Promise<void> {
+    const actor = { id: actorId };
+    {
       const transfer = await this.lock(manager, id);
       if (!canTransferTransition(transfer.status, 'PENDING_SIGNATURES')) {
         throw new ApiException(ErrorCode.TransferInvalidStateTransition, `El traslado está ${transfer.status}: su acta ya se generó o está cerrado`);
@@ -419,8 +426,7 @@ export class TransfersService {
         responsiblePersonId: payload.responsiblePersonId,
         ...(payload.signerSubstitutions ? { signerSubstitutions: payload.signerSubstitutions } : {}),
       });
-    });
-    return this.detail(id);
+    }
   }
 
   private async actPayload(
