@@ -18,7 +18,7 @@ import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js'
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { GLOBAL_COST_CENTER_SCOPE } from '../../src/modules/roles/services/cost-center-scope.js';
 import { conform, type Schema } from './openapi-conform.js';
-import { scalar, useSharedStorage } from './helpers.js';
+import { createPermissionRole, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 
 const FORMAT = 'OCI-17-89';
@@ -197,7 +197,9 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     reasonId = await scalar<string>(dataSource, `SELECT id FROM asset_transfer_reason WHERE code = 'REUBICACION'`);
 
     director = await actor('Directora', { mfa: true, role: 'INTERNAL_CONTROL_DIRECTOR' });
+    // Firma por Control Interno por tener act:sign_control:global en un rol cualquiera, no por llamarse AUDITOR.
     auditor = await actor('Auditora', { mfa: true, role: 'AUDITOR' });
+    await grant(auditor.userId, await createPermissionRole(dataSource, ['act:sign_control:global'], 'IT_FIRMA_CONTROL'));
     accountant = await actor('Contadora', { mfa: false });
     secondAccountant = await actor('Contador', { mfa: false });
     deliverer = await actor('Entregador', { mfa: false });
@@ -277,10 +279,20 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
       warnings: [],
       document: { generation: 'PENDING' },
     });
-    // Control Interno: quien no tiene rol de directora o auditor no firma ese turno.
+    // Control Interno: lo decide act:sign_control:global vigente, no el nombre del rol.
+    const plainAuditor = await actor('Auditor', { mfa: true, role: 'AUDITOR' });
+    const controlSigners = (await http().get('/api/v1/transfers/control-signers').set(auth(director)).expect(200)).body.data as Array<{
+      personId: string;
+    }>;
+    expect(controlSigners.map((item) => item.personId)).toEqual(expect.arrayContaining([director.personId, auditor.personId]));
+    expect(controlSigners.map((item) => item.personId)).not.toContain(plainAuditor.personId);
     const other = (await create([await asset()]).expect(201)).body.data;
-    const badControl = await generate(other.id, { controlSignerPersonId: deliverer.personId });
-    expect([badControl.status, badControl.body.error.code]).toEqual([400, 'TRANSFER_SIGNER_NOT_ELIGIBLE']);
+    for (const ineligible of [deliverer, plainAuditor]) {
+      const badControl = await generate(other.id, { controlSignerPersonId: ineligible.personId });
+      expect([badControl.status, badControl.body.error.code]).toEqual([400, 'TRANSFER_SIGNER_NOT_ELIGIBLE']);
+      expect(badControl.body.error.message).toContain('Firmar actas por Control Interno');
+    }
+    await revoke(plainAuditor.userId, 'AUDITOR');
     await http().post(`/api/v1/transfers/${other.id}/cancel`).set(auth(director)).send({ reason: 'Prueba terminada' }).expect(200);
     await http().post(`/api/v1/transfers/${created.id}/cancel`).set(auth(director)).send({ reason: 'Prueba terminada' }).expect(200);
   });
@@ -407,7 +419,7 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     expect(denied.status).toBe(403);
   });
 
-  it('separación de funciones: quien recibe no firma por Control Interno salvo sustituto con rol vigente, y queda impreso en el acta', async () => {
+  it('separación de funciones: quien recibe no firma por Control Interno salvo sustituto con el permiso vigente, y queda impreso en el acta', async () => {
     const assetId = await asset();
     const created = (await create([assetId], { ownerPersonId: auditor.personId }).expect(201)).body.data;
     const duplicated = await generate(created.id);

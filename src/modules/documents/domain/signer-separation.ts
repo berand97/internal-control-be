@@ -13,8 +13,9 @@ import { MFA_REQUIRED_ROLES } from './signing-channel.js';
  * (payload.signerSubstitutions[ROL] = { personId, reason }):
  * - solo se sustituyen turnos de Control Interno (SUBSTITUTABLE_ROLES); un conflicto entre otros roles (Entrega y
  *   Recibe, por ejemplo) no tiene sustituto: hay que cambiar el firmante;
- * - el sustituto tiene un rol vigente INTERNAL_CONTROL_DIRECTOR o AUDITOR (SUBSTITUTE_ROLE_CODES; lo comprueba el
- *   motor contra app_user.person_id + user_role vigente) y no firma ninguna otra parte del acta;
+ * - el sustituto tiene usuario activo con el permiso vigente act:sign_control:global («Firmar actas por Control
+ *   Interno», CONTROL_SIGNER_PERMISSION; lo comprueba el motor contra v_user_effective_permissions) y no firma ninguna
+ *   otra parte del acta. Decide el permiso, nunca el nombre del rol;
  * - la sustitución solo se acepta para resolver un conflicto real (el designado de ese turno ocupa otra firma);
  * - motivo obligatorio de 3 a 500 caracteres.
  * La sustitución queda impresa en el acta (firmantes[].sustituye, firmante.<rol>.sustitucion.*, tablas.sustituciones)
@@ -22,7 +23,11 @@ import { MFA_REQUIRED_ROLES } from './signing-channel.js';
  */
 export const SUBSTITUTABLE_ROLES: ReadonlyArray<string> = MFA_REQUIRED_ROLES;
 
-export const SUBSTITUTE_ROLE_CODES: ReadonlyArray<string> = ['INTERNAL_CONTROL_DIRECTOR', 'AUDITOR'];
+/**
+ * «Firmar actas por Control Interno» (migración 1767225940000): quién puede ser sustituto de un turno de Control
+ * Interno y quién firma el turno CONTROL_INTERNO del traslado. Exige MFA (auth/services/mfa-policy.ts).
+ */
+export const CONTROL_SIGNER_PERMISSION = 'act:sign_control:global';
 
 export const SUBSTITUTION_REASON_MIN = 3;
 export const SUBSTITUTION_REASON_MAX = 500;
@@ -107,8 +112,8 @@ export const conflictsOf = (
 const roleList = (specs: ReadonlyArray<SignerSpec>): string => specs.map((spec) => `${spec.label} (${spec.role})`).join(', ');
 
 /**
- * Aplica las sustituciones y exige la separación de funciones. No consulta la BD: que el sustituto tenga rol vigente
- * lo comprueba el motor (DocumentEngineService.assertSubstitutesEligible).
+ * Aplica las sustituciones y exige la separación de funciones. No consulta la BD: que el sustituto tenga el permiso
+ * vigente lo comprueba el motor (DocumentEngineService.assertSubstitutesEligible).
  * Errores: DOCUMENT_SIGNER_SUBSTITUTE_INVALID (sustitución mal formada, rol no sustituible, sin conflicto que
  * resolver, sustituto que ya firma otra parte) y DOCUMENT_SIGNER_DUPLICATED (queda una persona en dos firmas; los
  * details nombran los turnos y, si uno es de Control Interno, el campo signerSubstitutions.<ROL> donde va el sustituto).
@@ -167,7 +172,7 @@ export const resolveSigners = (
         ...(substitutable.length > 0
           ? substitutable.map((spec) => ({
               field: `signerSubstitutions.${spec.role}`,
-              message: `Indique un sustituto para ${spec.label} con rol vigente de Dirección de Control Interno o Auditor, y el motivo`,
+              message: `Indique un sustituto para ${spec.label} con el permiso «Firmar actas por Control Interno» vigente, y el motivo`,
             }))
           : [{ field: 'signers', message: `No hay sustituto posible entre ${roleList(taken)}: cambie el firmante` }]),
       ];

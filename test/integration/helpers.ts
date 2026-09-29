@@ -163,3 +163,26 @@ export const withGrantReason = <T extends { send(body: object): T }>(method: str
   GRANT_ROUTES.some(([verb, route]) => verb === method && route.test(path))
     ? pending.send({ reason: GRANT_REASON })
     : pending;
+
+/**
+ * Rol nuevo, como lo crearía el SUPER_ADMIN desde la interfaz: un código cualquiera y los permisos indicados. Sirve
+ * para probar que el comportamiento lo deciden los permisos y no el nombre del rol. Devuelve el código.
+ */
+export const createPermissionRole = async (
+  dataSource: DataSource,
+  permissionCodes: ReadonlyArray<string>,
+  prefix = 'IT_ROLE',
+): Promise<string> => {
+  const code = `${prefix}_${randomUUID().slice(0, 8).toUpperCase()}`;
+  const roleId = await scalar<string>(
+    dataSource,
+    `INSERT INTO role (code, name, hierarchy_level, superior_role_id)
+     VALUES ($1, $1, 2, (SELECT id FROM role WHERE code = 'SUPER_ADMIN')) RETURNING id`,
+    [code],
+  );
+  await dataSource.query(
+    `INSERT INTO role_permission (role_id, permission_id) SELECT $1, id FROM permission WHERE code = ANY($2::text[])`,
+    [roleId, [...permissionCodes]],
+  );
+  return code;
+};

@@ -34,7 +34,7 @@ import { DocumentLifecycleRegistry } from '../lifecycle/document-lifecycle.regis
 import {
   type ResolvedSigner,
   resolveSigners,
-  SUBSTITUTE_ROLE_CODES,
+  CONTROL_SIGNER_PERMISSION,
   type SignerSubstitution,
 } from '../domain/signer-separation.js';
 import { PDF_CONVERTER, type PdfConverter } from '../pdf/pdf-converter.js';
@@ -411,8 +411,9 @@ export class DocumentEngineService {
 
   /**
    * Firmantes del acta con la separación de funciones aplicada (domain/signer-separation.ts): nadie en dos firmas
-   * salvo sustituto de Control Interno con rol vigente. Lo usan enqueue (el proceso recibe el error al crear, no el
-   * outbox después) y generateWithin (autoridad: el rol del sustituto se vuelve a comprobar al generar).
+   * salvo sustituto de Control Interno con act:sign_control:global vigente. Lo usan enqueue (el proceso recibe el error
+   * al crear, no el outbox después) y generateWithin (autoridad: el permiso del sustituto se vuelve a comprobar al
+   * generar).
    */
   private async signersFor(
     manager: EntityManager,
@@ -428,26 +429,25 @@ export class DocumentEngineService {
     if (!actorId) {
       throw new ApiException(ErrorCode.DocumentSignerSubstituteInvalid, 'Una sustitución de firmante necesita un usuario que la haga');
     }
-    // Sustituto elegible: persona activa con usuario ACTIVE y un rol vigente (user_role sin revocar, dentro de
-    // valid_from / valid_until, rol no borrado) INTERNAL_CONTROL_DIRECTOR o AUDITOR, en cualquier alcance.
+    // Sustituto elegible: persona activa con usuario ACTIVE y el permiso vigente act:sign_control:global
+    // (v_user_effective_permissions: asignaciones sin revocar, dentro de su vigencia, roles no borrados, con herencia),
+    // en cualquier alcance. Decide el permiso, no el nombre del rol.
     const eligible = (await manager.query(
       `SELECT DISTINCT u.person_id FROM app_user u
        JOIN person p ON p.id = u.person_id AND p.is_active
-       JOIN user_role ur ON ur.user_id = u.id AND ur.revoked_at IS NULL AND ur.valid_from <= NOW()
-         AND (ur.valid_until IS NULL OR ur.valid_until > NOW())
-       JOIN role r ON r.id = ur.role_id AND r.deleted_at IS NULL
-       WHERE u.person_id = ANY($1::uuid[]) AND u.status = 'ACTIVE' AND r.code = ANY($2::text[])`,
-      [substitutes.map((signer) => signer.personId), SUBSTITUTE_ROLE_CODES],
+       JOIN v_user_effective_permissions v ON v.user_id = u.id AND v.permission_code = $2
+       WHERE u.person_id = ANY($1::uuid[]) AND u.status = 'ACTIVE'`,
+      [substitutes.map((signer) => signer.personId), CONTROL_SIGNER_PERMISSION],
     )) as Array<{ person_id: string }>;
     const allowed = new Set(eligible.map((row) => row.person_id));
     const rejected = substitutes.filter((signer) => !allowed.has(signer.personId ?? ''));
     if (rejected.length > 0) {
       throw new ApiException(
         ErrorCode.DocumentSignerSubstituteInvalid,
-        `El sustituto de ${rejected.map((signer) => signer.spec.label).join(', ')} no tiene usuario activo con rol vigente de Dirección de Control Interno o Auditor`,
+        `El sustituto de ${rejected.map((signer) => signer.spec.label).join(', ')} no tiene usuario activo con el permiso «Firmar actas por Control Interno» vigente`,
         rejected.map((signer) => ({
           field: `signerSubstitutions.${signer.spec.role}.personId`,
-          message: 'Sin rol vigente INTERNAL_CONTROL_DIRECTOR o AUDITOR',
+          message: `Sin el permiso vigente ${CONTROL_SIGNER_PERMISSION}`,
         })),
       );
     }

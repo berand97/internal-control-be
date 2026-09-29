@@ -1197,7 +1197,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE format_key = 'LOAN_RETURN'`)).toBe(0);
     });
   });
-  it('separación de funciones: quien recibe no firma por Control Interno salvo sustituto con rol vigente, impreso en el acta', async () => {
+  it('separación de funciones: quien recibe no firma por Control Interno salvo sustituto con el permiso vigente, impreso en el acta', async () => {
     const tag = randomUUID().slice(0, 6).toUpperCase();
     const assetId = await asset(`SOD-${tag}`, `EQUIPO SOD ${tag}`);
     const id = await requestLoan([assetId], addDays(bogotaDate(new Date()), 30));

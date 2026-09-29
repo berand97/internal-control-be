@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
-import { CONTROL_SIGNER_ROLE_CODES, TRANSFER_SIGN_ACCOUNTING } from '../domain/transfer.js';
+import { CONTROL_SIGNER_PERMISSION, TRANSFER_SIGN_ACCOUNTING } from '../domain/transfer.js';
 import type { TransferSignerCandidateDto, TransferWarningDto } from '../dto/transfer.responses.js';
 
 export type TransferSignerKind = 'CONTROL' | 'ACCOUNTING';
@@ -17,13 +17,19 @@ const LABEL: Record<TransferSignerKind, string> = {
   ACCOUNTING: 'Contabilidad',
 };
 
+const PERMISSION: Record<TransferSignerKind, string> = {
+  CONTROL: CONTROL_SIGNER_PERMISSION,
+  ACCOUNTING: TRANSFER_SIGN_ACCOUNTING,
+};
+
 /**
  * Quién puede firmar los turnos del OCI-17-89 que no nombra el traslado (decisión del desarrollador):
  * - CONTABILIDAD: usuario ACTIVE, persona activa, con transfer:sign_accounting:global vigente
  *   (v_user_effective_permissions: asignaciones sin revocar, dentro de su vigencia, con herencia de roles). Lo da el
  *   rol CONTABILIDAD (migración 1767225920000), que el SUPER_ADMIN otorga.
- * - CONTROL_INTERNO: usuario ACTIVE, persona activa, con rol vigente INTERNAL_CONTROL_DIRECTOR o AUDITOR (mismo
- *   criterio que el sustituto de Control Interno del motor).
+ * - CONTROL_INTERNO: usuario ACTIVE, persona activa, con act:sign_control:global vigente («Firmar actas por Control
+ *   Interno», migración 1767225940000; mismo criterio que el sustituto de Control Interno del motor). Lo da de base
+ *   INTERNAL_CONTROL_DIRECTOR; el SUPER_ADMIN puede otorgarlo a cualquier rol. Nunca se decide por nombre de rol.
  * Al generar: una sola persona elegible → se toma sola; varias → el cliente dice cuál (debe estar entre ellas);
  * ninguna → TRANSFER_NO_ACCOUNTING_SIGNER / TRANSFER_NO_CONTROL_SIGNER.
  */
@@ -32,28 +38,15 @@ export class TransferSignersService {
   constructor(private readonly dataSource: DataSource) {}
 
   async candidates(kind: TransferSignerKind, manager: EntityManager = this.dataSource.manager): Promise<TransferSignerCandidateDto[]> {
-    const rows =
-      kind === 'ACCOUNTING'
-        ? await manager.query(
-            `SELECT DISTINCT p.id AS "personId", trim(p.first_name || ' ' || p.last_name) AS name
-             FROM v_user_effective_permissions v
-             JOIN app_user u ON u.id = v.user_id AND u.status = 'ACTIVE'
-             JOIN person p ON p.id = u.person_id AND p.is_active
-             WHERE v.permission_code = $1
-             ORDER BY name, "personId"`,
-            [TRANSFER_SIGN_ACCOUNTING],
-          )
-        : await manager.query(
-            `SELECT DISTINCT p.id AS "personId", trim(p.first_name || ' ' || p.last_name) AS name
-             FROM app_user u
-             JOIN person p ON p.id = u.person_id AND p.is_active
-             JOIN user_role ur ON ur.user_id = u.id AND ur.revoked_at IS NULL AND ur.valid_from <= NOW()
-               AND (ur.valid_until IS NULL OR ur.valid_until > NOW())
-             JOIN role r ON r.id = ur.role_id AND r.deleted_at IS NULL
-             WHERE u.status = 'ACTIVE' AND r.code = ANY($1::text[])
-             ORDER BY name, "personId"`,
-            [CONTROL_SIGNER_ROLE_CODES],
-          );
+    const rows = await manager.query(
+      `SELECT DISTINCT p.id AS "personId", trim(p.first_name || ' ' || p.last_name) AS name
+       FROM v_user_effective_permissions v
+       JOIN app_user u ON u.id = v.user_id AND u.status = 'ACTIVE'
+       JOIN person p ON p.id = u.person_id AND p.is_active
+       WHERE v.permission_code = $1
+       ORDER BY name, "personId"`,
+      [PERMISSION[kind]],
+    );
     return rows as TransferSignerCandidateDto[];
   }
 
@@ -69,7 +62,7 @@ export class TransferSignersService {
           ErrorCode.TransferSignerNotEligible,
           kind === 'ACCOUNTING'
             ? 'La persona indicada no tiene el rol de Contabilidad (transfer:sign_accounting:global) vigente'
-            : 'La persona indicada no tiene rol vigente de Dirección de Control Interno o Auditor',
+            : 'La persona indicada no tiene el permiso «Firmar actas por Control Interno» (act:sign_control:global) vigente',
           [{ field: FIELD[kind], message: `No puede firmar por ${LABEL[kind]}` }],
         );
       }
@@ -104,7 +97,7 @@ export class TransferSignersService {
               {
                 code: 'NO_CONTROL_SIGNER' as const,
                 message:
-                  'No hay ningún usuario con rol de Dirección de Control Interno o Auditor que firme por Control Interno: el acta no se podrá generar. Pídele al administrador que lo asigne',
+                  'No hay ningún usuario con el permiso «Firmar actas por Control Interno»: el acta no se podrá generar. Pídele al administrador que lo otorgue',
               },
             ]),
         ...(accounting

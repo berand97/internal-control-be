@@ -768,7 +768,7 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     const denied = await http().get('/api/v1/persons').set(auth(outsider)).expect(403);
     expect(denied.body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
   });
-  it('separación de funciones: quien recibe no audita salvo sustituto de Control Interno con rol vigente, impreso en el acta', async () => {
+  it('separación de funciones: quien recibe no audita salvo sustituto de Control Interno con el permiso vigente, impreso en el acta', async () => {
     const assetId = await asset();
     const duplicated = await create([assetId], { auditorPersonId: receiver.personId });
     expect([duplicated.status, duplicated.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);

@@ -21,7 +21,7 @@ export const ApiSignerSubstitutions = () =>
       description:
         `Separación de funciones: si la persona designada para un turno de Control Interno (${SUBSTITUTABLE_ROLES.join(', ')}) ` +
         'ocupa otra firma del acta, el acta se rechaza (409 DOCUMENT_SIGNER_DUPLICATED) salvo que aquí venga su sustituto: ' +
-        'rol → { personId, reason }. El sustituto necesita usuario activo con rol vigente INTERNAL_CONTROL_DIRECTOR o AUDITOR ' +
+        'rol → { personId, reason }. El sustituto necesita usuario activo con el permiso vigente act:sign_control:global (Firmar actas por Control Interno) ' +
         'y no puede firmar otra parte del acta (400 DOCUMENT_SIGNER_SUBSTITUTE_INVALID). La sustitución queda impresa en el acta.',
       additionalProperties: {
         type: 'object',

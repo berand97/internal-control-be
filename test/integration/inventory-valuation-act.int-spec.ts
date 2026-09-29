@@ -700,7 +700,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       signerSubstitutions: { AUDITA: { personId: withoutRole.personId, reason: 'El responsable aprobó la conciliación' } },
     });
     expect([invalid.status, invalid.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_SUBSTITUTE_INVALID']);
-    expect(invalid.body.error.message).toContain('rol vigente');
+    expect(invalid.body.error.message).toContain('Firmar actas por Control Interno');
     // Nada cambió: el acta sigue sin encolar, con el motivo de la aprobación.
     expect((await detail(id)).act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
     const enqueued = await post(director, `/${id}/act/enqueue`, {

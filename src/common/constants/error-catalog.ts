@@ -708,7 +708,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     httpStatus: 400,
     action: 'CANCEL',
     message:
-      'El sustituto no es válido: solo se sustituye un turno de Control Interno, por una persona con rol vigente de Dirección de Control Interno o Auditor que no firme otra parte del acta',
+      'El sustituto no es válido: solo se sustituye un turno de Control Interno, por una persona con usuario activo y el permiso «Firmar actas por Control Interno» vigente que no firme otra parte del acta',
   },
   [ErrorCode.TransferSameCostCenter]: {
     httpStatus: 400,
@@ -755,7 +755,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     httpStatus: 409,
     action: 'CONTACT_SUPPORT',
     message:
-      'No hay ningún usuario activo con rol vigente de Dirección de Control Interno o Auditor que firme por Control Interno. Pídele al administrador que lo asigne',
+      'No hay ningún usuario activo con el permiso «Firmar actas por Control Interno» (act:sign_control:global). Pídele al administrador que lo otorgue',
   },
   [ErrorCode.TransferSignerNotEligible]: {
     httpStatus: 400,

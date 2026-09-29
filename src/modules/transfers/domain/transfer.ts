@@ -45,8 +45,11 @@ export const TRANSFER_MANAGE = 'asset:update:global';
 export const ASSET_READ_GLOBAL = 'asset:read:global';
 export const ASSET_READ_SCOPED = 'asset:read:org_unit';
 
-/** Quién puede firmar el turno CONTROL_INTERNO del traslado: mismo criterio que el sustituto de Control Interno. */
-export const CONTROL_SIGNER_ROLE_CODES: ReadonlyArray<string> = ['INTERNAL_CONTROL_DIRECTOR', 'AUDITOR'];
+/**
+ * Quién puede firmar el turno CONTROL_INTERNO del traslado: quien tenga act:sign_control:global vigente, el mismo
+ * permiso que exige el sustituto de Control Interno (documents/domain/signer-separation.ts).
+ */
+export { CONTROL_SIGNER_PERMISSION } from '../../documents/domain/signer-separation.js';
 
 /** Tope técnico de activos por acta (tamaño del documento); no es regla de negocio. */
 export const MAX_TRANSFER_ASSETS = 500;

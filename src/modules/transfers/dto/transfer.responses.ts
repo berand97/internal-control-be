@@ -249,7 +249,7 @@ export class TransferDetailDto {
 
   @ApiProperty({
     description:
-      'Hay al menos un usuario activo con rol vigente INTERNAL_CONTROL_DIRECTOR o AUDITOR que puede firmar por Control Interno',
+      'Hay al menos un usuario activo con act:sign_control:global vigente (Firmar actas por Control Interno)',
   })
   readonly controlSignerAvailable!: boolean;
 

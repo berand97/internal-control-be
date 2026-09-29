@@ -102,7 +102,7 @@ export class TransfersController {
   @ApiOperation({
     summary: 'Quiénes pueden firmar por Control Interno',
     description:
-      'Usuarios activos con rol vigente INTERNAL_CONTROL_DIRECTOR o AUDITOR (también son los sustitutos posibles). Vacío: TRANSFER_NO_CONTROL_SIGNER al generar.',
+      'Usuarios activos con el permiso vigente act:sign_control:global, «Firmar actas por Control Interno» (también son los sustitutos posibles). Vacío: TRANSFER_NO_CONTROL_SIGNER al generar.',
   })
   @ApiOkResponse({ schema: envelopedArraySchema(TransferSignerCandidateDto) })
   controlSigners() {
