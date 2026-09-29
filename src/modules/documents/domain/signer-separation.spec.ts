@@ -90,6 +90,23 @@ describe('resolveSigners (separación de funciones)', () => {
     ).toThrow(expect.objectContaining({ code: 'DOCUMENT_SIGNER_DUPLICATED', message: expect.stringContaining('Entrega (ENTREGA), Recibe (RECIBE)') }));
   });
 
+  it('designado de Control Interno sin el permiso: se acepta un sustituto aunque no ocupe otra firma', () => {
+    const signers = { ENTREGA: A, CONTROL_INTERNO: C, CONTABILIDAD: D };
+    const resolved = resolveSigners(
+      TRANSFER,
+      payload(signers, B, { CONTROL_INTERNO: { personId: S, reason: 'Aprobó sin el permiso' } }),
+      new Set(['CONTROL_INTERNO']),
+    );
+    expect(resolved.find((item) => item.spec.role === 'CONTROL_INTERNO')).toMatchObject({
+      personId: S,
+      substitution: { replacedPersonId: C, reason: 'Aprobó sin el permiso' },
+    });
+    // Un rol que no es de Control Interno sigue sin sustituto, aunque se marque como no elegible.
+    expect(() =>
+      resolveSigners(TRANSFER, payload(signers, B, { CONTABILIDAD: { personId: S, reason: 'Motivo' } }), new Set(['CONTABILIDAD'])),
+    ).toThrow(expect.objectContaining({ code: 'DOCUMENT_SIGNER_SUBSTITUTE_INVALID' }));
+  });
+
   it('normalizeSubstitutions: vacío sin sustituciones; rechaza lo que no es un mapa', () => {
     expect(normalizeSubstitutions(undefined)).toEqual({});
     expect(() => normalizeSubstitutions([])).toThrow(expect.objectContaining({ code: 'DOCUMENT_SIGNER_SUBSTITUTE_INVALID' }));

@@ -16,12 +16,25 @@ import { MFA_REQUIRED_ROLES } from './signing-channel.js';
  * - el sustituto tiene usuario activo con el permiso vigente act:sign_control:global («Firmar actas por Control
  *   Interno», CONTROL_SIGNER_PERMISSION; lo comprueba el motor contra v_user_effective_permissions) y no firma ninguna
  *   otra parte del acta. Decide el permiso, nunca el nombre del rol;
- * - la sustitución solo se acepta para resolver un conflicto real (el designado de ese turno ocupa otra firma);
+ * - la sustitución solo se acepta para resolver un problema real del turno: el designado ocupa otra firma, o no tiene
+ *   el permiso act:sign_control:global vigente (p. ej. quien aprobó la conciliación de una toma física, AUDITA);
  * - motivo obligatorio de 3 a 500 caracteres.
  * La sustitución queda impresa en el acta (firmantes[].sustituye, firmante.<rol>.sustitucion.*, tablas.sustituciones)
  * y registrada en document_signature_reassignment con source = 'AT_ISSUE'.
  */
 export const SUBSTITUTABLE_ROLES: ReadonlyArray<string> = MFA_REQUIRED_ROLES;
+
+/**
+ * Regla del firmante de Control Interno (decisión del desarrollador: «una regla que se aplica en un camino y no en
+ * otro no es una regla»). Todo turno cuyo rol es de Control Interno (AUDITA, CONTROL_INTERNO) lo ocupa una persona
+ * activa con usuario ACTIVE y el permiso vigente act:sign_control:global, en todos los documentos y caminos: al emitir
+ * (DocumentEngineService.signersFor, que usan enqueue, generateWithin y assertSigners de cada proceso) y al reasignar
+ * (reassignSigner). Los demás turnos (RESPONSIBLE o REQUEST de otro rol) exigen persona activa con un camino de firma
+ * (domain/signing-channel.ts). Error: 400 DOCUMENT_SIGNER_NOT_ELIGIBLE con el rol del turno en details.
+ */
+export const CONTROL_SIGNER_ROLES: ReadonlyArray<string> = SUBSTITUTABLE_ROLES;
+
+export const requiresControlSigner = (role: string): boolean => CONTROL_SIGNER_ROLES.includes(role);
 
 /**
  * «Firmar actas por Control Interno» (migración 1767225940000): quién puede ser sustituto de un turno de Control
@@ -125,6 +138,8 @@ export const resolveSigners = (
     readonly signers?: Readonly<Record<string, string>>;
     readonly signerSubstitutions?: unknown;
   },
+  /** Turnos de Control Interno cuyo designado no tiene el permiso vigente (lo calcula el motor contra la BD). */
+  ineligibleRoles: ReadonlySet<string> = new Set(),
 ): ResolvedSigner[] => {
   const substitutions = normalizeSubstitutions(payload.signerSubstitutions);
   const designated = designatedSigners(specs, payload);
@@ -138,8 +153,11 @@ export const resolveSigners = (
     if (!SUBSTITUTABLE_ROLES.includes(role)) {
       invalid(field, `Solo se sustituyen turnos de Control Interno (${SUBSTITUTABLE_ROLES.join(', ')}); ${role} no`);
     }
-    if (!slot?.personId || !conflicted.has(slot.personId)) {
-      invalid(field, `El designado de ${role} no ocupa otra firma del acta: no hay conflicto que resolver con un sustituto`);
+    if (!slot?.personId || (!conflicted.has(slot.personId) && !ineligibleRoles.has(role))) {
+      invalid(
+        field,
+        `El designado de ${role} no ocupa otra firma del acta y tiene el permiso vigente: no hay nada que resolver con un sustituto`,
+      );
     }
     if (substitution.personId === slot?.personId) {
       invalid(`${field}.personId`, 'El sustituto es la misma persona designada');

@@ -710,6 +710,12 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     message:
       'El sustituto no es válido: solo se sustituye un turno de Control Interno, por una persona con usuario activo y el permiso «Firmar actas por Control Interno» vigente que no firme otra parte del acta',
   },
+  [ErrorCode.DocumentSignerNotEligible]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message:
+      'La persona no puede ocupar ese turno del acta: los turnos de Control Interno (AUDITA, CONTROL_INTERNO) exigen usuario activo con el permiso «Firmar actas por Control Interno» vigente',
+  },
   [ErrorCode.TransferSameCostCenter]: {
     httpStatus: 400,
     action: 'CANCEL',

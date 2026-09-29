@@ -35,6 +35,9 @@ import {
   type ResolvedSigner,
   resolveSigners,
   CONTROL_SIGNER_PERMISSION,
+  designatedSigners,
+  normalizeSubstitutions,
+  requiresControlSigner,
   type SignerSubstitution,
 } from '../domain/signer-separation.js';
 import { PDF_CONVERTER, type PdfConverter } from '../pdf/pdf-converter.js';
@@ -98,8 +101,9 @@ export interface DocumentRequestPayload {
    */
   readonly tables?: Record<string, ReadonlyArray<Record<string, string>>>;
   /**
-   * Sustitutos de turnos de Control Interno cuando el designado ocupa otra firma del acta (separación de funciones,
-   * domain/signer-separation.ts): rol → { personId, reason }. Solo AUDITA y CONTROL_INTERNO.
+   * Sustitutos de turnos de Control Interno cuando el designado ocupa otra firma del acta o no tiene el permiso
+   * act:sign_control:global vigente (domain/signer-separation.ts): rol → { personId, reason }. Solo AUDITA y
+   * CONTROL_INTERNO.
    */
   readonly signerSubstitutions?: Record<string, SignerSubstitution>;
 }
@@ -410,10 +414,11 @@ export class DocumentEngineService {
   }
 
   /**
-   * Firmantes del acta con la separación de funciones aplicada (domain/signer-separation.ts): nadie en dos firmas
-   * salvo sustituto de Control Interno con act:sign_control:global vigente. Lo usan enqueue (el proceso recibe el error
-   * al crear, no el outbox después) y generateWithin (autoridad: el permiso del sustituto se vuelve a comprobar al
-   * generar).
+   * Firmantes del acta con la regla del firmante de Control Interno y la separación de funciones aplicadas
+   * (domain/signer-separation.ts): todo turno AUDITA/CONTROL_INTERNO lo ocupa alguien con act:sign_control:global
+   * vigente, y nadie ocupa dos firmas salvo sustituto de Control Interno. Lo usan assertSigners (cada proceso, antes de
+   * tocar nada), enqueue (el proceso recibe el error al crear, no el outbox después) y generateWithin (autoridad: el
+   * permiso se vuelve a comprobar al generar).
    */
   private async signersFor(
     manager: EntityManager,
@@ -421,25 +426,33 @@ export class DocumentEngineService {
     payload: DocumentRequestPayload,
     actorId: string | null,
   ): Promise<ResolvedSigner[]> {
-    const resolved = resolveSigners(format.signers, payload);
+    const designated = designatedSigners(format.signers, payload).filter(
+      (signer): signer is { spec: ResolvedSigner['spec']; personId: string } =>
+        requiresControlSigner(signer.spec.role) && Boolean(signer.personId),
+    );
+    const substituteIds = Object.values(normalizeSubstitutions(payload.signerSubstitutions)).map((item) => item.personId);
+    const allowed = await this.controlSignersAmong(manager, [...designated.map((signer) => signer.personId), ...substituteIds]);
+    const ineligible = designated.filter((signer) => !allowed.has(signer.personId));
+    const resolved = resolveSigners(format.signers, payload, new Set(ineligible.map((signer) => signer.spec.role)));
     const substitutes = resolved.filter((signer) => signer.substitution);
+    // Designado de Control Interno sin el permiso y sin sustituto: el turno no se puede emitir así.
+    const unresolved = ineligible.filter((signer) => !substitutes.some((item) => item.spec.role === signer.spec.role));
+    if (unresolved.length > 0) {
+      throw new ApiException(
+        ErrorCode.DocumentSignerNotEligible,
+        `La persona designada para ${unresolved.map((signer) => `${signer.spec.label} (${signer.spec.role})`).join(', ')} no tiene usuario activo con el permiso «Firmar actas por Control Interno» vigente: elija a quien lo tenga o indique un sustituto con motivo`,
+        unresolved.map((signer) => ({
+          field: `signers.${signer.spec.role}`,
+          message: `El turno ${signer.spec.role} exige el permiso vigente ${CONTROL_SIGNER_PERMISSION}`,
+        })),
+      );
+    }
     if (substitutes.length === 0) {
       return resolved;
     }
     if (!actorId) {
       throw new ApiException(ErrorCode.DocumentSignerSubstituteInvalid, 'Una sustitución de firmante necesita un usuario que la haga');
     }
-    // Sustituto elegible: persona activa con usuario ACTIVE y el permiso vigente act:sign_control:global
-    // (v_user_effective_permissions: asignaciones sin revocar, dentro de su vigencia, roles no borrados, con herencia),
-    // en cualquier alcance. Decide el permiso, no el nombre del rol.
-    const eligible = (await manager.query(
-      `SELECT DISTINCT u.person_id FROM app_user u
-       JOIN person p ON p.id = u.person_id AND p.is_active
-       JOIN v_user_effective_permissions v ON v.user_id = u.id AND v.permission_code = $2
-       WHERE u.person_id = ANY($1::uuid[]) AND u.status = 'ACTIVE'`,
-      [substitutes.map((signer) => signer.personId), CONTROL_SIGNER_PERMISSION],
-    )) as Array<{ person_id: string }>;
-    const allowed = new Set(eligible.map((row) => row.person_id));
     const rejected = substitutes.filter((signer) => !allowed.has(signer.personId ?? ''));
     if (rejected.length > 0) {
       throw new ApiException(
@@ -452,6 +465,41 @@ export class DocumentEngineService {
       );
     }
     return resolved;
+  }
+
+  /**
+   * De las personas dadas, las que hoy pueden firmar por Control Interno: persona activa con usuario ACTIVE y el
+   * permiso vigente act:sign_control:global (v_user_effective_permissions: asignaciones sin revocar, dentro de su
+   * vigencia, roles no borrados, con herencia), en cualquier alcance. Mismo criterio que ControlSignersService.holders.
+   * Decide el permiso, no el nombre del rol.
+   */
+  private async controlSignersAmong(manager: EntityManager, personIds: ReadonlyArray<string>): Promise<Set<string>> {
+    const ids = [...new Set(personIds)];
+    if (ids.length === 0) {
+      return new Set();
+    }
+    const rows = (await manager.query(
+      `SELECT DISTINCT u.person_id FROM app_user u
+       JOIN person p ON p.id = u.person_id AND p.is_active
+       JOIN v_user_effective_permissions v ON v.user_id = u.id AND v.permission_code = $2
+       WHERE u.person_id = ANY($1::uuid[]) AND u.status = 'ACTIVE'`,
+      [ids, CONTROL_SIGNER_PERMISSION],
+    )) as Array<{ person_id: string }>;
+    return new Set(rows.map((row) => row.person_id));
+  }
+
+  /**
+   * Validación temprana de los firmantes de un proceso (préstamo, entrega, …) ANTES de tocar activos o estados:
+   * misma regla que enqueue, para que el error claro (DOCUMENT_SIGNER_NOT_ELIGIBLE, DOCUMENT_SIGNER_DUPLICATED,
+   * DOCUMENT_SIGNER_SUBSTITUTE_INVALID) salga antes de encolar. enqueue lo vuelve a comprobar.
+   */
+  async assertSigners(
+    manager: EntityManager,
+    payload: Pick<DocumentRequestPayload, 'formatKey' | 'responsiblePersonId' | 'signers' | 'signerSubstitutions'>,
+    actorId: string | null,
+  ): Promise<void> {
+    const format = await this.catalog.current(payload.formatKey, manager);
+    await this.signersFor(manager, format, payload, actorId);
   }
 
   async enqueue(manager: EntityManager, payload: DocumentRequestPayload, requestedBy: string | null): Promise<string> {
@@ -1201,6 +1249,14 @@ export class DocumentEngineService {
             [{ field: 'personId', message: channel.blockedBy }],
           );
         }
+        // Regla del firmante de Control Interno (domain/signer-separation.ts): la misma que al emitir.
+        if (requiresControlSigner(targetSlot.role) && !(await this.controlSignersAmong(manager, [personId])).has(personId)) {
+          throw new ApiException(
+            ErrorCode.DocumentSignerNotEligible,
+            `El turno ${targetSlot.role} es de Control Interno: la persona debe tener usuario activo con el permiso «Firmar actas por Control Interno» vigente`,
+            [{ field: 'personId', message: `El turno ${targetSlot.role} exige el permiso vigente ${CONTROL_SIGNER_PERMISSION}` }],
+          );
+        }
       }
       const [locked] = (await manager.query(
         `SELECT id, number, period, format_key, status, data, template_version_id, pdf_hash, signature_reference,
@@ -1246,6 +1302,13 @@ export class DocumentEngineService {
           [
             { field: 'personId', message: `Ya firma como ${taken.map((item) => item.role).join(', ')}` },
             ...taken.map((item) => ({ field: `signers.${item.role}`, message: `Misma persona que ${label(slot.role)} (${slot.role})` })),
+            // Conflicto con un turno de Control Interno: se resuelve reasignando ese turno a un sustituto con el permiso.
+            ...[slot, ...taken]
+              .filter((item) => requiresControlSigner(item.role))
+              .map((item) => ({
+                field: `signers.${item.role}`,
+                message: `Reasigne el turno ${item.role} a otra persona con el permiso vigente ${CONTROL_SIGNER_PERMISSION}, con el motivo`,
+              })),
           ],
         );
       }

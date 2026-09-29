@@ -377,7 +377,10 @@ export class DocumentsController {
   @ApiOperation({
     summary: 'Reasignar un turno de firma pendiente',
     description:
-      'Solo quien administra el proceso (permiso de generación del formato). Queda como evidencia: quién, cuándo, desde dónde, de quién a quién y por qué.',
+      'Solo quien administra el proceso (permiso de generación del formato). Queda como evidencia: quién, cuándo, desde dónde, de quién a quién y por qué. ' +
+      'La persona nueva debe poder ocupar el turno: activa y con un camino de firma (409 SIGNATURE_SIGNER_CANNOT_SIGN); en un turno de Control Interno ' +
+      '(AUDITA, CONTROL_INTERNO), además, usuario activo con el permiso vigente act:sign_control:global (400 DOCUMENT_SIGNER_NOT_ELIGIBLE). ' +
+      'Si queda en dos firmas del acta: 409 DOCUMENT_SIGNER_DUPLICATED (si una es de Control Interno, reasigne ese turno a un sustituto con el permiso).',
   })
   @ApiOkResponse({ schema: envelopedSchema(DocumentDetailResponseDto) })
   reassign(

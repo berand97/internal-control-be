@@ -421,8 +421,9 @@ export class InventoriesController {
     description:
       'MISPLACED actualiza la ubicación; MISSING marca LOST; FOUND y MISPLACED con condición distinta actualizan la ' +
       'condición. NOT_VERIFIED y los sobrantes (incluidos los de activos LOST) no cambian nada. En la misma ' +
-      'transacción encola el acta OCI-21-37; si el formato no está listo (o falla armarla), la ' +
-      'conciliación sigue y el acta queda NOT_ENQUEUED con su motivo (act en la respuesta).',
+      'transacción encola el acta OCI-21-37; si el formato no está listo (o falla armarla, p. ej. quien aprueba firma ' +
+      'AUDITA y no tiene el permiso act:sign_control:global), la conciliación sigue y el acta queda NOT_ENQUEUED con ' +
+      'su motivo (act en la respuesta).',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   approveReconcile(
@@ -484,7 +485,10 @@ export class InventoriesController {
       'Si el responsable de la toma es quien aprobó la conciliación, la separación de funciones exige un sustituto para ' +
       'AUDITA (signerSubstitutions); sin él responde 409 DOCUMENT_SIGNER_DUPLICATED (details signers.<ROL> y ' +
       'signerSubstitutions.<ROL>), y con un sustituto inválido 400 DOCUMENT_SIGNER_SUBSTITUTE_INVALID, igual que entregas, ' +
-      'préstamos y traslados; la toma no cambia. Al aprobar la conciliación el acta queda NOT_ENQUEUED/ENQUEUE_FAILED con ese motivo.',
+      'préstamos y traslados; la toma no cambia. AUDITA es un turno de Control Interno: si quien aprobó la conciliación no ' +
+      'tiene usuario activo con el permiso vigente act:sign_control:global, 400 DOCUMENT_SIGNER_NOT_ELIGIBLE (details ' +
+      'signers.AUDITA) hasta que lo tenga o venga signerSubstitutions.AUDITA con alguien que sí lo tenga. Al aprobar la ' +
+      'conciliación el acta queda NOT_ENQUEUED/ENQUEUE_FAILED con ese motivo (la conciliación no se rompe).',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryActStateDto) })
   enqueueAct(

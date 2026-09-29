@@ -142,6 +142,7 @@ export enum ErrorCode {
   DocumentFormatSequenceStarted = 'DOCUMENT_FORMAT_SEQUENCE_STARTED',
   DocumentSignerDuplicated = 'DOCUMENT_SIGNER_DUPLICATED',
   DocumentSignerSubstituteInvalid = 'DOCUMENT_SIGNER_SUBSTITUTE_INVALID',
+  DocumentSignerNotEligible = 'DOCUMENT_SIGNER_NOT_ELIGIBLE',
   TransferSameCostCenter = 'TRANSFER_SAME_COST_CENTER',
   TransferMixedSourceCostCenter = 'TRANSFER_MIXED_SOURCE_COST_CENTER',
   TransferAssetInOpenTransfer = 'TRANSFER_ASSET_IN_OPEN_TRANSFER',

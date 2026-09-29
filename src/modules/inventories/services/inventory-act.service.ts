@@ -35,7 +35,11 @@ import { InventoryValuationService } from './inventory-valuation.service.js';
 const AUTOMATIC_GENERATION_ATTEMPTS = 5;
 
 /** Errores de separación de funciones que el encolado manual devuelve tal cual. */
-const SIGNER_ERRORS: ReadonlyArray<ErrorCode> = [ErrorCode.DocumentSignerDuplicated, ErrorCode.DocumentSignerSubstituteInvalid];
+const SIGNER_ERRORS: ReadonlyArray<ErrorCode> = [
+  ErrorCode.DocumentSignerDuplicated,
+  ErrorCode.DocumentSignerSubstituteInvalid,
+  ErrorCode.DocumentSignerNotEligible,
+];
 
 type BlockedReason = Extract<
   InventoryActReason,
