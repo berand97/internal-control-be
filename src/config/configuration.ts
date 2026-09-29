@@ -7,6 +7,7 @@ import {
 import { DEFAULT_THROTTLE_USER_LIMIT } from '../common/throttling/throttle-limits.js';
 import { guardDatabaseUrl } from './database-host-guard.js';
 import { dedicatedSecretWarnings, resolveDedicatedSecrets } from './dedicated-secrets.js';
+import { type EventsConfig, resolveEventsConfig } from './events-config.js';
 import { resolveGotenbergUrl } from './gotenberg-url.js';
 import { resolveSignatureVerifyUrl } from './signature-verify-url.js';
 import { normalizePublicAssetsBaseUrl, normalizePublicAssetsBucket } from '../shared/storage/public-assets.js';
@@ -115,6 +116,8 @@ export interface AppConfig {
   readonly documents: DocumentsConfig;
   readonly emailBrand: EmailBrandConfig;
   readonly inventories: InventoriesConfig;
+  /** Canal de eventos en tiempo real (src/modules/events). */
+  readonly events: EventsConfig;
 }
 
 /** Programación de tomas físicas. */
@@ -423,6 +426,7 @@ const configuration = (): AppConfig => {
     inventories: {
       weeklyConcentrationThreshold: readOptionalPositiveInteger('INVENTORY_WEEKLY_CONCENTRATION_THRESHOLD'),
     },
+    events: resolveEventsConfig(process.env),
   };
 };
 
