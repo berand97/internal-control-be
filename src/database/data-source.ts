@@ -105,6 +105,7 @@ import { RevokeSuperAdminInventoryCatalog1767225895000 } from './migrations/1767
 import { RoleGrantsAuditPermission1767225900000 } from './migrations/1767225900000-role-grants-audit-permission.js';
 import { RoleGrantsHistoryMenu1767225910000 } from './migrations/1767225910000-role-grants-history-menu.js';
 import { AssetTransfersAndSignerSeparation1767225920000 } from './migrations/1767225920000-asset-transfers-and-signer-separation.js';
+import { AssetRequests1767225930000 } from './migrations/1767225930000-asset-requests.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -221,8 +222,8 @@ const dataSource = new DataSource({
     LoanSignaturesAndHandoverCancel1767225690000,
     ImportTemplates1767225710000,
     ImportJobsAndMailOutbox1767225720000,
-    AdministrableDocumentFormats1767225730000,
-    NavigationIconsAndNewItems1767225740000,
+    AdministrableDocumentFormats1767225730000,
+    NavigationIconsAndNewItems1767225740000,
     RbacInheritanceHardening1767225750000,
     AuthAttemptLockout1767225751000,
     PersonEmailSingleLine1767225760000,
@@ -242,6 +243,7 @@ const dataSource = new DataSource({
     RoleGrantsAuditPermission1767225900000,
     RoleGrantsHistoryMenu1767225910000,
     AssetTransfersAndSignerSeparation1767225920000,
+    AssetRequests1767225930000,
   ],
 });
 
