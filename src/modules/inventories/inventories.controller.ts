@@ -482,7 +482,9 @@ export class InventoriesController {
       'conciliación (AUDITA). Si el formato sigue sin código SGC o firmantes: 409 DOCUMENT_FORMAT_NOT_READY; otro ' +
       'error al armar el acta: 406 INVALID_STATE. En ambos, error.details[0] = { field: reason, message: <reason> }. ' +
       'Si el responsable de la toma es quien aprobó la conciliación, la separación de funciones exige un sustituto para ' +
-      'AUDITA (signerSubstitutions); sin él, la razón es ENQUEUE_FAILED con el mensaje DOCUMENT_SIGNER_DUPLICATED.',
+      'AUDITA (signerSubstitutions); sin él responde 409 DOCUMENT_SIGNER_DUPLICATED (details signers.<ROL> y ' +
+      'signerSubstitutions.<ROL>), y con un sustituto inválido 400 DOCUMENT_SIGNER_SUBSTITUTE_INVALID, igual que entregas, ' +
+      'préstamos y traslados; la toma no cambia. Al aprobar la conciliación el acta queda NOT_ENQUEUED/ENQUEUE_FAILED con ese motivo.',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryActStateDto) })
   enqueueAct(
