@@ -107,6 +107,20 @@ export class PhysicalInventory {
   @Column({ name: 'act_blocked_at', type: 'timestamptz', nullable: true })
   actBlockedAt!: Date | null;
 
+  /**
+   * Jefe vigente del centro de la toma que la atendió en sitio (se indica al cerrar, migración 1767225980000). Firma
+   * el acta OCI-21-37 como ENCARGADO (turno RESPONSABLE). NULL: el centro no tenía jefe vigente (el acta no se puede
+   * emitir hasta indicarlo) o la toma se cerró antes de esta regla.
+   */
+  @Column({ name: 'attended_by_person_id', type: 'uuid', nullable: true })
+  attendedByPersonId!: string | null;
+
+  @Column({ name: 'attended_recorded_at', type: 'timestamptz', nullable: true })
+  attendedRecordedAt!: Date | null;
+
+  @Column({ name: 'attended_recorded_by', type: 'uuid', nullable: true })
+  attendedRecordedBy!: string | null;
+
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

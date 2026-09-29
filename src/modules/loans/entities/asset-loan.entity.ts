@@ -21,6 +21,13 @@ export class AssetLoan {
   @Column({ name: 'requested_at', type: 'timestamptz' })
   requestedAt!: Date;
 
+  /**
+   * Desde cuándo se puede entregar (migración 1767225980000): la fecha de inicio de la solicitud de activos que lo
+   * generó. NULL en los préstamos directos (POST /loans) y en los anteriores: se entregan en cualquier momento.
+   */
+  @Column({ name: 'start_date', type: 'date', nullable: true })
+  startDate!: string | null;
+
   @Column({ name: 'expected_return_date', type: 'date' })
   expectedReturnDate!: string;
 

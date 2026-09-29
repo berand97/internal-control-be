@@ -12,6 +12,11 @@ describe('actionSatisfies', () => {
     expect(actionSatisfies(new Set(['create']), 'read')).toBe(true);
   });
 
+  it('revisar (review) incluye leer: quien revisa solicitudes ve su menú', () => {
+    expect(actionSatisfies(new Set(['review']), 'read')).toBe(true);
+    expect(actionSatisfies(new Set(['review']), 'update')).toBe(false);
+  });
+
   it('no inventa acciones: manage no satisface update', () => {
     expect(actionSatisfies(new Set(['manage']), 'update')).toBe(false);
     expect(actionSatisfies(new Set(['read']), 'manage')).toBe(false);
