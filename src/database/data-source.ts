@@ -106,6 +106,7 @@ import { RoleGrantsAuditPermission1767225900000 } from './migrations/17672259000
 import { RoleGrantsHistoryMenu1767225910000 } from './migrations/1767225910000-role-grants-history-menu.js';
 import { AssetTransfersAndSignerSeparation1767225920000 } from './migrations/1767225920000-asset-transfers-and-signer-separation.js';
 import { AssetRequests1767225930000 } from './migrations/1767225930000-asset-requests.js';
+import { ControlSignerPermission1767225940000 } from './migrations/1767225940000-control-signer-permission.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -244,6 +245,7 @@ const dataSource = new DataSource({
     RoleGrantsHistoryMenu1767225910000,
     AssetTransfersAndSignerSeparation1767225920000,
     AssetRequests1767225930000,
+    ControlSignerPermission1767225940000,
   ],
 });
 
