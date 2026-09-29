@@ -50,6 +50,7 @@ describe('email-template-catalog', () => {
       'ASSET_REQUEST_COMPLETED',
       'ASSET_REQUEST_LOAN_SCHEDULED',
       'ASSET_REQUEST_LOAN_STARTS',
+      'ASSET_REQUEST_LOAN_REJECTED',
     ]);
   });
 

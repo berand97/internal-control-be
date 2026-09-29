@@ -109,6 +109,7 @@ import { AssetRequests1767225930000 } from './migrations/1767225930000-asset-req
 import { ControlSignerPermission1767225940000 } from './migrations/1767225940000-control-signer-permission.js';
 import { EventStream1767225950000 } from './migrations/1767225950000-event-stream.js';
 import { ScheduledLoansRequestReaderAndInventoryAttendee1767225980000 } from './migrations/1767225980000-scheduled-loans-request-reader-and-inventory-attendee.js';
+import { RejectedScheduledLoansAndFindingCategories1767225990000 } from './migrations/1767225990000-rejected-scheduled-loans-and-finding-categories.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -250,6 +251,7 @@ const dataSource = new DataSource({
     ControlSignerPermission1767225940000,
     EventStream1767225950000,
     ScheduledLoansRequestReaderAndInventoryAttendee1767225980000,
+    RejectedScheduledLoansAndFindingCategories1767225990000,
   ],
 });
 

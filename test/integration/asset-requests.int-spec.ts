@@ -596,6 +596,50 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     await dataSource.query('UPDATE cost_center_head SET valid_until = NOW() WHERE person_id = $1', [plainHead.personId]);
   });
 
+  it('préstamo programado rechazado: la solicitud se cierra con el motivo, libera los activos y avisa como un vencimiento', async () => {
+    const assetId = await asset(owner);
+    const id = (await create(temporary({ startDate: plusDays(2), expectedReturnDate: plusDays(9) })).expect(201)).body.data.id as string;
+    await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(ownerHead)).send({ assetIds: [assetId] }).expect(200);
+    const loanId = (await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(director)).send({}).expect(200)).body.data.document
+      .id as string;
+    const rejected = await http()
+      .post(`/api/v1/loans/${loanId}/reject`)
+      .set(auth(director))
+      .send({ reason: 'Los equipos se necesitan para el cierre del semestre' })
+      .expect(200);
+    expect(rejected.body.data).toMatchObject({ status: 'REJECTED', rejectedReason: 'Los equipos se necesitan para el cierre del semestre' });
+
+    const closed = await detail(id);
+    expect(closed).toMatchObject({ status: 'CLOSED_LOAN_REJECTED', expiresAt: null, document: { kind: 'LOAN', id: loanId, status: 'REJECTED' } });
+    expect(closed.events.at(-1)).toMatchObject({
+      eventType: 'LOAN_REJECTED',
+      fromStatus: 'LOAN_SCHEDULED',
+      toStatus: 'CLOSED_LOAN_REJECTED',
+      reason: 'Los equipos se necesitan para el cierre del semestre',
+      actor: { userId: director.userId },
+      payload: { loanId },
+    });
+    expectConforms('get', '/api/v1/asset-requests/{id}', 200, (await http().get(`/api/v1/asset-requests/${id}`).set(auth(requester)).expect(200)).body);
+    for (const who of [requester, ownerHead, auditor]) {
+      expect((await notices(who.userId, id)).map((row) => row.type)).toContain('ASSET_REQUEST_LOAN_REJECTED');
+    }
+    const mail = (await dataSource.query(
+      `SELECT context->>'solicitud.motivo' AS reason FROM mail_outbox WHERE entity_id = $1 AND template_type = 'ASSET_REQUEST_LOAN_REJECTED'`,
+      [id],
+    )) as Array<{ reason: string }>;
+    expect(mail.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(mail.map((row) => row.reason))).toEqual(new Set(['Los equipos se necesitan para el cierre del semestre']));
+
+    // Activos libres: vuelven a ser elegibles; el préstamo rechazado ya no se entrega.
+    const next = (await create(temporary()).expect(201)).body.data.id as string;
+    const eligible = (await http().get(`/api/v1/asset-requests/${next}/eligible-assets`).set(auth(ownerHead)).expect(200)).body.data;
+    expect(eligible.map((item: { id: string }) => item.id)).toContain(assetId);
+    await http().post(`/api/v1/asset-requests/${next}/cancel`).set(auth(requester)).send({ reason: 'Ya no se necesita' }).expect(200);
+    const late = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(director)).send({ deliveredByPersonId: ownerHead.personId, controlInternoPersonId: auditor.personId });
+    expect(late.status).toBe(406);
+    expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [assetId])).toBe('IN_USE');
+  });
+
   it('traslado: aceptar → generar con los datos por activo → cuatro firmas → COMPLETED y aviso a ambos', async () => {
     const assetId = await asset(owner);
     const id = (await create(temporary({ kind: 'PERMANENT', startDate: undefined, expectedReturnDate: undefined })).expect(201)).body.data.id as string;

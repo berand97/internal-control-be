@@ -106,6 +106,16 @@ export interface LoanDeliveredEvent {
 
 export type LoanDeliveredListener = (manager: EntityManager, event: LoanDeliveredEvent) => Promise<void>;
 
+/** Préstamo rechazado (reject), en la transacción que lo rechazó. */
+export interface LoanRejectedEvent {
+  readonly loanId: string;
+  readonly assetRequestId: string | null;
+  readonly reason: string;
+  readonly actorId: string;
+}
+
+export type LoanRejectedListener = (manager: EntityManager, event: LoanRejectedEvent) => Promise<void>;
+
 /**
  * Quién entrega un préstamo: Control Interno (loan:update:global) elige ENTREGA; el jefe vigente del centro dueño de un
  * préstamo de solicitud entrega él mismo (ENTREGA = su persona, sin elegir).
@@ -154,6 +164,7 @@ interface ReturnActEventPayload {
 @Injectable()
 export class LoansService {
   private readonly deliveredListeners: LoanDeliveredListener[] = [];
+  private readonly rejectedListeners: LoanRejectedListener[] = [];
 
   constructor(
     @InjectRepository(AssetLoan)
@@ -182,6 +193,11 @@ export class LoansService {
    */
   onDelivered(listener: LoanDeliveredListener): void {
     this.deliveredListeners.push(listener);
+  }
+
+  /** Igual que onDelivered, para el rechazo: la solicitud que originó un préstamo programado se cierra con él. */
+  onRejected(listener: LoanRejectedListener): void {
+    this.rejectedListeners.push(listener);
   }
 
   /** Alcance de lectura del usuario (403 si no tiene ninguno de los dos permisos o no alcanza centros). */
@@ -527,6 +543,9 @@ export class LoansService {
       });
       await this.addEvent(manager, loan.id, 'REJECTED', actor.id, { reason: dto.reason });
       await this.audit(manager, AuditAction.LoanRejected, loan.id, actor.id, { reason: dto.reason });
+      for (const listener of this.rejectedListeners) {
+        await listener(manager, { loanId: loan.id, assetRequestId: loan.assetRequestId, reason: dto.reason, actorId: actor.id });
+      }
     });
     return this.detailById(id);
   }

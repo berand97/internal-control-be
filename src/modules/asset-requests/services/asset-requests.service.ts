@@ -7,7 +7,7 @@ import { DocumentEngineService } from '../../documents/services/document-engine.
 import { longSpanishDate, SQL_BOGOTA_TODAY } from '../../loans/domain/loan-dates.js';
 import { LOAN_DELIVERY_FORMAT } from '../../loans/domain/loan-documents.js';
 import { OPEN_LOAN_STATUSES } from '../../loans/enums/loan-status.js';
-import { type LoanDeliveredEvent, LoansService } from '../../loans/services/loans.service.js';
+import { type LoanDeliveredEvent, type LoanRejectedEvent, LoansService } from '../../loans/services/loans.service.js';
 import { QrTokensService } from '../../qr-tokens/services/qr-tokens.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import { TRANSFER_FORMAT_KEY } from '../../transfers/domain/transfer.js';
@@ -720,6 +720,37 @@ export class AssetRequestsService {
     await this.notices.send(manager, request.id, 'GENERATED', ['REQUESTER', 'OWNER_HEADS'], {
       document: { kind: this.documentLabel(request.kind) },
     });
+  }
+
+  /**
+   * El préstamo programado de una solicitud se rechazó antes de entregarse (LoansService.reject, APPROVED → REJECTED,
+   * misma transacción): la solicitud pasa de LOAN_SCHEDULED a CLOSED_LOAN_REJECTED con el motivo del rechazo en su
+   * historial (evento LOAN_REJECTED) y avisa a los mismos que un vencimiento (solicitante, jefes del dueño y Control
+   * Interno). Los activos quedan libres: el préstamo rechazado ya no es un préstamo abierto y los ítems de la solicitud
+   * ya se habían liberado al generar.
+   */
+  async onLoanRejected(manager: EntityManager, rejected: LoanRejectedEvent): Promise<void> {
+    if (!rejected.assetRequestId) {
+      return;
+    }
+    const [request] = (await manager.query(
+      'SELECT id, status FROM asset_request WHERE id = $1 AND loan_id = $2 FOR UPDATE',
+      [rejected.assetRequestId, rejected.loanId],
+    )) as Array<{ id: string; status: AssetRequestStatus }>;
+    if (!request || request.status !== 'LOAN_SCHEDULED') {
+      return;
+    }
+    assertAssetRequestTransition(request.status, 'CLOSED_LOAN_REJECTED');
+    const reason = rejected.reason.trim();
+    await manager.query(
+      `UPDATE asset_request SET status = 'CLOSED_LOAN_REJECTED', expires_at = NULL, decided_by = $2, decided_at = NOW() WHERE id = $1`,
+      [request.id, rejected.actorId],
+    );
+    await manager.query('UPDATE asset_request_item SET open = FALSE WHERE request_id = $1', [request.id]);
+    await this.event(manager, request.id, 'LOAN_REJECTED', request.status, 'CLOSED_LOAN_REJECTED', rejected.actorId, reason, {
+      loanId: rejected.loanId,
+    });
+    await this.notices.send(manager, request.id, 'LOAN_REJECTED', ['REQUESTER', 'OWNER_HEADS', 'REVIEWERS'], { reason });
   }
 
   /**

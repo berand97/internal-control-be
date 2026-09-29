@@ -141,7 +141,12 @@ export class LoansController {
 
   @Post(':id/reject')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Rechazar un préstamo', description: APPROVAL_RULE })
+  @ApiOperation({
+    summary: 'Rechazar un préstamo',
+    description:
+      `${APPROVAL_RULE} REQUESTED o APPROVED → REJECTED (motivo obligatorio). Un préstamo programado de una solicitud de activos (APPROVED, sin entregar) ` +
+      'cierra en la misma transacción su solicitud: LOAN_SCHEDULED → CLOSED_LOAN_REJECTED, evento LOAN_REJECTED con el motivo, activos libres y aviso a solicitante, jefes del dueño y Control Interno.',
+  })
   @ApiOkResponse({ schema: envelopedSchema(LoanDetailDto) })
   reject(
     @Param('id', ParseUUIDPipe) id: string,
