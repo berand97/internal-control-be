@@ -112,7 +112,7 @@ export class GenerateTransferActDto {
   @ApiPropertyOptional({
     format: 'uuid',
     description:
-      'Quién firma por Control Interno (GET /transfers/control-signers). Opcional si hay una sola persona elegible; obligatorio si hay varias',
+      'Quién firma por Control Interno (GET /documents/control-signers o GET /transfers/control-signers, la misma lista). Opcional si hay una sola persona elegible; obligatorio si hay varias',
   })
   @IsOptional()
   @IsUUID('all')

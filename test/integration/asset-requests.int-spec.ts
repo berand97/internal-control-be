@@ -432,6 +432,59 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(mail[0]?.url).toContain(`/documents/${act.document.documentId}`);
   });
 
+  it('firmante de Control Interno: quien genera el préstamo (loan:update:global) ve la lista neutral y la generación valida contra ella', async () => {
+    const loanReviewer = await actor('Revisora de préstamos', [
+      await createPermissionRole(dataSource, ['loan:update:global', 'asset_request:review:global'], 'IT_PRESTAMOS'),
+    ]);
+    const loanOnly = await actor('Gestora de préstamos', [await createPermissionRole(dataSource, ['loan:update:global'], 'IT_PRESTAMOS')]);
+    const nobody = await actor('Sin permisos', []);
+    const expected = (await dataSource.query(
+      `SELECT DISTINCT p.id AS "personId" FROM v_user_effective_permissions v
+       JOIN app_user u ON u.id = v.user_id AND u.status = 'ACTIVE' JOIN person p ON p.id = u.person_id AND p.is_active
+       WHERE v.permission_code = 'act:sign_control:global'`,
+    )) as Array<{ personId: string }>;
+    expect(expected.length).toBeGreaterThan(1);
+
+    // La lista de /transfers exige asset:update:global; la neutral acepta cualquier permiso de generación o la revisión.
+    expect((await http().get('/api/v1/transfers/control-signers').set(auth(loanOnly))).status).toBe(403);
+    const listed = await http().get('/api/v1/documents/control-signers').set(auth(loanOnly)).expect(200);
+    expectConforms('get', '/api/v1/documents/control-signers', 200, listed.body);
+    const ids = (listed.body.data as Array<{ personId: string; name: string }>).map((row) => row.personId);
+    expect([...ids].sort()).toEqual(expected.map((row) => row.personId).sort());
+    expect(ids).toEqual(expect.arrayContaining([director.personId, auditor.personId]));
+    expect(ids).not.toContain(requester.personId);
+    for (const row of listed.body.data as Array<Record<string, unknown>>) {
+      expect(Object.keys(row).sort()).toEqual(['name', 'personId']);
+    }
+    // Revisar solicitudes basta (el auditor no genera préstamos); sin ninguno de esos permisos, 403.
+    expect((await http().get('/api/v1/documents/control-signers').set(auth(auditor)).expect(200)).body.data).toEqual(listed.body.data);
+    const denied = await http().get('/api/v1/documents/control-signers').set(auth(nobody));
+    expect([denied.status, denied.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
+    // Mismo contenido que la lista de traslados.
+    expect((await http().get('/api/v1/transfers/control-signers').set(auth(director)).expect(200)).body.data).toEqual(listed.body.data);
+
+    // Generar el préstamo de una solicitud: varias personas → hay que elegir; fuera de la lista → no elegible; de la lista → se usa.
+    const assetId = await asset(owner);
+    const id = (await create(temporary()).expect(201)).body.data.id as string;
+    await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(ownerHead)).send({ assetIds: [assetId] }).expect(200);
+    const unchosen = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(loanReviewer)).send({});
+    expect([unchosen.status, unchosen.body.error.code]).toEqual([400, 'TRANSFER_SIGNER_REQUIRED']);
+    const outside = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(loanReviewer)).send({ controlSignerPersonId: requester.personId });
+    expect([outside.status, outside.body.error.code]).toEqual([400, 'TRANSFER_SIGNER_NOT_ELIGIBLE']);
+    expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [id])).toBe('ACCEPTED');
+    const chosen = ids.find((personId) => personId === auditor.personId) ?? '';
+    const generated = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(loanReviewer)).send({ controlSignerPersonId: chosen }).expect(200);
+    expect(generated.body.data).toMatchObject({ status: 'DOCUMENT_GENERATED', document: { kind: 'LOAN' } });
+    await engine.processPending(1000);
+    const documentId = (await detail(id)).document.documentId as string;
+    expect(
+      await scalar<string>(dataSource, `SELECT signer_person_id FROM document_signature WHERE document_id = $1 AND role = 'AUDITA'`, [documentId]),
+    ).toBe(auditor.personId);
+    await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE user_id = ANY($1) AND revoked_at IS NULL', [
+      [loanReviewer.userId, loanOnly.userId, nobody.userId],
+    ]);
+  });
+
   it('traslado: aceptar → generar con los datos por activo → cuatro firmas → COMPLETED y aviso a ambos', async () => {
     const assetId = await asset(owner);
     const id = (await create(temporary({ kind: 'PERMANENT', startDate: undefined, expectedReturnDate: undefined })).expect(201)).body.data.id as string;

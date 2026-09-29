@@ -141,7 +141,7 @@ export class GenerateAssetRequestDto {
   @ApiPropertyOptional({
     format: 'uuid',
     description:
-      'Quién firma por Control Interno (AUDITA en el OCI-01-65, CONTROL_INTERNO en el OCI-17-89), entre GET /transfers/control-signers. Opcional si hay una sola persona elegible',
+      'Quién firma por Control Interno (AUDITA en el OCI-01-65, CONTROL_INTERNO en el OCI-17-89), entre GET /documents/control-signers (misma lista que valida la generación: fuera de ella, 400 TRANSFER_SIGNER_NOT_ELIGIBLE). Opcional si hay una sola persona elegible',
   })
   @IsOptional()
   @IsUUID('all')

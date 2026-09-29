@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
+import { ControlSignersService } from '../../documents/services/control-signers.service.js';
 import { CONTROL_SIGNER_PERMISSION, TRANSFER_SIGN_ACCOUNTING } from '../domain/transfer.js';
 import type { TransferSignerCandidateDto, TransferWarningDto } from '../dto/transfer.responses.js';
 
@@ -35,19 +36,14 @@ const PERMISSION: Record<TransferSignerKind, string> = {
  */
 @Injectable()
 export class TransferSignersService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly holders: ControlSignersService,
+  ) {}
 
-  async candidates(kind: TransferSignerKind, manager: EntityManager = this.dataSource.manager): Promise<TransferSignerCandidateDto[]> {
-    const rows = await manager.query(
-      `SELECT DISTINCT p.id AS "personId", trim(p.first_name || ' ' || p.last_name) AS name
-       FROM v_user_effective_permissions v
-       JOIN app_user u ON u.id = v.user_id AND u.status = 'ACTIVE'
-       JOIN person p ON p.id = u.person_id AND p.is_active
-       WHERE v.permission_code = $1
-       ORDER BY name, "personId"`,
-      [PERMISSION[kind]],
-    );
-    return rows as TransferSignerCandidateDto[];
+  /** La lista sale de ControlSignersService.holders: la misma que GET /documents/control-signers. */
+  candidates(kind: TransferSignerKind, manager: EntityManager = this.dataSource.manager): Promise<TransferSignerCandidateDto[]> {
+    return this.holders.holders(PERMISSION[kind], manager);
   }
 
   /** La persona que firmará el turno, según la regla de arriba. */

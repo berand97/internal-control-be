@@ -9,6 +9,7 @@ import { DocumentRequestsJob } from './jobs/document-requests.job.js';
 import { DocumentFormatCatalogService } from './services/document-format-catalog.service.js';
 import { DocumentLifecycleRegistry } from './lifecycle/document-lifecycle.registry.js';
 import { GotenbergPdfConverter, PDF_CONVERTER } from './pdf/pdf-converter.js';
+import { ControlSignersService } from './services/control-signers.service.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
 import { DocumentListService } from './services/document-list.service.js';
 import { SigningLinkService } from './services/signing-link.service.js';
@@ -30,6 +31,7 @@ import { SignatureVerificationController } from './signature-verification.contro
     InternalSignatureProvider,
     { provide: PDF_CONVERTER, useClass: GotenbergPdfConverter },
     DocumentFormatCatalogService,
+    ControlSignersService,
     {
       provide: SIGNATURE_PROVIDER,
       inject: [ConfigService, InternalSignatureProvider, StubSignatureProvider],
@@ -40,6 +42,6 @@ import { SignatureVerificationController } from './signature-verification.contro
       ) => (config.getOrThrow('documents', { infer: true }).signatureProvider === 'stub' ? stub : internal),
     },
   ],
-  exports: [DocumentEngineService, DocumentLifecycleRegistry, DocumentFormatCatalogService],
+  exports: [DocumentEngineService, DocumentLifecycleRegistry, DocumentFormatCatalogService, ControlSignersService],
 })
 export class DocumentsModule {}

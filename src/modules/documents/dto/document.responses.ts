@@ -832,6 +832,16 @@ export class SigningLinkResultResponseDto {
   readonly verificationUrl!: string | null;
 }
 
+// ---------- GET /documents/control-signers ----------
+
+export class ControlSignerDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly personId!: string;
+
+  @ApiProperty({ description: 'Nombre para mostrar en el selector' })
+  readonly name!: string;
+}
+
 export const DOCUMENT_RESPONSE_MODELS = [
   ApiSuccessEnvelope,
   DocumentListResponseDto,
@@ -845,4 +855,5 @@ export const DOCUMENT_RESPONSE_MODELS = [
   SigningLinkViewResponseDto,
   SigningLinkIdentityResponseDto,
   SigningLinkResultResponseDto,
+  ControlSignerDto,
 ] as const;

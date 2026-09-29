@@ -53,6 +53,7 @@ import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
 import {
   DOCUMENT_RESPONSE_MODELS,
+  ControlSignerDto,
   DocumentDetailResponseDto,
   DocumentFormatResponseDto,
   DocumentFormatVersionResponseDto,
@@ -65,6 +66,7 @@ import {
 import { CreateDocumentFormatDto, DocumentFormatVersionInputDto } from './dto/document-format.dto.js';
 import type { SignerSubstitutionsInput } from './dto/signer-substitution.dto.js';
 import { DocumentLifecycleRegistry } from './lifecycle/document-lifecycle.registry.js';
+import { ControlSignersService } from './services/control-signers.service.js';
 import { DocumentFormatCatalogService } from './services/document-format-catalog.service.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
 import { DOCUMENT_LIST_STATUSES, DocumentListService, type DocumentListStatus } from './services/document-list.service.js';
@@ -201,6 +203,7 @@ export class DocumentsController {
     private readonly documentList: DocumentListService,
     private readonly lifecycle: DocumentLifecycleRegistry,
     private readonly catalog: DocumentFormatCatalogService,
+    private readonly controlSigners: ControlSignersService,
   ) {}
 
   @Get()
@@ -327,6 +330,21 @@ export class DocumentsController {
       throw new ApiException(ErrorCode.ValidationFailed, `El acta de ${dto.entityType} la genera su propio proceso`);
     }
     return this.engine.generate(dto, actor.id);
+  }
+
+  // Antes de ':id': si no, la ruta la toma el detalle y ParseUUIDPipe responde 400.
+  @Get('control-signers')
+  @ApiOperation({
+    summary: 'Quiénes pueden firmar por Control Interno',
+    description:
+      'Personas activas con usuario ACTIVE y el permiso vigente act:sign_control:global («Firmar actas por Control Interno»), para elegir el firmante al generar un acta ' +
+      '(controlSignerPersonId, controlInternoPersonId). Requiere cualquier permiso de generación de un formato vigente del catálogo (asset:update:global, loan:update:global, inventory:execute:global, …) ' +
+      'o asset_request:review:global; sin ninguno, 403 INSUFFICIENT_PERMISSIONS. Es la misma lista con la que se valida al generar: vacía, TRANSFER_NO_CONTROL_SIGNER; ' +
+      'varias personas sin elegir, TRANSFER_SIGNER_REQUIRED; una persona fuera de ella, TRANSFER_SIGNER_NOT_ELIGIBLE.',
+  })
+  @ApiOkResponse({ schema: envelopedArraySchema(ControlSignerDto) })
+  controlSignerList(@CurrentUser() actor: AuthenticatedUser) {
+    return this.controlSigners.forGenerator(actor.id);
   }
 
   @Get(':id')
