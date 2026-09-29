@@ -8,7 +8,7 @@ export class AuthUserResponseDto {
   readonly username!: string;
 
   @ApiProperty({
-    description: 'Códigos de roles activos',
+    description: 'Códigos de roles activos (texto libre: el SUPER_ADMIN crea roles nuevos). Solo informativo; la UI no debe ramificar por rol.',
     type: [String],
     example: ['INTERNAL_CONTROL_DIRECTOR', 'AUDITOR'],
   })
