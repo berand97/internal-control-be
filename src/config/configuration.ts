@@ -4,6 +4,7 @@ import {
   parseTrustProxy,
   type TrustProxySetting,
 } from '../common/http/trust-proxy.js';
+import { DEFAULT_THROTTLE_USER_LIMIT } from '../common/throttling/throttle-limits.js';
 import { guardDatabaseUrl } from './database-host-guard.js';
 import { dedicatedSecretWarnings, resolveDedicatedSecrets } from './dedicated-secrets.js';
 import { resolveGotenbergUrl } from './gotenberg-url.js';
@@ -95,6 +96,8 @@ export interface AppConfig {
   readonly apiPublicUrl: string;
   readonly apiDocsEnabled: boolean;
   readonly trustProxy: TrustProxySetting;
+  /** Límite general de peticiones autenticadas por usuario y ruta en 60 s (THROTTLE_USER_LIMIT, 300 por defecto). */
+  readonly throttleUserLimit: number;
   readonly database: DatabaseConfig;
   readonly jwt: JwtConfig;
   readonly argon2: Argon2Config;
@@ -326,6 +329,7 @@ const configuration = (): AppConfig => {
     apiPublicUrl: readString('API_PUBLIC_URL', 'http://localhost:3000'),
     apiDocsEnabled: readBoolean('API_DOCS_ENABLED', process.env['NODE_ENV'] !== 'production'),
     trustProxy: parseTrustProxy(readString('TRUST_PROXY', DEFAULT_TRUST_PROXY)),
+    throttleUserLimit: readOptionalPositiveInteger('THROTTLE_USER_LIMIT') ?? DEFAULT_THROTTLE_USER_LIMIT,
     database: {
       // Fuera de producción solo hosts locales (ver database-host-guard.ts).
       url: guardDatabaseUrl(readRequiredString('DATABASE_URL'), process.env, (message) =>

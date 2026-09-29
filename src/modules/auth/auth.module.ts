@@ -71,6 +71,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
     AuthService,
     MfaAccountService,
     SessionStateService,
+    TokenService,
     'AuthUsersRepository',
     'RefreshTokenFamiliesRepository',
     'AuditLogsRepository',

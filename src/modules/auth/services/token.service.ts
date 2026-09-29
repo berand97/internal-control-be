@@ -6,6 +6,7 @@ import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AppConfig } from '../../../config/configuration.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import {
+  isAccessTokenPayload,
   isMfaChallengeTokenPayload,
   isMfaSetupTokenPayload,
   isRefreshTokenPayload,
@@ -133,6 +134,31 @@ export class TokenService {
       throw new ApiException(ErrorCode.MfaRequired);
     }
     return decoded;
+  }
+
+  /**
+   * Usuario de un access token válido (firma, emisor, audiencia, vigencia, tipo access y sesión sid), o null. Sin
+   * consultar la BD: lo usa el límite de peticiones, que corre antes que JwtAuthGuard; la sesión la sigue validando
+   * JwtStrategy.
+   */
+  accessTokenSubject(authorizationHeader: string | undefined): string | null {
+    if (
+      authorizationHeader === undefined ||
+      !authorizationHeader.startsWith(BEARER_PREFIX)
+    ) {
+      return null;
+    }
+    const jwtConfig = this.config.getOrThrow('jwt', { infer: true });
+    try {
+      const decoded: unknown = jwt.verify(
+        authorizationHeader.slice(BEARER_PREFIX.length),
+        jwtConfig.accessSecret,
+        { issuer: jwtConfig.issuer, audience: jwtConfig.audience },
+      );
+      return isAccessTokenPayload(decoded) && decoded.sid ? decoded.sub : null;
+    } catch {
+      return null;
+    }
   }
 
   verifyMfaSetupToken(

@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { createObserveModule } from '@nestjs/observe';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { THROTTLE_IP_LIMIT, THROTTLE_TTL_MS } from './common/throttling/throttle-limits.js';
+import { UserThrottlerGuard } from './common/throttling/user-throttler.guard.js';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter.js';
 import { FeatureGuard } from './common/guards/feature.guard.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
@@ -68,7 +70,7 @@ const nestObserveImports =
     MailModule,
     EmailTemplatesModule,
     EmailAssetUploadsModule,
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    ThrottlerModule.forRoot([{ ttl: THROTTLE_TTL_MS, limit: THROTTLE_IP_LIMIT }]),
     AuthModule,
     RolesModule,
     NavigationModule,
@@ -97,7 +99,7 @@ const nestObserveImports =
   controllers: [AppController],
   providers: [
     AppService,
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: UserThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: MustChangePasswordGuard },
     { provide: APP_GUARD, useClass: FeatureGuard },
