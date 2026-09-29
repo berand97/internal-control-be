@@ -333,7 +333,7 @@ export class InventoryReportResponseDto extends InventoryReportDto {
   readonly status!: InventoryStatus;
 }
 
-export class InventoryPersonRefDto {
+export class InventorySignerHeadDto {
   @ApiProperty({ format: 'uuid' })
   readonly personId!: string;
 
@@ -385,11 +385,11 @@ export class InventoryDetailResponseDto extends InventorySummaryDto {
   readonly act!: InventoryActStateDto;
 
   @ApiProperty({
-    type: () => InventoryPersonRefDto,
+    type: () => InventorySignerHeadDto,
     nullable: true,
     description: 'Jefe vigente del centro de la toma que firma el acta como ENCARGADO (se resuelve al cerrar); null antes del cierre o si el centro no tenía jefe',
   })
-  readonly signerHead!: InventoryPersonRefDto | null;
+  readonly signerHead!: InventorySignerHeadDto | null;
 
   @ApiProperty({
     type: () => InventoryAttendedByDto,

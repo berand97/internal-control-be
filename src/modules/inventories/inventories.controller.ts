@@ -64,7 +64,7 @@ import {
   InventoryItemCorrectionResultDto,
   InventoryItemDto,
   InventoryListResponseDto,
-  InventoryPersonRefDto,
+  InventorySignerHeadDto,
   InventoryProgressResponseDto,
   InventoryReportResponseDto,
   InventoryWarningDto,
@@ -109,7 +109,7 @@ const ACTOR_RULE =
   InventoryItemCorrectionResultDto,
   InventoryAccountingCutResponseDto,
   InventoryActStateDto,
-  InventoryPersonRefDto,
+  InventorySignerHeadDto,
   InventoryAttendedByDto,
   InventoryWarningDto,
 )
@@ -399,7 +399,7 @@ export class InventoriesController {
       '(signerHeadPersonId) o después (PUT /inventories/{id}/signer-head). Solo id y nombre. Vacío si el centro no tiene jefe ' +
       'o la toma no es de un centro de costo.',
   })
-  @ApiOkResponse({ schema: envelopedArraySchema(InventoryPersonRefDto) })
+  @ApiOkResponse({ schema: envelopedArraySchema(InventorySignerHeadDto) })
   async headCandidates(@Param('id', ParseUUIDPipe) id: string) {
     return this.signerHead.candidates(await this.inventoriesService.requireById(id));
   }
