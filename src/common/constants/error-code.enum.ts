@@ -164,6 +164,7 @@ export enum ErrorCode {
   LoanNoPendingExtension = 'LOAN_NO_PENDING_EXTENSION',
   LoanDeliveryActNotRejected = 'LOAN_DELIVERY_ACT_NOT_REJECTED',
   LoanNotStarted = 'LOAN_NOT_STARTED',
+  LoanDeliveryActNotSigned = 'LOAN_DELIVERY_ACT_NOT_SIGNED',
 
   InventoryScopeOverlap = 'INVENTORY_SCOPE_OVERLAP',
   InventoryUnverifiedExceedsThreshold = 'INVENTORY_UNVERIFIED_EXCEEDS',

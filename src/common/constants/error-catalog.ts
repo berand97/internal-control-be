@@ -825,6 +825,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El préstamo todavía no se puede entregar: su fecha de inicio no ha llegado',
   },
+  [ErrorCode.LoanDeliveryActNotSigned]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'No se puede registrar la devolución: el acta de entrega aún no está firmada por todos',
+  },
   [ErrorCode.InventoryScopeOverlap]: {
     httpStatus: 406,
     action: 'CANCEL',

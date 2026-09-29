@@ -224,7 +224,8 @@ export class LoansController {
     summary: 'Registrar la devolución: fecha real y condición por activo',
     description:
       'Desde ACTIVE u OVERDUE, o desde PARTIALLY_RETURNED para los activos que siguen fuera (devolverlos o declararlos perdidos con LOST). ' +
-      'returnedAt es la fecha real (por defecto, ahora): no futura ni anterior a la entrega. Un activo ya recibido: 400. Los activos siguen ON_LOAN hasta receive-return.',
+      'returnedAt es la fecha real (por defecto, ahora): no futura ni anterior a la entrega. Un activo ya recibido: 400. Los activos siguen ON_LOAN hasta receive-return. ' +
+      'Con el acta de entrega OCI-01-65 sin todas sus firmas (PENDING_SIGNATURES): 409 LOAN_DELIVERY_ACT_NOT_SIGNED. Otro estado: 406 INVALID_LOAN_STATE_TRANSITION.',
   })
   @ApiOkResponse({ schema: envelopedSchema(LoanDetailDto) })
   startReturn(
@@ -244,7 +245,7 @@ export class LoansController {
       'En una transacción: cada activo registrado sale de ON_LOAN con movimiento RETURN fechado en su fecha real. Resultado: RETURNED, ' +
       'PARTIALLY_RETURNED (quedan activos fuera) o CLOSED_WITH_LOSSES (todo resuelto, alguno perdido). ' +
       'Acta de devolución (LOAN_RETURN): formato institucional aún no emitido, así que la recepción se registra y returnActs[] la muestra PENDING_FORMAT; ' +
-      'cuando el catálogo tenga código y firmantes, se encola aquí con returnActSigners.',
+      'cuando el catálogo tenga código y firmantes, se encola aquí con returnActSigners. Con el acta de entrega sin todas sus firmas (PENDING_SIGNATURES): 409 LOAN_DELIVERY_ACT_NOT_SIGNED.',
   })
   @ApiOkResponse({ schema: envelopedSchema(LoanDetailDto) })
   receiveReturn(

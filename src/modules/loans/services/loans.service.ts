@@ -141,6 +141,17 @@ const PHYSICAL_CONDITION_LABELS: Record<string, string> = {
   OBSOLETE: 'Obsoleto',
 };
 
+/**
+ * La devolución exige el acta de entrega OCI-01-65 firmada por todos: mientras el préstamo está PENDING_SIGNATURES
+ * (activos entregados, acta sin todas sus firmas) no se registra ni se recibe una devolución, con un error propio que
+ * lo dice en lenguaje llano en vez del INVALID_LOAN_STATE_TRANSITION genérico. Los demás estados siguen las transiciones.
+ */
+const assertDeliveryActSigned = (loan: AssetLoan): void => {
+  if (loan.status === 'PENDING_SIGNATURES') {
+    throw new ApiException(ErrorCode.LoanDeliveryActNotSigned);
+  }
+};
+
 interface ReturnActEventPayload {
   readonly status?: 'PENDING_FORMAT' | 'REQUESTED';
   readonly documentRequestId?: string;
@@ -1019,6 +1030,7 @@ export class LoansService {
   async startReturn(id: string, dto: ReturnLoanDto, actor: AuthenticatedUser) {
     await this.dataSource.transaction(async (manager) => {
       const loan = await this.lockLoan(manager, id);
+      assertDeliveryActSigned(loan);
       assertLoanTransition(loan.status, 'PENDING_RECEPTION');
       const items = await manager.find(AssetLoanItem, { where: { loanId: id } });
       const byAsset = new Map(items.map((item) => [item.assetId, item]));
@@ -1079,6 +1091,7 @@ export class LoansService {
     const readiness = await this.documents.formatReadiness(LOAN_RETURN_FORMAT);
     await this.dataSource.transaction(async (manager) => {
       const loan = await this.lockLoan(manager, id);
+      assertDeliveryActSigned(loan);
       if (loan.status !== 'PENDING_RECEPTION') {
         throw new ApiException(ErrorCode.InvalidLoanStateTransition);
       }

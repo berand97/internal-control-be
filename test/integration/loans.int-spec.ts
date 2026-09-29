@@ -654,6 +654,19 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       const beforeLast = await detail(loanId);
       expect(beforeLast.deliveryAct.status).toBe('GENERATED');
       expect(beforeLast.status).toBe('PENDING_SIGNATURES');
+      // Falta una firma del acta de entrega: la devolución no se registra ni se recibe, y el error dice por qué.
+      for (const path of ['return', 'receive-return']) {
+        const blocked = await http()
+          .post(`/api/v1/loans/${loanId}/${path}`)
+          .set(auth('director'))
+          .send(path === 'return' ? { assetsReturned: [{ assetId: assets[0], condition: 'GOOD' }] } : {});
+        expect([blocked.status, blocked.body.error.code]).toEqual([409, 'LOAN_DELIVERY_ACT_NOT_SIGNED']);
+        expect(blocked.body.error.message).toBe('No se puede registrar la devolución: el acta de entrega aún no está firmada por todos');
+      }
+      const unchanged = await detail(loanId);
+      expect(unchanged.status).toBe('PENDING_SIGNATURES');
+      expect(unchanged.events.map((event: { eventType: string }) => event.eventType)).not.toContain('RETURN_STARTED');
+      expect(unchanged.items.every((item: { returnCondition: string | null }) => item.returnCondition === null)).toBe(true);
       const done = await sign(3, 'audita').expect(200);
       expect(done.body.data.status).toBe('SIGNED');
 
