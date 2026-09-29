@@ -140,6 +140,10 @@ describe('InventoriesService', () => {
       catalogs as never,
       valuation as never,
       act as never,
+      {
+        applyOnClose: vi.fn().mockResolvedValue(undefined),
+        view: vi.fn().mockResolvedValue({ signerHead: null, attendedBy: null, actIssuable: false, warnings: [] }),
+      } as never,
     );
   });
 

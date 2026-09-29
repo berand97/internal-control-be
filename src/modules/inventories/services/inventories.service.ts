@@ -39,6 +39,7 @@ import { InventoryActorPolicy } from './inventory-actor-policy.service.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
 import { InventoryActService } from './inventory-act.service.js';
 import { type ItemViewContext, mergeFrozenReport, toItemView, toProgressView, toReportView } from './inventory-item-view.js';
+import { InventorySignerHeadService } from './inventory-signer-head.service.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
 import { inventorySummary, inventorySummaryUserIds, loadResponsibleNames } from './inventory-summary.js';
 
@@ -84,6 +85,7 @@ export class InventoriesService {
     private readonly catalogs: InventoryCatalogsService,
     private readonly valuation: InventoryValuationService,
     private readonly act: InventoryActService,
+    private readonly signerHead: InventorySignerHeadService,
   ) {}
 
   async list(query: QueryInventoriesDto) {
@@ -129,6 +131,7 @@ export class InventoriesService {
       report: this.frozenOrLiveReport(inventory, items, context),
       reconciliationBasis: await this.valuation.basis(inventory),
       act: await this.act.state(inventory),
+      ...(await this.signerHead.view(inventory)),
     };
   }
 
@@ -349,7 +352,9 @@ export class InventoriesService {
 
   /**
    * Cierra la toma: los ítems que siguen PENDING pasan a NOT_VERIFIED (no son faltantes y la conciliación no los
-   * toca) y se congela el reporte. Todo en una transacción.
+   * toca) y se congela el reporte. Se resuelve quién firma el acta como ENCARGADO (jefe vigente del centro de la toma,
+   * InventorySignerHeadService) y se guarda quién atendió por el área. Todo en una transacción. Si el centro no tiene
+   * jefe el cierre procede y la respuesta trae el aviso ACT_CANNOT_BE_ISSUED.
    */
   async close(id: string, dto: CloseInventoryDto, actor: AuthenticatedUser) {
     const inventory = await this.requireInventory(id);
@@ -383,6 +388,7 @@ export class InventoriesService {
       inventory.closedAt = now;
       inventory.closedBy = actor.id;
       inventory.discrepancyReport = report;
+      await this.signerHead.applyOnClose(manager, inventory, dto, actor);
       await manager.getRepository(PhysicalInventory).save(inventory);
       // Solo conteos: el reporte completo (con notas y causas en texto libre) queda en la toma, no en la auditoría.
       await this.auditLogsRepository.record(
@@ -393,7 +399,11 @@ export class InventoriesService {
           performedBy: actor.id,
           ipAddress: null,
           userAgent: null,
-          changes: { ...toProgressView(items), allowUnverified: dto.allowUnverified === true },
+          changes: {
+            ...toProgressView(items),
+            allowUnverified: dto.allowUnverified === true,
+            signerHeadPersonId: inventory.signerHeadPersonId,
+          },
         },
         manager,
       );
@@ -760,6 +770,11 @@ export class InventoriesService {
     const padding = Number(row?.padding_length ?? 3);
     const prefix = typeof row?.prefix === 'string' ? row.prefix : 'TF-';
     return `${prefix}${year}-${String(value).padStart(padding, '0')}`;
+  }
+
+  /** La toma o 404 (para quien lee un dato de ella, como los jefes elegibles). */
+  requireById(id: string): Promise<PhysicalInventory> {
+    return this.requireInventory(id);
   }
 
   private async requireInventory(id: string): Promise<PhysicalInventory> {

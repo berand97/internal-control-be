@@ -298,6 +298,42 @@ export class CloseInventoryDto {
   @IsOptional()
   @IsBoolean()
   readonly allowUnverified?: boolean;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Jefe vigente del centro de la toma que firma el acta OCI-21-37 como ENCARGADO (GET /inventories/{id}/head-candidates). ' +
+      'Con un solo jefe vigente se toma por defecto; con varios es obligatorio (400 VALIDATION_FAILED); con ninguno el cierre ' +
+      'procede con el aviso ACT_CANNOT_BE_ISSUED y el acta no se emite hasta indicarlo (PUT /inventories/{id}/signer-head)',
+  })
+  @IsOptional()
+  @IsUUID('all')
+  readonly signerHeadPersonId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Quién atendió la toma por el área, si es persona del sistema. Solo informativo: no firma. No junto con attendedByName',
+  })
+  @IsOptional()
+  @IsUUID('all')
+  readonly attendedByPersonId?: string;
+
+  @ApiPropertyOptional({
+    minLength: 3,
+    maxLength: 200,
+    description: 'Quién atendió la toma por el área, en texto, si no está registrado (encargado o asistente). Solo informativo',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(200)
+  readonly attendedByName?: string;
+}
+
+export class AssignSignerHeadDto {
+  @ApiProperty({ format: 'uuid', description: 'Jefe vigente del centro de la toma (GET /inventories/{id}/head-candidates)' })
+  @IsUUID('all')
+  readonly signerHeadPersonId!: string;
 }
 
 export class QueryInventoriesDto {

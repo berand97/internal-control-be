@@ -29,6 +29,7 @@ import {
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
 import {
+  AssignSignerHeadDto,
   CancelInventoryDto,
   CloseInventoryDto,
   CorrectInventoryItemDto,
@@ -57,13 +58,16 @@ import {
 import {
   InventoryAccountingCutResponseDto,
   InventoryActStateDto,
+  InventoryAttendedByDto,
   InventoryDetailResponseDto,
   InventoryItemCorrectionDto,
   InventoryItemCorrectionResultDto,
   InventoryItemDto,
   InventoryListResponseDto,
+  InventoryPersonRefDto,
   InventoryProgressResponseDto,
   InventoryReportResponseDto,
+  InventoryWarningDto,
 } from './dto/inventory.responses.js';
 import { envelopedArraySchema } from '../documents/dto/document.responses.js';
 import { AccountingCutsService } from './services/accounting-cuts.service.js';
@@ -75,6 +79,7 @@ import { InventoryPlanningService } from './services/inventory-planning.service.
 import { InventoryResponsibleCandidatesService } from './services/inventory-responsible-candidates.service.js';
 import { InventorySchedulesService } from './services/inventory-schedules.service.js';
 import { InventoryReadAccess } from './services/inventory-read-access.service.js';
+import { InventorySignerHeadService } from './services/inventory-signer-head.service.js';
 
 const READ_ACCESS_RULE =
   'Trae activos: además de inventory:read:global exige asset:read:global, ser responsable o quien programó la toma, o asset:read:org_unit ' +
@@ -104,6 +109,9 @@ const ACTOR_RULE =
   InventoryItemCorrectionResultDto,
   InventoryAccountingCutResponseDto,
   InventoryActStateDto,
+  InventoryPersonRefDto,
+  InventoryAttendedByDto,
+  InventoryWarningDto,
 )
 @Feature('inventories')
 @Controller('inventories')
@@ -118,6 +126,7 @@ export class InventoriesController {
     private readonly act: InventoryActService,
     private readonly responsibleCandidates: InventoryResponsibleCandidatesService,
     private readonly readAccess: InventoryReadAccess,
+    private readonly signerHead: InventorySignerHeadService,
   ) {}
 
   @Get()
@@ -381,6 +390,38 @@ export class InventoriesController {
     return this.corrections.listCorrections(id, itemId);
   }
 
+  @Get(':id/head-candidates')
+  @RequirePermission('inventory:execute:global')
+  @ApiOperation({
+    summary: 'Jefes vigentes del centro de la toma que pueden firmar el acta como ENCARGADO',
+    description:
+      'Personas activas con jefatura vigente (cost_center_head) del centro de costo de la toma: una se elige al cerrar ' +
+      '(signerHeadPersonId) o después (PUT /inventories/{id}/signer-head). Solo id y nombre. Vacío si el centro no tiene jefe ' +
+      'o la toma no es de un centro de costo.',
+  })
+  @ApiOkResponse({ schema: envelopedArraySchema(InventoryPersonRefDto) })
+  async headCandidates(@Param('id', ParseUUIDPipe) id: string) {
+    return this.signerHead.candidates(await this.inventoriesService.requireById(id));
+  }
+
+  @Put(':id/signer-head')
+  @RequirePermission('inventory:execute:global')
+  @ApiOperation({
+    summary: 'Indicar el jefe que firma el acta como ENCARGADO después del cierre',
+    description:
+      'Con la toma CLOSED o RECONCILED y el acta aún sin encolar (si no, 406 INVALID_STATE). Debe ser jefe vigente del centro ' +
+      'de la toma (400 VALIDATION_FAILED). Si la toma ya está conciliada, luego se encola con POST /inventories/{id}/act/enqueue.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
+  async assignSignerHead(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AssignSignerHeadDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    await this.signerHead.assign(id, dto.signerHeadPersonId, actor);
+    return this.inventoriesService.getById(id);
+  }
+
   @Post(':id/close')
   @RequirePermission('inventory:execute:global')
   @HttpCode(HttpStatus.OK)
@@ -388,7 +429,11 @@ export class InventoriesController {
     summary: 'Cerrar la toma y generar el reporte de discrepancias',
     description:
       `${ACTOR_RULE} Con más del 5 % pendiente exige allowUnverified e inventory:create:global. Los pendientes pasan a ` +
-      'NOT_VERIFIED (no son faltantes; la conciliación no los toca). actualEndDate es la fecha de Bogotá.',
+      'NOT_VERIFIED (no son faltantes; la conciliación no los toca). actualEndDate es la fecha de Bogotá. ' +
+      'Firmante ENCARGADO del acta OCI-21-37 = jefe vigente del centro de la toma: con uno solo se toma por defecto; con varios, ' +
+      'signerHeadPersonId es obligatorio (400 VALIDATION_FAILED); con ninguno el cierre procede y la respuesta trae ' +
+      'warnings [ACT_CANNOT_BE_ISSUED] y actIssuable = false (el acta quedará NOT_ENQUEUED / NO_COST_CENTER_HEAD al conciliar). ' +
+      'attendedByPersonId o attendedByName (no ambos): quién atendió por el área, solo informativo.',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   close(
@@ -479,10 +524,11 @@ export class InventoriesController {
   @ApiOperation({
     summary: 'Encolar el acta OCI-21-37 que la conciliación no pudo encolar',
     description:
-      'Solo tomas RECONCILED con acta NOT_ENQUEUED. Firman el responsable de la toma (RESPONSABLE) y quien aprobó la ' +
-      'conciliación (AUDITA). Si el formato sigue sin código SGC o firmantes: 409 DOCUMENT_FORMAT_NOT_READY; otro ' +
-      'error al armar el acta: 406 INVALID_STATE. En ambos, error.details[0] = { field: reason, message: <reason> }. ' +
-      'Si el responsable de la toma es quien aprobó la conciliación, la separación de funciones exige un sustituto para ' +
+      'Solo tomas RECONCILED con acta NOT_ENQUEUED. Firman el jefe del centro de la toma indicado al cerrar (RESPONSABLE, ' +
+      'ENCARGADO: signerHead) y quien aprobó la conciliación (AUDITA). Sin jefe indicado: 406 INVALID_STATE con reason ' +
+      'NO_COST_CENTER_HEAD (indíquelo con PUT /inventories/{id}/signer-head). Si el formato sigue sin código SGC o firmantes: ' +
+      '409 DOCUMENT_FORMAT_NOT_READY; otro error al armar el acta: 406 INVALID_STATE. En todos, error.details[0] = { field: reason, message: <reason> }. ' +
+      'Si el jefe que firma como ENCARGADO es quien aprobó la conciliación, la separación de funciones exige un sustituto para ' +
       'AUDITA (signerSubstitutions); sin él responde 409 DOCUMENT_SIGNER_DUPLICATED (details signers.<ROL> y ' +
       'signerSubstitutions.<ROL>), y con un sustituto inválido 400 DOCUMENT_SIGNER_SUBSTITUTE_INVALID, igual que entregas, ' +
       'préstamos y traslados; la toma no cambia. AUDITA es un turno de Control Interno: si quien aprobó la conciliación no ' +

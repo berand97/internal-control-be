@@ -333,6 +333,36 @@ export class InventoryReportResponseDto extends InventoryReportDto {
   readonly status!: InventoryStatus;
 }
 
+export class InventoryPersonRefDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly personId!: string;
+
+  @ApiProperty({ description: 'Nombre y apellidos' })
+  readonly name!: string;
+}
+
+export class InventoryAttendedByDto {
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'null si se registró como texto libre' })
+  readonly personId!: string | null;
+
+  @ApiProperty()
+  readonly name!: string;
+}
+
+export const INVENTORY_WARNING_CODES = ['ACT_CANNOT_BE_ISSUED'] as const;
+
+export class InventoryWarningDto {
+  @ApiProperty({
+    enum: INVENTORY_WARNING_CODES,
+    enumName: 'InventoryWarningCode',
+    description: 'ACT_CANNOT_BE_ISSUED: no hay jefe vigente del centro de la toma que firme el acta como ENCARGADO',
+  })
+  readonly code!: (typeof INVENTORY_WARNING_CODES)[number];
+
+  @ApiProperty({ description: 'Explicación para mostrar' })
+  readonly message!: string;
+}
+
 export class InventoryDetailResponseDto extends InventorySummaryDto {
   @ApiProperty({ type: () => InventoryItemDto, isArray: true })
   readonly items!: InventoryItemDto[];
@@ -353,6 +383,30 @@ export class InventoryDetailResponseDto extends InventorySummaryDto {
 
   @ApiProperty({ type: () => InventoryActStateDto, description: 'Acta OCI-21-37 de la toma' })
   readonly act!: InventoryActStateDto;
+
+  @ApiProperty({
+    type: () => InventoryPersonRefDto,
+    nullable: true,
+    description: 'Jefe vigente del centro de la toma que firma el acta como ENCARGADO (se resuelve al cerrar); null antes del cierre o si el centro no tenía jefe',
+  })
+  readonly signerHead!: InventoryPersonRefDto | null;
+
+  @ApiProperty({
+    type: () => InventoryAttendedByDto,
+    nullable: true,
+    description: 'Quién atendió la toma por el área (persona del sistema o texto libre). Solo informativo: no firma',
+  })
+  readonly attendedBy!: InventoryAttendedByDto | null;
+
+  @ApiProperty({ description: 'El acta tiene quién firme como ENCARGADO (o ya se encoló)' })
+  readonly actIssuable!: boolean;
+
+  @ApiProperty({
+    type: () => InventoryWarningDto,
+    isArray: true,
+    description: 'Con la toma cerrada o conciliada y sin jefe que firme: [ACT_CANNOT_BE_ISSUED]. Informativo: la toma sigue',
+  })
+  readonly warnings!: InventoryWarningDto[];
 }
 
 // ---------- Corte contable ----------

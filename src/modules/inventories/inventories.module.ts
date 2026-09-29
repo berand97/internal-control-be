@@ -25,6 +25,7 @@ import { InventoryRemindersJob } from './jobs/inventory-reminders.job.js';
 import { AccountingCutsService } from './services/accounting-cuts.service.js';
 import { InventoriesService } from './services/inventories.service.js';
 import { InventoryActService } from './services/inventory-act.service.js';
+import { InventorySignerHeadService } from './services/inventory-signer-head.service.js';
 import { InventorySurplusService } from './services/inventory-surplus.service.js';
 import { InventoryValuationService } from './services/inventory-valuation.service.js';
 import { InventoryActorPolicy } from './services/inventory-actor-policy.service.js';
@@ -78,6 +79,7 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
     InventoryRemindersJob,
     InventoryValuationService,
     InventoryActService,
+    InventorySignerHeadService,
     InventorySurplusService,
     AccountingCutsService,
   ],

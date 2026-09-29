@@ -145,6 +145,15 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       label,
     ]);
 
+  /** Jefatura vigente del centro: quien firma el acta como ENCARGADO. */
+  const headOf = async (costCenterId: string, who: Who) => {
+    await dataSource.query(`INSERT INTO cost_center_head (person_id, cost_center_id, reason) VALUES ($1, $2, 'Prueba')`, [
+      who.personId,
+      costCenterId,
+    ]);
+    return who;
+  };
+
   const newAsset = async (costCenterId: string, price: number) => {
     const asset = await app.get(AssetsService).create(
       {
@@ -530,6 +539,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
   it('aprobar sin plantilla: la toma queda RECONCILED y el acta falla con TEMPLATE_NOT_ACTIVE; con el formato sin código SGC queda NOT_ENQUEUED y se encola después', async () => {
     const centerId = await center('Centro sin plantilla');
     await newAsset(centerId, 10);
+    await headOf(centerId, await person('Jefa', null));
     const responsible = await person('Responsable', 'INTERNAL_CONTROL_DIRECTOR');
     const id = await started(centerId, responsible);
     const approved = await closeAndApprove(id, responsible);
@@ -564,6 +574,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     try {
       const otherCenter = await center('Centro sin formato');
       await newAsset(otherCenter, 10);
+      const otherHead = await headOf(otherCenter, await person('Jefe', null));
       const orphan = await started(otherCenter, responsible);
       const reconciled = await closeAndApprove(orphan, responsible);
       expect(reconciled.status).toBe('RECONCILED');
@@ -595,10 +606,10 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
         `SELECT payload FROM document_request WHERE payload->>'entityId' = $1`,
         [orphan],
       )) as Array<{ payload: { signers: Record<string, string>; responsiblePersonId: string; costCenterId: string } }>;
-      // AUDITA es quien aprobó la conciliación, no quien reintenta.
+      // AUDITA es quien aprobó la conciliación, no quien reintenta; RESPONSABLE (ENCARGADO) es el jefe del centro.
       expect(payload?.payload).toMatchObject({
         signers: { AUDITA: approver.personId },
-        responsiblePersonId: responsible.personId,
+        responsiblePersonId: otherHead.personId,
         costCenterId: otherCenter,
       });
       expect((await post(director, `/${orphan}/act/enqueue`)).status).toBe(406);
@@ -621,6 +632,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     const missing = await newAsset(centerId, 200);
     await depreciation(first, 2020, 12, 800);
     await depreciation(second, 2020, 12, 300);
+    await headOf(centerId, await person('Jefa', null));
     const responsible = await person('Responsable', 'INTERNAL_CONTROL_DIRECTOR');
     const id = await started(centerId, responsible);
     const view = await detail(id);
@@ -661,27 +673,27 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(text).toContain(`TOMA|${code}|Centro de costo `);
     expect(text).toContain('|Sin corte contable: estado del sistema al ');
     expect(text).toContain('TOTALES|3|2|1|1|');
-    expect(text).toContain(`H|AU|2|${formatMoney(1500)}|66,67 %|${formatMoney(1100)}|`);
-    expect(text).toContain(`H|ANE|1|${formatMoney(200)}|33,33 %|Sin dato|`);
+    // Porcentaje sobre el precio de compra: 1500 / 1700 y 200 / 1700 (no 2 y 1 de 3 bienes).
+    expect(text).toContain(`H|AU|2|${formatMoney(1500)}|88,24 %|${formatMoney(1100)}|`);
+    expect(text).toContain(`H|ANE|1|${formatMoney(200)}|11,76 %|Sin dato|`);
     expect(text).toContain(`H|AOD|0|${formatMoney(0)}|0,00 %|${formatMoney(0)}|`);
     expect(text).toContain(`H|TOTAL|3|${formatMoney(1700)}|100,00 %|Sin dato|`);
     expect(text).toContain('1.500,00');
     expect(text).toContain('S|Mesa sin placa|Sin decisión|');
     expect(text).toContain('|Encontrado|En uso|');
     expect(text).toContain('|No encontrado|No encontrado|Sin dato|');
-    expect(text).toContain('FIRMAS|Responsable Valoración|Aprobador Valoración|');
+    // ENCARGADO = jefe vigente del centro de la toma, no el responsable de la toma.
+    expect(text).toContain('FIRMAS|Jefa Valoración|Aprobador Valoración|');
   });
-  it('separación de funciones: si quien aprueba es el responsable de la toma, el acta queda sin encolar hasta indicar un sustituto de Control Interno', async () => {
+  it('separación de funciones: si quien aprueba es el jefe que firma como ENCARGADO, el acta queda sin encolar hasta indicar un sustituto de Control Interno', async () => {
     const centerId = await center('Centro con conflicto de firmas');
     await newAsset(centerId, 10);
-    // El aprobador es a la vez el responsable de la toma: firmaría RESPONSABLE y AUDITA.
-    const id = await started(centerId, approver);
-    expect((await post(approver, `/${id}/close`, { allowUnverified: true })).status).toBe(200);
-    const reconcile = await post(approver, `/${id}/reconcile`);
+    // El aprobador es a la vez el jefe del centro de la toma: firmaría RESPONSABLE (ENCARGADO) y AUDITA.
+    await headOf(centerId, approver);
+    const id = await started(centerId);
+    expect((await post(director, `/${id}/close`, { allowUnverified: true })).status).toBe(200);
+    const reconcile = await post(director, `/${id}/reconcile`);
     expect(reconcile.status, JSON.stringify(reconcile.body)).toBe(200);
-    // El proceso ya lo impide (INVENTORY_RECONCILE_SOD: quien pide conciliar, el responsable, no aprueba); se simula el
-    // dato para probar la defensa del motor: la solicitud de conciliación queda a nombre de la directora.
-    await dataSource.query('UPDATE physical_inventory SET reconcile_requested_by = $2 WHERE id = $1', [id, director.userId]);
     const approved = await post(approver, `/${id}/reconcile/approve`);
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
     expect(approved.body.data.status).toBe('RECONCILED');
@@ -728,6 +740,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     );
     const centerId = await center('Centro con aprobador sin permiso de firma');
     await newAsset(centerId, 10);
+    await headOf(centerId, await person('Jefe', null));
     const id = await started(centerId);
     expect((await post(director, `/${id}/close`, { allowUnverified: true })).status).toBe(200);
     expect((await post(director, `/${id}/reconcile`)).status).toBe(200);
@@ -747,5 +760,118 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     });
     expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
     expect(enqueued.body.data).toMatchObject({ generation: 'PENDING' });
+  });
+
+  it('firmante ENCARGADO al cerrar: un jefe firma él; varios, se elige; ninguno, aviso y acta sin emitir hasta asignar y reencolar; quién atendió es aparte', async () => {
+    const payloadOf = async (id: string) =>
+      (
+        (await dataSource.query(`SELECT payload FROM document_request WHERE payload->>'entityId' = $1`, [id])) as Array<{
+          payload: { responsiblePersonId: string; fields: Record<string, string> };
+        }>
+      )[0]?.payload;
+    const put = (who: Who, path: string, body: Record<string, unknown>) =>
+      http().put(`/api/v1/inventories${path}`).set(as(who)).send(body);
+    const approve = async (id: string) => {
+      expect((await post(director, `/${id}/reconcile`)).status).toBe(200);
+      const approved = await post(approver, `/${id}/reconcile/approve`);
+      expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+      return approved.body.data as { act: Record<string, unknown>; warnings: unknown[] };
+    };
+
+    // Un jefe vigente: firma él sin elegir. Atendió una persona del sistema (informativo, no firma).
+    const single = await center('Centro con un jefe');
+    await newAsset(single, 10);
+    const onlyHead = await headOf(single, await person('Único', null));
+    const assistant = await person('Asistente', null);
+    const first = await started(single);
+    const closed = await post(director, `/${first}/close`, { allowUnverified: true, attendedByPersonId: assistant.personId });
+    expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+    expectConforms('post', '/api/v1/inventories/{id}/close', 200, closed.body);
+    expect(closed.body.data).toMatchObject({
+      signerHead: { personId: onlyHead.personId, name: 'Único Valoración' },
+      attendedBy: { personId: assistant.personId, name: 'Asistente Valoración' },
+      actIssuable: true,
+      warnings: [],
+    });
+    await approve(first);
+    expect(await payloadOf(first)).toMatchObject({
+      responsiblePersonId: onlyHead.personId,
+      fields: { atendioPorArea: 'Asistente Valoración' },
+    });
+
+    // Varios jefes: hay que elegir, y solo entre ellos. Atendió alguien sin usuario: texto libre.
+    const shared = await center('Centro con dos jefes');
+    await newAsset(shared, 10);
+    const headA = await headOf(shared, await person('Jefa A', null));
+    const headB = await headOf(shared, await person('Jefe B', null));
+    const second = await started(shared);
+    const candidates = await http().get(`/api/v1/inventories/${second}/head-candidates`).set(as(director)).expect(200);
+    expectConforms('get', '/api/v1/inventories/{id}/head-candidates', 200, candidates.body);
+    expect(candidates.body.data.map((row: { personId: string }) => row.personId).sort()).toEqual([headA.personId, headB.personId].sort());
+    for (const row of candidates.body.data as Array<Record<string, unknown>>) {
+      expect(Object.keys(row).sort()).toEqual(['name', 'personId']);
+    }
+    const unchosen = await post(director, `/${second}/close`, { allowUnverified: true });
+    expect([unchosen.status, unchosen.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect(unchosen.body.error.details).toEqual([{ field: 'signerHeadPersonId', message: expect.any(String) }]);
+    const notHead = await post(director, `/${second}/close`, { allowUnverified: true, signerHeadPersonId: assistant.personId });
+    expect([notHead.status, notHead.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    const both = await post(director, `/${second}/close`, {
+      allowUnverified: true,
+      signerHeadPersonId: headB.personId,
+      attendedByPersonId: assistant.personId,
+      attendedByName: 'Auxiliar de turno',
+    });
+    expect([both.status, both.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect(await scalar<string>(dataSource, 'SELECT status FROM physical_inventory WHERE id = $1', [second])).toBe('IN_PROGRESS');
+    const chosen = await post(director, `/${second}/close`, {
+      allowUnverified: true,
+      signerHeadPersonId: headB.personId,
+      attendedByName: 'Auxiliar de turno',
+    });
+    expect(chosen.status, JSON.stringify(chosen.body)).toBe(200);
+    expect(chosen.body.data).toMatchObject({
+      signerHead: { personId: headB.personId },
+      attendedBy: { personId: null, name: 'Auxiliar de turno' },
+      actIssuable: true,
+      warnings: [],
+    });
+    await approve(second);
+    expect(await payloadOf(second)).toMatchObject({ responsiblePersonId: headB.personId, fields: { atendioPorArea: 'Auxiliar de turno' } });
+
+    // Ningún jefe: el cierre procede con el aviso; el acta queda NOT_ENQUEUED hasta asignar un jefe y reencolar.
+    const headless = await center('Centro sin jefe');
+    await newAsset(headless, 10);
+    const third = await started(headless);
+    const warned = await post(director, `/${third}/close`, { allowUnverified: true });
+    expect(warned.status, JSON.stringify(warned.body)).toBe(200);
+    expect(warned.body.data).toMatchObject({
+      status: 'CLOSED',
+      signerHead: null,
+      actIssuable: false,
+      warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', message: expect.stringContaining('no tiene jefe vigente') }],
+    });
+    const reconciled = await approve(third);
+    expect(reconciled.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'NO_COST_CENTER_HEAD', retryAction: 'ENQUEUE' });
+    expect(reconciled.warnings).toEqual([{ code: 'ACT_CANNOT_BE_ISSUED', message: expect.any(String) }]);
+    expect(await payloadOf(third)).toBeUndefined();
+    const stillBlocked = await post(director, `/${third}/act/enqueue`);
+    expect([stillBlocked.status, stillBlocked.body.error.code]).toEqual([406, 'INVALID_STATE']);
+    expect(stillBlocked.body.error.details).toEqual([{ field: 'reason', message: 'NO_COST_CENTER_HEAD' }]);
+    const newcomer = await person('Nueva jefa', null);
+    const early = await put(director, `/${third}/signer-head`, { signerHeadPersonId: newcomer.personId });
+    expect([early.status, early.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    await headOf(headless, newcomer);
+    const assigned = await put(director, `/${third}/signer-head`, { signerHeadPersonId: newcomer.personId });
+    expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
+    expectConforms('put', '/api/v1/inventories/{id}/signer-head', 200, assigned.body);
+    expect(assigned.body.data).toMatchObject({ signerHead: { personId: newcomer.personId }, actIssuable: true, warnings: [] });
+    const enqueued = await post(director, `/${third}/act/enqueue`);
+    expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
+    expect(enqueued.body.data).toMatchObject({ generation: 'PENDING', reason: null });
+    expect(await payloadOf(third)).toMatchObject({ responsiblePersonId: newcomer.personId, fields: { atendioPorArea: 'Sin dato' } });
+    // Ya encolada: no se cambia el firmante.
+    const late = await put(director, `/${third}/signer-head`, { signerHeadPersonId: newcomer.personId });
+    expect(late.status).toBe(406);
   });
 });

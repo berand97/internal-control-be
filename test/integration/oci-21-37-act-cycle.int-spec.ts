@@ -126,6 +126,13 @@ describe
         };
       };
 
+      /** Jefatura vigente del centro: firma el acta como ENCARGADO. */
+      const headOf = (costCenterId: string, who: Who) =>
+        dataSource.query(
+          `INSERT INTO cost_center_head (person_id, cost_center_id, reason) VALUES ($1, $2, 'Prueba')`,
+          [who.personId, costCenterId],
+        );
+
       const center = (name: string) =>
         scalar<string>(
           dataSource,
@@ -188,6 +195,7 @@ describe
           category?: string;
           notes?: string;
         }>,
+        attendedByName?: string,
       ) => {
         const created = await http()
           .post('/api/v1/inventories')
@@ -242,6 +250,7 @@ describe
         ).toBe(200);
         const closed = await post(responsible, `/${id}/close`, {
           allowUnverified: true,
+          ...(attendedByName ? { attendedByName } : {}),
         });
         expect(closed.status, JSON.stringify(closed.body)).toBe(200);
         return id;
@@ -441,6 +450,9 @@ describe
         await depreciation(laptop, 2_090_000);
         await depreciation(chair, 120_000);
         // Proyector y teléfono sin depreciación: su valor en libros no existe y el acta debe decir «Sin dato».
+        // Firma como ENCARGADO la jefa vigente del centro, no el responsable de la toma.
+        const head = await person('Gloria Patricia', 'Rendón Mejía', 'Decana', null);
+        await headOf(centerId, head);
         const responsible = await person(
           'Andrés Felipe',
           'Gómez Tobón',
@@ -464,7 +476,7 @@ describe
           },
           { assetId: projector, action: 'MISSING', category: 'ANE' },
           { assetId: phone, action: 'SKIP' },
-        ]);
+        ], 'Asistente de la decanatura');
         // Doble firma de la conciliación: la pide el responsable y la aprueba otra persona (INVENTORY_RECONCILE_SOD).
         expect((await post(responsible, `/${id}/reconcile`)).status).toBe(200);
         const approved = await post(approver, `/${id}/reconcile/approve`);
@@ -493,10 +505,14 @@ describe
           `Informe de Hallazgos No. ${number}`,
           `Centro de Costos ${code} DECANATURA DE CIENCIAS ADMINISTRATIVAS`,
           `Toma física ${tomaCode} — Toma anual del centro`,
-          'Responsable Andrés Felipe Gómez Tobón',
-          `AU — En uso 2 ${money(5_430_000)} 50,00 % ${money(2_920_000)}`,
-          `ANE — No encontrado 1 ${money(1_980_000)} 25,00 % Sin dato`,
-          `AOD — Obsoleto o dañado 1 ${money(690_000)} 25,00 % ${money(120_000)}`,
+          'Responsable Gloria Patricia Rendón Mejía',
+          'Atendió por el área Asistente de la decanatura',
+          // Porcentaje sobre el precio de compra (5 430 000 / 8 100 000), no sobre el número de bienes.
+          `AU — En uso 2 ${money(5_430_000)} 67,04 % ${money(2_920_000)}`,
+          `ANE — No encontrado 1 ${money(1_980_000)} 24,44 % Sin dato`,
+          `AOD — Obsoleto o dañado 1 ${money(690_000)} 8,52 % ${money(120_000)}`,
+          'Porcentaje calculado sobre el precio de compra',
+          'El valor en libros es otro dato y no entra en el porcentaje',
           `Total 4 ${money(8_100_000)} 100,00 % Sin dato`,
           'Laura Milena Quintero Ruiz',
           'PORTATIL LENOVO THINKPAD E14 CORE I7 16GB',
@@ -536,7 +552,7 @@ describe
           .send({ rubric });
         expect(early.status).not.toBe(200);
         for (const [order, who] of [
-          [1, responsible],
+          [1, head],
           [2, approver],
         ] as const) {
           const signed = await http()
@@ -563,13 +579,13 @@ describe
           writeFileSync(join(OUTPUT, 'acta-oci-21-37-firmada.txt'), finalText);
         }
         expect(finalText).toContain('Hoja de firmas');
-        expect(finalText).toContain('Andrés Felipe Gómez Tobón');
+        expect(finalText).toContain('Gloria Patricia Rendón Mejía');
         expect(sampleLeftovers(finalText, SAMPLE, { numbers: true })).toEqual(
           [],
         );
       });
 
-      it('separación de funciones: si el responsable aprueba, el acta lleva la sustitución de Control Interno con su motivo', async () => {
+      it('separación de funciones: si el jefe que firma como ENCARGADO aprueba, el acta lleva la sustitución de Control Interno con su motivo', async () => {
         const centerId = await center('OFICINA DE ADMISIONES');
         const cabinet = await newAsset(
           centerId,
@@ -577,16 +593,18 @@ describe
           870_000,
         );
         await depreciation(cabinet, 410_000);
-        // El aprobador es a la vez el responsable de la toma: firmaría RESPONSABLE y AUDITA.
-        const id = await executed(centerId, approver, [
+        // El aprobador es a la vez el jefe del centro de la toma: firmaría RESPONSABLE (ENCARGADO) y AUDITA.
+        await headOf(centerId, approver);
+        const responsible = await person(
+          'Mateo',
+          'Arango Vélez',
+          'Profesional de Control Interno',
+          'INTERNAL_CONTROL_DIRECTOR',
+        );
+        const id = await executed(centerId, responsible, [
           { assetId: cabinet, action: 'FOUND', category: 'AU' },
         ]);
-        expect((await post(approver, `/${id}/reconcile`)).status).toBe(200);
-        // El proceso ya lo impide (INVENTORY_RECONCILE_SOD); se simula el dato para llegar al motor, como en inventory-valuation-act.
-        await dataSource.query(
-          'UPDATE physical_inventory SET reconcile_requested_by = $2 WHERE id = $1',
-          [id, director.userId],
-        );
+        expect((await post(responsible, `/${id}/reconcile`)).status).toBe(200);
         const approved = await post(approver, `/${id}/reconcile/approve`);
         expect(approved.body.data.act).toMatchObject({
           generation: 'NOT_ENQUEUED',
@@ -596,7 +614,7 @@ describe
           signerSubstitutions: {
             AUDITA: {
               personId: director.personId,
-              reason: 'La responsable de la toma aprobó la conciliación',
+              reason: 'La jefa del centro aprobó la conciliación',
             },
           },
         });
@@ -605,7 +623,7 @@ describe
         const { text } = await generated(id, 'acta-oci-21-37-sustitucion');
         expect(sampleLeftovers(text, SAMPLE, { numbers: true })).toEqual([]);
         expect(text).toContain(
-          'Sustitución de firmante (separación de funciones): firma por Control Interno Directora Pruebas Acta en lugar de Laura Milena Quintero Ruiz, que firma el acta como Responsable. Motivo: La responsable de la toma aprobó la conciliación',
+          'Sustitución de firmante (separación de funciones): firma por Control Interno Directora Pruebas Acta en lugar de Laura Milena Quintero Ruiz, que firma el acta como Responsable. Motivo: La jefa del centro aprobó la conciliación',
         );
       });
     },

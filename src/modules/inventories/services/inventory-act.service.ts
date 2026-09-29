@@ -29,6 +29,7 @@ import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
 import { VerificationResult } from '../enums/verification-result.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
+import { InventorySignerHeadService } from './inventory-signer-head.service.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
 
 /** Reintentos automáticos del outbox (DocumentEngineService.processPending: attempts < 5). */
@@ -43,7 +44,7 @@ const SIGNER_ERRORS: ReadonlyArray<ErrorCode> = [
 
 type BlockedReason = Extract<
   InventoryActReason,
-  'FORMAT_NOT_READY' | 'ENQUEUE_FAILED'
+  'FORMAT_NOT_READY' | 'ENQUEUE_FAILED' | 'NO_COST_CENTER_HEAD'
 >;
 
 type EnqueueOutcome =
@@ -86,6 +87,7 @@ export class InventoryActService implements OnModuleInit {
     private readonly lifecycle: DocumentLifecycleRegistry,
     private readonly valuation: InventoryValuationService,
     private readonly catalogs: InventoryCatalogsService,
+    private readonly signerHead: InventorySignerHeadService,
     @Inject('AuditLogsRepository')
     private readonly auditLogs: AuditLogsRepository,
   ) {}
@@ -93,7 +95,8 @@ export class InventoryActService implements OnModuleInit {
   onModuleInit(): void {
     this.lifecycle.register({
       entityType: INVENTORY_ACT_ENTITY_TYPE,
-      // RESPONSABLE = responsable de la toma (responsiblePersonId); AUDITA = quien aprueba la conciliación (signers).
+      // RESPONSABLE (ENCARGADO) = jefe vigente del centro de la toma resuelto al cerrar (responsiblePersonId);
+      // AUDITA (REVISA) = quien aprueba la conciliación (signers), turno de Control Interno.
       formats: [
         {
           formatKey: INVENTORY_ACT_FORMAT_KEY,
@@ -263,14 +266,18 @@ export class InventoryActService implements OnModuleInit {
         message: `El formato ${INVENTORY_ACT_FORMAT_KEY} no se puede generar: ${readiness.reasons.join('; ')}`,
       };
     }
+    // Sin jefe del centro que firme como ENCARGADO el acta no se emite (aviso ACT_CANNOT_BE_ISSUED del cierre).
+    const signerHeadPersonId = inventory.signerHeadPersonId;
+    if (!signerHeadPersonId) {
+      return { blocked: 'NO_COST_CENTER_HEAD', message: (await this.signerHead.warning(inventory, manager)).message };
+    }
     await manager.query('SAVEPOINT inventory_act');
     try {
-      // app_user.person_id es NOT NULL: responsable y aprobador siempre tienen persona que firme.
-      const responsiblePersonId = await this.personOf(manager, inventory.responsibleUserId);
+      // app_user.person_id es NOT NULL: el aprobador siempre tiene persona que firme.
       const approverPersonId = await this.personOf(manager, approverUserId);
-      const payload = await this.payload(manager, inventory, responsiblePersonId, approverPersonId);
-      // Separación de funciones: si quien aprueba (AUDITA) es el responsable de la toma, el acta necesita un sustituto
-      // de Control Interno (POST /inventories/:id/act/enqueue con signerSubstitutions.AUDITA).
+      const payload = await this.payload(manager, inventory, signerHeadPersonId, approverPersonId);
+      // Separación de funciones: si quien aprueba (AUDITA) es el jefe que firma como ENCARGADO, el acta necesita un
+      // sustituto de Control Interno (POST /inventories/:id/act/enqueue con signerSubstitutions.AUDITA).
       const requestId = await this.engine.enqueue(
         manager,
         signerSubstitutions && Object.keys(signerSubstitutions).length > 0 ? { ...payload, signerSubstitutions } : payload,
@@ -369,6 +376,7 @@ export class InventoryActService implements OnModuleInit {
       causeLabels: catalogs.causeLabels,
       valuations,
       conditionLabels: CONDITION_LABELS,
+      attendedBy: await this.signerHead.attendedName(manager, inventory),
     });
     return {
       formatKey: INVENTORY_ACT_FORMAT_KEY,
