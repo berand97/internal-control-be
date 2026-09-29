@@ -253,7 +253,7 @@ export class TransferDetailDto {
   })
   readonly controlSignerAvailable!: boolean;
 
-  @ApiProperty({ description: 'Hay al menos un usuario activo con transfer:sign_accounting:global (rol Contabilidad)' })
+  @ApiProperty({ description: 'Hay al menos un usuario activo con el permiso `transfer:sign_accounting:global` vigente' })
   readonly accountingSignerAvailable!: boolean;
 
   @ApiProperty({
