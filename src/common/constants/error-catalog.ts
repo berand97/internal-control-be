@@ -897,6 +897,26 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     message:
       'Solo se resuelve un sobrante vigente sin activo registrado, con la toma cerrada y sin conciliar, y una sola vez como activo',
   },
+  [ErrorCode.AssetPriceZeroReasonUnavailable]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'El motivo de precio cero no existe o está inactivo',
+  },
+  [ErrorCode.AssetPriceZeroReasonInUse]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'El motivo de precio cero ya se registró en algún activo: desactívalo en lugar de borrarlo',
+  },
+  [ErrorCode.AssetPriceZeroReasonExists]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'Ya existe un motivo de precio cero con ese nombre',
+  },
+  [ErrorCode.AssetPriceNotZero]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'El activo no tiene precio de compra cero: no lleva motivo de precio cero',
+  },
   [ErrorCode.DepreciationInvalidPeriod]: {
     httpStatus: 400,
     action: 'CANCEL',

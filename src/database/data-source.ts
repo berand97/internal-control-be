@@ -16,6 +16,7 @@ import { AcquisitionType } from '../modules/assets/entities/acquisition-type.ent
 import { Asset } from '../modules/assets/entities/asset.entity.js';
 import { AssetCustomValue } from '../modules/assets/entities/asset-custom-value.entity.js';
 import { AssetIdentifier } from '../modules/assets/entities/asset-identifier.entity.js';
+import { AssetPriceZeroReason } from '../modules/assets/entities/asset-price-zero-reason.entity.js';
 import { AssetImportBatch } from '../modules/assets/entities/asset-import-batch.entity.js';
 import { AssetMovement } from '../modules/assets/entities/asset-movement.entity.js';
 import { AssetPhoto } from '../modules/assets/entities/asset-photo.entity.js';
@@ -161,6 +162,7 @@ const dataSource = new DataSource({
     AssetPhoto,
     AssetImportBatch,
     AssetIdentifier,
+    AssetPriceZeroReason,
     QrTokenRotationLog,
     StorageSettings,
     MailSettings,

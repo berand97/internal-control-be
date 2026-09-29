@@ -104,7 +104,7 @@ export const FEATURE_CATALOG: ReadonlyArray<FeatureDefinition> = [
     code: 'assets',
     label: 'Activos',
     core: false,
-    resourceTypes: ['asset'],
+    resourceTypes: ['asset', 'asset_price_zero_reason'],
     pathPrefixes: ['/assets'],
   },
   {
