@@ -93,6 +93,7 @@ cada una; es preferible que el despliegue falle de inmediato y se vea en Dokploy
 | `ARGON2_PARALLELISM` | No | `4` | | Ídem. |
 | `REFRESH_COOKIE_SECURE` | No | `true` | `true` | Déjela en `true` en producción (cookie solo por https). |
 | `TRUST_PROXY` | No | `loopback, linklocal, uniquelocal` | `2` | Proxies de confianza para `X-Forwarded-For` (IP real en firmas, auditoría y throttler). Número de saltos o lista de redes; nunca `true`. |
+| `THROTTLE_USER_LIMIT` | No | `300` | `300` | Peticiones por usuario autenticado, por ruta, en 60 s (ver nota de límite de peticiones). Entero ≥ 1; otro valor impide arrancar. |
 | `API_DOCS_ENABLED` | No | `false` en producción | `false` | `true` publica `/api/openapi.json` y `/api/reference`. |
 | `DATABASE_LOGGING` | No | `false` | `false` | `true` registra el SQL (ruidoso; puede incluir datos personales). |
 | `DOCUMENT_NUMBERING_POLICY` | No | `continue` | `continue` | `continue` \| `restart`; otro valor impide arrancar. |
@@ -107,6 +108,16 @@ cada una; es preferible que el despliegue falle de inmediato y se vea en Dokploy
 | `OTEL_ORGANIZATION` | No | `default` | | |
 | `OBSERVE_APP_KEY` / `OBSERVE_APP_SECRET` | No | vacíos | | Sin ambas no se registra NestJS Observe. |
 | `ALLOW_REMOTE_DATABASE` | **No usar en producción** | — | | Solo afecta a entornos con `NODE_ENV` distinto de `production` (ver §6). |
+
+**Nota de límite de peticiones.** Toda la universidad sale por el mismo NAT: contar por IP
+dejaría a todos con `429` en cuanto unos pocos abran varias pestañas. Por eso el límite general
+(60 s, por ruta) cuenta **por usuario** cuando la petición trae un access token válido
+(`THROTTLE_USER_LIMIT`, 300 por defecto) y **por IP** cuando no (100). Los límites estrictos de
+login, MFA, recuperación de contraseña, enlaces de firma y verificación pública del acta y del QR
+siguen **por IP** con sus valores. Para que la IP de los no autenticados sea la del cliente y no
+la del proxy, `TRUST_PROXY` debe describir exactamente los proxies delante del backend (número de
+saltos o sus redes); si queda corto, todos comparten la IP del proxy, y si confía de más, un
+cliente puede inventar su IP con `X-Forwarded-For`. El `429` trae `Retry-After` (expuesto por CORS).
 
 **Nota de almacenamiento.** Las variables `STORAGE_*` son solo el valor inicial: en cuanto
 existe la fila de `storage_settings` (se crea al guardar la configuración desde la
