@@ -292,12 +292,15 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
         [manager.id, target.id],
       );
 
-      // Control: con SUPER_ADMIN vigente reorganiza (re-apunta al mismo superior).
+      const otherSuperior = await createRole([]);
+
+      // Control: con SUPER_ADMIN vigente reorganiza (mueve el rol a otro superior). Re-apuntar al mismo superior ya
+      // no es reorganizar (no se revalida nada), así que el control cambia de superior de verdad.
       const before = await call(
         'patch',
         `/roles/${target.id}`,
         actorToken,
-      ).send({ superiorRoleId: manager.id });
+      ).send({ superiorRoleId: otherSuperior.id });
       expect(before.status).toBe(200);
 
       const revoked = await call(

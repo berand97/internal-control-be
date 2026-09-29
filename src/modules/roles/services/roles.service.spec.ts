@@ -320,6 +320,13 @@ describe('RolesService', () => {
     expect(rolesRepository.update).not.toHaveBeenCalled();
   });
 
+  it('sin nada que cambiar (solo el superior actual) no escribe y responde el rol', async () => {
+    vi.mocked(rolesRepository.findActiveById).mockResolvedValue(customRole());
+    const result = await service.update('role-1', { reason: 'Motivo de prueba', superiorRoleId: 'admin-role' }, actor, ORIGIN);
+    expect(result.id).toBe('role-1');
+    expect(rolesRepository.update).not.toHaveBeenCalled();
+  });
+
   it('padre y superior iguales a los actuales no son reorganizar: renombrar no revalida nada', async () => {
     const current = customRole();
     current.parentRoleId = 'parent-1';

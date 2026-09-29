@@ -227,17 +227,19 @@ export class RolesService {
     // Titulares alcanzados por el linaje actual: si se quita o cambia la herencia, también cambian sus permisos.
     const affectedBefore =
       await this.rolesRepository.findActiveHolderIdsInheriting(role.id);
+    const changes = {
+      ...(dto.name !== undefined ? { name: dto.name } : {}),
+      ...(dto.description !== undefined
+        ? { description: dto.description }
+        : {}),
+      ...(parentChanged ? { parentRoleId } : {}),
+      ...(superiorChanged ? { superiorRoleId, hierarchyLevel } : {}),
+    };
     try {
-      await this.rolesRepository.update(role.id, {
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.description !== undefined
-          ? { description: dto.description }
-          : {}),
-        ...(parentChanged ? { parentRoleId } : {}),
-        ...(superiorChanged
-          ? { superiorRoleId, hierarchyLevel }
-          : {}),
-      });
+      // Sin nada que cambiar (p. ej. solo padre y superior iguales a los actuales) no se escribe.
+      if (Object.keys(changes).length > 0) {
+        await this.rolesRepository.update(role.id, changes);
+      }
       for (const child of descendantLevels) {
         await this.rolesRepository.update(child.id, {
           hierarchyLevel: child.hierarchyLevel,
