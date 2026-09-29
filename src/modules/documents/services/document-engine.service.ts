@@ -24,7 +24,6 @@ import {
 import {
   IDENTITY_AUTHORIZATION_MINUTES,
   lastFourDigits,
-  maskName,
   MAX_IDENTITY_ATTEMPTS,
   methodLabel,
   requiresMfa,
@@ -1028,14 +1027,15 @@ export class DocumentEngineService {
     return { ...context, current: context.current };
   }
 
+  /**
+   * Vista pública del enlace (Ley 1581, dato mínimo): solo lo que la pantalla necesita para firmar ESTE turno —estado
+   * del enlace, vencimiento, intentos, formato y número del acta y el rol del propio turno—. Nada de firmantes (ni
+   * nombres, ni siquiera enmascarados, ni el propio), nada de otros turnos y ningún enlace o ruta del sistema.
+   */
   async signingLinkView(token: string) {
     const { link, document, current, status } = await this.linkContext(this.dataSource.manager, token, false);
     const active = status === 'ACTIVE';
     const format = await this.catalog.forDocument(document.id);
-    const [slot] = (await this.dataSource.query(
-      'SELECT signer_name FROM document_signature WHERE document_id = $1 AND sign_order = $2',
-      [link.document_id, link.sign_order],
-    )) as Array<{ signer_name: string | null }>;
     return {
       status,
       expiresAt: link.expires_at ? new Date(link.expires_at).toISOString() : null,
@@ -1049,7 +1049,6 @@ export class DocumentEngineService {
               roleLabel: format.signers.find((spec) => spec.role === current.role)?.label ?? current.role,
             }
           : null,
-      signerName: active ? maskName(slot?.signer_name) : null,
     };
   }
 

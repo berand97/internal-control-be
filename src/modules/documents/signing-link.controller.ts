@@ -66,7 +66,8 @@ export class SigningLinkController {
   @ApiOperation({
     summary: 'Estado del enlace de firma',
     description:
-      'Sin sesión. Metadatos mínimos del acta (formato, número, rol del turno, nombre enmascarado) solo si status es ACTIVE. Token inexistente: 404 RESOURCE_NOT_FOUND.',
+      'Sin sesión. Solo lo necesario para firmar este turno: estado del enlace, vencimiento, intentos de identidad y, solo si status es ACTIVE, formato y número del acta y orden y rol del turno. ' +
+      'Ningún dato de firmantes (ni nombres, ni enmascarados), de otros turnos ni enlaces del sistema (Ley 1581). Token inexistente: 404 RESOURCE_NOT_FOUND.',
   })
   @ApiOkResponse({ schema: envelopedSchema(SigningLinkViewResponseDto) })
   view(@Param() params: SigningLinkParams) {

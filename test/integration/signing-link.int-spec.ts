@@ -263,7 +263,7 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     expect(before.viewer).toMatchObject({ canResendLink: true, canReassign: true });
     expect(JSON.stringify(before)).not.toContain(token);
 
-    // Página pública: metadatos mínimos y nombre enmascarado; nunca el documento de identidad.
+    // Página pública: solo lo necesario para firmar este turno; ni nombres (ni enmascarados), ni otros turnos, ni rutas.
     const page = await view(token).expect(200);
     expect(page.body.data).toEqual({
       status: 'ACTIVE',
@@ -272,9 +272,10 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
       identityAttemptsRemaining: 5,
       document: { sgcCode: 'OCI-01-55', formatName: 'Acta de entrega y asignación de activos fijos', number: document.number },
       turn: { order: 1, roleLabel: 'Recibe' },
-      signerName: 'Laura S. U.',
     });
-    expect(JSON.stringify(page.body)).not.toContain(documentNumber);
+    const pageText = JSON.stringify(page.body);
+    expect(pageText).not.toContain(documentNumber);
+    expect(pageText).not.toMatch(/Laura|signerName|https?:|\/api\//);
     const pdf = await http()
       .get(`/api/v1/public/signing-links/${token}/pdf`)
       .set('X-Forwarded-For', ip())
@@ -383,7 +384,8 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     expect([locked.status, locked.body.error.code]).toEqual([410, 'SIGNATURE_IDENTITY_LOCKED']);
     // Ni con los dígitos correctos: hay que reenviar.
     expect((await identity(first, documentNumber.slice(-4))).body.error.code).toBe('SIGNATURE_LINK_UNAVAILABLE');
-    expect((await view(first)).body.data).toMatchObject({ status: 'INVALIDATED', document: null, turn: null, signerName: null });
+    expect((await view(first)).body.data).toMatchObject({ status: 'INVALIDATED', document: null, turn: null });
+    expect((await view(first)).body.data).not.toHaveProperty('signerName');
     expect((await detail(document.id)).signatures[0].signingLink).toMatchObject({
       status: 'INVALIDATED',
       invalidatedReason: 'ATTEMPTS_EXCEEDED',

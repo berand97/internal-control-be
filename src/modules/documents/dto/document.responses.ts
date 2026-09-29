@@ -799,16 +799,12 @@ export class SigningLinkViewResponseDto {
   @ApiProperty({ type: () => SigningLinkDocumentDto, nullable: true, description: 'Solo con status ACTIVE' })
   readonly document!: SigningLinkDocumentDto | null;
 
-  @ApiProperty({ type: () => SigningLinkTurnDto, nullable: true, description: 'Solo con status ACTIVE' })
-  readonly turn!: SigningLinkTurnDto | null;
-
   @ApiProperty({
-    type: 'string',
+    type: () => SigningLinkTurnDto,
     nullable: true,
-    example: 'Laura R. E.',
-    description: 'Nombre del firmante con los apellidos en iniciales; solo con status ACTIVE',
+    description: 'El turno de este enlace (orden y rol), solo con status ACTIVE. Nunca datos de firmantes ni de otros turnos',
   })
-  readonly signerName!: string | null;
+  readonly turn!: SigningLinkTurnDto | null;
 }
 
 export class SigningLinkIdentityResponseDto {
