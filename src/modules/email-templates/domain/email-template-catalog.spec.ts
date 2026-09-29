@@ -25,7 +25,7 @@ describe('email-template-catalog', () => {
     expect(EMAIL_PLACEHOLDER_CATALOG.PASSWORD_RESET.required).toContain('auth.resetUrl');
   });
 
-  it('son exactamente los 12 tipos que el sistema envía', () => {
+  it('son exactamente los 21 tipos que el sistema envía', () => {
     expect(EMAIL_TEMPLATE_TYPES).toEqual([
       'USER_INVITATION',
       'PASSWORD_RESET',
@@ -39,6 +39,15 @@ describe('email-template-catalog', () => {
       'INVENTORY_RESCHEDULED',
       'INVENTORY_REMINDER',
       'INVENTORY_CANCELLED',
+      'ASSET_REQUEST_CREATED',
+      'ASSET_REQUEST_ACCEPTED',
+      'ASSET_REQUEST_CLOSED',
+      'ASSET_REQUEST_RETURNED',
+      'ASSET_REQUEST_CORRECTED',
+      'ASSET_REQUEST_CANCELLED',
+      'ASSET_REQUEST_GENERATED',
+      'ASSET_REQUEST_EXPIRED',
+      'ASSET_REQUEST_COMPLETED',
     ]);
   });
 
@@ -74,7 +83,7 @@ describe('email-template-catalog', () => {
 
   it('las variables de enlace son exactamente las que llevan un URL', () => {
     const urls = [...new Set(EMAIL_TEMPLATE_TYPES.flatMap((type) => [...urlVariables(type).keys()]))].sort();
-    expect(urls).toEqual(['app.loginUrl', 'auth.loginUrl', 'auth.resetUrl', 'firma.url']);
+    expect(urls).toEqual(['app.loginUrl', 'auth.loginUrl', 'auth.resetUrl', 'documento.url', 'firma.url', 'solicitud.url']);
     expect(urlVariables('PASSWORD_RESET').get('auth.resetUrl')).toEqual({
       name: 'auth.resetUrl',
       label: 'Enlace para restablecer la contraseña',

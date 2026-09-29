@@ -22,6 +22,15 @@ export const EMAIL_TEMPLATE_TYPES = [
   'INVENTORY_RESCHEDULED',
   'INVENTORY_REMINDER',
   'INVENTORY_CANCELLED',
+  'ASSET_REQUEST_CREATED',
+  'ASSET_REQUEST_ACCEPTED',
+  'ASSET_REQUEST_CLOSED',
+  'ASSET_REQUEST_RETURNED',
+  'ASSET_REQUEST_CORRECTED',
+  'ASSET_REQUEST_CANCELLED',
+  'ASSET_REQUEST_GENERATED',
+  'ASSET_REQUEST_EXPIRED',
+  'ASSET_REQUEST_COMPLETED',
 ] as const;
 
 export type EmailTemplateType = (typeof EMAIL_TEMPLATE_TYPES)[number];
@@ -39,7 +48,32 @@ export const EMAIL_TEMPLATE_LABEL: Record<EmailTemplateType, string> = {
   INVENTORY_RESCHEDULED: 'Aviso de toma física reprogramada',
   INVENTORY_REMINDER: 'Recordatorio de toma física',
   INVENTORY_CANCELLED: 'Aviso de toma física cancelada',
+  ASSET_REQUEST_CREATED: 'Solicitud de activos recibida',
+  ASSET_REQUEST_ACCEPTED: 'Solicitud de activos aceptada por el centro dueño',
+  ASSET_REQUEST_CLOSED: 'Solicitud de activos cerrada por el centro dueño',
+  ASSET_REQUEST_RETURNED: 'Solicitud de activos devuelta para corregir',
+  ASSET_REQUEST_CORRECTED: 'Solicitud de activos corregida',
+  ASSET_REQUEST_CANCELLED: 'Solicitud de activos cancelada',
+  ASSET_REQUEST_GENERATED: 'Documento de la solicitud de activos generado',
+  ASSET_REQUEST_EXPIRED: 'Solicitud de activos vencida',
+  ASSET_REQUEST_COMPLETED: 'Documento de la solicitud de activos firmado',
 };
+
+/** Obligatorias y opcionales comunes de los avisos de solicitudes de activos (AssetRequestNoticesService). */
+const ASSET_REQUEST_REQUIRED = [
+  'solicitud.codigo',
+  'solicitud.tipo',
+  'solicitud.centroSolicitante',
+  'solicitud.centroDueno',
+  'solicitud.url',
+] as const;
+const ASSET_REQUEST_OPTIONAL = [
+  'solicitud.descripcion',
+  'solicitud.solicitante',
+  'user.fullName',
+  'app.name',
+  'app.loginUrl',
+] as const;
 
 export interface EmailPlaceholderCatalog {
   readonly required: ReadonlyArray<string>;
@@ -112,6 +146,26 @@ export const EMAIL_PLACEHOLDER_CATALOG: Record<
   INVENTORY_CANCELLED: {
     required: ['toma.codigo', 'toma.nombre', 'toma.alcance', 'toma.motivo'],
     optional: ['toma.inicio', 'toma.fin', ...INVENTORY_OPTIONAL],
+  },
+  ASSET_REQUEST_CREATED: { required: [...ASSET_REQUEST_REQUIRED], optional: [...ASSET_REQUEST_OPTIONAL] },
+  ASSET_REQUEST_ACCEPTED: { required: [...ASSET_REQUEST_REQUIRED], optional: ['solicitud.activos', ...ASSET_REQUEST_OPTIONAL] },
+  ASSET_REQUEST_CLOSED: { required: [...ASSET_REQUEST_REQUIRED, 'solicitud.motivo'], optional: [...ASSET_REQUEST_OPTIONAL] },
+  ASSET_REQUEST_RETURNED: { required: [...ASSET_REQUEST_REQUIRED, 'solicitud.motivo'], optional: [...ASSET_REQUEST_OPTIONAL] },
+  ASSET_REQUEST_CORRECTED: { required: [...ASSET_REQUEST_REQUIRED, 'solicitud.estado'], optional: [...ASSET_REQUEST_OPTIONAL] },
+  ASSET_REQUEST_CANCELLED: { required: [...ASSET_REQUEST_REQUIRED, 'solicitud.motivo'], optional: [...ASSET_REQUEST_OPTIONAL] },
+  ASSET_REQUEST_GENERATED: {
+    required: [...ASSET_REQUEST_REQUIRED, 'documento.tipo'],
+    optional: [...ASSET_REQUEST_OPTIONAL],
+  },
+  ASSET_REQUEST_EXPIRED: { required: [...ASSET_REQUEST_REQUIRED, 'solicitud.vencio'], optional: [...ASSET_REQUEST_OPTIONAL] },
+  ASSET_REQUEST_COMPLETED: {
+    required: [
+      ...ASSET_REQUEST_REQUIRED.filter((name) => name !== 'solicitud.url'),
+      'documento.tipo',
+      'documento.numero',
+      'documento.url',
+    ],
+    optional: ['solicitud.url', ...ASSET_REQUEST_OPTIONAL],
   },
 };
 
@@ -188,6 +242,20 @@ const EMAIL_VARIABLES: Readonly<Record<string, Omit<EmailVariableSpec, 'name'>>>
   'centro.nombre': textVar('Nombre del centro de costo (solo tomas de un centro)'),
   'recordatorio.cuando': textVar('Cuándo empieza la toma (hoy, mañana, en 15 días)'),
   'recordatorio.dias': textVar('Días que faltan para el inicio'),
+  'solicitud.codigo': textVar('Código de la solicitud de activos'),
+  'solicitud.tipo': textVar('Tipo de solicitud (préstamo temporal o traslado permanente)'),
+  'solicitud.centroSolicitante': textVar('Centro de costo que solicita los activos'),
+  'solicitud.centroDueno': textVar('Centro de costo dueño de los activos'),
+  'solicitud.url': urlVar('Enlace a la solicitud en Control Interno', 'Ver la solicitud'),
+  'solicitud.descripcion': textVar('Qué necesita el centro solicitante'),
+  'solicitud.solicitante': textVar('Nombre de quien solicita'),
+  'solicitud.activos': textVar('Cantidad de activos elegidos por el centro dueño'),
+  'solicitud.motivo': textVar('Motivo del cierre, la devolución o la cancelación'),
+  'solicitud.estado': textVar('A quién pasa la solicitud corregida (centro dueño o Control Interno)'),
+  'solicitud.vencio': textVar('Fecha en que venció la solicitud sin revisión de Control Interno'),
+  'documento.tipo': textVar('Documento generado (préstamo OCI-01-65 o traslado OCI-17-89)'),
+  'documento.numero': textVar('Número del acta firmada'),
+  'documento.url': urlVar('Enlace al acta firmada', 'Ver el acta'),
 };
 
 const variableSpec = (name: string): EmailVariableSpec => {
@@ -215,6 +283,15 @@ export const EMAIL_TEMPLATE_VARIABLES: Record<EmailTemplateType, ReadonlyArray<E
   INVENTORY_RESCHEDULED: typeVariables('INVENTORY_RESCHEDULED'),
   INVENTORY_REMINDER: typeVariables('INVENTORY_REMINDER'),
   INVENTORY_CANCELLED: typeVariables('INVENTORY_CANCELLED'),
+  ASSET_REQUEST_CREATED: typeVariables('ASSET_REQUEST_CREATED'),
+  ASSET_REQUEST_ACCEPTED: typeVariables('ASSET_REQUEST_ACCEPTED'),
+  ASSET_REQUEST_CLOSED: typeVariables('ASSET_REQUEST_CLOSED'),
+  ASSET_REQUEST_RETURNED: typeVariables('ASSET_REQUEST_RETURNED'),
+  ASSET_REQUEST_CORRECTED: typeVariables('ASSET_REQUEST_CORRECTED'),
+  ASSET_REQUEST_CANCELLED: typeVariables('ASSET_REQUEST_CANCELLED'),
+  ASSET_REQUEST_GENERATED: typeVariables('ASSET_REQUEST_GENERATED'),
+  ASSET_REQUEST_EXPIRED: typeVariables('ASSET_REQUEST_EXPIRED'),
+  ASSET_REQUEST_COMPLETED: typeVariables('ASSET_REQUEST_COMPLETED'),
 };
 
 /** Variables de enlace (kind = url) del tipo. */
@@ -228,6 +305,34 @@ export interface EmailTemplateDesign {
 
 /** Párrafo de texto simple (sin formato) para los diseños por defecto. */
 const paragraph = (text: string): ParagraphBlock => ({ type: 'paragraph', content: textToRichText(text) });
+
+/** Diseño por defecto de los avisos de solicitud de activos: título, texto, datos, aviso opcional y botón. */
+const assetRequestDesign = (
+  subject: string,
+  heading: string,
+  text: string,
+  callout?: { readonly tone: 'info' | 'warning'; readonly text: string },
+  button: { readonly label: string; readonly url: string } = { label: 'Ver la solicitud', url: '{{solicitud.url}}' },
+): EmailTemplateDesign => ({
+  subject,
+  blocks: [
+    { type: 'heading', text: heading },
+    paragraph('Hola {{user.fullName}},'),
+    paragraph(text),
+    {
+      type: 'keyValueList',
+      items: [
+        { label: 'Solicitud', value: '{{solicitud.codigo}}' },
+        { label: 'Tipo', value: '{{solicitud.tipo}}' },
+        { label: 'Centro que solicita', value: '{{solicitud.centroSolicitante}}' },
+        { label: 'Centro dueño', value: '{{solicitud.centroDueno}}' },
+      ],
+    },
+    ...(callout ? [{ type: 'callout' as const, tone: callout.tone, text: callout.text }] : []),
+    { type: 'button', label: button.label, url: button.url },
+    paragraph('{{app.name}}'),
+  ],
+});
 
 /**
  * Diseño por defecto de cada tipo: se usa mientras el tipo no tenga versión activa en BD. Mismo texto que las
@@ -392,6 +497,57 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
       paragraph('{{app.name}}'),
     ],
   },
+  ASSET_REQUEST_CREATED: assetRequestDesign(
+    'Solicitud de activos {{solicitud.codigo}}',
+    'Nueva solicitud de activos',
+    '{{solicitud.solicitante}} pide activos de su centro de costo. Revise la solicitud y elija los activos o ciérrela indicando el motivo.',
+    { tone: 'info', text: '{{solicitud.descripcion}}' },
+  ),
+  ASSET_REQUEST_ACCEPTED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}} aceptada',
+    'Solicitud de activos aceptada',
+    'El centro dueño aceptó la solicitud y eligió {{solicitud.activos}} activos. Control Interno la revisa y genera el documento.',
+  ),
+  ASSET_REQUEST_CLOSED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}} cerrada',
+    'Solicitud de activos cerrada',
+    'El centro dueño cerró la solicitud: no entregará los activos.',
+    { tone: 'warning', text: 'Motivo: {{solicitud.motivo}}' },
+  ),
+  ASSET_REQUEST_RETURNED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}} devuelta para corregir',
+    'Solicitud de activos devuelta',
+    'Control Interno devolvió la solicitud para que la corrija o la cancele.',
+    { tone: 'warning', text: 'Motivo: {{solicitud.motivo}}' },
+  ),
+  ASSET_REQUEST_CORRECTED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}} corregida',
+    'Solicitud de activos corregida',
+    'El solicitante corrigió la solicitud; ahora la revisa {{solicitud.estado}}.',
+  ),
+  ASSET_REQUEST_CANCELLED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}} cancelada',
+    'Solicitud de activos cancelada',
+    'El solicitante canceló la solicitud.',
+    { tone: 'warning', text: 'Motivo: {{solicitud.motivo}}' },
+  ),
+  ASSET_REQUEST_GENERATED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}}: documento generado',
+    'Documento generado',
+    'Control Interno generó el documento de la solicitud: {{documento.tipo}}. Las personas que firman reciben su enlace de firma.',
+  ),
+  ASSET_REQUEST_EXPIRED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}} vencida',
+    'Solicitud de activos vencida',
+    'La solicitud venció el {{solicitud.vencio}} sin que Control Interno generara el documento. Los activos elegidos quedaron libres.',
+  ),
+  ASSET_REQUEST_COMPLETED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}}: acta {{documento.numero}} firmada',
+    'Documento firmado',
+    'El acta {{documento.tipo}} N.° {{documento.numero}} de la solicitud quedó firmada por todos.',
+    undefined,
+    { label: 'Ver el acta', url: '{{documento.url}}' },
+  ),
 };
 
 const INVENTORY_SAMPLE: Readonly<Record<string, string>> = {
@@ -404,6 +560,19 @@ const INVENTORY_SAMPLE: Readonly<Record<string, string>> = {
   'toma.responsable': 'Carolina Gómez',
   'centro.codigo': '3060',
   'centro.nombre': 'Talento Humano',
+  'app.loginUrl': 'http://localhost:4200',
+  'app.name': 'Control Interno UNAC',
+};
+
+const ASSET_REQUEST_SAMPLE: Readonly<Record<string, string>> = {
+  'user.fullName': 'Juliana Pérez',
+  'solicitud.codigo': 'SOL-2026-0007',
+  'solicitud.tipo': 'Préstamo temporal',
+  'solicitud.centroSolicitante': '3060 · Talento Humano',
+  'solicitud.centroDueno': '2010 · Sistemas',
+  'solicitud.url': 'http://localhost:4200/asset-requests/ejemplo',
+  'solicitud.descripcion': 'Dos portátiles para la inducción de personal nuevo',
+  'solicitud.solicitante': 'Carolina Gómez',
   'app.loginUrl': 'http://localhost:4200',
   'app.name': 'Control Interno UNAC',
 };
@@ -482,6 +651,20 @@ export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, stri
     },
     INVENTORY_REMINDER: { ...INVENTORY_SAMPLE, 'recordatorio.cuando': 'en 15 días', 'recordatorio.dias': '15' },
     INVENTORY_CANCELLED: { ...INVENTORY_SAMPLE, 'toma.motivo': 'Se hará dentro de la toma general de la sede' },
+    ASSET_REQUEST_CREATED: { ...ASSET_REQUEST_SAMPLE },
+    ASSET_REQUEST_ACCEPTED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.activos': '2' },
+    ASSET_REQUEST_CLOSED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.motivo': 'Los equipos están comprometidos para el semestre' },
+    ASSET_REQUEST_RETURNED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.motivo': 'Falta la fecha real de inicio del préstamo' },
+    ASSET_REQUEST_CORRECTED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.estado': 'Control Interno' },
+    ASSET_REQUEST_CANCELLED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.motivo': 'Ya no se necesitan los equipos' },
+    ASSET_REQUEST_GENERATED: { ...ASSET_REQUEST_SAMPLE, 'documento.tipo': 'Préstamo de activos (OCI-01-65)' },
+    ASSET_REQUEST_EXPIRED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.vencio': '12 de octubre de 2026' },
+    ASSET_REQUEST_COMPLETED: {
+      ...ASSET_REQUEST_SAMPLE,
+      'documento.tipo': 'Préstamo de activos (OCI-01-65)',
+      'documento.numero': '0104',
+      'documento.url': 'http://localhost:4200/documents/ejemplo',
+    },
   };
 
 
