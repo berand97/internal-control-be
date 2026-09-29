@@ -166,7 +166,7 @@ export class AssetRequests1767225930000 implements MigrationInterface {
         (id, module, module_label, resource, path, label, required_action, sort_order, icon)
       VALUES
         ('${REQUESTS_NAV_ID}', 'ASSET', 'Activos', 'loan', '/asset-requests', 'Solicitudes de activos', 'request', 82, 'hand-helping'),
-        ('${TRANSFERS_NAV_ID}', 'ASSET', 'Activos', 'transfer', '/transfers', 'Traslados', 'read', 76, 'package')
+        ('${TRANSFERS_NAV_ID}', 'ASSET', 'Activos', 'transfer', '/transfers', 'Traslados', 'read', 78, 'package')
       ON CONFLICT (path) DO NOTHING
     `);
   }
