@@ -97,6 +97,10 @@ describe('AuthService', () => {
       findByEmailWithPerson: vi.fn(),
       findByIdWithPerson: vi.fn(),
       findActiveRoleCodes: vi.fn().mockResolvedValue(['VIEWER']),
+      // Mismos roles que findActiveRoleCodes (cada test ajusta ese mock), con un nombre para mostrar.
+      findActiveRoles: vi.fn(async (userId: string) =>
+        (await authUsersRepository.findActiveRoleCodes(userId)).map((code) => ({ code, name: `Rol ${code}` })),
+      ),
       findActiveScopes: vi.fn().mockResolvedValue([]),
       markLoggedIn: vi.fn(),
       updatePassword: vi.fn(),

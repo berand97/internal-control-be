@@ -298,6 +298,28 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
     expect(Number(await scalar<string>(dataSource, `SELECT count(*) FROM navigation_item WHERE path IN ('/imports', '/handovers', '/documents')`))).toBe(3);
   });
 
+  it('/auth/me trae roleDetails con el nombre editable del rol en la BD, sin quitar roles[]', async () => {
+    const original = await scalar<string>(dataSource, `SELECT name FROM role WHERE code = 'INTERNAL_CONTROL_DIRECTOR'`);
+    const before = (await http().get('/api/v1/auth/me').set(auth('director')).expect(200)).body.data;
+    expect(before.roles).toEqual(['INTERNAL_CONTROL_DIRECTOR']);
+    expect(before.roleDetails).toEqual([{ code: 'INTERNAL_CONTROL_DIRECTOR', name: original }]);
+    try {
+      await dataSource.query(`UPDATE role SET name = 'Jefatura de Control Interno' WHERE code = 'INTERNAL_CONTROL_DIRECTOR'`);
+      const after = (await http().get('/api/v1/auth/me').set(auth('director')).expect(200)).body.data;
+      expect(after.roleDetails).toEqual([{ code: 'INTERNAL_CONTROL_DIRECTOR', name: 'Jefatura de Control Interno' }]);
+    } finally {
+      await dataSource.query(`UPDATE role SET name = $1 WHERE code = 'INTERNAL_CONTROL_DIRECTOR'`, [original]);
+    }
+    const openapi = createOpenApiDocument(app);
+    const schemas = (openapi.components?.schemas ?? {}) as Record<string, Record<string, unknown>>;
+    for (const dto of ['MeResponseDto', 'AuthUserResponseDto']) {
+      const properties = (schemas[dto]?.['properties'] ?? {}) as Record<string, Record<string, unknown>>;
+      expect(properties['roleDetails'], dto).toMatchObject({ type: 'array', items: { $ref: '#/components/schemas/ActiveRoleResponseDto' } });
+      expect(schemas[dto]?.['required'], dto).toEqual(expect.arrayContaining(['roles', 'roleDetails']));
+    }
+    expect(schemas['ActiveRoleResponseDto']).toMatchObject({ required: ['code', 'name'] });
+  });
+
   it('OpenAPI: icon es el enum con nombre NavigationIcon, nullable, en /auth/me y en el CRUD', () => {
     const openapi = createOpenApiDocument(app);
     const schemas = (openapi.components?.schemas ?? {}) as Record<string, Record<string, unknown>>;

@@ -9,7 +9,7 @@ import {
 import { AppUser } from '../entities/app-user.entity.js';
 import { UserRole } from '../entities/user-role.entity.js';
 import { UserStatus } from '../enums/user-status.enum.js';
-import { AuthUsersRepository } from './auth-users.repository.interface.js';
+import type { ActiveRole, AuthUsersRepository } from './auth-users.repository.interface.js';
 
 interface RoleCodeRow {
   readonly code: string;
@@ -65,6 +65,21 @@ export class TypeOrmAuthUsersRepository implements AuthUsersRepository {
       .distinct(true)
       .getRawMany<RoleCodeRow>();
     return rows.map((row): string => row.code);
+  }
+
+  /** Mismos roles que findActiveRoleCodes, con el nombre editable del rol (role.name) para mostrarlo. */
+  async findActiveRoles(userId: string): Promise<ReadonlyArray<ActiveRole>> {
+    const rows = await this.userRoles
+      .createQueryBuilder('ur')
+      .select('r.code', 'code')
+      .addSelect('r.name', 'name')
+      .innerJoin('ur.role', 'r')
+      .where('ur.userId = :userId', { userId })
+      .andWhere(ACTIVE_ROLE_WHERE)
+      .distinct(true)
+      .orderBy('r.code')
+      .getRawMany<ActiveRole>();
+    return rows.map((row): ActiveRole => ({ code: row.code, name: row.name }));
   }
 
   async findActiveScopes(userId: string): Promise<ReadonlyArray<TokenScope>> {

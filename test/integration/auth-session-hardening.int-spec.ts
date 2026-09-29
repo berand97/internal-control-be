@@ -862,6 +862,11 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       const fresh = await login(email, passwords[0] ?? '');
       expect(fresh.status).toBe(200);
       expect(fresh.body.data.user.mustChangePassword).toBe(true);
+      // El login trae, además de los códigos, el nombre editable de cada rol (el de la BD).
+      expect(fresh.body.data.user.roles).toEqual(['VIEWER']);
+      expect(fresh.body.data.user.roleDetails).toEqual([
+        { code: 'VIEWER', name: await scalar<string>(dataSource, `SELECT name FROM role WHERE code = 'VIEWER'`) },
+      ]);
       const pendingToken = fresh.body.data.accessToken as string;
 
       // Vencida: ni login ni la sesión que abrió.

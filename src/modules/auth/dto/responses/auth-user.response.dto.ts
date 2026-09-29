@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { ActiveRoleResponseDto } from './active-role.response.dto.js';
 
 export class AuthUserResponseDto {
   @ApiProperty({ format: 'uuid', description: 'Identificador del usuario' })
@@ -13,6 +14,12 @@ export class AuthUserResponseDto {
     example: ['INTERNAL_CONTROL_DIRECTOR', 'AUDITOR'],
   })
   readonly roles!: ReadonlyArray<string>;
+
+  @ApiProperty({
+    description: 'Los mismos roles activos que roles[], con el nombre editable del rol para mostrarlo. Solo informativo.',
+    type: [ActiveRoleResponseDto],
+  })
+  readonly roleDetails!: ReadonlyArray<ActiveRoleResponseDto>;
 
   @ApiProperty({
     description:

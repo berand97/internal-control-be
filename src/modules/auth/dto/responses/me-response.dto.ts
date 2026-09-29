@@ -11,6 +11,7 @@ import type { AuditLog } from '../../entities/audit-log.entity.js';
 import type { MfaStatus } from '../../services/mfa-account.service.js';
 import { LoginEventResponseDto } from './login-event.response.dto.js';
 import { NavigationItemResponseDto } from './navigation-item.response.dto.js';
+import { ActiveRoleResponseDto } from './active-role.response.dto.js';
 import { ResourceCapabilityResponseDto } from './resource-capability.response.dto.js';
 import { TokenScopeResponseDto } from './token-scope.response.dto.js';
 
@@ -83,6 +84,13 @@ export class MeResponseDto {
   readonly roles!: ReadonlyArray<string>;
 
   @ApiProperty({
+    description:
+      'Los mismos roles activos que roles[], con el nombre del rol que el administrador edita en Roles (para mostrarlo en la barra superior). Solo informativo; la UI no debe ramificar por rol.',
+    type: [ActiveRoleResponseDto],
+  })
+  readonly roleDetails!: ReadonlyArray<ActiveRoleResponseDto>;
+
+  @ApiProperty({
     description: 'Ámbitos activos derivados de los roles asignados',
     type: [TokenScopeResponseDto],
   })
@@ -123,7 +131,7 @@ export class MeResponseDto {
 
   static from(
     user: AppUser,
-    roles: ReadonlyArray<string>,
+    roles: ReadonlyArray<ActiveRoleResponseDto>,
     scopes: ReadonlyArray<TokenScope>,
     lastLogins: ReadonlyArray<AuditLog>,
     granted: ReadonlyArray<GrantedPermission>,
@@ -148,7 +156,8 @@ export class MeResponseDto {
       mfaRequiredByRole: mfa.requiredByRole,
       mfaSessionVerified: mfa.sessionVerified,
       mustChangePassword: user.mustChangePassword === true,
-      roles,
+      roles: roles.map((role) => role.code),
+      roleDetails: roles.map((role): ActiveRoleResponseDto => ({ code: role.code, name: role.name })),
       scopes: scopes.map((scope): TokenScopeResponseDto => ({
         type: scope.type,
         id: scope.id,

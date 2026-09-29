@@ -389,14 +389,15 @@ export class AuthService {
       throw new ApiException(ErrorCode.Unauthorized);
     }
 
-    const [roles, scopes, lastLogins, granted, catalog] = await Promise.all([
-      this.authUsersRepository.findActiveRoleCodes(user.id),
+    const [roleDetails, scopes, lastLogins, granted, catalog] = await Promise.all([
+      this.authUsersRepository.findActiveRoles(user.id),
       this.authUsersRepository.findActiveScopes(user.id),
       this.auditLogsRepository.findLastLogins(user.id, LAST_LOGINS_LIMIT),
       this.authUsersRepository.findEffectivePermissions(user.id),
       this.navigationService.listActiveDefinitions(),
     ]);
 
+    const roles = roleDetails.map((role) => role.code);
     const mfa = await this.mfaAccount.status(user, dbUser, {
       roleCodes: roles,
       permissionCodes: granted.map((permission) => permission.code),
@@ -404,7 +405,7 @@ export class AuthService {
 
     return MeResponseDto.from(
       dbUser,
-      roles,
+      roleDetails,
       scopes,
       lastLogins,
       granted,
@@ -604,10 +605,11 @@ export class AuthService {
     context: AuthRequestContext,
     mfaMethod: MfaProofMethod | null = null,
   ): Promise<AuthenticatedLoginOutcome> {
-    const [roles, scopes] = await Promise.all([
-      this.authUsersRepository.findActiveRoleCodes(user.id),
+    const [roleDetails, scopes] = await Promise.all([
+      this.authUsersRepository.findActiveRoles(user.id),
       this.authUsersRepository.findActiveScopes(user.id),
     ]);
+    const roles = roleDetails.map((role) => role.code);
     const authenticatedUser = this.toAuthenticatedUser(user, roles, scopes);
 
     const familyId = randomUUID();
@@ -643,7 +645,7 @@ export class AuthService {
         accessToken,
         this.tokenService.getAccessTokenLifetimeSeconds(),
         user,
-        roles,
+        roleDetails,
       ),
       refreshToken,
     };

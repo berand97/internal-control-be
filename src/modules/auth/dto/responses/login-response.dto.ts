@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type { AppUser } from '../../entities/app-user.entity.js';
 import { AuthUserResponseDto } from './auth-user.response.dto.js';
+import type { ActiveRoleResponseDto } from './active-role.response.dto.js';
 
 export class LoginResponseDto {
   @ApiProperty({
@@ -26,12 +27,13 @@ export class LoginResponseDto {
     accessToken: string,
     expiresIn: number,
     user: AppUser,
-    roles: ReadonlyArray<string>,
+    roles: ReadonlyArray<ActiveRoleResponseDto>,
   ): LoginResponseDto {
     const authUser: AuthUserResponseDto = {
       id: user.id,
       username: user.username,
-      roles,
+      roles: roles.map((role) => role.code),
+      roleDetails: roles.map((role): ActiveRoleResponseDto => ({ code: role.code, name: role.name })),
       mustChangePassword: user.mustChangePassword === true,
     };
     return { accessToken, expiresIn, user: authUser };
