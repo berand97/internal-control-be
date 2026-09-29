@@ -193,8 +193,14 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     const mine = await http().get('/api/v1/imports/jobs').set(auth());
     expect((mine.body.data as Array<{ id: string }>).map((item) => item.id)).toContain(job.id);
 
-    // Sin SMTP el correo queda FALLIDO y visible en el trabajo.
-    await outbox.dispatchPending();
+    // Sin SMTP el correo queda FALLIDO y visible en el trabajo. mail_outbox es una cola compartida por todos los
+    // archivos (FIFO por created_at, 20 por pasada): otros archivos dejan avisos pendientes (tomas físicas, …) y, según
+    // el orden de los archivos y si el job de cada 5 s de otra app alcanzó a despacharlos, el de este trabajo puede
+    // quedar fuera de la primera pasada. Se vacía la cola vencida: cada pasada toma filas distintas (una fila
+    // despachada no vuelve a estar vencida hasta OUTBOX_RETRY_MINUTES), así que el bucle termina.
+    for (let pass = await outbox.dispatchPending(); pass.sent + pass.failed > 0; pass = await outbox.dispatchPending()) {
+      // sigue hasta que no quede nada vencido
+    }
     const mailed = await jobs.find(job.id);
     expect(mailed.email).toMatchObject({
       status: 'FAILED',
