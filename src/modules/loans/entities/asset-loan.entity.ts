@@ -63,6 +63,10 @@ export class AssetLoan {
   @Column({ name: 'delivery_document_id', type: 'uuid', nullable: true })
   deliveryDocumentId!: string | null;
 
+  /** Solicitud de activos que originó el préstamo (migración 1767225930000); null si se creó por POST /loans. */
+  @Column({ name: 'asset_request_id', type: 'uuid', nullable: true })
+  assetRequestId!: string | null;
+
   @Column({ name: 'extension_requested_date', type: 'date', nullable: true })
   extensionRequestedDate!: string | null;
 

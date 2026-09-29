@@ -19,7 +19,11 @@ import {
   type DocumentRequestPayload,
   DocumentEngineService,
 } from '../../documents/services/document-engine.service.js';
-import { costCenterFilter, type ReadableCostCenterScope } from '../../roles/services/cost-center-scope.js';
+import {
+  costCenterFilter,
+  type CostCenterScope,
+  type ReadableCostCenterScope,
+} from '../../roles/services/cost-center-scope.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import {
   assertLoanInApprovalScope,
@@ -72,6 +76,20 @@ const LOANABLE: ReadonlyArray<OperationalStatus> = [
 ];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const ASSET_READ_GLOBAL = 'asset:read:global';
+const ASSET_READ_SCOPED = 'asset:read:org_unit';
+
+/** Datos del préstamo que crea createWithin (POST /loans o la solicitud de activos). */
+export interface CreateLoanInput {
+  readonly assetIds: ReadonlyArray<string>;
+  readonly targetCostCenterId: string;
+  readonly targetLocationId: string | null;
+  readonly contactPersonId: string;
+  readonly expectedReturnDate: string;
+  readonly justification: string;
+  readonly deliveryNotes: string | null;
+}
 
 const RETURN_CONDITION_LABELS: Record<LoanReturnCondition, string> = {
   GOOD: 'Bueno',
@@ -282,14 +300,64 @@ export class LoansService {
    * segunda ve la primera. Un activo en un préstamo abierto (OPEN_LOAN_STATUSES, incluida otra solicitud) no entra.
    */
   async create(dto: CreateLoanDto, actor: AuthenticatedUser) {
-    const uniqueIds = [...new Set(dto.assets)];
-    const loanId = await this.dataSource.transaction(async (manager) => {
+    // Ningún endpoint expone activos de otro centro: quien crea el préstamo debe alcanzar el centro de ORIGEN de los
+    // activos (asset:read:global, o asset:read:org_unit por asignación COST_CENTER o jefatura). Si no, 404 sin datos,
+    // igual que un activo inexistente (el pedido a otro centro va por POST /asset-requests).
+    const scope = await this.permissions.costCenterScope(actor.id, ASSET_READ_GLOBAL, ASSET_READ_SCOPED);
+    const loanId = await this.dataSource.transaction((manager) =>
+      this.createWithin(
+        manager,
+        {
+          assetIds: dto.assets,
+          targetCostCenterId: dto.targetCostCenterId,
+          targetLocationId: dto.targetLocationId ?? null,
+          contactPersonId: dto.contactPerson,
+          expectedReturnDate: dto.expectedReturnDate,
+          justification: dto.justification,
+          deliveryNotes: dto.deliveryNotes ?? null,
+        },
+        actor.id,
+        { sourceScope: scope },
+      ),
+    );
+    return this.detailById(loanId);
+  }
+
+  /**
+   * Crea el préstamo dentro de la transacción del llamador. sourceScope: alcance que debe cubrir el centro de origen
+   * (POST /loans). approved: el préstamo nace APPROVED (solicitud de activos aceptada por el jefe dueño y revisada por
+   * Control Interno), con quién y cuándo aprobó y la solicitud que lo origina (asset_loan.asset_request_id).
+   */
+  async createWithin(
+    manager: EntityManager,
+    input: CreateLoanInput,
+    actorId: string,
+    options: {
+      readonly sourceScope?: CostCenterScope;
+      readonly approved?: {
+        readonly by: string;
+        readonly at: Date;
+        readonly requestedBy: string;
+        readonly assetRequestId: string;
+      };
+    } = {},
+  ): Promise<string> {
+    const uniqueIds = [...new Set(input.assetIds)];
+    {
       const assets = await manager.find(Asset, {
         where: { id: In(uniqueIds) },
         order: { id: 'ASC' },
         lock: { mode: 'pessimistic_write' },
       });
       if (assets.length !== uniqueIds.length) {
+        throw new ApiException(ErrorCode.ResourceNotFound);
+      }
+      const scope = options.sourceScope;
+      if (
+        scope &&
+        scope.kind !== 'GLOBAL' &&
+        (scope.kind !== 'COST_CENTERS' || assets.some((asset) => !scope.costCenterIds.includes(asset.costCenterId)))
+      ) {
         throw new ApiException(ErrorCode.ResourceNotFound);
       }
       const sourceId = assets[0]?.costCenterId;
@@ -299,16 +367,16 @@ export class LoansService {
       if (assets.some((item) => item.costCenterId !== sourceId)) {
         throw new ApiException(ErrorCode.ValidationFailed);
       }
-      if (sourceId === dto.targetCostCenterId) {
+      if (sourceId === input.targetCostCenterId) {
         throw new ApiException(ErrorCode.LoanSameCostCenter);
       }
       const target = await manager.findOne(CostCenter, {
-        where: { id: dto.targetCostCenterId, isActive: true },
+        where: { id: input.targetCostCenterId, isActive: true },
       });
       if (!target) {
         throw new ApiException(ErrorCode.ResourceNotFound);
       }
-      const contact = await manager.findOne(Person, { where: { id: dto.contactPerson } });
+      const contact = await manager.findOne(Person, { where: { id: input.contactPersonId } });
       if (!contact) {
         throw new ApiException(ErrorCode.ResourceNotFound);
       }
@@ -330,17 +398,20 @@ export class LoansService {
         );
       }
       const now = new Date();
+      const approved = options.approved;
+      const requestedBy = approved?.requestedBy ?? actorId;
       const created = manager.create(AssetLoan, {
         sourceCostCenterId: sourceId,
-        targetCostCenterId: dto.targetCostCenterId,
-        targetLocationId: dto.targetLocationId ?? null,
-        contactPersonId: dto.contactPerson,
+        targetCostCenterId: input.targetCostCenterId,
+        targetLocationId: input.targetLocationId,
+        contactPersonId: input.contactPersonId,
         requestedAt: now,
-        expectedReturnDate: dto.expectedReturnDate.slice(0, 10),
-        requestedBy: actor.id,
-        status: 'REQUESTED',
-        justification: dto.justification,
-        deliveryNotes: dto.deliveryNotes ?? null,
+        expectedReturnDate: input.expectedReturnDate.slice(0, 10),
+        requestedBy,
+        status: approved ? 'APPROVED' : 'REQUESTED',
+        ...(approved ? { approvedBy: approved.by, approvedAt: approved.at, assetRequestId: approved.assetRequestId } : {}),
+        justification: input.justification,
+        deliveryNotes: input.deliveryNotes,
         createdAt: now,
         updatedAt: now,
       });
@@ -356,11 +427,21 @@ export class LoansService {
           }),
         );
       }
-      await this.addEvent(manager, saved.id, 'REQUESTED', actor.id, { assets: uniqueIds });
-      await this.audit(manager, AuditAction.LoanRequested, saved.id, actor.id, { assets: uniqueIds });
+      await this.addEvent(manager, saved.id, 'REQUESTED', requestedBy, {
+        assets: uniqueIds,
+        ...(approved ? { assetRequestId: approved.assetRequestId } : {}),
+      });
+      await this.audit(manager, AuditAction.LoanRequested, saved.id, actorId, {
+        assets: uniqueIds,
+        ...(approved ? { assetRequestId: approved.assetRequestId } : {}),
+      });
+      if (approved) {
+        // La aprobación es la aceptación del jefe del centro dueño (origen) en la solicitud de activos.
+        await this.addEvent(manager, saved.id, 'APPROVED', approved.by, { assetRequestId: approved.assetRequestId });
+        await this.audit(manager, AuditAction.LoanApproved, saved.id, actorId, { assetRequestId: approved.assetRequestId });
+      }
       return saved.id;
-    });
-    return this.detailById(loanId);
+    }
   }
 
   /**
@@ -421,7 +502,14 @@ export class LoansService {
    * muestra FAILED con su error (se reintenta con POST /documents/requests/:requestId/retry).
    */
   async deliver(id: string, dto: DeliverLoanDto, actor: AuthenticatedUser) {
-    await this.dataSource.transaction(async (manager) => {
+    await this.dataSource.transaction((manager) => this.deliverWithin(manager, id, dto, actor.id));
+    return this.detailById(id);
+  }
+
+  /** Entrega dentro de la transacción del llamador (deliver o la generación de una solicitud de activos). */
+  async deliverWithin(manager: EntityManager, id: string, dto: DeliverLoanDto, actorId: string): Promise<void> {
+    const actor = { id: actorId };
+    {
       const loan = await this.lockLoan(manager, id);
       assertLoanTransition(loan.status, 'PENDING_SIGNATURES');
       const contactPersonId = loan.contactPersonId;
@@ -548,8 +636,7 @@ export class LoansService {
         fields,
       });
       await this.audit(manager, AuditAction.LoanDelivered, loan.id, actor.id, { documentRequestId: requestId });
-    });
-    return this.detailById(id);
+    }
   }
 
   /**
