@@ -30,7 +30,7 @@ import {
 import { AssetRequestsService } from './services/asset-requests.service.js';
 
 const PARTIES =
-  'Solo la ven sus partes: quien la solicitó, los jefes vigentes del centro dueño y Control Interno (asset_request:review:global). Cualquier otro usuario: 404 RESOURCE_NOT_FOUND, igual que una solicitud inexistente.';
+  'Solo la ven sus partes: quien la solicitó, los jefes vigentes del centro dueño, Control Interno (asset_request:review:global) y quien las lee todas sin acciones (asset_request:read:global, viewerRoles READER). Cualquier otro usuario: 404 RESOURCE_NOT_FOUND, igual que una solicitud inexistente.';
 
 const OWNER_ONLY =
   'Solo un jefe vigente del centro dueño que no sea quien solicitó; cualquier otro caso (otra solicitud, otro centro, token inválido, activo de otro centro) responde 404 RESOURCE_NOT_FOUND sin datos.';
@@ -72,7 +72,7 @@ export class AssetRequestsController {
   @ApiOperation({
     summary: 'Bandejas de solicitudes de activos',
     description:
-      'box=mine: las que abrí; box=to-decide: las de los centros que dirijo hoy; box=review: todas (403 INSUFFICIENT_PERMISSIONS sin asset_request:review:global).',
+      'box=mine: las que abrí; box=to-decide: las de los centros que dirijo hoy; box=review: todas (asset_request:review:global o asset_request:read:global; sin ninguno, 403 INSUFFICIENT_PERMISSIONS).',
   })
   @ApiOkResponse({ schema: envelopedSchema(AssetRequestListResponseDto) })
   list(@Query() query: QueryAssetRequestsDto, @CurrentUser() actor: AuthenticatedUser) {
@@ -150,7 +150,7 @@ export class AssetRequestsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Control Interno devuelve la solicitud al solicitante para corregir',
-    description: 'ACCEPTED → RETURNED. Motivo obligatorio. Requiere asset_request:review:global. Los activos siguen reservados.',
+    description: `ACCEPTED → RETURNED. Motivo obligatorio. Requiere asset_request:review:global (READER: 403). Los activos siguen reservados; si el solicitante no la corrige ni la cancela en ${ASSET_REQUEST_EXPIRY_DAYS} días, vence (EXPIRED) y los libera.`,
   })
   @ApiOkResponse({ schema: envelopedSchema(AssetRequestDetailDto) })
   returnToRequester(
@@ -187,11 +187,14 @@ export class AssetRequestsController {
   @Post(':id/generate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Control Interno genera el préstamo o el traslado con su acta',
+    summary: 'Control Interno genera el préstamo (programado) o el traslado con su acta',
     description:
-      'ACCEPTED → DOCUMENT_GENERATED en una transacción. Requiere asset_request:review:global y el permiso de generación del formato (OCI-01-65: loan:update:global; OCI-17-89: asset:update:global). ' +
-      'TEMPORARY: préstamo APPROVED (aprobó el jefe dueño al aceptar) y entregado: activos ON_LOAN y acta OCI-01-65 con ENTREGA = jefe dueño que aceptó, RECIBE = solicitante, AUDITA = Control Interno. ' +
-      'PERMANENT: traslado con items (datos del acta por activo, exactamente los aceptados) y acta OCI-17-89 con ENTREGA = jefe dueño, RECIBE = solicitante, CONTROL_INTERNO y CONTABILIDAD por rol ' +
+      'En una transacción. Requiere asset_request:review:global (READER: 403) y el permiso de generación del formato (OCI-01-65: loan:update:global; OCI-17-89: asset:update:global). ' +
+      'TEMPORARY: ACCEPTED → LOAN_SCHEDULED. Generar NO entrega: préstamo APPROVED (aprobó el jefe dueño al aceptar) con los activos aceptados, startDate y expectedReturnDate de la solicitud; los activos siguen en el centro dueño, reservados por el préstamo, sin movimiento ni acta. ' +
+      'La entrega es POST /loans/:id/deliver desde startDate (jefe vigente del centro dueño o Control Interno): activos ON_LOAN, movimiento LOAN y acta OCI-01-65; la solicitud pasa a DOCUMENT_GENERATED. ' +
+      'controlSignerPersonId, signerSubstitutions y assetNotes se indican al entregar: enviarlos aquí con TEMPORARY responde 400 VALIDATION_FAILED. El día de inicio se avisa al solicitante y al dueño (una vez). ' +
+      'PERMANENT: ACCEPTED → DOCUMENT_GENERATED. ' +
+      'Traslado con items (datos del acta por activo, exactamente los aceptados) y acta OCI-17-89 con ENTREGA = jefe dueño, RECIBE = solicitante, CONTROL_INTERNO y CONTABILIDAD por rol ' +
       '(TRANSFER_NO_CONTROL_SIGNER / TRANSFER_NO_ACCOUNTING_SIGNER / TRANSFER_SIGNER_REQUIRED si faltan o hay varios). Se aplican las guardas del préstamo o del traslado. ' +
       'Cuando el acta queda firmada, el solicitante y los jefes del centro dueño reciben el enlace.',
   })

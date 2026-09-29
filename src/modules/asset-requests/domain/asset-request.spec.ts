@@ -16,12 +16,15 @@ describe('asset-request transitions', () => {
         'REQUESTED->ACCEPTED',
         'REQUESTED->CLOSED_BY_OWNER',
         'REQUESTED->CANCELLED',
+        'ACCEPTED->LOAN_SCHEDULED',
         'ACCEPTED->DOCUMENT_GENERATED',
+        'LOAN_SCHEDULED->DOCUMENT_GENERATED',
         'ACCEPTED->RETURNED',
         'ACCEPTED->EXPIRED',
         'RETURNED->REQUESTED',
         'RETURNED->ACCEPTED',
         'RETURNED->CANCELLED',
+        'RETURNED->EXPIRED',
       ].sort(),
     );
   });

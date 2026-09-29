@@ -4,17 +4,19 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { DocumentEngineService } from '../../documents/services/document-engine.service.js';
+import { longSpanishDate, SQL_BOGOTA_TODAY } from '../../loans/domain/loan-dates.js';
 import { LOAN_DELIVERY_FORMAT } from '../../loans/domain/loan-documents.js';
 import { OPEN_LOAN_STATUSES } from '../../loans/enums/loan-status.js';
-import { LoansService } from '../../loans/services/loans.service.js';
+import { type LoanDeliveredEvent, LoansService } from '../../loans/services/loans.service.js';
 import { QrTokensService } from '../../qr-tokens/services/qr-tokens.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import { TRANSFER_FORMAT_KEY } from '../../transfers/domain/transfer.js';
-import { TransferSignersService } from '../../transfers/services/transfer-signers.service.js';
 import { TransfersService } from '../../transfers/services/transfers.service.js';
 import {
   ASSET_REQUEST_EXPIRY_DAYS,
+  ASSET_REQUEST_READ_GLOBAL,
   ASSET_REQUEST_REVIEW,
+  EXPIRING_STATUSES,
   assertAssetRequestTransition,
   type AssetRequestKind,
   type AssetRequestStatus,
@@ -116,7 +118,8 @@ const longDate = (date: Date): string =>
  * - solicita: un usuario cuya persona es jefe VIGENTE del centro que solicita (cost_center_head);
  * - acepta o cierra: un jefe vigente del centro dueño que no sea quien solicitó (separación de funciones);
  * - revisa (devuelve o genera): asset_request:review:global; generar exige además el permiso de generación del formato
- *   (OCI-01-65 o OCI-17-89), el mismo que pide generarlo por su propio proceso.
+ *   (OCI-01-65 o OCI-17-89), el mismo que pide generarlo por su propio proceso;
+ * - lee todas sin ninguna acción: asset_request:read:global (READER; el auditor).
  * Privacidad: nadie ve activos de otro centro. Una solicitud solo la ven sus partes (solicitante, jefes del dueño,
  * revisores); los activos elegibles y la lectura de QR, solo el jefe dueño y solo del centro dueño. Cualquier otro caso
  * responde 404 RESOURCE_NOT_FOUND, igual que una solicitud o un activo inexistentes.
@@ -129,7 +132,6 @@ export class AssetRequestsService {
     private readonly notices: AssetRequestNoticesService,
     private readonly loans: LoansService,
     private readonly transfers: TransfersService,
-    private readonly signers: TransferSignersService,
     private readonly documents: DocumentEngineService,
     private readonly qr: QrTokensService,
   ) {}
@@ -158,6 +160,10 @@ export class AssetRequestsService {
     return this.permissions.userHasPermission(userId, ASSET_REQUEST_REVIEW);
   }
 
+  private isReader(userId: string): Promise<boolean> {
+    return this.permissions.userHasPermission(userId, ASSET_REQUEST_READ_GLOBAL);
+  }
+
   /** Jefes vigentes (persona activa) del centro, sin contar a la persona indicada. */
   private async headCount(manager: EntityManager, costCenterId: string, exceptPersonId: string | null): Promise<number> {
     const [row] = (await manager.query(
@@ -178,6 +184,9 @@ export class AssetRequestsService {
     }
     if (await this.isReviewer(userId)) {
       roles.push('REVIEWER');
+    }
+    if (await this.isReader(userId)) {
+      roles.push('READER');
     }
     return roles;
   }
@@ -530,9 +539,11 @@ export class AssetRequestsService {
       this.assertReviewer(roles);
       assertAssetRequestTransition(request.status, 'RETURNED');
       // Los activos siguen reservados: si el solicitante solo corrige texto o fechas, vuelve a Control Interno con ellos.
+      // Mismo reloj que ACCEPTED: si no la corrige ni la cancela en el plazo, vence y los libera (expireDue).
       await manager.query(
-        `UPDATE asset_request SET status = 'RETURNED', expires_at = NULL, decided_by = $2, decided_at = NOW() WHERE id = $1`,
-        [request.id, actor.id],
+        `UPDATE asset_request SET status = 'RETURNED', expires_at = NOW() + make_interval(days => $3), decided_by = $2,
+           decided_at = NOW() WHERE id = $1`,
+        [request.id, actor.id, ASSET_REQUEST_EXPIRY_DAYS],
       );
       await this.event(manager, request.id, 'RETURNED', request.status, 'RETURNED', actor.id, reason.trim(), {});
       await this.notices.send(manager, request.id, 'RETURNED', ['REQUESTER'], { reason: reason.trim() });
@@ -542,10 +553,12 @@ export class AssetRequestsService {
 
   /**
    * Genera el documento en UNA transacción:
-   * - TEMPORARY: el préstamo nace APPROVED (la aprobación es la aceptación del jefe dueño) con los activos aceptados y se
-   *   entrega en el acto (LoansService.deliverWithin): activos ON_LOAN, préstamo PENDING_SIGNATURES y acta OCI-01-65
-   *   encolada con ENTREGA = jefe dueño que aceptó, RECIBE = solicitante, AUDITA = Control Interno. Es el mismo paso que
-   *   POST /loans/:id/deliver; hacerlo aquí evita un préstamo aprobado sin acta que nadie más atendería.
+   * - TEMPORARY: generar NO es entregar. El préstamo nace APPROVED (la aprobación es la aceptación del jefe dueño) con
+   *   los activos aceptados, la fecha de inicio y la de devolución de la solicitud; los activos siguen en el centro
+   *   dueño (IN_USE / IN_STORAGE), reservados por el préstamo abierto, sin movimiento ni acta. La solicitud queda
+   *   LOAN_SCHEDULED. La entrega es POST /loans/:id/deliver desde la fecha de inicio (jefe dueño o Control Interno):
+   *   activos ON_LOAN, movimiento LOAN con la fecha real y acta OCI-01-65 (onLoanDelivered → DOCUMENT_GENERATED).
+   *   Firmantes del acta y observaciones por activo se indican al entregar, no aquí.
    * - PERMANENT: el traslado se crea con asset_request_id y los datos por activo del cuerpo, y su acta OCI-17-89 se
    *   encola (TransfersService.generateWithin) con ENTREGA = jefe dueño, RECIBE = solicitante, CONTROL_INTERNO y
    *   CONTABILIDAD por rol.
@@ -555,7 +568,20 @@ export class AssetRequestsService {
     await this.dataSource.transaction(async (manager) => {
       const { request, roles } = await this.partyRequest(manager, id, actor.id, true);
       this.assertReviewer(roles);
-      assertAssetRequestTransition(request.status, 'DOCUMENT_GENERATED');
+      const temporary = request.kind === 'TEMPORARY';
+      assertAssetRequestTransition(request.status, temporary ? 'LOAN_SCHEDULED' : 'DOCUMENT_GENERATED');
+      if (temporary) {
+        const deliveryOnly = (['controlSignerPersonId', 'signerSubstitutions', 'assetNotes'] as const).filter(
+          (field) => dto[field] !== undefined,
+        );
+        if (deliveryOnly.length > 0) {
+          throw new ApiException(
+            ErrorCode.ValidationFailed,
+            'Generar un préstamo no lo entrega: firmantes y observaciones del acta OCI-01-65 se indican al entregar (POST /loans/:id/deliver)',
+            deliveryOnly.map((field) => ({ field, message: 'Se indica al entregar el préstamo' })),
+          );
+        }
+      }
       const { format } = await this.documents.formatReadiness(
         request.kind === 'TEMPORARY' ? LOAN_DELIVERY_FORMAT : TRANSFER_FORMAT_KEY,
         manager,
@@ -595,6 +621,7 @@ export class AssetRequestsService {
             targetLocationId: dto.targetLocationId ?? null,
             contactPersonId: request.requester_person_id,
             expectedReturnDate: request.expected_return_date ?? '',
+            startDate: request.start_date,
             justification,
             deliveryNotes: null,
           },
@@ -607,18 +634,6 @@ export class AssetRequestsService {
               assetRequestId: request.id,
             },
           },
-        );
-        const control = await this.signers.resolve('CONTROL', dto.controlSignerPersonId, manager);
-        await this.loans.deliverWithin(
-          manager,
-          loanId,
-          {
-            deliveredByPersonId: ownerPerson,
-            controlInternoPersonId: control,
-            ...(dto.signerSubstitutions ? { signerSubstitutions: dto.signerSubstitutions } : {}),
-            ...(dto.assetNotes ? { assetNotes: dto.assetNotes } : {}),
-          },
-          actor.id,
         );
       } else {
         const items = dto.items ?? [];
@@ -651,24 +666,97 @@ export class AssetRequestsService {
           actor.id,
         );
       }
+      const next: AssetRequestStatus = temporary ? 'LOAN_SCHEDULED' : 'DOCUMENT_GENERATED';
       await manager.query(
-        `UPDATE asset_request SET status = 'DOCUMENT_GENERATED', loan_id = $2, transfer_id = $3, expires_at = NULL,
+        `UPDATE asset_request SET status = $5, loan_id = $2, transfer_id = $3, expires_at = NULL,
            decided_by = $4, decided_at = NOW() WHERE id = $1`,
-        [request.id, loanId, transferId, actor.id],
+        [request.id, loanId, transferId, actor.id, next],
       );
-      await this.event(manager, request.id, 'DOCUMENT_GENERATED', request.status, 'DOCUMENT_GENERATED', actor.id, null, {
-        ...(loanId ? { loanId } : {}),
-        ...(transferId ? { transferId } : {}),
-      });
-      await this.notices.send(manager, request.id, 'GENERATED', ['REQUESTER', 'OWNER_HEADS'], {
-        document: { kind: this.documentLabel(request.kind) },
-      });
+      if (temporary) {
+        await this.event(manager, request.id, 'LOAN_SCHEDULED', request.status, next, actor.id, null, {
+          loanId,
+          startDate: request.start_date,
+          expectedReturnDate: request.expected_return_date,
+        });
+        await this.notices.send(manager, request.id, 'SCHEDULED', ['REQUESTER', 'OWNER_HEADS'], {
+          startDate: request.start_date ? longSpanishDate(request.start_date) : '',
+        });
+      } else {
+        await this.event(manager, request.id, 'DOCUMENT_GENERATED', request.status, next, actor.id, null, { transferId });
+        await this.notices.send(manager, request.id, 'GENERATED', ['REQUESTER', 'OWNER_HEADS'], {
+          document: { kind: this.documentLabel(request.kind) },
+        });
+      }
     });
     return this.getById(id, actor);
   }
 
   private documentLabel(kind: AssetRequestKind): string {
     return kind === 'TEMPORARY' ? `Préstamo de activos (${LOAN_DELIVERY_FORMAT})` : `Traslado de activos (${TRANSFER_FORMAT_KEY})`;
+  }
+
+  /**
+   * El préstamo de una solicitud se entregó (LoansService.deliverWithin, misma transacción): la solicitud pasa de
+   * LOAN_SCHEDULED a DOCUMENT_GENERATED (su acta OCI-01-65 quedó encolada) y avisa al solicitante y al dueño.
+   */
+  async onLoanDelivered(manager: EntityManager, delivered: LoanDeliveredEvent): Promise<void> {
+    if (!delivered.assetRequestId) {
+      return;
+    }
+    const [request] = (await manager.query(
+      'SELECT id, kind, status FROM asset_request WHERE id = $1 AND loan_id = $2 FOR UPDATE',
+      [delivered.assetRequestId, delivered.loanId],
+    )) as Array<{ id: string; kind: AssetRequestKind; status: AssetRequestStatus }>;
+    if (!request || request.status !== 'LOAN_SCHEDULED') {
+      return;
+    }
+    assertAssetRequestTransition(request.status, 'DOCUMENT_GENERATED');
+    await manager.query(`UPDATE asset_request SET status = 'DOCUMENT_GENERATED' WHERE id = $1`, [request.id]);
+    await this.event(manager, request.id, 'LOAN_DELIVERED', request.status, 'DOCUMENT_GENERATED', delivered.actorId, null, {
+      loanId: delivered.loanId,
+      deliveredAt: delivered.deliveredAt.toISOString(),
+      documentRequestId: delivered.documentRequestId,
+    });
+    await this.notices.send(manager, request.id, 'GENERATED', ['REQUESTER', 'OWNER_HEADS'], {
+      document: { kind: this.documentLabel(request.kind) },
+    });
+  }
+
+  /**
+   * Aviso del día de inicio: préstamos programados (LOAN_SCHEDULED, préstamo APPROVED) cuya fecha de inicio llegó
+   * (America/Bogota) avisan al solicitante y a los jefes del centro dueño que hoy se entrega. Una sola vez por préstamo
+   * (evento LOAN_START_NOTICE con el loanId); cada uno en su transacción con FOR UPDATE SKIP LOCKED. No entrega nada.
+   */
+  async noticeLoanStarts(limit = 200): Promise<number> {
+    let sent = 0;
+    for (let index = 0; index < limit; index += 1) {
+      const done = await this.dataSource.transaction(async (manager) => {
+        const [row] = (await manager.query(
+          `SELECT r.id, r.loan_id, to_char(l.start_date, 'YYYY-MM-DD') AS start_date
+           FROM asset_request r JOIN asset_loan l ON l.id = r.loan_id
+           WHERE r.status = 'LOAN_SCHEDULED' AND l.status = 'APPROVED' AND l.start_date <= ${SQL_BOGOTA_TODAY}
+             AND NOT EXISTS (SELECT 1 FROM asset_request_event e
+                             WHERE e.request_id = r.id AND e.event_type = 'LOAN_START_NOTICE' AND e.payload->>'loanId' = r.loan_id::text)
+           ORDER BY l.start_date, r.id LIMIT 1 FOR UPDATE OF r SKIP LOCKED`,
+        )) as Array<{ id: string; loan_id: string; start_date: string }>;
+        if (!row) {
+          return false;
+        }
+        await this.event(manager, row.id, 'LOAN_START_NOTICE', 'LOAN_SCHEDULED', 'LOAN_SCHEDULED', null, null, {
+          loanId: row.loan_id,
+          startDate: row.start_date,
+        });
+        await this.notices.send(manager, row.id, 'LOAN_STARTS', ['REQUESTER', 'OWNER_HEADS'], {
+          startDate: longSpanishDate(row.start_date),
+        });
+        return true;
+      });
+      if (!done) {
+        break;
+      }
+      sent += 1;
+    }
+    return sent;
   }
 
   /**
@@ -703,8 +791,10 @@ export class AssetRequestsService {
   }
 
   /**
-   * Vencimiento: ACCEPTED con expires_at pasado → EXPIRED, activos liberados, aviso a solicitante, dueño y Control
-   * Interno; cada solicitud en su transacción, con FOR UPDATE SKIP LOCKED (dos instancias no la vencen dos veces).
+   * Vencimiento: ACCEPTED (sin resolución de Control Interno) o RETURNED (sin corrección del solicitante) con
+   * expires_at pasado → EXPIRED, activos liberados, aviso a solicitante, dueño y Control Interno. El evento EXPIRED
+   * guarda el estado del que venció y, si venía devuelta, el motivo de la devolución. Cada solicitud en su
+   * transacción, con FOR UPDATE SKIP LOCKED (dos instancias no la vencen dos veces).
    */
   async expireDue(limit = 50): Promise<number> {
     let expired = 0;
@@ -712,17 +802,31 @@ export class AssetRequestsService {
       const done = await this.dataSource.transaction(async (manager) => {
         const [row] = (await manager.query(
           `SELECT ${ROW_COLUMNS}, expires_at FROM asset_request
-           WHERE status = 'ACCEPTED' AND expires_at <= NOW()
+           WHERE status = ANY($1) AND expires_at <= NOW()
            ORDER BY expires_at LIMIT 1 FOR UPDATE SKIP LOCKED`,
+          [EXPIRING_STATUSES],
         )) as Array<AssetRequestRow & { expires_at: Date }>;
         if (!row) {
           return false;
         }
+        assertAssetRequestTransition(row.status, 'EXPIRED');
+        const [returned] =
+          row.status === 'RETURNED'
+            ? ((await manager.query(
+                `SELECT reason FROM asset_request_event WHERE request_id = $1 AND event_type = 'RETURNED'
+                 ORDER BY created_at DESC, id DESC LIMIT 1`,
+                [row.id],
+              )) as Array<{ reason: string | null }>)
+            : [];
         await manager.query(`UPDATE asset_request SET status = 'EXPIRED', decided_by = NULL, decided_at = NOW() WHERE id = $1`, [row.id]);
         await manager.query('UPDATE asset_request_item SET open = FALSE WHERE request_id = $1', [row.id]);
-        await this.event(manager, row.id, 'EXPIRED', 'ACCEPTED', 'EXPIRED', null, null, { expiresAt: row.expires_at });
+        await this.event(manager, row.id, 'EXPIRED', row.status, 'EXPIRED', null, null, {
+          expiresAt: row.expires_at,
+          ...(row.status === 'RETURNED' ? { expiredFrom: 'RETURNED', returnReason: returned?.reason ?? null } : {}),
+        });
         await this.notices.send(manager, row.id, 'EXPIRED', ['REQUESTER', 'OWNER_HEADS', 'REVIEWERS'], {
           expiredOn: longDate(new Date(row.expires_at)),
+          ...(row.status === 'RETURNED' ? { returnReason: returned?.reason ?? '' } : {}),
         });
         return true;
       });
@@ -795,8 +899,11 @@ export class AssetRequestsService {
     let where: string;
     let scopeParam: unknown;
     if (query.box === 'review') {
-      if (!(await this.isReviewer(actor.id))) {
-        throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${ASSET_REQUEST_REVIEW}`);
+      if (!(await this.isReviewer(actor.id)) && !(await this.isReader(actor.id))) {
+        throw new ApiException(
+          ErrorCode.InsufficientPermissions,
+          `Requiere permiso ${ASSET_REQUEST_REVIEW} o ${ASSET_REQUEST_READ_GLOBAL}`,
+        );
       }
       where = '$1::uuid IS NULL';
       scopeParam = null;
@@ -871,13 +978,14 @@ export class AssetRequestsService {
     const transferId = row['transfer_id'] as string | null;
     const [document] = loanId
       ? ((await manager.query(
-          `SELECT 'LOAN' AS kind, l.id, l.status, d.id AS "documentId", d.number AS "documentNumber", d.status AS "documentStatus"
+          `SELECT 'LOAN' AS kind, l.id, l.status, to_char(l.start_date, 'YYYY-MM-DD') AS "startDate",
+                  d.id AS "documentId", d.number AS "documentNumber", d.status AS "documentStatus"
            FROM asset_loan l LEFT JOIN document d ON d.id = l.delivery_document_id WHERE l.id = $1`,
           [loanId],
         )) as Array<AssetRequestDetailDto['document']>)
       : transferId
         ? ((await manager.query(
-            `SELECT 'TRANSFER' AS kind, t.id, t.status, d.id AS "documentId", d.number AS "documentNumber", d.status AS "documentStatus"
+            `SELECT 'TRANSFER' AS kind, t.id, t.status, NULL::text AS "startDate", d.id AS "documentId", d.number AS "documentNumber", d.status AS "documentStatus"
              FROM asset_transfer t LEFT JOIN document d ON d.id = t.document_id WHERE t.id = $1`,
             [transferId],
           )) as Array<AssetRequestDetailDto['document']>)

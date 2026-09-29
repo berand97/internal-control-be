@@ -8,6 +8,7 @@ import { RolesModule } from '../roles/roles.module.js';
 import { TransfersModule } from '../transfers/transfers.module.js';
 import { AssetRequestsController } from './asset-requests.controller.js';
 import { AssetRequestExpiryJob } from './jobs/asset-request-expiry.job.js';
+import { AssetRequestLoanStartJob } from './jobs/asset-request-loan-start.job.js';
 import { AssetRequestCompletionObserver } from './services/asset-request-completion.observer.js';
 import { AssetRequestNoticesService } from './services/asset-request-notices.service.js';
 import { AssetRequestsService } from './services/asset-requests.service.js';
@@ -15,6 +16,6 @@ import { AssetRequestsService } from './services/asset-requests.service.js';
 @Module({
   imports: [AuthModule, DocumentsModule, LoansModule, NotificationsModule, QrTokensModule, RolesModule, TransfersModule],
   controllers: [AssetRequestsController],
-  providers: [AssetRequestsService, AssetRequestNoticesService, AssetRequestCompletionObserver, AssetRequestExpiryJob],
+  providers: [AssetRequestsService, AssetRequestNoticesService, AssetRequestCompletionObserver, AssetRequestExpiryJob, AssetRequestLoanStartJob],
 })
 export class AssetRequestsModule {}

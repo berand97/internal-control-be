@@ -48,6 +48,8 @@ describe('email-template-catalog', () => {
       'ASSET_REQUEST_GENERATED',
       'ASSET_REQUEST_EXPIRED',
       'ASSET_REQUEST_COMPLETED',
+      'ASSET_REQUEST_LOAN_SCHEDULED',
+      'ASSET_REQUEST_LOAN_STARTS',
     ]);
   });
 

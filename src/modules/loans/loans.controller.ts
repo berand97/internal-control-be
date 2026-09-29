@@ -135,13 +135,15 @@ export class LoansController {
     return this.loansService.reject(id, dto, actor);
   }
 
+  // Sin @RequirePermission: el jefe vigente del centro dueño entrega los préstamos de solicitud, y eso depende del préstamo.
   @Post(':id/deliver')
-  @RequirePermission('loan:update:global')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Entregar los activos y encolar el acta OCI-01-65',
     description:
-      'En una transacción: activos ON_LOAN con movimiento LOAN (la salida física queda registrada al entregar), préstamo PENDING_SIGNATURES, evento DELIVERED y el acta en el outbox. ' +
+      'Quién: loan:update:global (Control Interno), o un jefe vigente del centro de ORIGEN si el préstamo salió de una solicitud de activos (assetRequest) y no es quien la pidió; si no, 403 INSUFFICIENT_PERMISSIONS (también si el préstamo no existe). ' +
+      'Cuándo: un préstamo con startDate se entrega desde esa fecha (America/Bogota); antes, 409 LOAN_NOT_STARTED con la fecha. Sin startDate (préstamo directo), en cualquier momento. ' +
+      'En una transacción: activos ON_LOAN con movimiento LOAN fechado en la entrega real (la salida física queda registrada al entregar), préstamo PENDING_SIGNATURES, evento DELIVERED y el acta en el outbox; la solicitud de activos que lo originó pasa de LOAN_SCHEDULED a DOCUMENT_GENERATED. ' +
       'El préstamo pasa a ACTIVE cuando el acta queda firmada. Firmantes: ENTREGA (deliveredByPersonId) → RECIBE (persona de contacto) → Control Interno (controlInternoPersonId). ' +
       'El responsable y el centro de costo de los activos no cambian. deliveryAct dice si el acta está pendiente, fallida, generada, firmada o rechazada.',
   })

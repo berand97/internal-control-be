@@ -814,6 +814,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Solo se genera una nueva acta de entrega cuando la anterior fue rechazada',
   },
+  [ErrorCode.LoanNotStarted]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El préstamo todavía no se puede entregar: su fecha de inicio no ha llegado',
+  },
   [ErrorCode.InventoryScopeOverlap]: {
     httpStatus: 406,
     action: 'CANCEL',

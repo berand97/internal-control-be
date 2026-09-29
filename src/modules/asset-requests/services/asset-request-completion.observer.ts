@@ -1,6 +1,7 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { DocumentLifecycleRegistry } from '../../documents/lifecycle/document-lifecycle.registry.js';
 import { LOAN_DELIVERY_FORMAT, LOAN_DOCUMENT_ENTITY } from '../../loans/domain/loan-documents.js';
+import { LoansService } from '../../loans/services/loans.service.js';
 import { TRANSFER_ENTITY_TYPE, TRANSFER_FORMAT_KEY } from '../../transfers/domain/transfer.js';
 import { AssetRequestsService } from './asset-requests.service.js';
 
@@ -15,9 +16,12 @@ export class AssetRequestCompletionObserver implements OnModuleInit {
   constructor(
     private readonly lifecycle: DocumentLifecycleRegistry,
     private readonly requests: AssetRequestsService,
+    private readonly loans: LoansService,
   ) {}
 
   onModuleInit(): void {
+    // Entregar el préstamo programado de una solicitud la lleva de LOAN_SCHEDULED a DOCUMENT_GENERATED.
+    this.loans.onDelivered((manager, event) => this.requests.onLoanDelivered(manager, event));
     this.lifecycle.observe(LOAN_DOCUMENT_ENTITY, 'onSigned', async (manager, event) => {
       if (event.formatKey === LOAN_DELIVERY_FORMAT && event.entityId) {
         await this.requests.onDocumentSigned(manager, {

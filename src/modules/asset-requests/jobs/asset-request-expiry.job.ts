@@ -4,8 +4,8 @@ import { FeatureFlagsService } from '../../features/services/feature-flags.servi
 import { AssetRequestsService } from '../services/asset-requests.service.js';
 
 /**
- * Vencimiento de solicitudes ACCEPTED sin resolución de Control Interno (ASSET_REQUEST_EXPIRY_DAYS días desde la
- * aceptación). Cada 10 minutos; con la cola vacía es una consulta sobre el índice parcial idx_asset_request_expiry.
+ * Vencimiento de solicitudes ACCEPTED sin resolución de Control Interno y RETURNED sin corrección del solicitante
+ * (ASSET_REQUEST_EXPIRY_DAYS días desde la aceptación o la devolución). Cada 10 minutos; con la cola vacía es una consulta sobre el índice parcial idx_asset_request_expiry.
  * FOR UPDATE SKIP LOCKED y el aviso se encola en la transacción que vence la solicitud. Solo con el módulo «loans».
  */
 @Injectable()

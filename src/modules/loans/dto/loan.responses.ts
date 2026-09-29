@@ -81,6 +81,16 @@ export class LoanSummaryDto {
   })
   readonly contactPersonId!: string | null;
 
+  @ApiProperty({
+    type: 'string',
+    format: 'date',
+    nullable: true,
+    example: '2026-10-12',
+    description:
+      'Desde cuándo se puede entregar (fecha de inicio de la solicitud de activos que lo generó). Antes de esa fecha POST /loans/:id/deliver responde 409 LOAN_NOT_STARTED. null: préstamo directo, se entrega en cualquier momento',
+  })
+  readonly startDate!: string | null;
+
   @ApiProperty({ type: 'string', format: 'date', example: '2026-12-11' })
   readonly expectedReturnDate!: string;
 

@@ -8,7 +8,7 @@ import {
   type AssetRequestStatus,
 } from '../domain/asset-request.js';
 
-export const ASSET_REQUEST_VIEWER_ROLES = ['REQUESTER', 'OWNER_HEAD', 'REVIEWER'] as const;
+export const ASSET_REQUEST_VIEWER_ROLES = ['REQUESTER', 'OWNER_HEAD', 'REVIEWER', 'READER'] as const;
 export type AssetRequestViewerRole = (typeof ASSET_REQUEST_VIEWER_ROLES)[number];
 
 export const ASSET_REQUEST_DOCUMENT_KINDS = ['LOAN', 'TRANSFER'] as const;
@@ -127,7 +127,9 @@ export class AssetRequestEventDto {
 
   @ApiProperty({
     description:
-      'CREATED, ACCEPTED, CLOSED_BY_OWNER, RETURNED, CORRECTED, CANCELLED, DOCUMENT_GENERATED, EXPIRED, DOCUMENT_COMPLETED',
+      'CREATED, ACCEPTED, CLOSED_BY_OWNER, RETURNED, CORRECTED, CANCELLED, LOAN_SCHEDULED (préstamo generado, sin entregar), ' +
+      'LOAN_START_NOTICE (aviso del día de inicio), LOAN_DELIVERED (préstamo entregado: acta encolada), DOCUMENT_GENERATED, ' +
+      'EXPIRED (payload.expiredFrom = RETURNED y returnReason si venció devuelta), DOCUMENT_COMPLETED',
   })
   readonly eventType!: string;
 
@@ -159,6 +161,14 @@ export class AssetRequestDocumentDto {
 
   @ApiProperty({ description: 'Estado del préstamo o del traslado' })
   readonly status!: string;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'date',
+    nullable: true,
+    description: 'LOAN: desde cuándo se puede entregar (POST /loans/:id/deliver). TRANSFER: null',
+  })
+  readonly startDate!: string | null;
 
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Acta (OCI-01-65 u OCI-17-89) cuando ya se generó' })
   readonly documentId!: string | null;
@@ -205,7 +215,8 @@ export class AssetRequestDetailDto extends AssetRequestSummaryDto {
     enum: ASSET_REQUEST_VIEWER_ROLES,
     enumName: 'AssetRequestViewerRole',
     isArray: true,
-    description: 'Papel de quien consulta: decide qué acciones muestra la pantalla',
+    description:
+      'Papel de quien consulta: decide qué acciones muestra la pantalla. READER (asset_request:read:global) solo lee: ninguna acción',
   })
   readonly viewerRoles!: AssetRequestViewerRole[];
 }

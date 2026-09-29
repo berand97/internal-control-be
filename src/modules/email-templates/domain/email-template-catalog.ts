@@ -31,6 +31,8 @@ export const EMAIL_TEMPLATE_TYPES = [
   'ASSET_REQUEST_GENERATED',
   'ASSET_REQUEST_EXPIRED',
   'ASSET_REQUEST_COMPLETED',
+  'ASSET_REQUEST_LOAN_SCHEDULED',
+  'ASSET_REQUEST_LOAN_STARTS',
 ] as const;
 
 export type EmailTemplateType = (typeof EMAIL_TEMPLATE_TYPES)[number];
@@ -57,6 +59,8 @@ export const EMAIL_TEMPLATE_LABEL: Record<EmailTemplateType, string> = {
   ASSET_REQUEST_GENERATED: 'Documento de la solicitud de activos generado',
   ASSET_REQUEST_EXPIRED: 'Solicitud de activos vencida',
   ASSET_REQUEST_COMPLETED: 'Documento de la solicitud de activos firmado',
+  ASSET_REQUEST_LOAN_SCHEDULED: 'Préstamo de la solicitud de activos programado',
+  ASSET_REQUEST_LOAN_STARTS: 'Día de entrega del préstamo de la solicitud de activos',
 };
 
 /** Obligatorias y opcionales comunes de los avisos de solicitudes de activos (AssetRequestNoticesService). */
@@ -167,6 +171,8 @@ export const EMAIL_PLACEHOLDER_CATALOG: Record<
     ],
     optional: ['solicitud.url', ...ASSET_REQUEST_OPTIONAL],
   },
+  ASSET_REQUEST_LOAN_SCHEDULED: { required: [...ASSET_REQUEST_REQUIRED, 'prestamo.inicio'], optional: [...ASSET_REQUEST_OPTIONAL] },
+  ASSET_REQUEST_LOAN_STARTS: { required: [...ASSET_REQUEST_REQUIRED, 'prestamo.inicio'], optional: [...ASSET_REQUEST_OPTIONAL] },
 };
 
 export const EMAIL_VARIABLE_KINDS = ['url', 'text'] as const;
@@ -252,7 +258,8 @@ const EMAIL_VARIABLES: Readonly<Record<string, Omit<EmailVariableSpec, 'name'>>>
   'solicitud.activos': textVar('Cantidad de activos elegidos por el centro dueño'),
   'solicitud.motivo': textVar('Motivo del cierre, la devolución o la cancelación'),
   'solicitud.estado': textVar('A quién pasa la solicitud corregida (centro dueño o Control Interno)'),
-  'solicitud.vencio': textVar('Fecha en que venció la solicitud sin revisión de Control Interno'),
+  'solicitud.vencio': textVar('Fecha en que venció la solicitud (aceptada sin revisión de Control Interno, o devuelta sin corrección)'),
+  'prestamo.inicio': textVar('Fecha de inicio del préstamo: desde ese día se puede entregar'),
   'documento.tipo': textVar('Documento generado (préstamo OCI-01-65 o traslado OCI-17-89)'),
   'documento.numero': textVar('Número del acta firmada'),
   'documento.url': urlVar('Enlace al acta firmada', 'Ver el acta'),
@@ -292,6 +299,8 @@ export const EMAIL_TEMPLATE_VARIABLES: Record<EmailTemplateType, ReadonlyArray<E
   ASSET_REQUEST_GENERATED: typeVariables('ASSET_REQUEST_GENERATED'),
   ASSET_REQUEST_EXPIRED: typeVariables('ASSET_REQUEST_EXPIRED'),
   ASSET_REQUEST_COMPLETED: typeVariables('ASSET_REQUEST_COMPLETED'),
+  ASSET_REQUEST_LOAN_SCHEDULED: typeVariables('ASSET_REQUEST_LOAN_SCHEDULED'),
+  ASSET_REQUEST_LOAN_STARTS: typeVariables('ASSET_REQUEST_LOAN_STARTS'),
 };
 
 /** Variables de enlace (kind = url) del tipo. */
@@ -548,6 +557,16 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
     undefined,
     { label: 'Ver el acta', url: '{{documento.url}}' },
   ),
+  ASSET_REQUEST_LOAN_SCHEDULED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}}: préstamo programado',
+    'Préstamo programado',
+    'Control Interno generó el préstamo de la solicitud. Los activos siguen en el centro dueño: se entregan desde el {{prestamo.inicio}}, y al entregarlos se genera el acta de préstamo para firmar.',
+  ),
+  ASSET_REQUEST_LOAN_STARTS: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}}: hoy se entrega el préstamo',
+    'Hoy se entrega el préstamo',
+    'Desde hoy, {{prestamo.inicio}}, se pueden entregar los activos del préstamo. El jefe del centro dueño o Control Interno registran la entrega en el sistema; ahí se genera el acta para firmar.',
+  ),
 };
 
 const INVENTORY_SAMPLE: Readonly<Record<string, string>> = {
@@ -659,6 +678,8 @@ export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, stri
     ASSET_REQUEST_CANCELLED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.motivo': 'Ya no se necesitan los equipos' },
     ASSET_REQUEST_GENERATED: { ...ASSET_REQUEST_SAMPLE, 'documento.tipo': 'Préstamo de activos (OCI-01-65)' },
     ASSET_REQUEST_EXPIRED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.vencio': '12 de octubre de 2026' },
+    ASSET_REQUEST_LOAN_SCHEDULED: { ...ASSET_REQUEST_SAMPLE, 'prestamo.inicio': '12 de octubre de 2026' },
+    ASSET_REQUEST_LOAN_STARTS: { ...ASSET_REQUEST_SAMPLE, 'prestamo.inicio': '12 de octubre de 2026' },
     ASSET_REQUEST_COMPLETED: {
       ...ASSET_REQUEST_SAMPLE,
       'documento.tipo': 'Préstamo de activos (OCI-01-65)',

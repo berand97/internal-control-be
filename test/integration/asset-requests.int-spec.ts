@@ -301,7 +301,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(sameCenter.status).toBe(400);
   });
 
-  it('préstamo: crear → elegir (lista y QR) → aceptar → devolver → corregir → generar → firmas → ACTIVE y aviso a ambos', async () => {
+  it('préstamo: crear → elegir (lista y QR) → aceptar → devolver → corregir → generar (programado) → entregar → firmas → ACTIVE y aviso a ambos', async () => {
     const first = await asset(owner);
     const second = await asset(owner, 'IN_STORAGE');
     const damaged = await asset(owner, 'IN_MAINTENANCE');
@@ -372,30 +372,54 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(corrected.body.data).toMatchObject({ status: 'ACCEPTED', assetCount: 2 });
 
     // Generar: el auditor revisa pero no tiene el permiso de generación del OCI-01-65.
-    const auditorGenerate = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(auditor)).send({ controlSignerPersonId: auditor.personId });
+    const auditorGenerate = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(auditor)).send({});
     expect([auditorGenerate.status, auditorGenerate.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
-    const generated = await http()
+    // Firmantes y observaciones del acta son de la entrega, no de la generación.
+    const withSigners = await http()
       .post(`/api/v1/asset-requests/${id}/generate`)
       .set(auth(director))
-      .send({ controlSignerPersonId: auditor.personId, assetNotes: { [first]: 'Con cargador' } })
-      .expect(200);
+      .send({ controlSignerPersonId: auditor.personId, assetNotes: { [first]: 'Con cargador' } });
+    expect([withSigners.status, withSigners.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    const generated = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(director)).send({}).expect(200);
     expectConforms('post', '/api/v1/asset-requests/{id}/generate', 200, generated.body);
-    expect(generated.body.data).toMatchObject({ status: 'DOCUMENT_GENERATED', document: { kind: 'LOAN', status: 'PENDING_SIGNATURES' } });
+    expect(generated.body.data).toMatchObject({
+      status: 'LOAN_SCHEDULED',
+      document: { kind: 'LOAN', status: 'APPROVED', startDate: bogotaToday(), documentId: null },
+    });
     const loanId = generated.body.data.document.id as string;
     const loan = await scalar<Record<string, string>>(
       dataSource,
-      `SELECT row_to_json(l) FROM (SELECT status, asset_request_id, approved_by, requested_by, target_cost_center_id, source_cost_center_id FROM asset_loan WHERE id = $1) l`,
+      `SELECT row_to_json(l) FROM (SELECT status, asset_request_id, approved_by, requested_by, target_cost_center_id, source_cost_center_id,
+         to_char(start_date, 'YYYY-MM-DD') AS start_date FROM asset_loan WHERE id = $1) l`,
       [loanId],
     );
     expect(loan).toMatchObject({
-      status: 'PENDING_SIGNATURES',
+      status: 'APPROVED',
       asset_request_id: id,
       approved_by: ownerHead.userId,
       requested_by: requester.userId,
       target_cost_center_id: requesting,
       source_cost_center_id: owner,
+      start_date: bogotaToday(),
     });
+    // Generar no entrega: los activos siguen en el dueño, sin movimiento ni acta.
+    expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [first])).toBe('IN_USE');
+    expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM asset_movement WHERE asset_id = $1 AND movement_type::text = 'LOAN'`, [first])).toBe(0);
+    expect(
+      await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE payload->>'entityType' = 'LOAN' AND payload->>'entityId' = $1`, [loanId]),
+    ).toBe(0);
+    for (const who of [requester, ownerHead]) {
+      expect((await notices(who.userId, id)).map((row) => row.type)).toContain('ASSET_REQUEST_LOAN_SCHEDULED');
+    }
+    // Entrega: el jefe dueño (sin loan:update:global), desde la fecha de inicio (hoy).
+    const delivered = await http()
+      .post(`/api/v1/loans/${loanId}/deliver`)
+      .set(auth(ownerHead))
+      .send({ deliveredByPersonId: ownerHead.personId, controlInternoPersonId: auditor.personId, assetNotes: { [first]: 'Con cargador' } })
+      .expect(200);
+    expect(delivered.body.data).toMatchObject({ status: 'PENDING_SIGNATURES', startDate: bogotaToday() });
     expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [first])).toBe('ON_LOAN');
+    expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [id])).toBe('DOCUMENT_GENERATED');
     await engine.processPending(1000);
     const act = await detail(id);
     expect(act.document.documentId).not.toBeNull();
@@ -418,9 +442,15 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       'ACCEPTED',
       'RETURNED',
       'CORRECTED',
-      'DOCUMENT_GENERATED',
+      'LOAN_SCHEDULED',
+      'LOAN_DELIVERED',
       'DOCUMENT_COMPLETED',
     ]);
+    expect(done.events.find((event: { eventType: string }) => event.eventType === 'LOAN_DELIVERED')).toMatchObject({
+      fromStatus: 'LOAN_SCHEDULED',
+      toStatus: 'DOCUMENT_GENERATED',
+      actor: { userId: ownerHead.userId },
+    });
     for (const who of [requester, ownerHead]) {
       expect((await notices(who.userId, id)).map((row) => row.type)).toContain('ASSET_REQUEST_COMPLETED');
     }
@@ -432,7 +462,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(mail[0]?.url).toContain(`/documents/${act.document.documentId}`);
   });
 
-  it('firmante de Control Interno: quien genera el préstamo (loan:update:global) ve la lista neutral y la generación valida contra ella', async () => {
+  it('firmante de Control Interno: quien genera el préstamo (loan:update:global) ve la lista neutral y la entrega valida contra ella', async () => {
     const loanReviewer = await actor('Revisora de préstamos', [
       await createPermissionRole(dataSource, ['loan:update:global', 'asset_request:review:global'], 'IT_PRESTAMOS'),
     ]);
@@ -463,18 +493,27 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     // Mismo contenido que la lista de traslados.
     expect((await http().get('/api/v1/transfers/control-signers').set(auth(director)).expect(200)).body.data).toEqual(listed.body.data);
 
-    // Generar el préstamo de una solicitud: varias personas → hay que elegir; fuera de la lista → no elegible; de la lista → se usa.
+    // Préstamo de una solicitud: se genera sin firmantes; al entregar, fuera de la lista → no elegible (nada se mueve);
+    // de la lista → se usa. Quien genera (loan:update:global) también puede entregar.
     const assetId = await asset(owner);
     const id = (await create(temporary()).expect(201)).body.data.id as string;
     await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(ownerHead)).send({ assetIds: [assetId] }).expect(200);
-    const unchosen = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(loanReviewer)).send({});
-    expect([unchosen.status, unchosen.body.error.code]).toEqual([400, 'TRANSFER_SIGNER_REQUIRED']);
-    const outside = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(loanReviewer)).send({ controlSignerPersonId: requester.personId });
-    expect([outside.status, outside.body.error.code]).toEqual([400, 'TRANSFER_SIGNER_NOT_ELIGIBLE']);
-    expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [id])).toBe('ACCEPTED');
+    const generated = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(loanReviewer)).send({}).expect(200);
+    expect(generated.body.data).toMatchObject({ status: 'LOAN_SCHEDULED', document: { kind: 'LOAN', status: 'APPROVED' } });
+    const loanId = generated.body.data.document.id as string;
+    const outside = await http()
+      .post(`/api/v1/loans/${loanId}/deliver`)
+      .set(auth(loanReviewer))
+      .send({ deliveredByPersonId: ownerHead.personId, controlInternoPersonId: loanOnly.personId });
+    expect([outside.status, outside.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
+    expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [assetId])).toBe('IN_USE');
+    expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [id])).toBe('LOAN_SCHEDULED');
     const chosen = ids.find((personId) => personId === auditor.personId) ?? '';
-    const generated = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(loanReviewer)).send({ controlSignerPersonId: chosen }).expect(200);
-    expect(generated.body.data).toMatchObject({ status: 'DOCUMENT_GENERATED', document: { kind: 'LOAN' } });
+    await http()
+      .post(`/api/v1/loans/${loanId}/deliver`)
+      .set(auth(loanReviewer))
+      .send({ deliveredByPersonId: ownerHead.personId, controlInternoPersonId: chosen })
+      .expect(200);
     await engine.processPending(1000);
     const documentId = (await detail(id)).document.documentId as string;
     expect(
@@ -535,6 +574,126 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE user_id = $1', [secondHead.userId]);
   });
 
+  it('préstamo con fecha futura: generar no entrega; antes de la fecha no se entrega; el día de inicio se avisa una vez y se entrega con fecha real', async () => {
+    const assetId = await asset(owner);
+    const start = plusDays(3);
+    const id = (await create(temporary({ startDate: start, expectedReturnDate: plusDays(10) })).expect(201)).body.data.id as string;
+    await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(ownerHead)).send({ assetIds: [assetId] }).expect(200);
+    const generated = (await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(director)).send({}).expect(200)).body.data;
+    expect(generated).toMatchObject({ status: 'LOAN_SCHEDULED', document: { kind: 'LOAN', status: 'APPROVED', startDate: start, documentId: null } });
+    const loanId = generated.document.id as string;
+    const movementCount = () =>
+      scalar<number>(dataSource, `SELECT count(*)::int FROM asset_movement WHERE asset_id = $1 AND movement_type::text = 'LOAN'`, [assetId]);
+    const actCount = () =>
+      scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE payload->>'entityType' = 'LOAN' AND payload->>'entityId' = $1`, [loanId]);
+    expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [assetId])).toBe('IN_USE');
+    expect(await movementCount()).toBe(0);
+    expect(await actCount()).toBe(0);
+
+    // Reservado por el préstamo APPROVED: no se elige en otra solicitud ni entra en otro préstamo.
+    const other = (await create(temporary()).expect(201)).body.data.id as string;
+    const otherEligible = (await http().get(`/api/v1/asset-requests/${other}/eligible-assets`).set(auth(ownerHead)).expect(200)).body.data;
+    expect(otherEligible.map((item: { id: string }) => item.id)).not.toContain(assetId);
+    const reserved = await http().post(`/api/v1/asset-requests/${other}/accept`).set(auth(ownerHead)).send({ assetIds: [assetId] });
+    expect([reserved.status, reserved.body.error.code]).toEqual([406, 'ASSET_REQUEST_ASSET_UNAVAILABLE']);
+    await http().post(`/api/v1/asset-requests/${other}/cancel`).set(auth(requester)).send({ reason: 'Ya no se necesita' }).expect(200);
+
+    // Quién entrega: ni otro jefe ni el solicitante; el jefe dueño sí, pero no antes de la fecha.
+    const body = { deliveredByPersonId: ownerHead.personId, controlInternoPersonId: director.personId };
+    for (const who of [outsider, requester]) {
+      const denied = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(who)).send(body);
+      expect([denied.status, denied.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
+    }
+    const early = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(ownerHead)).send(body);
+    expect([early.status, early.body.error.code]).toEqual([409, 'LOAN_NOT_STARTED']);
+    expect(early.body.error.message).toContain(start);
+    expect(early.body.error.details).toEqual([{ field: 'startDate', message: start }]);
+    const earlyDirector = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(director)).send(body);
+    expect([earlyDirector.status, earlyDirector.body.error.code]).toEqual([409, 'LOAN_NOT_STARTED']);
+    expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [assetId])).toBe('IN_USE');
+    expect(await movementCount()).toBe(0);
+    expect(await actCount()).toBe(0);
+
+    // Aviso del día de inicio: nada antes de la fecha; llegado el día, una sola vez aunque el job corra de nuevo.
+    const service = app.get(AssetRequestsService);
+    const startNotices = async () =>
+      (await notices(requester.userId, id)).filter((row) => row.type === 'ASSET_REQUEST_LOAN_STARTS').length +
+      (await notices(ownerHead.userId, id)).filter((row) => row.type === 'ASSET_REQUEST_LOAN_STARTS').length;
+    await service.noticeLoanStarts();
+    expect(await startNotices()).toBe(0);
+    // Llega el día: se simula moviendo la fecha de inicio a hoy.
+    await dataSource.query('UPDATE asset_loan SET start_date = $2 WHERE id = $1', [loanId, bogotaToday()]);
+    await dataSource.query('UPDATE asset_request SET start_date = $2 WHERE id = $1', [id, bogotaToday()]);
+    expect(await service.noticeLoanStarts()).toBeGreaterThanOrEqual(1);
+    expect(await startNotices()).toBe(2);
+    await service.noticeLoanStarts();
+    expect(await startNotices()).toBe(2);
+    expect(
+      await scalar<number>(dataSource, `SELECT count(*)::int FROM asset_request_event WHERE request_id = $1 AND event_type = 'LOAN_START_NOTICE'`, [id]),
+    ).toBe(1);
+    // El aviso no entrega nada.
+    expect(await scalar<string>(dataSource, 'SELECT status FROM asset_loan WHERE id = $1', [loanId])).toBe('APPROVED');
+
+    const before = new Date(Date.now() - 1000);
+    const delivered = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(ownerHead)).send(body).expect(200);
+    expect(delivered.body.data.status).toBe('PENDING_SIGNATURES');
+    expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [assetId])).toBe('ON_LOAN');
+    const executedAt = await scalar<Date>(
+      dataSource,
+      `SELECT executed_at FROM asset_movement WHERE asset_id = $1 AND movement_type::text = 'LOAN'`,
+      [assetId],
+    );
+    expect(new Date(executedAt).getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(await actCount()).toBe(1);
+    const after = await detail(id);
+    expect(after.status).toBe('DOCUMENT_GENERATED');
+    expect(after.events.map((event: { eventType: string }) => event.eventType)).toEqual([
+      'CREATED',
+      'ACCEPTED',
+      'LOAN_SCHEDULED',
+      'LOAN_START_NOTICE',
+      'LOAN_DELIVERED',
+    ]);
+    // Entregado: un segundo intento ya no es una transición válida.
+    const again = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(ownerHead)).send(body);
+    expect(again.status).toBe(406);
+  });
+
+  it('una solicitud devuelta vence a los 14 días de la devolución: EXPIRED, activos libres, motivo y vencimiento en el historial', async () => {
+    const assetId = await asset(owner);
+    const id = (await create(temporary()).expect(201)).body.data.id as string;
+    await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(ownerHead)).send({ assetIds: [assetId] }).expect(200);
+    const returned = (
+      await http().post(`/api/v1/asset-requests/${id}/return`).set(auth(director)).send({ reason: 'Falta el uso de los equipos' }).expect(200)
+    ).body.data;
+    expect(returned.status).toBe('RETURNED');
+    expect(returned.expiresAt).not.toBeNull();
+    const days = (new Date(returned.expiresAt).getTime() - new Date(returned.updatedAt).getTime()) / 86_400_000;
+    expect(Math.round(days)).toBe(14);
+    await dataSource.query(`UPDATE asset_request SET expires_at = NOW() - interval '1 minute' WHERE id = $1`, [id]);
+    expect(await app.get(AssetRequestsService).expireDue()).toBeGreaterThanOrEqual(1);
+    const expired = await detail(id);
+    expect(expired).toMatchObject({ status: 'EXPIRED', items: [{ assetId, open: false }] });
+    const history = expired.events as Array<{ eventType: string; fromStatus: string | null; reason: string | null; payload: Record<string, unknown> }>;
+    expect(history.find((event) => event.eventType === 'RETURNED')).toMatchObject({ reason: 'Falta el uso de los equipos' });
+    expect(history.at(-1)).toMatchObject({
+      eventType: 'EXPIRED',
+      fromStatus: 'RETURNED',
+      actor: null,
+      payload: { expiredFrom: 'RETURNED', returnReason: 'Falta el uso de los equipos' },
+    });
+    for (const who of [requester, ownerHead, director]) {
+      expect((await notices(who.userId, id)).map((row) => row.type)).toContain('ASSET_REQUEST_EXPIRED');
+    }
+    // El activo quedó libre: vuelve a ser elegible.
+    const next = (await create(temporary()).expect(201)).body.data.id as string;
+    const eligible = (await http().get(`/api/v1/asset-requests/${next}/eligible-assets`).set(auth(ownerHead)).expect(200)).body.data;
+    expect(eligible.map((item: { id: string }) => item.id)).toContain(assetId);
+    await http().post(`/api/v1/asset-requests/${next}/cancel`).set(auth(requester)).send({ reason: 'Ya no se necesita' }).expect(200);
+    const late = await http().patch(`/api/v1/asset-requests/${id}`).set(auth(requester)).send({ description: 'Tarde' });
+    expect(late.status).toBe(406);
+  });
+
   it('vence a los 14 días sin resolución de Control Interno: EXPIRED, activos libres y aviso a los tres', async () => {
     const assetId = await asset(owner);
     const id = (await create(temporary()).expect(201)).body.data.id as string;
@@ -564,10 +723,48 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     const denied = await http().get('/api/v1/asset-requests?box=review').set(auth(requester));
     expect([denied.status, denied.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
     expect((await http().get('/api/v1/asset-requests?box=review&status=EXPIRED').set(auth(auditor)).expect(200)).body.data.total).toBeGreaterThan(0);
-    // El rol AUDITOR de la semilla ya no trae asset_request:review:global (migración 1767225940000).
+  });
+
+  it('el AUDITOR de la semilla ve todas las solicitudes (asset_request:read:global) y no puede hacer ninguna acción', async () => {
     const plainAuditor = await actor('Auditor', ['AUDITOR']);
-    const notReviewer = await http().get('/api/v1/asset-requests?box=review').set(auth(plainAuditor));
-    expect([notReviewer.status, notReviewer.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
+    const all = (await http().get('/api/v1/asset-requests?box=review').set(auth(plainAuditor)).expect(200)).body;
+    expectConforms('get', '/api/v1/asset-requests', 200, all);
+    const total = await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_request');
+    expect(all.data.total).toBe(total);
+    // Una en cada estado accionable: REQUESTED (dueño), ACCEPTED (Control Interno), RETURNED (solicitante).
+    const assetId = await asset(owner);
+    const requested = (await create(temporary()).expect(201)).body.data.id as string;
+    const accepted = (await create(temporary()).expect(201)).body.data.id as string;
+    await http().post(`/api/v1/asset-requests/${accepted}/accept`).set(auth(ownerHead)).send({ assetIds: [assetId] }).expect(200);
+    const read = await http().get(`/api/v1/asset-requests/${accepted}`).set(auth(plainAuditor)).expect(200);
+    expectConforms('get', '/api/v1/asset-requests/{id}', 200, read.body);
+    expect(read.body.data.viewerRoles).toEqual(['READER']);
+    const attempts: Array<[string, string, Record<string, unknown>]> = [
+      ['post', `/api/v1/asset-requests/${requested}/accept`, { assetIds: [assetId] }],
+      ['post', `/api/v1/asset-requests/${requested}/close`, { reason: 'No se puede' }],
+      ['post', `/api/v1/asset-requests/${requested}/cancel`, { reason: 'No se puede' }],
+      ['patch', `/api/v1/asset-requests/${requested}`, { description: 'Otra cosa' }],
+      ['post', `/api/v1/asset-requests/${accepted}/return`, { reason: 'No se puede' }],
+      ['post', `/api/v1/asset-requests/${accepted}/generate`, {}],
+      ['post', '/api/v1/asset-requests', temporary()],
+    ];
+    for (const [method, path, payload] of attempts) {
+      const response = await (method === 'patch' ? http().patch(path) : http().post(path)).set(auth(plainAuditor)).send(payload);
+      expect(response.status, `${method.toUpperCase()} ${path}`).toBe(403);
+    }
+    expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [requested])).toBe('REQUESTED');
+    expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [accepted])).toBe('ACCEPTED');
+    // Los activos del dueño y el QR siguen siendo solo del jefe dueño.
+    expect((await http().get(`/api/v1/asset-requests/${requested}/eligible-assets`).set(auth(plainAuditor))).status).toBe(404);
+
+    // Menú: lo ven quien lee todas, quien revisa y quien solicita.
+    const menuPaths = async (who: Actor) =>
+      ((await http().get('/api/v1/auth/me').set(auth(who)).expect(200)).body.data.navigation as Array<{ path: string }>).map((item) => item.path);
+    for (const who of [plainAuditor, director, requester]) {
+      expect(await menuPaths(who)).toContain('/asset-requests');
+    }
+    expect(await menuPaths(await actor('Sin rol', []))).not.toContain('/asset-requests');
+    await http().post(`/api/v1/asset-requests/${requested}/cancel`).set(auth(requester)).send({ reason: 'Fin de la prueba' }).expect(200);
     await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [plainAuditor.userId]);
   });
 });

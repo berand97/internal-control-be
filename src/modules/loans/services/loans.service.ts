@@ -89,7 +89,24 @@ export interface CreateLoanInput {
   readonly expectedReturnDate: string;
   readonly justification: string;
   readonly deliveryNotes: string | null;
+  /** Desde cuándo se puede entregar (solicitud de activos TEMPORARY); sin él, en cualquier momento. */
+  readonly startDate?: string | null;
 }
+
+/** Entrega registrada (deliverWithin), en la transacción que la hizo. */
+export interface LoanDeliveredEvent {
+  readonly loanId: string;
+  readonly assetRequestId: string | null;
+  readonly documentRequestId: string;
+  readonly deliveredAt: Date;
+  readonly actorId: string;
+}
+
+export type LoanDeliveredListener = (manager: EntityManager, event: LoanDeliveredEvent) => Promise<void>;
+
+const LOAN_UPDATE_GLOBAL = 'loan:update:global';
+
+const CURRENT_HEAD = 'h.valid_from <= NOW() AND (h.valid_until IS NULL OR h.valid_until > NOW())';
 
 const RETURN_CONDITION_LABELS: Record<LoanReturnCondition, string> = {
   GOOD: 'Bueno',
@@ -128,6 +145,8 @@ interface ReturnActEventPayload {
  */
 @Injectable()
 export class LoansService {
+  private readonly deliveredListeners: LoanDeliveredListener[] = [];
+
   constructor(
     @InjectRepository(AssetLoan)
     private readonly loans: Repository<AssetLoan>,
@@ -147,6 +166,14 @@ export class LoansService {
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
   ) {}
+
+  /**
+   * Quien necesita enterarse de una entrega (la solicitud de activos que originó el préstamo) se registra aquí; corre en
+   * la transacción de la entrega, después de encolar el acta. Así loans no depende de asset-requests.
+   */
+  onDelivered(listener: LoanDeliveredListener): void {
+    this.deliveredListeners.push(listener);
+  }
 
   /** Alcance de lectura del usuario (403 si no tiene ninguno de los dos permisos o no alcanza centros). */
   private async readScope(actor: AuthenticatedUser): Promise<ReadableCostCenterScope> {
@@ -407,6 +434,7 @@ export class LoansService {
         contactPersonId: input.contactPersonId,
         requestedAt: now,
         expectedReturnDate: input.expectedReturnDate.slice(0, 10),
+        startDate: input.startDate ? input.startDate.slice(0, 10) : null,
         requestedBy,
         status: approved ? 'APPROVED' : 'REQUESTED',
         ...(approved ? { approvedBy: approved.by, approvedAt: approved.at, assetRequestId: approved.assetRequestId } : {}),
@@ -502,8 +530,44 @@ export class LoansService {
    * muestra FAILED con su error (se reintenta con POST /documents/requests/:requestId/retry).
    */
   async deliver(id: string, dto: DeliverLoanDto, actor: AuthenticatedUser) {
-    await this.dataSource.transaction((manager) => this.deliverWithin(manager, id, dto, actor.id));
+    await this.dataSource.transaction(async (manager) => {
+      await this.assertCanDeliver(manager, id, actor.id);
+      await this.deliverWithin(manager, id, dto, actor.id);
+    });
     return this.detailById(id);
+  }
+
+  /**
+   * Quién entrega: Control Interno (loan:update:global, el permiso de generación del OCI-01-65), o un jefe vigente del
+   * centro dueño (ORIGEN) si el préstamo salió de una solicitud de activos y no es quien la pidió (separación de
+   * funciones, como al aceptar la solicitud). No existe loan:update:org_unit: la jefatura vigente (cost_center_head) es
+   * el mismo criterio con el que ese jefe aceptó la solicitud. Los préstamos directos se entregan como antes (solo
+   * loan:update:global). Sin permiso: 403, exista o no el préstamo.
+   */
+  private async assertCanDeliver(manager: EntityManager, id: string, actorId: string): Promise<void> {
+    if (await this.permissions.userHasPermission(actorId, LOAN_UPDATE_GLOBAL)) {
+      return;
+    }
+    const denied = new ApiException(
+      ErrorCode.InsufficientPermissions,
+      `Requiere ${LOAN_UPDATE_GLOBAL}, o ser jefe vigente del centro dueño de un préstamo que salió de una solicitud de activos`,
+    );
+    const [loan] = UUID.test(id)
+      ? ((await manager.query('SELECT source_cost_center_id, asset_request_id, requested_by FROM asset_loan WHERE id = $1', [
+          id,
+        ])) as Array<{ source_cost_center_id: string; asset_request_id: string | null; requested_by: string }>)
+      : [];
+    if (!loan || !loan.asset_request_id || loan.requested_by === actorId) {
+      throw denied;
+    }
+    const [head] = (await manager.query(
+      `SELECT 1 FROM cost_center_head h JOIN app_user u ON u.person_id = h.person_id
+       WHERE u.id = $1 AND h.cost_center_id = $2 AND ${CURRENT_HEAD}`,
+      [actorId, loan.source_cost_center_id],
+    )) as unknown[];
+    if (!head) {
+      throw denied;
+    }
   }
 
   /** Entrega dentro de la transacción del llamador (deliver o la generación de una solicitud de activos). */
@@ -512,6 +576,15 @@ export class LoansService {
     {
       const loan = await this.lockLoan(manager, id);
       assertLoanTransition(loan.status, 'PENDING_SIGNATURES');
+      // Un préstamo programado (solicitud de activos) se entrega desde su fecha de inicio, nunca antes.
+      const today = bogotaDate(new Date());
+      if (loan.startDate && today < loan.startDate) {
+        throw new ApiException(
+          ErrorCode.LoanNotStarted,
+          `El préstamo se entrega desde el ${longSpanishDate(loan.startDate)} (${loan.startDate}); hoy es ${today}`,
+          [{ field: 'startDate', message: loan.startDate }],
+        );
+      }
       const contactPersonId = loan.contactPersonId;
       if (!contactPersonId) {
         throw new ApiException(
@@ -647,6 +720,15 @@ export class LoansService {
         fields,
       });
       await this.audit(manager, AuditAction.LoanDelivered, loan.id, actor.id, { documentRequestId: requestId });
+      for (const listener of this.deliveredListeners) {
+        await listener(manager, {
+          loanId: loan.id,
+          assetRequestId: loan.assetRequestId,
+          documentRequestId: requestId,
+          deliveredAt,
+          actorId,
+        });
+      }
     }
   }
 
@@ -1392,6 +1474,7 @@ export class LoansService {
       targetCostCenterId: loan.targetCostCenterId,
       targetLocationId: loan.targetLocationId,
       contactPersonId: loan.contactPersonId,
+      startDate: loan.startDate,
       expectedReturnDate: loan.expectedReturnDate,
       justification: loan.justification,
       deliveryNotes: loan.deliveryNotes,

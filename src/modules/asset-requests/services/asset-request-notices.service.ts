@@ -20,6 +20,8 @@ export type AssetRequestNoticeKind =
   | 'CORRECTED'
   | 'CANCELLED'
   | 'GENERATED'
+  | 'SCHEDULED'
+  | 'LOAN_STARTS'
   | 'EXPIRED'
   | 'COMPLETED';
 
@@ -31,6 +33,10 @@ export interface AssetRequestNoticeExtra {
   /** Corrección: a quién pasa (centro dueño o Control Interno). */
   readonly nextReviewer?: string;
   readonly expiredOn?: string;
+  /** Vencimiento de una solicitud devuelta: el motivo con que Control Interno la devolvió. */
+  readonly returnReason?: string;
+  /** Préstamo programado: fecha de inicio (desde la que se entrega), en texto largo. */
+  readonly startDate?: string;
   readonly assetCount?: number;
   readonly document?: { readonly kind: string; readonly number?: string; readonly documentId?: string };
 }
@@ -62,6 +68,8 @@ const TEMPLATE: Record<AssetRequestNoticeKind, EmailTemplateType> = {
   CORRECTED: 'ASSET_REQUEST_CORRECTED',
   CANCELLED: 'ASSET_REQUEST_CANCELLED',
   GENERATED: 'ASSET_REQUEST_GENERATED',
+  SCHEDULED: 'ASSET_REQUEST_LOAN_SCHEDULED',
+  LOAN_STARTS: 'ASSET_REQUEST_LOAN_STARTS',
   EXPIRED: 'ASSET_REQUEST_EXPIRED',
   COMPLETED: 'ASSET_REQUEST_COMPLETED',
 };
@@ -74,6 +82,8 @@ const TITLE: Record<AssetRequestNoticeKind, string> = {
   CORRECTED: 'Solicitud de activos corregida',
   CANCELLED: 'Solicitud de activos cancelada',
   GENERATED: 'Documento de la solicitud generado',
+  SCHEDULED: 'Préstamo de la solicitud programado',
+  LOAN_STARTS: 'Hoy se entrega el préstamo de la solicitud',
   EXPIRED: 'Solicitud de activos vencida',
   COMPLETED: 'Acta de la solicitud firmada',
 };
@@ -219,6 +229,9 @@ export class AssetRequestNoticesService {
     if (extra.expiredOn !== undefined) {
       context['solicitud.vencio'] = extra.expiredOn;
     }
+    if (extra.startDate !== undefined) {
+      context['prestamo.inicio'] = extra.startDate;
+    }
     if (extra.assetCount !== undefined) {
       context['solicitud.activos'] = String(extra.assetCount);
     }
@@ -247,6 +260,15 @@ export class AssetRequestNoticesService {
     }
     if (extra.document) {
       lines.push(`${extra.document.kind}${extra.document.number ? ` N.° ${extra.document.number}` : ''}`);
+    }
+    if (kind === 'SCHEDULED' && extra.startDate) {
+      lines.push(`Préstamo programado: se entrega desde el ${extra.startDate}. Nada se ha entregado todavía`);
+    }
+    if (kind === 'LOAN_STARTS' && extra.startDate) {
+      lines.push(`Hoy (${extra.startDate}) se puede entregar el préstamo: el jefe del centro dueño o Control Interno registran la entrega`);
+    }
+    if (extra.returnReason !== undefined) {
+      lines.push(`Estaba devuelta al solicitante para corregir (motivo: ${extra.returnReason || 'sin motivo registrado'}) y no se corrigió`);
     }
     if (extra.expiredOn) {
       lines.push(`Venció el ${extra.expiredOn}; los activos elegidos quedaron libres`);
