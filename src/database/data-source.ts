@@ -110,10 +110,12 @@ import { ControlSignerPermission1767225940000 } from './migrations/1767225940000
 import { EventStream1767225950000 } from './migrations/1767225950000-event-stream.js';
 import { ScheduledLoansRequestReaderAndInventoryAttendee1767225980000 } from './migrations/1767225980000-scheduled-loans-request-reader-and-inventory-attendee.js';
 import { RejectedScheduledLoansAndFindingCategories1767225990000 } from './migrations/1767225990000-rejected-scheduled-loans-and-finding-categories.js';
+import { InventoryActsPerCostCenterAndPriceZero1767226000000 } from './migrations/1767226000000-inventory-acts-per-cost-center-and-price-zero.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
 import { PhysicalInventoryScope } from '../modules/inventories/entities/physical-inventory-scope.entity.js';
+import { PhysicalInventoryAct } from '../modules/inventories/entities/physical-inventory-act.entity.js';
 import { InventoryFindingCategory } from '../modules/inventories/entities/inventory-finding-category.entity.js';
 import { InventoryMissingCause } from '../modules/inventories/entities/inventory-missing-cause.entity.js';
 import { InventoryItemCorrection } from '../modules/inventories/entities/inventory-item-correction.entity.js';
@@ -174,6 +176,7 @@ const dataSource = new DataSource({
     PhysicalInventory,
     PhysicalInventoryItem,
     PhysicalInventoryScope,
+    PhysicalInventoryAct,
     InventoryFindingCategory,
     InventoryMissingCause,
     InventoryItemCorrection,
@@ -252,6 +255,7 @@ const dataSource = new DataSource({
     EventStream1767225950000,
     ScheduledLoansRequestReaderAndInventoryAttendee1767225980000,
     RejectedScheduledLoansAndFindingCategories1767225990000,
+    InventoryActsPerCostCenterAndPriceZero1767226000000,
   ],
 });
 
