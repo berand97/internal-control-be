@@ -106,19 +106,19 @@ const FINDINGS_HEADERS = [
 // Columnas del anexo por activo. `cell` es el encabezado en la hoja «Total Activos .» cuando el formato lo trae; las
 // demás las introduce la plantilla porque el sistema las registra en la verificación (resultado, condición, causa…).
 // Anchos en twips para una hoja carta horizontal con márgenes de 0,5" (14 400 útiles); Id y código caben en una línea
-// con códigos internos de 12 caracteres (A2026-000123).
+// con códigos internos de 12 caracteres (A2026-000123) y el # con cuatro dígitos (una toma real tuvo 757 activos).
 export const COLUMNS = [
-  { cell: 'A1', header: '#', tag: '{{indice}}', width: 350, align: 'center' },
+  { cell: 'A1', header: '#', tag: '{{indice}}', width: 600, align: 'center' },
   { cell: 'B1', header: 'Id', tag: '{{idOrigen}}', width: 1150 },
   { cell: 'C1', header: 'Código de barras', tag: '{{codigo}}', width: 1150 },
-  { cell: 'D1', header: 'Descripción del activo', tag: '{{descripcion}}', width: 2300 },
+  { cell: 'D1', header: 'Descripción del activo', tag: '{{descripcion}}', width: 2350 },
   { header: 'Resultado', tag: '{{campos.resultado}}', width: 1100 },
   { header: 'Condición observada', tag: '{{campos.condicionObservada}}', width: 1000 },
-  { cell: 'L1', header: 'Categorizacion', label: 'Categoría', tag: '{{campos.categoriaCodigo}}', width: 1050, align: 'center' },
-  { cell: 'I1', header: 'Precio compra', tag: '{{campos.valorCompra}}', width: 1300, align: 'right' },
-  { cell: 'J1', header: 'Valor en libros', tag: '{{campos.valorLibros}}', width: 1300, align: 'right' },
+  { cell: 'L1', header: 'Categorizacion', label: 'Categoría', tag: '{{campos.categoriaCodigo}}', width: 950, align: 'center' },
+  { cell: 'I1', header: 'Precio compra', tag: '{{campos.valorCompra}}', width: 1250, align: 'right' },
+  { cell: 'J1', header: 'Valor en libros', tag: '{{campos.valorLibros}}', width: 1250, align: 'right' },
   { header: 'Código temporal', tag: '{{campos.codigoTemporal}}', width: 950, align: 'center' },
-  { header: 'Causa del faltante', tag: '{{campos.causa}}', width: 1400 },
+  { header: 'Causa del faltante', tag: '{{campos.causa}}', width: 1300 },
   { cell: 'R1', header: 'Observaciones', tag: '{{observacion}}', width: 1350 },
 ];
 
@@ -297,7 +297,7 @@ const body = (format) => {
         run('Sustitución de firmante (separación de funciones): ', { bold: true, size: small }),
         run('firma por {{rol}} {{sustituto}} en lugar de {{sustituido}}, que firma el acta como {{conflicto}}. Motivo: {{motivo}}', { size: small }),
       ],
-      { after: 0 },
+      { after: 60 },
     ),
     para([run('{{/tablas.sustituciones}}', { size: small })], { after: 0 }),
   ];
@@ -339,8 +339,8 @@ const body = (format) => {
 
   // Anexo 2: sobrantes sin activo registrado (no está en el Excel). Solo se imprime si hay alguno.
   const surplusColumns = [
-    { header: '#', tag: '{{indice}}', width: 400, align: 'center' },
-    { header: 'Descripción', tag: '{{descripcion}}', width: 4000 },
+    { header: '#', tag: '{{indice}}', width: 600, align: 'center' },
+    { header: 'Descripción', tag: '{{descripcion}}', width: 3800 },
     { header: 'Ubicación', tag: '{{ubicacion}}', width: 2200 },
     { header: 'Condición', tag: '{{condicion}}', width: 1500 },
     { header: 'Resolución', tag: '{{resolucion}}', width: 1900 },

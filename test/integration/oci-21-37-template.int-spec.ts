@@ -8,6 +8,7 @@
 // GOTENBERG_URL, además lo convierte a PDF y revisa la capa de texto.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PDFDocument } from 'pdf-lib';
 import PizZip from 'pizzip';
 import { PhysicalCondition } from '../../src/modules/assets/enums/physical-condition.enum.js';
 import {
@@ -499,4 +500,58 @@ describe('Plantilla OCI-21-37 (acta de toma física, construida desde el Excel i
       }
     });
   }
+
+  it.runIf(Boolean(GOTENBERG))(
+    'con 60 activos el anexo ocupa varias páginas, repite el encabezado de la tabla y no parte filas',
+    async () => {
+      const base = context({
+        categories: CATEGORIES,
+        surplus: false,
+        substitution: false,
+      });
+      const [first] = base['activos'] as Array<Record<string, unknown>>;
+      const many = Array.from({ length: 60 }, (_, index) => ({
+        ...first,
+        indice: index + 1,
+        id: `asset-many-${index}`,
+        idOrigen: `A2026-${String(index + 200).padStart(6, '0')}`,
+        codigo: `A2026-${String(index + 200).padStart(6, '0')}`,
+        descripcion: `ESCRITORIO MODULAR NUMERO ${index + 1} CON CAJONERA Y PORTATECLADO`,
+      }));
+      const output = renderDocx(template, {
+        ...base,
+        activos: many,
+        totalElementos: many.length,
+      });
+      const form = new FormData();
+      form.append('files', new Blob([new Uint8Array(output)]), 'acta.docx');
+      const response = await fetch(
+        `${(GOTENBERG ?? '').replace(/\/$/, '')}/forms/libreoffice/convert`,
+        { method: 'POST', body: form },
+      );
+      expect(response.status).toBe(200);
+      const pdf = Buffer.from(await response.arrayBuffer());
+      const pages = (await PDFDocument.load(pdf)).getPageCount();
+      const layer = await pdfText(pdf);
+      if (OUTPUT) {
+        mkdirSync(OUTPUT, { recursive: true });
+        writeFileSync(join(OUTPUT, 'muestra-60-activos.pdf'), pdf);
+        writeFileSync(join(OUTPUT, 'muestra-60-activos.txt'), layer);
+      }
+      // El anexo ocupa varias páginas y su encabezado se repite en cada una (fila de encabezado de tabla).
+      expect(pages).toBeGreaterThanOrEqual(3);
+      expect((layer.match(/Descripción del activo/g) ?? []).length).toBe(
+        pages - 1,
+      );
+      // Ni el # ni el código se parten: cada fila empieza con su número y su código enteros.
+      const rows = squash(layer);
+      for (let index = 0; index < 60; index += 1) {
+        expect(rows).toMatch(
+          new RegExp(
+            `(?<!\\d)${index + 1}\\s?A2026-${String(index + 200).padStart(6, '0')}`,
+          ),
+        );
+      }
+    },
+  );
 });
