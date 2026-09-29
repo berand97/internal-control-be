@@ -149,13 +149,17 @@ export class NotificationsService {
     return row ?? null;
   }
 
-  /** Las del usuario con event_seq > afterSeq, en orden (reposición con Last-Event-ID). */
+  /**
+   * Reposición con Last-Event-ID: las `limit` MÁS RECIENTES del usuario con event_seq > afterSeq, devueltas en orden
+   * ascendente de event_seq.
+   */
   async eventsAfter(userId: string, afterSeq: string, limit: number): Promise<NotificationEventView[]> {
-    return (await this.dataSource.query(
+    const rows = (await this.dataSource.query(
       `SELECT ${EVENT_COLUMNS} FROM notification
-       WHERE recipient_user_id = $1 AND event_seq > $2::bigint ORDER BY event_seq LIMIT $3`,
+       WHERE recipient_user_id = $1 AND event_seq > $2::bigint ORDER BY event_seq DESC LIMIT $3`,
       [userId, afterSeq, limit],
     )) as NotificationEventView[];
+    return rows.reverse();
   }
 
   /** Último event_seq del usuario ('0' si no tiene): cursor inicial de un stream sin Last-Event-ID. */
