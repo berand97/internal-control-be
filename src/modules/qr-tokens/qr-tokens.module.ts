@@ -18,5 +18,6 @@ import { QrTokensService } from './services/qr-tokens.service.js';
   ],
   controllers: [QrTokensController],
   providers: [QrTokensService],
+  exports: [QrTokensService],
 })
 export class QrTokensModule {}
