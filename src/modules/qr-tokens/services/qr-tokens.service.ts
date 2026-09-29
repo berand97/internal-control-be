@@ -14,6 +14,7 @@ import { OperationalStatus } from '../../assets/enums/operational-status.enum.js
 import type { AssetsRepository } from '../../assets/repositories/assets.repository.interface.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
 import { AssetStateService } from '../../assets/services/asset-state.service.js';
+import { PermissionsService } from '../../roles/services/permissions.service.js';
 import { QrTokenRotationLog } from '../entities/qr-token-rotation-log.entity.js';
 import type {
   QrHistoryItemDto,
@@ -21,6 +22,9 @@ import type {
   QrVerifyAuthResponseDto,
   QrVerifyPublicResponseDto,
 } from '../dto/responses/qr-token.response.dto.js';
+
+const ASSET_READ_GLOBAL = 'asset:read:global';
+const ASSET_READ_SCOPED = 'asset:read:org_unit';
 
 interface QrPayload {
   readonly typ: 'qr';
@@ -51,6 +55,7 @@ export class QrTokensService {
     private readonly rotations: Repository<QrTokenRotationLog>,
     private readonly config: ConfigService<AppConfig, true>,
     private readonly assetState: AssetStateService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   async issue(
@@ -176,16 +181,20 @@ export class QrTokensService {
     }));
   }
 
-  async verifyPublic(
+  /**
+   * Verificación con sesión Y alcance (decisión del desarrollador: la etiqueta no expone activos de otro centro).
+   * Con asset:read:global, o asset:read:org_unit con el centro de costo ACTUAL del activo entre los del usuario
+   * (asignaciones COST_CENTER ∪ jefaturas), devuelve los datos. Token alterado, activo inexistente, activo de otro
+   * centro o usuario sin alcance: 400 QR_TOKEN_INVALID, la misma respuesta en todos los casos (no distingue «existe
+   * pero no es tuyo»). QR_VERSION_MISMATCH solo se informa sobre activos del alcance.
+   */
+  async verify(
     token: string,
+    actor: AuthenticatedUser,
     withPng: boolean,
     size: number,
   ): Promise<QrVerifyPublicResponseDto & { pngBase64?: string }> {
-    const payload = this.decode(token);
-    const asset = await this.assetsRepository.findById(payload.assetId);
-    if (!asset) {
-      throw new ApiException(ErrorCode.QrAssetNotFound);
-    }
+    const { payload, asset } = await this.assetInScope(token, actor);
     if (payload.tokenVersion !== asset.qrTokenVersion || !asset.qrToken) {
       throw new ApiException(ErrorCode.QrVersionMismatch);
     }
@@ -220,20 +229,16 @@ export class QrTokensService {
     };
   }
 
-  async verifyAuthenticated(token: string): Promise<QrVerifyAuthResponseDto> {
-    const publicData = await this.verifyPublic(token, false, 300);
-    const asset = await this.assetsRepository.findById(
-      this.decode(token).assetId,
-    );
-    if (!asset) {
-      throw new ApiException(ErrorCode.QrAssetNotFound);
-    }
+  /** verify con movimientos recientes y préstamos activos: mismo alcance y mismas respuestas. */
+  async verifyAuthenticated(token: string, actor: AuthenticatedUser): Promise<QrVerifyAuthResponseDto> {
+    const verified = await this.verify(token, actor, false, 300);
+    const assetId = this.decode(token).assetId;
     const [movements, loans] = await Promise.all([
-      this.assetsRepository.findRecentMovements(asset.id, 5),
-      this.assetsRepository.findActiveLoans(asset.id),
+      this.assetsRepository.findRecentMovements(assetId, 5),
+      this.assetsRepository.findActiveLoans(assetId),
     ]);
     return {
-      ...publicData,
+      ...verified,
       recentMovements: movements.map((item) => ({
         id: item.id,
         movementType: item.movementType,
@@ -242,6 +247,22 @@ export class QrTokensService {
       })),
       activeLoans: loans,
     };
+  }
+
+  /** El activo del token si el usuario lo alcanza; si no (o no existe), QR_TOKEN_INVALID como un token alterado. */
+  private async assetInScope(token: string, actor: AuthenticatedUser) {
+    const payload = this.decode(token);
+    const asset = await this.assetsRepository.findById(payload.assetId);
+    if (!asset) {
+      throw new ApiException(ErrorCode.QrTokenInvalid);
+    }
+    const scope = await this.permissions.costCenterScope(actor.id, ASSET_READ_GLOBAL, ASSET_READ_SCOPED);
+    const inScope =
+      scope.kind === 'GLOBAL' || (scope.kind === 'COST_CENTERS' && scope.costCenterIds.includes(asset.costCenterId));
+    if (!inScope) {
+      throw new ApiException(ErrorCode.QrTokenInvalid);
+    }
+    return { payload, asset };
   }
 
   private sign(payload: QrPayload): string {

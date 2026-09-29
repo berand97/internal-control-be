@@ -20,7 +20,6 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
-import { Public } from '../../common/decorators/public.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import {
   ApiErrorEnvelope,
@@ -40,7 +39,12 @@ import {
 import { VerifyQrBodyDto, VerifyQrQueryDto } from './dto/verify-qr.dto.js';
 import { QrTokensService } from './services/qr-tokens.service.js';
 
-const PUBLIC_QR_THROTTLE = { default: { limit: 60, ttl: 60_000 } } as const;
+const QR_VERIFY_THROTTLE = { default: { limit: 60, ttl: 60_000 } } as const;
+
+const QR_SCOPE_RULE =
+  'Requiere sesión. Responde con asset:read:global, o con asset:read:org_unit si el centro de costo ACTUAL del activo está entre los del usuario ' +
+  '(asignaciones COST_CENTER ∪ jefaturas vigentes). Token alterado, activo inexistente, activo de otro centro o usuario sin alcance: ' +
+  '400 QR_TOKEN_INVALID, idéntico en todos los casos. 406 QR_VERSION_MISMATCH solo para activos del alcance.';
 
 @ApiTags(OpenApiTag.QrTokens)
 @ApiExtraModels(
@@ -115,21 +119,26 @@ export class QrTokensController {
     return this.qrTokensService.history(assetId);
   }
 
+  // Sin @RequirePermission: el alcance (global o centro actual del activo) lo decide el servicio.
   @Get('qr/verify')
-  @Public()
-  @Throttle(PUBLIC_QR_THROTTLE)
+  @ApiBearerAuth()
+  @Throttle(QR_VERIFY_THROTTLE)
   @ApiOperation({
-    summary: 'Verificar QR (público)',
-    description: 'Sin datos de responsable ni precio. Rate limit 60/min por IP.',
+    summary: 'Verificar QR (con sesión y alcance)',
+    description:
+      `${QR_SCOPE_RULE} Sin datos de responsable ni precio. Rate limit 60/min.`,
   })
-  verifyPublicGet(
+  @ApiResponse({ status: 200, schema: envelopedSchema(QrVerifyPublicResponseDto) })
+  verifyGet(
     @Query() query: VerifyQrQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<QrVerifyPublicResponseDto> {
     if (!query.token) {
       throw new ApiException(ErrorCode.QrTokenInvalid);
     }
-    return this.qrTokensService.verifyPublic(
+    return this.qrTokensService.verify(
       query.token,
+      user,
       query.format === 'png',
       query.size ?? 300,
     );
@@ -138,11 +147,16 @@ export class QrTokensController {
   @Post('qr/verify')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @RequirePermission('asset:read:global')
-  @ApiOperation({ summary: 'Verificar QR autenticado (incluye préstamos y movimientos)' })
+  @Throttle(QR_VERIFY_THROTTLE)
+  @ApiOperation({
+    summary: 'Verificar QR autenticado (incluye préstamos y movimientos)',
+    description: QR_SCOPE_RULE,
+  })
+  @ApiResponse({ status: 200, schema: envelopedSchema(QrVerifyAuthResponseDto) })
   verifyAuth(
     @Body() dto: VerifyQrBodyDto,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<QrVerifyAuthResponseDto> {
-    return this.qrTokensService.verifyAuthenticated(dto.token);
+    return this.qrTokensService.verifyAuthenticated(dto.token, user);
   }
 }

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module.js';
 import { AssetsModule } from '../assets/assets.module.js';
 import { MovementsModule } from '../movements/movements.module.js';
+import { RolesModule } from '../roles/roles.module.js';
 import { QrTokenRotationLog } from './entities/qr-token-rotation-log.entity.js';
 import { QrTokensController } from './qr-tokens.controller.js';
 import { QrTokensService } from './services/qr-tokens.service.js';
@@ -12,6 +13,7 @@ import { QrTokensService } from './services/qr-tokens.service.js';
     AuthModule,
     AssetsModule,
     MovementsModule,
+    RolesModule,
     TypeOrmModule.forFeature([QrTokenRotationLog]),
   ],
   controllers: [QrTokensController],
