@@ -3,6 +3,13 @@ import { DataSource, type EntityManager, QueryFailedError } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
+import {
+  HOLD_OPEN_INVENTORY,
+  HOLD_OPEN_LOAN,
+  HOLD_OPEN_TRANSFER,
+  HOLD_REQUEST_RESERVATION,
+  holdReasons,
+} from '../../assets/domain/asset-holds.js';
 import { DocumentEngineService } from '../../documents/services/document-engine.service.js';
 import { longSpanishDate, SQL_BOGOTA_TODAY } from '../../loans/domain/loan-dates.js';
 import { LOAN_DELIVERY_FORMAT } from '../../loans/domain/loan-documents.js';
@@ -55,17 +62,13 @@ const CURRENT_HEAD = `h.valid_from <= NOW() AND (h.valid_until IS NULL OR h.vali
  * IN_STORAGE, sin préstamo abierto) y que el traslado (sin traslado abierto ni toma física abierta), más: no reservado
  * por otra solicitud abierta. $2 = OPEN_LOAN_STATUSES, $3 = solicitud propia (se excluye).
  */
-const BLOCKERS = `ARRAY_REMOVE(ARRAY[
-  CASE WHEN a.operational_status::text NOT IN ('IN_USE', 'IN_STORAGE') THEN 'está ' || a.operational_status::text END,
-  CASE WHEN EXISTS (SELECT 1 FROM asset_loan_item li JOIN asset_loan l ON l.id = li.loan_id
-         WHERE li.asset_id = a.id AND l.status::text = ANY($2) AND li.received_at IS NULL) THEN 'está en un préstamo abierto' END,
-  CASE WHEN EXISTS (SELECT 1 FROM asset_transfer_item ti WHERE ti.asset_id = a.id AND ti.open)
-       THEN 'está en un traslado abierto' END,
-  CASE WHEN EXISTS (SELECT 1 FROM physical_inventory_item pi JOIN physical_inventory p ON p.id = pi.inventory_id
-         WHERE pi.asset_id = a.id AND p.status IN ('PLANNED', 'IN_PROGRESS')) THEN 'está en una toma física abierta' END,
-  CASE WHEN EXISTS (SELECT 1 FROM asset_request_item ri WHERE ri.asset_id = a.id AND ri.open AND ri.request_id IS DISTINCT FROM $3::uuid)
-       THEN 'está reservado por otra solicitud' END
-], NULL)`;
+const BLOCKERS = holdReasons(
+  `CASE WHEN a.operational_status::text NOT IN ('IN_USE', 'IN_STORAGE') THEN 'está ' || a.operational_status::text END`,
+  HOLD_OPEN_LOAN('$2'),
+  HOLD_OPEN_TRANSFER,
+  HOLD_OPEN_INVENTORY,
+  HOLD_REQUEST_RESERVATION('$3'),
+);
 
 export interface AssetRequestRow {
   id: string;

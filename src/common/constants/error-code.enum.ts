@@ -136,6 +136,7 @@ export enum ErrorCode {
   HandoverAssetInOpenHandover = 'HANDOVER_ASSET_IN_OPEN_HANDOVER',
   HandoverCostCenterMismatch = 'HANDOVER_COST_CENTER_MISMATCH',
   HandoverAssetNotDeliverable = 'HANDOVER_ASSET_NOT_DELIVERABLE',
+  HandoverAssetReserved = 'HANDOVER_ASSET_RESERVED',
   DocumentFormatNotReady = 'DOCUMENT_FORMAT_NOT_READY',
   DocumentFormatAlreadyExists = 'DOCUMENT_FORMAT_ALREADY_EXISTS',
   DocumentFormatBreaksProcess = 'DOCUMENT_FORMAT_BREAKS_PROCESS',

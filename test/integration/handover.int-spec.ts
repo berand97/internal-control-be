@@ -612,6 +612,52 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     ).toBe(requestsBefore);
   });
 
+  it('no toma activos reservados: préstamo aprobado sin entregar (programado) o solicitud de activos aceptada → 409 con el motivo', async () => {
+    const scheduled = await asset();
+    const reserved = await asset();
+    const free = await asset();
+    const loanId = await scalar<string>(
+      dataSource,
+      `INSERT INTO asset_loan (source_cost_center_id, target_cost_center_id, requested_at, start_date, expected_return_date, requested_by,
+         status, purpose, created_at, updated_at)
+       VALUES ($1, $2, NOW(), CURRENT_DATE + 3, CURRENT_DATE + 10, $3, 'APPROVED', 'Préstamo programado de prueba', NOW(), NOW()) RETURNING id`,
+      [costCenter, otherCostCenter, director.userId],
+    );
+    await dataSource.query('INSERT INTO asset_loan_item (loan_id, asset_id, source_cost_center_id) VALUES ($1, $2, $3)', [
+      loanId,
+      scheduled,
+      costCenter,
+    ]);
+    const requestId = await scalar<string>(
+      dataSource,
+      `INSERT INTO asset_request (code, kind, status, requester_user_id, requester_person_id, requesting_cost_center_id, owner_cost_center_id,
+         description, accepted_by, accepted_at, expires_at)
+       VALUES ($1, 'PERMANENT', 'ACCEPTED', $2, $3, $4, $5, 'Escritorio para prueba de entregas', $2, NOW(), NOW() + interval '14 days') RETURNING id`,
+      [`SOL-IT-${randomUUID().slice(0, 6)}`, director.userId, director.personId, otherCostCenter, costCenter],
+    );
+    await dataSource.query('INSERT INTO asset_request_item (request_id, asset_id) VALUES ($1, $2)', [requestId, reserved]);
+    const count = () => scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_handover');
+    const before = await count();
+
+    const response = await create([free, scheduled, reserved]).expect(409);
+    expect(response.body.error.code).toBe('HANDOVER_ASSET_RESERVED');
+    const messages = (response.body.error.details as Array<{ field: string; message: string }>).map((item) => item.message);
+    expect(messages).toHaveLength(2);
+    expect(messages.find((message) => message.includes('préstamo abierto'))).toBeDefined();
+    expect(messages.find((message) => message.includes('reservado por una solicitud de activos'))).toBeDefined();
+    expect(await count()).toBe(before);
+
+    // Liberados (préstamo rechazado, solicitud vencida), se pueden entregar.
+    await dataSource.query(`UPDATE asset_loan SET status = 'REJECTED' WHERE id = $1`, [loanId]);
+    await dataSource.query('UPDATE asset_request_item SET open = FALSE WHERE request_id = $1', [requestId]);
+    const created = await create([scheduled, reserved]).expect(201);
+    await http().post(`/api/v1/handovers/${created.body.data.id}/cancel`).set(auth(director)).send({ reason: 'Prueba de reservas' }).expect(200);
+    await dataSource.query('DELETE FROM asset_request_item WHERE request_id = $1', [requestId]);
+    await dataSource.query('DELETE FROM asset_request WHERE id = $1', [requestId]);
+    await dataSource.query('DELETE FROM asset_loan_item WHERE loan_id = $1', [loanId]);
+    await dataSource.query('DELETE FROM asset_loan WHERE id = $1', [loanId]);
+  });
+
   it('dos entregas simultáneas del mismo activo: una se crea y la otra choca con la entrega abierta', async () => {
     const assetId = await asset();
     const responses = await Promise.all([create([assetId]), create([assetId])]);

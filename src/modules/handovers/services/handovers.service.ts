@@ -5,6 +5,7 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import type { ErrorDetail } from '../../../common/types/response-envelope.type.js';
+import { HOLD_OPEN_LOAN, HOLD_OPEN_TRANSFER, HOLD_REQUEST_RESERVATION, holdReasons } from '../../assets/domain/asset-holds.js';
 import type { Asset } from '../../assets/entities/asset.entity.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
 import type { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
@@ -16,6 +17,7 @@ import {
   type DocumentLifecycleEvent,
 } from '../../documents/lifecycle/document-lifecycle.registry.js';
 import { DocumentEngineService } from '../../documents/services/document-engine.service.js';
+import { OPEN_LOAN_STATUSES } from '../../loans/enums/loan-status.js';
 import {
   CANCELLABLE_HANDOVER_STATUSES,
   HANDOVER_ENTITY_TYPE,
@@ -118,6 +120,7 @@ export class HandoversService implements OnModuleInit {
         );
         await this.assertCostCenter(manager, dto.costCenterId);
         await this.assertAssets(manager, assetIds, dto.costCenterId);
+        await this.assertNotHeld(manager, assetIds);
         await this.assertNotInOpenHandover(manager, assetIds);
 
         const assetNotes = Object.fromEntries(
@@ -387,6 +390,27 @@ export class HandoversService implements OnModuleInit {
           field: 'assets',
           message: `El activo ${row.code} (${row.id}) está en el centro de costo ${row.current_cost_center_id}`,
         })),
+      );
+    }
+  }
+
+  /**
+   * Ningún activo comprometido en otro proceso abierto: préstamo abierto (incluido el APPROVED programado de una
+   * solicitud), reserva de una solicitud de activos aceptada o devuelta, o traslado abierto. Mismas definiciones que
+   * al elegir activos en una solicitud (assets/domain/asset-holds.ts). 409 HANDOVER_ASSET_RESERVED con el motivo por activo.
+   */
+  private async assertNotHeld(manager: EntityManager, assetIds: ReadonlyArray<string>): Promise<void> {
+    const held = (await manager.query(
+      `SELECT a.id, ${ASSET_CODE} AS code, ${holdReasons(HOLD_OPEN_LOAN('$2'), HOLD_REQUEST_RESERVATION(), HOLD_OPEN_TRANSFER)} AS reasons
+       FROM asset a WHERE a.id = ANY($1) ORDER BY a.id`,
+      [assetIds, OPEN_LOAN_STATUSES],
+    )) as Array<{ id: string; code: string; reasons: string[] }>;
+    const blocked = held.filter((row) => row.reasons.length > 0);
+    if (blocked.length > 0) {
+      throw new ApiException(
+        ErrorCode.HandoverAssetReserved,
+        undefined,
+        blocked.map((row) => ({ field: 'assets', message: `El activo ${row.code} ${row.reasons.join(', ')}` })),
       );
     }
   }

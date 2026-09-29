@@ -678,6 +678,12 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El activo está dado de baja o en préstamo y no se puede entregar',
   },
+  [ErrorCode.HandoverAssetReserved]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message:
+      'El activo está comprometido en un préstamo, una solicitud de activos o un traslado abiertos: no se puede entregar a un responsable hasta que ese proceso termine',
+  },
   [ErrorCode.DocumentFormatNotReady]: {
     httpStatus: 409,
     action: 'CONTACT_SUPPORT',
