@@ -17,7 +17,7 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { conform, type Schema } from './openapi-conform.js';
-import { scalar, useSharedStorage } from './helpers.js';
+import { createPermissionRole, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 
 const LOAN_FORMAT = 'OCI-01-65';
@@ -179,7 +179,8 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     );
     reasonId = await scalar<string>(dataSource, `SELECT id FROM asset_transfer_reason WHERE code = 'REUBICACION'`);
     director = await actor('Directora', ['INTERNAL_CONTROL_DIRECTOR']);
-    auditor = await actor('Auditora', ['AUDITOR']);
+    // Revisa solicitudes y firma por Control Interno por sus permisos, con un rol cualquiera (no por llamarse AUDITOR).
+    auditor = await actor('Auditora', ['AUDITOR', await createPermissionRole(dataSource, ['asset_request:review:global', 'act:sign_control:global'], 'IT_REVISORA')]);
     accountant = await actor('Contadora', ['CONTABILIDAD']);
     requester = await actor('Solicitante', ['DEPARTMENT_HEAD'], [requesting]);
     ownerHead = await actor('Dueña', ['DEPARTMENT_HEAD'], [owner]);
@@ -476,5 +477,10 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     const denied = await http().get('/api/v1/asset-requests?box=review').set(auth(requester));
     expect([denied.status, denied.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
     expect((await http().get('/api/v1/asset-requests?box=review&status=EXPIRED').set(auth(auditor)).expect(200)).body.data.total).toBeGreaterThan(0);
+    // El rol AUDITOR de la semilla ya no trae asset_request:review:global (migración 1767225940000).
+    const plainAuditor = await actor('Auditor', ['AUDITOR']);
+    const notReviewer = await http().get('/api/v1/asset-requests?box=review').set(auth(plainAuditor));
+    expect([notReviewer.status, notReviewer.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
+    await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [plainAuditor.userId]);
   });
 });

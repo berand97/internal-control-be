@@ -97,7 +97,7 @@ export class RolesController {
   @ApiOperation({
     summary: 'Historial de permisos y roles otorgados o retirados',
     description:
-      'Quién, cuándo, desde dónde (IP y user-agent), qué permisos agregó o quitó a qué rol, qué rol dio o quitó a qué usuario (con alcance y vigencia) y el motivo. Incluye creación, edición y borrado de roles. Solo lectura: requiere role:audit:global (Directora de Control Interno, Auditor y SUPER_ADMIN), no administración de roles. Registros anteriores a que se exigiera el motivo traen reason, ipAddress y userAgent en null. Filtros combinables; orden del más reciente al más antiguo.',
+      'Quién, cuándo, desde dónde (IP y user-agent), qué permisos agregó o quitó a qué rol, qué rol dio o quitó a qué usuario (con alcance y vigencia) y el motivo. Incluye creación, edición y borrado de roles. Solo lectura: requiere role:audit:global (de base: Directora de Control Interno y SUPER_ADMIN), no administración de roles. Registros anteriores a que se exigiera el motivo traen reason, ipAddress y userAgent en null. Filtros combinables; orden del más reciente al más antiguo.',
   })
   @ApiResponse({ status: 200, schema: envelopedSchema(RoleGrantsHistoryPageDto) })
   @ApiResponse({ status: 400, description: 'Filtro inválido (VALIDATION_FAILED)', schema: errorEnvelopeSchema() })

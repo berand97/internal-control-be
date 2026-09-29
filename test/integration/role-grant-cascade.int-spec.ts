@@ -388,7 +388,7 @@ describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HT
 
       const director = await createUser(['INTERNAL_CONTROL_DIRECTOR']);
       const auditor = await createUser(['AUDITOR']);
-      for (const reader of [director, auditor, admin]) {
+      for (const reader of [director, admin]) {
         const history = await call('get', '/roles/grants-history', reader.token).query({ userId: target.id });
         expect(history.status).toBe(200);
         const items = history.body.data.items as Array<Record<string, unknown>>;
@@ -408,6 +408,8 @@ describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HT
       }
 
       const viewer = await createUser(['VIEWER']);
+      // El AUDITOR de la semilla ya no lo trae (migración 1767225940000): role:audit:global es de la Directora y SUPER_ADMIN.
+      expect((await call('get', '/roles/grants-history', auditor.token)).status).toBe(403);
       expect((await call('get', '/roles/grants-history', viewer.token)).status).toBe(403);
       expect((await call('get', '/roles/grants-history', director.token).query({ roleId: 'x' })).status).toBe(400);
     });
