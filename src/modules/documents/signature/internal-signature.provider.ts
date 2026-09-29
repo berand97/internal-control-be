@@ -358,7 +358,7 @@ export class InternalSignatureProvider implements SignatureProvider {
       signers: signers.map((signer) => ({
         order: signer.sign_order,
         role: signer.role_label ?? signer.role,
-        name: signer.status === 'PENDING' ? null : signer.name,
+        name: signer.status === 'SIGNED' ? signer.name : null,
         status: signer.status,
         signedAt: signer.signed_at ? new Date(signer.signed_at).toISOString() : null,
         method: signer.status === 'PENDING' ? null : signer.method,
