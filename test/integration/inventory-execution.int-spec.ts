@@ -604,19 +604,19 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     }
   });
 
-  it('catálogos: leer con inventory:read, administrar solo con inventory_catalog:manage; ANI queda sin definir', async () => {
+  it('catálogos: leer con inventory:read, administrar solo con inventory_catalog:manage; tres categorías, sin ANI ni pendientes', async () => {
     const list = await http().get('/api/v1/inventories/catalogs/finding-categories').set(as(outsiderCustodian));
     expect(list.status).toBe(200);
     expectConforms('get', '/api/v1/inventories/catalogs/finding-categories', 200, list.body);
-    const byCode = new Map((list.body.data as Array<{ code: string }>).map((row) => [row.code, row]));
-    expect(byCode.get('ANI')).toMatchObject({
-      label: 'ANI',
-      description: null,
-      isActive: false,
-      pendingDefinition: true,
-      suggestResults: null,
-      suggestConditions: null,
-    });
+    const rows = list.body.data as Array<{ code: string; label: string; isActive: boolean; pendingDefinition: boolean }>;
+    const byCode = new Map(rows.map((row) => [row.code, row]));
+    expect(byCode.has('ANI')).toBe(false);
+    expect(rows.filter((row) => row.pendingDefinition)).toEqual([]);
+    expect(['AU', 'ANE', 'AOD'].map((code) => [code, byCode.get(code)?.label, byCode.get(code)?.isActive])).toEqual([
+      ['AU', 'Activos en uso', true],
+      ['ANE', 'Activos no encontrados', true],
+      ['AOD', 'Activos obsoletos dañados', true],
+    ]);
     expect(byCode.get('AOD')).toMatchObject({ suggestConditions: ['OBSOLETE', 'POOR'] });
 
     const denied = await http()

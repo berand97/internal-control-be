@@ -508,9 +508,9 @@ describe
           'Responsable Gloria Patricia Rendón Mejía',
           'Atendió por el área Asistente de la decanatura',
           // Porcentaje sobre el precio de compra (5 430 000 / 8 100 000), no sobre el número de bienes.
-          `AU — En uso 2 ${money(5_430_000)} 67,04 % ${money(2_920_000)}`,
-          `ANE — No encontrado 1 ${money(1_980_000)} 24,44 % Sin dato`,
-          `AOD — Obsoleto o dañado 1 ${money(690_000)} 8,52 % ${money(120_000)}`,
+          `AU — Activos en uso 2 ${money(5_430_000)} 67,04 % ${money(2_920_000)}`,
+          `ANE — Activos no encontrados 1 ${money(1_980_000)} 24,44 % Sin dato`,
+          `AOD — Activos obsoletos dañados 1 ${money(690_000)} 8,52 % ${money(120_000)}`,
           'Porcentaje calculado sobre el precio de compra',
           'El valor en libros es otro dato y no entra en el porcentaje',
           `Total 4 ${money(8_100_000)} 100,00 % Sin dato`,

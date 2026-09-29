@@ -680,8 +680,8 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(text).toContain(`H|TOTAL|3|${formatMoney(1700)}|100,00 %|Sin dato|`);
     expect(text).toContain('1.500,00');
     expect(text).toContain('S|Mesa sin placa|Sin decisión|');
-    expect(text).toContain('|Encontrado|En uso|');
-    expect(text).toContain('|No encontrado|No encontrado|Sin dato|');
+    expect(text).toContain('|Encontrado|Activos en uso|');
+    expect(text).toContain('|No encontrado|Activos no encontrados|Sin dato|');
     // ENCARGADO = jefe vigente del centro de la toma, no el responsable de la toma.
     expect(text).toContain('FIRMAS|Jefa Valoración|Aprobador Valoración|');
   });
