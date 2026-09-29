@@ -19,8 +19,10 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  *    asset_request:read:own (OWN: ver las propias; no da nada que el servicio no diera ya por ser parte), sembrado a los
  *    roles que tienen loan:request:own. El menú «Solicitudes de activos» pasa a asset_request / read: lo ven quien
  *    lee todas, quien revisa (review cuenta como lectura en el menú, action-satisfies.ts) y quien solicita (read:own).
- * 5. physical_inventory.attended_by_person_id (FK person, NULL) + attended_recorded_at / attended_recorded_by: el jefe
- *    vigente del centro de la toma que la atendió en sitio; firma el acta OCI-21-37 como ENCARGADO (turno RESPONSABLE).
+ * 5. physical_inventory.signer_head_person_id (FK person, NULL) + signer_head_recorded_at / _by: el jefe vigente del
+ *    centro de la toma que firma el acta OCI-21-37 como ENCARGADO (turno RESPONSABLE), resuelto al cerrar; NULL si el
+ *    centro no tenía jefe (el acta no se emite hasta indicarlo). Aparte y solo informativo, quién atendió por el área:
+ *    attended_by_person_id (persona del sistema) o attended_by_name (texto libre 3..200), nunca ambos; no firma.
  *
  * down(): se niega si hay solicitudes LOAN_SCHEDULED; deja las RETURNED sin vencimiento, quita lo sembrado y las
  * columnas (la fecha de inicio de un préstamo de solicitud sigue en asset_request.start_date).
@@ -111,11 +113,16 @@ export class ScheduledLoansRequestReaderAndInventoryAttendee1767225980000 implem
 
     await queryRunner.query(`
       ALTER TABLE physical_inventory
+        ADD COLUMN signer_head_person_id UUID REFERENCES person(id),
+        ADD COLUMN signer_head_recorded_at TIMESTAMPTZ,
+        ADD COLUMN signer_head_recorded_by UUID REFERENCES app_user(id),
         ADD COLUMN attended_by_person_id UUID REFERENCES person(id),
-        ADD COLUMN attended_recorded_at TIMESTAMPTZ,
-        ADD COLUMN attended_recorded_by UUID REFERENCES app_user(id),
+        ADD COLUMN attended_by_name VARCHAR(200),
+        ADD CONSTRAINT chk_physical_inventory_signer_head CHECK (
+          signer_head_person_id IS NULL OR (signer_head_recorded_at IS NOT NULL AND signer_head_recorded_by IS NOT NULL)),
         ADD CONSTRAINT chk_physical_inventory_attended CHECK (
-          attended_by_person_id IS NULL OR (attended_recorded_at IS NOT NULL AND attended_recorded_by IS NOT NULL))
+          (attended_by_person_id IS NULL OR attended_by_name IS NULL)
+          AND (attended_by_name IS NULL OR length(btrim(attended_by_name)) BETWEEN 3 AND 200))
     `);
   }
 
@@ -129,9 +136,12 @@ export class ScheduledLoansRequestReaderAndInventoryAttendee1767225980000 implem
     await queryRunner.query(`
       ALTER TABLE physical_inventory
         DROP CONSTRAINT chk_physical_inventory_attended,
-        DROP COLUMN attended_recorded_by,
-        DROP COLUMN attended_recorded_at,
-        DROP COLUMN attended_by_person_id
+        DROP CONSTRAINT chk_physical_inventory_signer_head,
+        DROP COLUMN attended_by_name,
+        DROP COLUMN attended_by_person_id,
+        DROP COLUMN signer_head_recorded_by,
+        DROP COLUMN signer_head_recorded_at,
+        DROP COLUMN signer_head_person_id
     `);
     await queryRunner.query(
       `UPDATE navigation_item SET resource = 'loan', required_action = 'request' WHERE id = $1`,

@@ -108,18 +108,26 @@ export class PhysicalInventory {
   actBlockedAt!: Date | null;
 
   /**
-   * Jefe vigente del centro de la toma que la atendió en sitio (se indica al cerrar, migración 1767225980000). Firma
-   * el acta OCI-21-37 como ENCARGADO (turno RESPONSABLE). NULL: el centro no tenía jefe vigente (el acta no se puede
-   * emitir hasta indicarlo) o la toma se cerró antes de esta regla.
+   * Jefe vigente del centro de la toma que firma el acta OCI-21-37 como ENCARGADO (turno RESPONSABLE), resuelto al
+   * cerrar (migración 1767225980000). NULL: el centro no tenía jefe vigente (el acta no se emite hasta indicarlo) o la
+   * toma se cerró antes de esta regla.
    */
+  @Column({ name: 'signer_head_person_id', type: 'uuid', nullable: true })
+  signerHeadPersonId!: string | null;
+
+  @Column({ name: 'signer_head_recorded_at', type: 'timestamptz', nullable: true })
+  signerHeadRecordedAt!: Date | null;
+
+  @Column({ name: 'signer_head_recorded_by', type: 'uuid', nullable: true })
+  signerHeadRecordedBy!: string | null;
+
+  /** Quién atendió la toma por el área, si es persona del sistema. Solo informativo: no firma. */
   @Column({ name: 'attended_by_person_id', type: 'uuid', nullable: true })
   attendedByPersonId!: string | null;
 
-  @Column({ name: 'attended_recorded_at', type: 'timestamptz', nullable: true })
-  attendedRecordedAt!: Date | null;
-
-  @Column({ name: 'attended_recorded_by', type: 'uuid', nullable: true })
-  attendedRecordedBy!: string | null;
+  /** Quién atendió por el área, en texto libre, si no está registrado. Nunca junto con attendedByPersonId. */
+  @Column({ name: 'attended_by_name', type: 'varchar', length: 200, nullable: true })
+  attendedByName!: string | null;
 
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
