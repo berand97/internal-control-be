@@ -99,9 +99,12 @@ export class RolePrivilegePolicy {
   }
 
   /**
-   * Heredar de un rol (parent_role_id) equivale a otorgar todo lo que aporta: el padre y cada ancestro suyo deben ser
-   * administrables por el actor (nivel mayor al propio) y el actor debe tener, efectivamente, cada permiso del
-   * linaje. La separación de funciones sobre roles efectivos la hace cumplir la BD (fn_check_role_inheritance_sod).
+   * Heredar de un rol (parent_role_id) equivale a otorgar todo lo que aporta, y sigue la misma regla que otorgar
+   * permisos (assertCanGrantPermissions): el padre y cada ancestro suyo deben ser administrables por el actor (nivel
+   * mayor al propio) y, salvo SUPER_ADMIN (administración pura: asigna herencia sin tener los permisos del padre), el
+   * actor debe tener, efectivamente, cada permiso del linaje. Nadie amplía por herencia un rol que tiene, SUPER_ADMIN
+   * incluido (assertDoesNotWidenOwn). La separación de funciones sobre roles efectivos la hace cumplir la BD
+   * (fn_check_role_inheritance_sod).
    */
   async assertCanInheritFrom(
     actor: AuthenticatedUser,
@@ -118,7 +121,7 @@ export class RolePrivilegePolicy {
     const inherited = await this.rolesRepository.findPermissionsForRoles(
       lineage.map((role) => role.id),
     );
-    await this.assertCanGrant(actor, inherited);
+    await this.assertCanGrantPermissions(actor, inherited);
     if (inheritingRoleId !== undefined) {
       await this.assertDoesNotWidenOwn(actor, inheritingRoleId, inherited);
     }
@@ -162,8 +165,7 @@ export class RolePrivilegePolicy {
   /**
    * Otorgar permisos a un rol (crearlo con permisos, agregarle o reemplazar su set). SUPER_ADMIN es administración
    * pura: otorga cualquier permiso aunque no lo tenga (no opera). Los demás siguen la cascada: solo lo que tienen.
-   * La herencia (parent_role_id) no pasa por aquí: sigue exigiendo tener cada permiso del linaje
-   * (assertCanInheritFrom), también a SUPER_ADMIN.
+   * La herencia (assertCanInheritFrom) aplica esta misma regla a los permisos del linaje.
    */
   async assertCanGrantPermissions(
     actor: AuthenticatedUser,

@@ -113,29 +113,59 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
   });
 
   describe('BE-02: la herencia pasa por las mismas reglas que otorgar permisos', () => {
-    it('SUPER_ADMIN no puede crear un rol que herede del Director (escenario del hallazgo)', async () => {
+    // Decisión del desarrollador: asignar herencia sigue la regla de otorgar permisos. SUPER_ADMIN (administración pura)
+    // puede hacerlo sin tener los permisos del padre; la BD sigue impidiendo que un SUPER_ADMIN termine con ese rol.
+    it('SUPER_ADMIN puede crear un rol que herede del Director, como puede otorgarle sus permisos', async () => {
       const admin = await createUser(['SUPER_ADMIN']);
       const response = await call('post', '/roles', admin.token).send({
         code: `SHADOW_${tag()}`,
         name: 'Rol sombra',
         parentRoleId: await roleId('INTERNAL_CONTROL_DIRECTOR'),
       });
-      expect(response.status).toBe(403);
-      expect(response.body.error.code).toBe('PERMISSION_NOT_HELD');
+      expect(response.status).toBe(201);
+      expect(response.body.data.parentRoleId).toBe(await roleId('INTERNAL_CONTROL_DIRECTOR'));
     });
 
-    it('SUPER_ADMIN no puede re-apuntar la herencia de un rol existente al Director', async () => {
+    it('SUPER_ADMIN puede cambiar el padre de un rol existente (200)', async () => {
       const admin = await createUser(['SUPER_ADMIN']);
       const created = await call('post', '/roles', admin.token).send({ code: `EMPTY_${tag()}`, name: 'Vacío' });
       expect(created.status).toBe(201);
       const response = await call('patch', `/roles/${created.body.data.id as string}`, admin.token).send({
         parentRoleId: await roleId('INTERNAL_CONTROL_DIRECTOR'),
       });
-      expect(response.status).toBe(403);
-      expect(response.body.error.code).toBe('PERMISSION_NOT_HELD');
+      expect(response.status).toBe(200);
       expect(
         await scalar<string | null>(dataSource, 'SELECT parent_role_id FROM role WHERE id = $1', [created.body.data.id]),
-      ).toBeNull();
+      ).toBe(await roleId('INTERNAL_CONTROL_DIRECTOR'));
+    });
+
+    it('SUPER_ADMIN renombra un rol con padre enviando padre y superior iguales a los actuales (200, defecto reportado)', async () => {
+      const admin = await createUser(['SUPER_ADMIN']);
+      const created = await call('post', '/roles', admin.token).send({
+        code: `NAMED_${tag()}`,
+        name: 'Antes',
+        parentRoleId: await roleId('AUDITOR'),
+      });
+      expect(created.status).toBe(201);
+      const role = created.body.data as { id: string; parentRoleId: string; superiorRoleId: string };
+      const response = await call('patch', `/roles/${role.id}`, admin.token).send({
+        name: 'Después',
+        description: 'Solo cambia el nombre',
+        parentRoleId: role.parentRoleId,
+        superiorRoleId: role.superiorRoleId,
+      });
+      expect(response.status).toBe(200);
+      expect(response.body.data).toMatchObject({ name: 'Después', parentRoleId: role.parentRoleId, superiorRoleId: role.superiorRoleId });
+    });
+
+    it('ni SUPER_ADMIN amplía por herencia un rol que tiene (403)', async () => {
+      const admin = await createUser(['SUPER_ADMIN']);
+      const ownId = await insertRole(`OWN_${tag()}`, 2, null);
+      await dataSource.query(`INSERT INTO user_role (user_id, role_id, scope_type) VALUES ($1, $2, 'GLOBAL')`, [admin.id, ownId]);
+      const response = await call('patch', `/roles/${ownId}`, admin.token).send({ parentRoleId: await roleId('VIEWER') });
+      expect(response.status).toBe(403);
+      expect(response.body.error.code).toBe('ROLE_SELF_ASSIGNMENT_FORBIDDEN');
+      expect(await scalar<string | null>(dataSource, 'SELECT parent_role_id FROM role WHERE id = $1', [ownId])).toBeNull();
     });
 
     it('la BD rechaza asignar a un SUPER_ADMIN un rol que hereda del Director, aunque no sea el Director', async () => {
@@ -263,6 +293,22 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
         });
         expect(response.status).toBe(403);
         expect(response.body.error.code).toBe('ROLE_PRIVILEGE_ESCALATION');
+      });
+
+      it('dentro de su cascada sigue limitado: no hereda de un rol que aporta permisos que no tiene', async () => {
+        const director = await createUser(['INTERNAL_CONTROL_DIRECTOR']);
+        const lowId = await insertRole(`LOW_${tag()}`, 3, null);
+        await dataSource.query(
+          `INSERT INTO role_permission (role_id, permission_id) SELECT $1, id FROM permission WHERE code = 'user:manage:global'`,
+          [lowId],
+        );
+        const response = await call('post', '/roles', director.token).send({
+          code: `BORROW_${tag()}`,
+          name: 'Prestado',
+          parentRoleId: lowId,
+        });
+        expect(response.status).toBe(403);
+        expect(response.body.error.code).toBe('PERMISSION_NOT_HELD');
       });
 
       it('no puede otorgar un permiso que no tiene', async () => {

@@ -169,8 +169,14 @@ export class RolesService {
     origin: RequestOrigin,
   ): Promise<RoleResponseDto> {
     const role = await this.requireRole(id);
-    const reorganizing =
-      dto.parentRoleId !== undefined || dto.superiorRoleId !== undefined;
+    // Enviar parentRoleId / superiorRoleId iguales a los actuales (lo hace el formulario al renombrar) no es
+    // reorganizar: no se revalida nada y el cambio de nombre o descripción pasa.
+    const parentChanged =
+      dto.parentRoleId !== undefined && dto.parentRoleId !== role.parentRoleId;
+    const superiorChanged =
+      dto.superiorRoleId !== undefined &&
+      dto.superiorRoleId !== role.superiorRoleId;
+    const reorganizing = parentChanged || superiorChanged;
     if (reorganizing) {
       await this.privilege.assertCanReorganize(actor);
       if (role.code === 'SUPER_ADMIN') {
@@ -179,7 +185,7 @@ export class RolesService {
     }
 
     let parentRoleId = role.parentRoleId;
-    if (dto.parentRoleId !== undefined) {
+    if (parentChanged) {
       if (dto.parentRoleId === role.id) {
         throw new ApiException(ErrorCode.InvalidState);
       }
@@ -196,7 +202,7 @@ export class RolesService {
     let hierarchyLevel = role.hierarchyLevel;
     let descendantLevels: ReadonlyArray<{ id: string; hierarchyLevel: number }> =
       [];
-    if (dto.superiorRoleId !== undefined) {
+    if (superiorChanged) {
       if (dto.superiorRoleId === role.id) {
         throw new ApiException(ErrorCode.InvalidState);
       }
@@ -227,8 +233,8 @@ export class RolesService {
         ...(dto.description !== undefined
           ? { description: dto.description }
           : {}),
-        ...(dto.parentRoleId !== undefined ? { parentRoleId } : {}),
-        ...(dto.superiorRoleId !== undefined
+        ...(parentChanged ? { parentRoleId } : {}),
+        ...(superiorChanged
           ? { superiorRoleId, hierarchyLevel }
           : {}),
       });
