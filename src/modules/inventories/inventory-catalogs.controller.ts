@@ -63,7 +63,7 @@ export class InventoryCatalogsController {
   @RequirePermission('inventory:read:global')
   @ApiOperation({
     summary: 'Categorías de hallazgo',
-    description: 'Todas, activas o no, por sortOrder. pendingDefinition = sin definición: no se sugiere ni se asigna.',
+    description: 'Todas, activas o no, por sortOrder. Solo las activas se sugieren y se asignan.',
   })
   @ApiOkResponse({ schema: envelopedArraySchema(InventoryFindingCategoryDto) })
   listFindingCategories() {

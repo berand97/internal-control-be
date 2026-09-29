@@ -1,7 +1,7 @@
 /**
  * Sugerencia de categoría de hallazgo a partir del catálogo (inventory_finding_category). Solo sugiere: el auditor
  * fija la categoría. Reglas, todas en datos:
- * - participan las categorías activas y con definición (pendingDefinition = false);
+ * - participan las categorías activas;
  * - una categoría aplica si cumple TODOS sus criterios no nulos: el resultado del ítem está en suggestResults y la
  *   condición observada está en suggestConditions; sin ningún criterio, nunca aplica;
  * - si aplican varias, gana la que acierta por condición observada (es más específica que el resultado), luego la
@@ -11,7 +11,6 @@
 export interface SuggestibleCategory {
   readonly code: string;
   readonly isActive: boolean;
-  readonly pendingDefinition: boolean;
   readonly sortOrder: number;
   readonly suggestResults: ReadonlyArray<string> | null;
   readonly suggestConditions: ReadonlyArray<string> | null;
@@ -43,7 +42,7 @@ export const suggestFindingCategory = (
 ): string | null => {
   let best: { readonly code: string; readonly score: number; readonly sortOrder: number } | null = null;
   for (const category of categories) {
-    if (!category.isActive || category.pendingDefinition) {
+    if (!category.isActive) {
       continue;
     }
     const value = score(category, item);

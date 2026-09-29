@@ -3,7 +3,6 @@ import { type SuggestibleCategory, suggestFindingCategory } from './finding-sugg
 
 const category = (overrides: Partial<SuggestibleCategory> & { code: string }): SuggestibleCategory => ({
   isActive: true,
-  pendingDefinition: false,
   sortOrder: 0,
   suggestResults: null,
   suggestConditions: null,
@@ -15,7 +14,6 @@ const seeded: ReadonlyArray<SuggestibleCategory> = [
   category({ code: 'AU', sortOrder: 10, suggestResults: ['FOUND', 'MISPLACED'] }),
   category({ code: 'ANE', sortOrder: 20, suggestResults: ['MISSING'] }),
   category({ code: 'AOD', sortOrder: 30, suggestConditions: ['OBSOLETE', 'POOR'] }),
-  category({ code: 'ANI', sortOrder: 40, isActive: false, pendingDefinition: true }),
 ];
 
 describe('suggestFindingCategory', () => {
@@ -37,10 +35,9 @@ describe('suggestFindingCategory', () => {
     expect(suggestFindingCategory(seeded, { result: 'SURPLUS', actualCondition: 'GOOD' })).toBeNull();
   });
 
-  it('ignora inactivas, pendientes de definición y categorías sin criterios', () => {
+  it('ignora inactivas y categorías sin criterios', () => {
     const categories = [
       category({ code: 'X', suggestResults: ['FOUND'], isActive: false }),
-      category({ code: 'Y', suggestResults: ['FOUND'], pendingDefinition: true }),
       category({ code: 'Z' }),
     ];
     expect(suggestFindingCategory(categories, { result: 'FOUND', actualCondition: 'GOOD' })).toBeNull();

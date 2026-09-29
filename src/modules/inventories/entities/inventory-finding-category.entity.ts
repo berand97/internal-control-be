@@ -27,9 +27,6 @@ export class InventoryFindingCategory {
   @Column({ name: 'suggest_conditions', type: 'text', array: true, nullable: true })
   suggestConditions!: string[] | null;
 
-  @Column({ name: 'pending_definition', type: 'boolean', default: false })
-  pendingDefinition!: boolean;
-
   @Column({ name: 'created_at', type: 'timestamptz', default: () => 'NOW()' })
   createdAt!: Date;
 

@@ -496,7 +496,7 @@ export class InventoryActService implements OnModuleInit {
     const categories = (
       (await manager.query(
         `SELECT code, label FROM inventory_finding_category
-         WHERE is_active AND NOT pending_definition ORDER BY sort_order, code`,
+         WHERE is_active ORDER BY sort_order, code`,
       )) as Array<{ code: string; label: string }>
     ).map((row) => ({ code: row.code, label: row.label }));
     const content = buildInventoryActContent({

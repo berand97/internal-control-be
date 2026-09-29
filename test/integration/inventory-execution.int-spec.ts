@@ -604,14 +604,14 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     }
   });
 
-  it('catálogos: leer con inventory:read, administrar solo con inventory_catalog:manage; tres categorías, sin ANI ni pendientes', async () => {
+  it('catálogos: leer con inventory:read, administrar solo con inventory_catalog:manage; tres categorías, sin ANI ni marca de pendiente', async () => {
     const list = await http().get('/api/v1/inventories/catalogs/finding-categories').set(as(outsiderCustodian));
     expect(list.status).toBe(200);
     expectConforms('get', '/api/v1/inventories/catalogs/finding-categories', 200, list.body);
-    const rows = list.body.data as Array<{ code: string; label: string; isActive: boolean; pendingDefinition: boolean }>;
+    const rows = list.body.data as Array<{ code: string; label: string; isActive: boolean } & Record<string, unknown>>;
     const byCode = new Map(rows.map((row) => [row.code, row]));
     expect(byCode.has('ANI')).toBe(false);
-    expect(rows.filter((row) => row.pendingDefinition)).toEqual([]);
+    expect(rows.some((row) => 'pendingDefinition' in row)).toBe(false);
     expect(['AU', 'ANE', 'AOD'].map((code) => [code, byCode.get(code)?.label, byCode.get(code)?.isActive])).toEqual([
       ['AU', 'Activos en uso', true],
       ['ANE', 'Activos no encontrados', true],

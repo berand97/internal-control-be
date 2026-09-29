@@ -44,10 +44,10 @@ export class InventoryCatalogsService {
     };
   }
 
-  /** Categoría asignable a un ítem: existe, activa y definida. */
+  /** Categoría asignable a un ítem: existe y está activa. */
   async requireAssignableCategory(code: string): Promise<InventoryFindingCategory> {
     const category = await this.categories.findOne({ where: { code: code.trim().toUpperCase() } });
-    if (!category || !category.isActive || category.pendingDefinition) {
+    if (!category || !category.isActive) {
       throw new ApiException(ErrorCode.InventoryCatalogEntryUnavailable);
     }
     return category;
@@ -102,7 +102,6 @@ export class InventoryCatalogsService {
         sortOrder: dto.sortOrder ?? 0,
         suggestResults: dto.suggestResults ?? null,
         suggestConditions: dto.suggestConditions ?? null,
-        pendingDefinition: dto.pendingDefinition ?? false,
       }),
     );
     await this.audit(actor, saved.code, { catalog: 'FINDING_CATEGORY', op: 'CREATE', code: saved.code });
@@ -118,7 +117,6 @@ export class InventoryCatalogsService {
       ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
       ...(dto.suggestResults !== undefined ? { suggestResults: dto.suggestResults } : {}),
       ...(dto.suggestConditions !== undefined ? { suggestConditions: dto.suggestConditions } : {}),
-      ...(dto.pendingDefinition !== undefined ? { pendingDefinition: dto.pendingDefinition } : {}),
     };
     await this.categories.update({ code: category.code }, { ...patch, updatedAt: new Date() });
     await this.audit(actor, category.code, {
@@ -281,7 +279,6 @@ export class InventoryCatalogsService {
       sortOrder: row.sortOrder,
       suggestResults: row.suggestResults,
       suggestConditions: row.suggestConditions,
-      pendingDefinition: row.pendingDefinition,
       inUse,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

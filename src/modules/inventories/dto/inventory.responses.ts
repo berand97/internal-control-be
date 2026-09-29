@@ -665,9 +665,6 @@ export class InventoryFindingCategoryDto {
   @ApiProperty({ type: 'array', items: { type: 'string', enum: [...PHYSICAL_CONDITIONS] }, nullable: true })
   readonly suggestConditions!: string[] | null;
 
-  @ApiProperty({ description: 'Sin definición: no se sugiere ni se asigna' })
-  readonly pendingDefinition!: boolean;
-
   @ApiProperty({ description: 'Asignada a algún ítem: no se puede borrar, solo desactivar' })
   readonly inUse!: boolean;
 

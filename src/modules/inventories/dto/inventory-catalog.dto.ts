@@ -80,14 +80,6 @@ export class CreateFindingCategoryDto {
   @ArrayUnique()
   @IsIn(PHYSICAL_CONDITIONS, { each: true })
   readonly suggestConditions?: string[] | null;
-
-  @ApiPropertyOptional({
-    default: false,
-    description: 'true = nadie ha definido qué significa: no se sugiere ni se puede asignar a un ítem',
-  })
-  @IsOptional()
-  @IsBoolean()
-  readonly pendingDefinition?: boolean;
 }
 
 export class UpdateFindingCategoryDto extends PartialType(OmitType(CreateFindingCategoryDto, ['code'] as const)) {}
