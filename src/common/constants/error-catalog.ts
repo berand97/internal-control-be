@@ -767,6 +767,32 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Hay varias personas que pueden firmar ese turno: indique cuál',
   },
+  [ErrorCode.AssetRequestNotHead]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Solo un jefe vigente del centro de costo puede hacer esta acción en la solicitud de activos',
+  },
+  [ErrorCode.AssetRequestOwnerWithoutHead]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message:
+      'El centro de costo al que le pide los activos no tiene jefe vigente que decida la solicitud. Pídale al administrador que asigne la jefatura',
+  },
+  [ErrorCode.AssetRequestSodViolation]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Quien hizo la solicitud de activos no puede decidirla',
+  },
+  [ErrorCode.AssetRequestInvalidStateTransition]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'La solicitud de activos no admite esa acción en su estado actual',
+  },
+  [ErrorCode.AssetRequestAssetUnavailable]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'Alguno de los activos elegidos ya no está disponible para prestar o trasladar',
+  },
   [ErrorCode.LoanExtensionNotRequester]: {
     httpStatus: 403,
     action: 'CANCEL',
