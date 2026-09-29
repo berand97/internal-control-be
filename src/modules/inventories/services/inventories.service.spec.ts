@@ -69,7 +69,7 @@ describe('InventoriesService', () => {
   let permissionsService: { userHasPermission: ReturnType<typeof vi.fn> };
   let auditLogsRepository: { record: ReturnType<typeof vi.fn> };
   let valuation: { viewContext: ReturnType<typeof vi.fn>; basis: ReturnType<typeof vi.fn> };
-  let act: { state: ReturnType<typeof vi.fn>; enqueueOnApproval: ReturnType<typeof vi.fn> };
+  let act: { detail: ReturnType<typeof vi.fn>; enqueueOnApproval: ReturnType<typeof vi.fn> };
   let service: InventoriesService;
 
   beforeEach(() => {
