@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
@@ -302,8 +302,11 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
     await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE revoked_at IS NULL AND user_id = ANY($1)', [
       [director, headA, headB, headC, contactC].map((who) => who.userId),
     ]);
-    // Tabla endpoint → resultado para el reporte.
-    console.info(`PRIVACY_BATTERY\n${results.map(([name, status, verdict]) => `${name} | ${status} | ${verdict}`).join('\n')}`);
+    // Tabla endpoint → resultado para el reporte (PRIVACY_BATTERY_OUT=<archivo> la escribe; la consola de la suite va en silencio).
+    const out = process.env['PRIVACY_BATTERY_OUT'];
+    if (out) {
+      await writeFile(out, results.map(([name, status, verdict]) => `| ${name} | ${status} | ${verdict} |`).join('\n'));
+    }
     await app.close();
   });
 
