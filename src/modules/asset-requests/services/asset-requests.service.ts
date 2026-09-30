@@ -14,7 +14,12 @@ import { DocumentEngineService } from '../../documents/services/document-engine.
 import { longSpanishDate, SQL_BOGOTA_TODAY } from '../../loans/domain/loan-dates.js';
 import { LOAN_DELIVERY_FORMAT } from '../../loans/domain/loan-documents.js';
 import { OPEN_LOAN_STATUSES } from '../../loans/enums/loan-status.js';
-import { type LoanDeliveredEvent, type LoanRejectedEvent, LoansService } from '../../loans/services/loans.service.js';
+import {
+  type LoanCancelledEvent,
+  type LoanDeliveredEvent,
+  type LoanRejectedEvent,
+  LoansService,
+} from '../../loans/services/loans.service.js';
 import { QrTokensService } from '../../qr-tokens/services/qr-tokens.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import { TRANSFER_FORMAT_KEY } from '../../transfers/domain/transfer.js';
@@ -733,27 +738,44 @@ export class AssetRequestsService {
    * ya se habían liberado al generar.
    */
   async onLoanRejected(manager: EntityManager, rejected: LoanRejectedEvent): Promise<void> {
-    if (!rejected.assetRequestId) {
+    await this.closeByLoan(manager, rejected, 'CLOSED_LOAN_REJECTED', 'LOAN_REJECTED');
+  }
+
+  /**
+   * El préstamo programado de una solicitud se canceló antes de entregarse (LoansService.cancel, APPROVED → CANCELLED,
+   * misma transacción): igual que el rechazo, la solicitud pasa de LOAN_SCHEDULED a CLOSED_LOAN_CANCELLED con el motivo
+   * en su historial (evento LOAN_CANCELLED), avisa a solicitante, jefes del dueño y Control Interno, y los activos
+   * quedan libres.
+   */
+  async onLoanCancelled(manager: EntityManager, cancelled: LoanCancelledEvent): Promise<void> {
+    await this.closeByLoan(manager, cancelled, 'CLOSED_LOAN_CANCELLED', 'LOAN_CANCELLED');
+  }
+
+  private async closeByLoan(
+    manager: EntityManager,
+    loan: LoanRejectedEvent,
+    next: 'CLOSED_LOAN_REJECTED' | 'CLOSED_LOAN_CANCELLED',
+    kind: 'LOAN_REJECTED' | 'LOAN_CANCELLED',
+  ): Promise<void> {
+    if (!loan.assetRequestId) {
       return;
     }
     const [request] = (await manager.query(
       'SELECT id, status FROM asset_request WHERE id = $1 AND loan_id = $2 FOR UPDATE',
-      [rejected.assetRequestId, rejected.loanId],
+      [loan.assetRequestId, loan.loanId],
     )) as Array<{ id: string; status: AssetRequestStatus }>;
     if (!request || request.status !== 'LOAN_SCHEDULED') {
       return;
     }
-    assertAssetRequestTransition(request.status, 'CLOSED_LOAN_REJECTED');
-    const reason = rejected.reason.trim();
+    assertAssetRequestTransition(request.status, next);
+    const reason = loan.reason.trim();
     await manager.query(
-      `UPDATE asset_request SET status = 'CLOSED_LOAN_REJECTED', expires_at = NULL, decided_by = $2, decided_at = NOW() WHERE id = $1`,
-      [request.id, rejected.actorId],
+      'UPDATE asset_request SET status = $3, expires_at = NULL, decided_by = $2, decided_at = NOW() WHERE id = $1',
+      [request.id, loan.actorId, next],
     );
     await manager.query('UPDATE asset_request_item SET open = FALSE WHERE request_id = $1', [request.id]);
-    await this.event(manager, request.id, 'LOAN_REJECTED', request.status, 'CLOSED_LOAN_REJECTED', rejected.actorId, reason, {
-      loanId: rejected.loanId,
-    });
-    await this.notices.send(manager, request.id, 'LOAN_REJECTED', ['REQUESTER', 'OWNER_HEADS', 'REVIEWERS'], { reason });
+    await this.event(manager, request.id, kind, request.status, next, loan.actorId, reason, { loanId: loan.loanId });
+    await this.notices.send(manager, request.id, kind, ['REQUESTER', 'OWNER_HEADS', 'REVIEWERS'], { reason });
   }
 
   /**

@@ -640,6 +640,91 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [assetId])).toBe('IN_USE');
   });
 
+  it('préstamo programado cancelado: el solicitante, el jefe dueño o Control Interno; la solicitud se cierra con el motivo, libera los activos y avisa; entregado ya no se cancela', async () => {
+    const scheduled = async () => {
+      const assetId = await asset(owner);
+      const id = (await create(temporary({ startDate: plusDays(2), expectedReturnDate: plusDays(9) })).expect(201)).body.data.id as string;
+      await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(ownerHead)).send({ assetIds: [assetId] }).expect(200);
+      const loanId = (await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(director)).send({}).expect(200)).body.data.document
+        .id as string;
+      return { assetId, id, loanId };
+    };
+    const cancel = (loanId: string, who: Actor, reason = 'El solicitante ya no necesita los equipos') =>
+      http().post(`/api/v1/loans/${loanId}/cancel`).set(auth(who)).send({ reason });
+
+    // 1. El solicitante cancela (es quien sabe que ya no lo necesita).
+    const first = await scheduled();
+    expect((await cancel(first.loanId, outsider)).status).toBe(403);
+    expect((await cancel(first.loanId, auditor)).status).toBe(403);
+    const short = await cancel(first.loanId, requester, 'no');
+    expect([short.status, short.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    const cancelled = await cancel(first.loanId, requester);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    expectConforms('post', '/api/v1/loans/{id}/cancel', 200, cancelled.body);
+    expect(cancelled.body.data).toMatchObject({
+      status: 'CANCELLED',
+      cancelledReason: 'El solicitante ya no necesita los equipos',
+      rejectedReason: null,
+    });
+    expect((cancelled.body.data.events as Array<{ eventType: string; payload: unknown }>).at(-1)).toMatchObject({
+      eventType: 'CANCELLED',
+      payload: { reason: 'El solicitante ya no necesita los equipos' },
+    });
+    const closed = await detail(first.id);
+    expect(closed).toMatchObject({ status: 'CLOSED_LOAN_CANCELLED', expiresAt: null, document: { kind: 'LOAN', id: first.loanId } });
+    expect(closed.events.at(-1)).toMatchObject({
+      eventType: 'LOAN_CANCELLED',
+      fromStatus: 'LOAN_SCHEDULED',
+      toStatus: 'CLOSED_LOAN_CANCELLED',
+      reason: 'El solicitante ya no necesita los equipos',
+      actor: { userId: requester.userId },
+      payload: { loanId: first.loanId },
+    });
+    expectConforms('get', '/api/v1/asset-requests/{id}', 200, (await http().get(`/api/v1/asset-requests/${first.id}`).set(auth(requester)).expect(200)).body);
+    for (const who of [requester, ownerHead, auditor]) {
+      expect((await notices(who.userId, first.id)).map((row) => row.type)).toContain('ASSET_REQUEST_LOAN_CANCELLED');
+    }
+    const mail = (await dataSource.query(
+      `SELECT context->>'solicitud.motivo' AS reason FROM mail_outbox WHERE entity_id = $1 AND template_type = 'ASSET_REQUEST_LOAN_CANCELLED'`,
+      [first.id],
+    )) as Array<{ reason: string }>;
+    expect(mail.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(mail.map((row) => row.reason))).toEqual(new Set(['El solicitante ya no necesita los equipos']));
+    const [audit] = (await dataSource.query(
+      `SELECT changes FROM audit_log WHERE entity_type = 'LOAN' AND entity_id = $1 AND action = 'LOAN_CANCELLED'`,
+      [first.loanId],
+    )) as Array<{ changes: Record<string, unknown> }>;
+    expect(audit?.changes).toEqual({ from: 'APPROVED', to: 'CANCELLED' });
+    // Activos libres y sin moverse; un cancelado no se vuelve a cancelar ni se entrega.
+    expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [first.assetId])).toBe('IN_USE');
+    const next = (await create(temporary()).expect(201)).body.data.id as string;
+    const eligible = (await http().get(`/api/v1/asset-requests/${next}/eligible-assets`).set(auth(ownerHead)).expect(200)).body.data;
+    expect(eligible.map((item: { id: string }) => item.id)).toContain(first.assetId);
+    await http().post(`/api/v1/asset-requests/${next}/cancel`).set(auth(requester)).send({ reason: 'Ya no se necesita' }).expect(200);
+    expect([(await cancel(first.loanId, director)).status, (await cancel(first.loanId, director)).body.error.code]).toEqual([
+      406,
+      'INVALID_LOAN_STATE_TRANSITION',
+    ]);
+
+    // 2. El jefe del centro dueño también cancela (el activo se dañó).
+    const second = await scheduled();
+    expect((await cancel(second.loanId, ownerHead, 'El equipo se dañó antes de la entrega')).status).toBe(200);
+    expect((await detail(second.id)).status).toBe('CLOSED_LOAN_CANCELLED');
+
+    // 3. Entregado ya no se cancela (se deshace la entrega); Control Interno sí cancela uno programado.
+    const third = await scheduled();
+    await dataSource.query('UPDATE asset_loan SET start_date = $2 WHERE id = $1', [third.loanId, bogotaToday()]);
+    const delivered = await http()
+      .post(`/api/v1/loans/${third.loanId}/deliver`)
+      .set(auth(director))
+      .send({ deliveredByPersonId: ownerHead.personId, controlInternoPersonId: auditor.personId });
+    expect(delivered.status, JSON.stringify(delivered.body)).toBe(200);
+    const late = await cancel(third.loanId, director);
+    expect([late.status, late.body.error.code]).toEqual([406, 'INVALID_LOAN_STATE_TRANSITION']);
+    const fourth = await scheduled();
+    expect((await cancel(fourth.loanId, director, 'Control Interno cancela el préstamo programado')).status).toBe(200);
+  });
+
   it('traslado: aceptar → generar con los datos por activo → cuatro firmas → COMPLETED y aviso a ambos', async () => {
     const assetId = await asset(owner);
     const id = (await create(temporary({ kind: 'PERMANENT', startDate: undefined, expectedReturnDate: undefined })).expect(201)).body.data.id as string;

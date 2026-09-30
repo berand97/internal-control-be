@@ -27,11 +27,40 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  * 3. Menú «Precio cero» (/assets/price-zero) en Activos, junto a «Activos»: lo publica asset:read (la lista de trabajo
  *    GET /assets/price-zero se acota al alcance de lectura de activos). Id fijo y ON CONFLICT (path) DO NOTHING; down()
  *    borra por ese id y nunca toca una fila creada a mano.
+ *
+ * 4. Cancelar un préstamo programado (POST /loans/:id/cancel, APPROVED → CANCELLED). asset_loan.cancelled_reason guarda
+ *    el motivo (3 a 500). asset_request.status CLOSED_LOAN_CANCELLED: la solicitud TEMPORARY cuyo préstamo programado se
+ *    canceló antes de entregarse; como CLOSED_LOAN_REJECTED, conserva loan_id y la aceptación. down() se niega si hay
+ *    solicitudes CLOSED_LOAN_CANCELLED o préstamos con motivo de cancelación (no hay dónde guardarlos antes).
  */
 
 const RETIRED_ROLE = 'CUSTODIAN';
 
 const PRICE_ZERO_NAV_ID = '6f1d2c3a-7b4e-4a1f-9c2d-000000020101';
+
+const REQUEST_STATUS_CHECKS = (withCancelled: boolean): string => {
+  const cancelled = withCancelled ? ", 'CLOSED_LOAN_CANCELLED'" : '';
+  return `
+      ALTER TABLE asset_request
+        ADD CONSTRAINT chk_asset_request_status CHECK (status IN
+          ('REQUESTED', 'ACCEPTED', 'CLOSED_BY_OWNER', 'RETURNED', 'LOAN_SCHEDULED', 'DOCUMENT_GENERATED',
+           'CLOSED_LOAN_REJECTED'${cancelled}, 'CANCELLED', 'EXPIRED')),
+        ADD CONSTRAINT chk_asset_request_accepted CHECK (
+          status NOT IN ('ACCEPTED', 'LOAN_SCHEDULED', 'DOCUMENT_GENERATED', 'CLOSED_LOAN_REJECTED'${cancelled}, 'EXPIRED')
+          OR (accepted_by IS NOT NULL AND accepted_at IS NOT NULL)),
+        ADD CONSTRAINT chk_asset_request_document CHECK (
+          (status NOT IN ('LOAN_SCHEDULED', 'CLOSED_LOAN_REJECTED'${cancelled})
+            OR (kind = 'TEMPORARY' AND loan_id IS NOT NULL AND transfer_id IS NULL))
+          AND (status <> 'DOCUMENT_GENERATED'
+            OR (kind = 'TEMPORARY' AND loan_id IS NOT NULL AND transfer_id IS NULL)
+            OR (kind = 'PERMANENT' AND transfer_id IS NOT NULL AND loan_id IS NULL)))`;
+};
+
+const DROP_REQUEST_STATUS_CHECKS = `
+      ALTER TABLE asset_request
+        DROP CONSTRAINT chk_asset_request_status,
+        DROP CONSTRAINT chk_asset_request_accepted,
+        DROP CONSTRAINT chk_asset_request_document`;
 
 export class CustodianRetirementLoanCancelAndSurplusCenter1767226010000 implements MigrationInterface {
   name = 'CustodianRetirementLoanCancelAndSurplusCenter1767226010000';
@@ -50,9 +79,31 @@ export class CustodianRetirementLoanCancelAndSurplusCenter1767226010000 implemen
        ON CONFLICT (path) DO NOTHING`,
       [PRICE_ZERO_NAV_ID],
     );
+
+    await queryRunner.query(`
+      ALTER TABLE asset_loan
+        ADD COLUMN cancelled_reason TEXT,
+        ADD CONSTRAINT chk_asset_loan_cancelled_reason CHECK (
+          cancelled_reason IS NULL OR length(btrim(cancelled_reason)) BETWEEN 3 AND 500)
+    `);
+    await queryRunner.query(DROP_REQUEST_STATUS_CHECKS);
+    await queryRunner.query(REQUEST_STATUS_CHECKS(true));
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    const [blocking] = (await queryRunner.query(
+      `SELECT (SELECT count(*)::int FROM asset_request WHERE status = 'CLOSED_LOAN_CANCELLED') AS requests,
+              (SELECT count(*)::int FROM asset_loan WHERE cancelled_reason IS NOT NULL) AS loans`,
+    )) as Array<{ requests: number; loans: number }>;
+    if ((blocking?.requests ?? 0) > 0 || (blocking?.loans ?? 0) > 0) {
+      throw new Error(
+        `No se puede revertir sin perder datos: hay ${blocking?.requests} solicitudes CLOSED_LOAN_CANCELLED y ${blocking?.loans} préstamos cancelados con motivo`,
+      );
+    }
+    await queryRunner.query(DROP_REQUEST_STATUS_CHECKS);
+    await queryRunner.query(REQUEST_STATUS_CHECKS(false));
+    await queryRunner.query('ALTER TABLE asset_loan DROP CONSTRAINT chk_asset_loan_cancelled_reason, DROP COLUMN cancelled_reason');
+
     await queryRunner.query('DELETE FROM navigation_item WHERE id = $1', [PRICE_ZERO_NAV_ID]);
 
     await queryRunner.query(

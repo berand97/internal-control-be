@@ -51,6 +51,7 @@ describe('email-template-catalog', () => {
       'ASSET_REQUEST_LOAN_SCHEDULED',
       'ASSET_REQUEST_LOAN_STARTS',
       'ASSET_REQUEST_LOAN_REJECTED',
+      'ASSET_REQUEST_LOAN_CANCELLED',
     ]);
   });
 

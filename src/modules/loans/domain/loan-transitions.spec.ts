@@ -19,6 +19,9 @@ describe('assertLoanTransition', () => {
   it('la entrega deja el préstamo pendiente de firmas; solo la firma lo activa', () => {
     expect(canTransition('APPROVED', 'PENDING_SIGNATURES')).toBe(true);
     expect(canTransition('APPROVED', 'ACTIVE')).toBe(false);
+    // Un préstamo programado se cancela antes de entregarse; entregado, se deshace la entrega.
+    expect(canTransition('APPROVED', 'CANCELLED')).toBe(true);
+    expect(canTransition('ACTIVE', 'CANCELLED')).toBe(false);
     expect(canTransition('PENDING_SIGNATURES', 'ACTIVE')).toBe(true);
     expect(canTransition('PENDING_SIGNATURES', 'CANCELLED')).toBe(true);
     expect(canTransition('PENDING_SIGNATURES', 'PENDING_RECEPTION')).toBe(false);

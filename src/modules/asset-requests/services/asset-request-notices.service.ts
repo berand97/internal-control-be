@@ -23,6 +23,7 @@ export type AssetRequestNoticeKind =
   | 'SCHEDULED'
   | 'LOAN_STARTS'
   | 'LOAN_REJECTED'
+  | 'LOAN_CANCELLED'
   | 'EXPIRED'
   | 'COMPLETED';
 
@@ -72,6 +73,7 @@ const TEMPLATE: Record<AssetRequestNoticeKind, EmailTemplateType> = {
   SCHEDULED: 'ASSET_REQUEST_LOAN_SCHEDULED',
   LOAN_STARTS: 'ASSET_REQUEST_LOAN_STARTS',
   LOAN_REJECTED: 'ASSET_REQUEST_LOAN_REJECTED',
+  LOAN_CANCELLED: 'ASSET_REQUEST_LOAN_CANCELLED',
   EXPIRED: 'ASSET_REQUEST_EXPIRED',
   COMPLETED: 'ASSET_REQUEST_COMPLETED',
 };
@@ -87,6 +89,7 @@ const TITLE: Record<AssetRequestNoticeKind, string> = {
   SCHEDULED: 'Préstamo de la solicitud programado',
   LOAN_STARTS: 'Hoy se entrega el préstamo de la solicitud',
   LOAN_REJECTED: 'Préstamo de la solicitud rechazado',
+  LOAN_CANCELLED: 'Préstamo de la solicitud cancelado',
   EXPIRED: 'Solicitud de activos vencida',
   COMPLETED: 'Acta de la solicitud firmada',
 };
@@ -275,6 +278,9 @@ export class AssetRequestNoticesService {
     }
     if (kind === 'LOAN_REJECTED') {
       lines.push('El préstamo programado se rechazó antes de entregarse: la solicitud quedó cerrada y los activos quedaron libres');
+    }
+    if (kind === 'LOAN_CANCELLED') {
+      lines.push('El préstamo programado se canceló antes de entregarse: no se va a realizar, la solicitud quedó cerrada y los activos quedaron libres');
     }
     if (extra.expiredOn) {
       lines.push(`Venció el ${extra.expiredOn}; los activos elegidos quedaron libres`);

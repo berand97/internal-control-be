@@ -24,6 +24,8 @@ export class AssetRequestCompletionObserver implements OnModuleInit {
     this.loans.onDelivered((manager, event) => this.requests.onLoanDelivered(manager, event));
     // Rechazar el préstamo programado (antes de entregarlo) cierra la solicitud: CLOSED_LOAN_REJECTED.
     this.loans.onRejected((manager, event) => this.requests.onLoanRejected(manager, event));
+    // Cancelar el préstamo programado (ya aprobado, antes de entregarlo) también la cierra: CLOSED_LOAN_CANCELLED.
+    this.loans.onCancelled((manager, event) => this.requests.onLoanCancelled(manager, event));
     this.lifecycle.observe(LOAN_DOCUMENT_ENTITY, 'onSigned', async (manager, event) => {
       if (event.formatKey === LOAN_DELIVERY_FORMAT && event.entityId) {
         await this.requests.onDocumentSigned(manager, {

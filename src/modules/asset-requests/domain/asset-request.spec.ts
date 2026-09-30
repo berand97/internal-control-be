@@ -20,6 +20,7 @@ describe('asset-request transitions', () => {
         'ACCEPTED->DOCUMENT_GENERATED',
         'LOAN_SCHEDULED->DOCUMENT_GENERATED',
         'LOAN_SCHEDULED->CLOSED_LOAN_REJECTED',
+        'LOAN_SCHEDULED->CLOSED_LOAN_CANCELLED',
         'ACCEPTED->RETURNED',
         'ACCEPTED->EXPIRED',
         'RETURNED->REQUESTED',
@@ -31,7 +32,7 @@ describe('asset-request transitions', () => {
   });
 
   it('los finales no salen a ninguna parte', () => {
-    for (const final of ['CLOSED_BY_OWNER', 'DOCUMENT_GENERATED', 'CLOSED_LOAN_REJECTED', 'CANCELLED', 'EXPIRED'] as const) {
+    for (const final of ['CLOSED_BY_OWNER', 'DOCUMENT_GENERATED', 'CLOSED_LOAN_REJECTED', 'CLOSED_LOAN_CANCELLED', 'CANCELLED', 'EXPIRED'] as const) {
       expect(ASSET_REQUEST_STATUSES.some((to) => canAssetRequestTransition(final, to))).toBe(false);
     }
   });

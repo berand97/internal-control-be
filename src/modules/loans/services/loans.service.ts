@@ -53,6 +53,7 @@ import {
   ReceiveReturnDto,
   RegenerateDeliveryActDto,
   RejectLoanDto,
+  CancelLoanDto,
   ReturnLoanDto,
   UndoDeliveryDto,
 } from '../dto/loan.dto.js';
@@ -116,6 +117,11 @@ export interface LoanRejectedEvent {
 
 export type LoanRejectedListener = (manager: EntityManager, event: LoanRejectedEvent) => Promise<void>;
 
+/** Préstamo programado cancelado (cancel), en la transacción que lo canceló. */
+export type LoanCancelledEvent = LoanRejectedEvent;
+
+export type LoanCancelledListener = (manager: EntityManager, event: LoanCancelledEvent) => Promise<void>;
+
 /**
  * Quién entrega un préstamo: Control Interno (loan:update:global) elige ENTREGA; el jefe vigente del centro dueño de un
  * préstamo de solicitud entrega él mismo (ENTREGA = su persona, sin elegir).
@@ -176,6 +182,7 @@ interface ReturnActEventPayload {
 export class LoansService {
   private readonly deliveredListeners: LoanDeliveredListener[] = [];
   private readonly rejectedListeners: LoanRejectedListener[] = [];
+  private readonly cancelledListeners: LoanCancelledListener[] = [];
 
   constructor(
     @InjectRepository(AssetLoan)
@@ -209,6 +216,11 @@ export class LoansService {
   /** Igual que onDelivered, para el rechazo: la solicitud que originó un préstamo programado se cierra con él. */
   onRejected(listener: LoanRejectedListener): void {
     this.rejectedListeners.push(listener);
+  }
+
+  /** Igual que onRejected, para la cancelación de un préstamo programado. */
+  onCancelled(listener: LoanCancelledListener): void {
+    this.cancelledListeners.push(listener);
   }
 
   /** Alcance de lectura del usuario (403 si no tiene ninguno de los dos permisos o no alcanza centros). */
@@ -559,6 +571,53 @@ export class LoansService {
       }
     });
     return this.detailById(id);
+  }
+
+  /**
+   * Cancela un préstamo programado que no va a ocurrir (el activo se dañó, ya no se necesita, el solicitante se fue):
+   * APPROVED → CANCELLED, solo antes de entregarlo (después, deshacer la entrega). Motivo obligatorio. Pueden hacerlo
+   * quienes pueden entregarlo (Control Interno con loan:update:global, o un jefe vigente del centro dueño si salió de una
+   * solicitud de activos) y quien lo solicitó (es quien sabe que ya no lo necesita). Nadie más: 403, también si el
+   * préstamo no existe (igual que entregar). En una transacción: estado, motivo, evento CANCELLED, auditoría y, si salió
+   * de una solicitud, la solicitud se cierra (CLOSED_LOAN_CANCELLED) con sus avisos. Los activos quedan libres: el
+   * préstamo cancelado ya no es un préstamo abierto (y nada salió: siguen como estaban).
+   */
+  async cancel(id: string, dto: CancelLoanDto, actor: AuthenticatedUser) {
+    const reason = dto.reason.trim();
+    await this.dataSource.transaction(async (manager) => {
+      if (!(await this.canCancel(manager, id, actor.id))) {
+        throw new ApiException(
+          ErrorCode.InsufficientPermissions,
+          `Requiere ${LOAN_UPDATE_GLOBAL}, ser quien solicitó el préstamo, o ser jefe vigente del centro dueño de un préstamo que salió de una solicitud de activos`,
+        );
+      }
+      const loan = await this.lockLoan(manager, id);
+      assertLoanTransition(loan.status, 'CANCELLED');
+      if (loan.status !== 'APPROVED') {
+        throw new ApiException(ErrorCode.InvalidLoanStateTransition);
+      }
+      await manager.update(AssetLoan, loan.id, { status: 'CANCELLED', cancelledReason: reason, updatedAt: new Date() });
+      await this.addEvent(manager, loan.id, 'CANCELLED', actor.id, { reason });
+      await this.audit(manager, AuditAction.LoanCancelled, loan.id, actor.id, { from: loan.status, to: 'CANCELLED' });
+      for (const listener of this.cancelledListeners) {
+        await listener(manager, { loanId: loan.id, assetRequestId: loan.assetRequestId, reason, actorId: actor.id });
+      }
+    });
+    return this.detailById(id);
+  }
+
+  /** Quién cancela: quien puede entregarlo (deliveryRole) o quien lo solicitó. */
+  private async canCancel(manager: EntityManager, id: string, actorId: string): Promise<boolean> {
+    if (await this.deliveryRole(manager, id, actorId)) {
+      return true;
+    }
+    if (!UUID.test(id)) {
+      return false;
+    }
+    const [loan] = (await manager.query('SELECT requested_by FROM asset_loan WHERE id = $1', [id])) as Array<{
+      requested_by: string;
+    }>;
+    return loan?.requested_by === actorId;
   }
 
   /**
@@ -1616,6 +1675,7 @@ export class LoansService {
       deliveryNotes: loan.deliveryNotes,
       returnNotes: loan.returnNotes,
       rejectedReason: loan.rejectedReason,
+      cancelledReason: loan.cancelledReason,
       requestedBy: loan.requestedBy,
       approvedBy: loan.approvedBy,
       deliveredBy: loan.deliveredBy,

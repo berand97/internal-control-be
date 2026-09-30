@@ -20,6 +20,10 @@ import { ApiException } from '../../../common/exceptions/api.exception.js';
  *   (el préstamo rechazado ya no los retiene). Final. Estado propio porque ninguno existente lo dice: CLOSED_BY_OWNER
  *   es la negativa del jefe dueño al aceptar (y el rechazo puede venir de Control Interno), CANCELLED es el solicitante
  *   que desiste y EXPIRED es el plazo.
+ * - CLOSED_LOAN_CANCELLED: (solo TEMPORARY) el préstamo programado se canceló antes de entregarse
+ *   (POST /loans/:id/cancel, APPROVED → CANCELLED): ya aprobado, no va a ocurrir (el activo se dañó, ya no se necesita,
+ *   el solicitante se fue). La solicitud se cierra con ese motivo y los activos quedan libres. Final. Distinto de
+ *   CLOSED_LOAN_REJECTED (el préstamo no se aprobó al revisarlo) y de CANCELLED (la solicitud, antes de generar).
  * - CANCELLED: el solicitante desistió en REQUESTED o RETURNED (motivo). Final.
  * - EXPIRED: ACCEPTED sin resolución de Control Interno, o RETURNED sin corrección del solicitante, en el plazo.
  *   Final; libera los activos.
@@ -32,6 +36,7 @@ export const ASSET_REQUEST_STATUSES = [
   'LOAN_SCHEDULED',
   'DOCUMENT_GENERATED',
   'CLOSED_LOAN_REJECTED',
+  'CLOSED_LOAN_CANCELLED',
   'CANCELLED',
   'EXPIRED',
 ] as const;
@@ -49,10 +54,11 @@ const TRANSITIONS: Readonly<Record<AssetRequestStatus, ReadonlyArray<AssetReques
   REQUESTED: ['ACCEPTED', 'CLOSED_BY_OWNER', 'CANCELLED'],
   ACCEPTED: ['LOAN_SCHEDULED', 'DOCUMENT_GENERATED', 'RETURNED', 'EXPIRED'],
   RETURNED: ['REQUESTED', 'ACCEPTED', 'CANCELLED', 'EXPIRED'],
-  LOAN_SCHEDULED: ['DOCUMENT_GENERATED', 'CLOSED_LOAN_REJECTED'],
+  LOAN_SCHEDULED: ['DOCUMENT_GENERATED', 'CLOSED_LOAN_REJECTED', 'CLOSED_LOAN_CANCELLED'],
   CLOSED_BY_OWNER: [],
   DOCUMENT_GENERATED: [],
   CLOSED_LOAN_REJECTED: [],
+  CLOSED_LOAN_CANCELLED: [],
   CANCELLED: [],
   EXPIRED: [],
 };

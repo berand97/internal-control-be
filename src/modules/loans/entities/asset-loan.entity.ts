@@ -67,6 +67,10 @@ export class AssetLoan {
   @Column({ name: 'rejected_reason', type: 'text', nullable: true })
   rejectedReason!: string | null;
 
+  /** Motivo de la cancelación de un préstamo programado (APPROVED → CANCELLED); null en cualquier otro caso. */
+  @Column({ name: 'cancelled_reason', type: 'text', nullable: true })
+  cancelledReason!: string | null;
+
   @Column({ name: 'delivery_document_id', type: 'uuid', nullable: true })
   deliveryDocumentId!: string | null;
 

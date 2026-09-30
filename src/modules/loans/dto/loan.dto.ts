@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiSignerSubstitutions, type SignerSubstitutionsInput } from '../../documents/dto/signer-substitution.dto.js';
 import {
   ArrayMinSize,
@@ -10,6 +10,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -126,6 +127,20 @@ export class RegenerateDeliveryActDto {
 
   @ApiSignerSubstitutions()
   readonly signerSubstitutions?: SignerSubstitutionsInput;
+}
+
+export class CancelLoanDto {
+  @ApiProperty({
+    minLength: 3,
+    maxLength: 500,
+    example: 'El equipo se dañó antes de la fecha de entrega',
+    description: 'Por qué el préstamo programado no va a ocurrir: queda en el préstamo, en su historial y en el aviso',
+  })
+  @IsString()
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
+  @MinLength(3)
+  @MaxLength(500)
+  readonly reason!: string;
 }
 
 export class UndoDeliveryDto {

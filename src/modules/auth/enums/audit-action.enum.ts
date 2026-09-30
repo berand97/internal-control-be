@@ -68,6 +68,7 @@ export enum AuditAction {
   LoanRequested = 'LOAN_REQUESTED',
   LoanApproved = 'LOAN_APPROVED',
   LoanRejected = 'LOAN_REJECTED',
+  LoanCancelled = 'LOAN_CANCELLED',
   LoanDelivered = 'LOAN_DELIVERED',
   LoanReturned = 'LOAN_RETURNED',
   LoanExtended = 'LOAN_EXTENDED',

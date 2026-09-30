@@ -34,6 +34,7 @@ export const EMAIL_TEMPLATE_TYPES = [
   'ASSET_REQUEST_LOAN_SCHEDULED',
   'ASSET_REQUEST_LOAN_STARTS',
   'ASSET_REQUEST_LOAN_REJECTED',
+  'ASSET_REQUEST_LOAN_CANCELLED',
 ] as const;
 
 export type EmailTemplateType = (typeof EMAIL_TEMPLATE_TYPES)[number];
@@ -63,6 +64,7 @@ export const EMAIL_TEMPLATE_LABEL: Record<EmailTemplateType, string> = {
   ASSET_REQUEST_LOAN_SCHEDULED: 'Préstamo de la solicitud de activos programado',
   ASSET_REQUEST_LOAN_STARTS: 'Día de entrega del préstamo de la solicitud de activos',
   ASSET_REQUEST_LOAN_REJECTED: 'Préstamo programado de la solicitud de activos rechazado',
+  ASSET_REQUEST_LOAN_CANCELLED: 'Préstamo programado de la solicitud de activos cancelado',
 };
 
 /** Obligatorias y opcionales comunes de los avisos de solicitudes de activos (AssetRequestNoticesService). */
@@ -176,6 +178,7 @@ export const EMAIL_PLACEHOLDER_CATALOG: Record<
   ASSET_REQUEST_LOAN_SCHEDULED: { required: [...ASSET_REQUEST_REQUIRED, 'prestamo.inicio'], optional: [...ASSET_REQUEST_OPTIONAL] },
   ASSET_REQUEST_LOAN_STARTS: { required: [...ASSET_REQUEST_REQUIRED, 'prestamo.inicio'], optional: [...ASSET_REQUEST_OPTIONAL] },
   ASSET_REQUEST_LOAN_REJECTED: { required: [...ASSET_REQUEST_REQUIRED, 'solicitud.motivo'], optional: [...ASSET_REQUEST_OPTIONAL] },
+  ASSET_REQUEST_LOAN_CANCELLED: { required: [...ASSET_REQUEST_REQUIRED, 'solicitud.motivo'], optional: [...ASSET_REQUEST_OPTIONAL] },
 };
 
 export const EMAIL_VARIABLE_KINDS = ['url', 'text'] as const;
@@ -305,6 +308,7 @@ export const EMAIL_TEMPLATE_VARIABLES: Record<EmailTemplateType, ReadonlyArray<E
   ASSET_REQUEST_LOAN_SCHEDULED: typeVariables('ASSET_REQUEST_LOAN_SCHEDULED'),
   ASSET_REQUEST_LOAN_STARTS: typeVariables('ASSET_REQUEST_LOAN_STARTS'),
   ASSET_REQUEST_LOAN_REJECTED: typeVariables('ASSET_REQUEST_LOAN_REJECTED'),
+  ASSET_REQUEST_LOAN_CANCELLED: typeVariables('ASSET_REQUEST_LOAN_CANCELLED'),
 };
 
 /** Variables de enlace (kind = url) del tipo. */
@@ -577,6 +581,12 @@ export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesig
     'El préstamo programado de la solicitud se rechazó antes de entregarse. La solicitud quedó cerrada y los activos quedaron libres.',
     { tone: 'warning', text: 'Motivo: {{solicitud.motivo}}' },
   ),
+  ASSET_REQUEST_LOAN_CANCELLED: assetRequestDesign(
+    'Solicitud {{solicitud.codigo}}: préstamo cancelado',
+    'Préstamo cancelado',
+    'El préstamo programado de la solicitud se canceló antes de entregarse: no se va a realizar. La solicitud quedó cerrada y los activos quedaron libres.',
+    { tone: 'warning', text: 'Motivo: {{solicitud.motivo}}' },
+  ),
 };
 
 const INVENTORY_SAMPLE: Readonly<Record<string, string>> = {
@@ -691,6 +701,7 @@ export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, stri
     ASSET_REQUEST_LOAN_SCHEDULED: { ...ASSET_REQUEST_SAMPLE, 'prestamo.inicio': '12 de octubre de 2026' },
     ASSET_REQUEST_LOAN_STARTS: { ...ASSET_REQUEST_SAMPLE, 'prestamo.inicio': '12 de octubre de 2026' },
     ASSET_REQUEST_LOAN_REJECTED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.motivo': 'Los equipos se necesitan para el cierre del semestre' },
+    ASSET_REQUEST_LOAN_CANCELLED: { ...ASSET_REQUEST_SAMPLE, 'solicitud.motivo': 'El equipo se dañó antes de la fecha de entrega' },
     ASSET_REQUEST_COMPLETED: {
       ...ASSET_REQUEST_SAMPLE,
       'documento.tipo': 'Préstamo de activos (OCI-01-65)',

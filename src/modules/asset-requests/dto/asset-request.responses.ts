@@ -130,6 +130,7 @@ export class AssetRequestEventDto {
       'CREATED, ACCEPTED, CLOSED_BY_OWNER, RETURNED, CORRECTED, CANCELLED, LOAN_SCHEDULED (préstamo generado, sin entregar), ' +
       'LOAN_START_NOTICE (aviso del día de inicio), LOAN_DELIVERED (préstamo entregado: acta encolada), DOCUMENT_GENERATED, ' +
       'LOAN_REJECTED (el préstamo programado se rechazó antes de entregarse: reason = motivo del rechazo, payload.loanId; la solicitud queda CLOSED_LOAN_REJECTED), ' +
+      'LOAN_CANCELLED (el préstamo programado, ya aprobado, se canceló antes de entregarse: reason = motivo, payload.loanId; la solicitud queda CLOSED_LOAN_CANCELLED), ' +
       'EXPIRED (payload.expiredFrom = RETURNED y returnReason si venció devuelta), DOCUMENT_COMPLETED',
   })
   readonly eventType!: string;

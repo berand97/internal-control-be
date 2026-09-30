@@ -35,6 +35,7 @@ import {
   ReceiveReturnDto,
   RegenerateDeliveryActDto,
   RejectLoanDto,
+  CancelLoanDto,
   ReturnLoanDto,
   UndoDeliveryDto,
 } from './dto/loan.dto.js';
@@ -154,6 +155,28 @@ export class LoansController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.loansService.reject(id, dto, actor);
+  }
+
+  // Sin @RequirePermission: quién cancela depende del préstamo (solicitante, jefe dueño o Control Interno).
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancelar un préstamo programado que no va a ocurrir',
+    description:
+      'Distinto de rechazar: el préstamo ya estaba aprobado y no se va a entregar (el activo se dañó, ya no se necesita, el solicitante se fue). ' +
+      'Solo APPROVED (antes de entregar; entregado: POST /loans/:id/undo-delivery) → CANCELLED; otro estado: 406 INVALID_LOAN_STATE_TRANSITION. Motivo obligatorio (3 a 500). ' +
+      'Quién: Control Interno (loan:update:global), quien solicitó el préstamo, o un jefe vigente del centro de ORIGEN si el préstamo salió de una solicitud de activos; ' +
+      'nadie más: 403 INSUFFICIENT_PERMISSIONS (también si el préstamo no existe). En una transacción: cancelledReason, evento CANCELLED con el motivo, auditoría y activos libres; ' +
+      'si salió de una solicitud de activos, la solicitud pasa de LOAN_SCHEDULED a CLOSED_LOAN_CANCELLED (evento LOAN_CANCELLED con el motivo) y avisa (notificación y correo ' +
+      'ASSET_REQUEST_LOAN_CANCELLED) a solicitante, jefes del dueño y Control Interno.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(LoanDetailDto) })
+  cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelLoanDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.loansService.cancel(id, dto, actor);
   }
 
   // Sin @RequirePermission: el jefe vigente del centro dueño entrega los préstamos de solicitud, y eso depende del préstamo.

@@ -106,6 +106,13 @@ export class LoanSummaryDto {
   @ApiProperty({ type: 'string', nullable: true })
   readonly rejectedReason!: string | null;
 
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Motivo de la cancelación de un préstamo programado (POST /loans/:id/cancel); null si no se canceló así',
+  })
+  readonly cancelledReason!: string | null;
+
   @ApiProperty({ format: 'uuid', description: 'Usuario que solicitó' })
   readonly requestedBy!: string;
 

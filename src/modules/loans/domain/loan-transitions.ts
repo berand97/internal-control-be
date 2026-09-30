@@ -5,6 +5,7 @@ import type { LoanStatus } from '../enums/loan-status.js';
 /**
  * Transiciones permitidas (docs/decisiones.md):
  * - APPROVED → PENDING_SIGNATURES: entrega física (POST /loans/:id/deliver).
+ * - APPROVED → CANCELLED: el préstamo programado no va a ocurrir (POST /loans/:id/cancel, con motivo), antes de entregar.
  * - PENDING_SIGNATURES → ACTIVE: el acta OCI-01-65 queda firmada (onSigned, misma transacción).
  * - PENDING_SIGNATURES → CANCELLED: se deshace la entrega (POST /loans/:id/undo-delivery).
  * - OVERDUE → ACTIVE: se aprueba una extensión con fecha no vencida.
@@ -14,7 +15,7 @@ import type { LoanStatus } from '../enums/loan-status.js';
  */
 const ALLOWED: Record<LoanStatus, ReadonlyArray<LoanStatus>> = {
   REQUESTED: ['APPROVED', 'REJECTED', 'CANCELLED'],
-  APPROVED: ['PENDING_SIGNATURES', 'IN_TRANSIT', 'REJECTED'],
+  APPROVED: ['PENDING_SIGNATURES', 'IN_TRANSIT', 'REJECTED', 'CANCELLED'],
   REJECTED: [],
   IN_TRANSIT: ['ACTIVE'],
   PENDING_SIGNATURES: ['ACTIVE', 'CANCELLED'],
