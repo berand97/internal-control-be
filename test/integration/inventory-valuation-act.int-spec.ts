@@ -1053,6 +1053,16 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(systemsAct).toMatchObject({ generation: 'GENERATED', status: 'PENDING_SIGNATURE' });
     expect(facultyAct['number']).not.toEqual(systemsAct['number']);
 
+    // El documento del acta dice cómo volver a la toma y a su centro.
+    const facultyDocument = await http().get(`/api/v1/documents/${String(facultyAct['documentId'])}`).set(as(director));
+    expect(facultyDocument.status, JSON.stringify(facultyDocument.body)).toBe(200);
+    expectConforms('get', '/api/v1/documents/{id}', 200, facultyDocument.body);
+    expect(facultyDocument.body.data).toMatchObject({
+      entityType: 'PHYSICAL_INVENTORY_ACT',
+      entityId: facultyAct['id'],
+      links: { inventoryId: id, costCenterId: faculty },
+    });
+
     const facultyText = await text(facultyAct['documentId']);
     expect(facultyText).toContain(`CENTRO|${await code(faculty)}|Auxiliar del laboratorio|${String(facultyAct['number'])}|`);
     expect(facultyText).toContain('|Ubicación ');

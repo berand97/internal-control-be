@@ -1623,6 +1623,7 @@ export class DocumentEngineService {
       status: document.status,
       entityType: document.entity_type,
       entityId: document.entity_id,
+      links: await this.lifecycle.links(document.entity_type, document.entity_id),
       pdfDriver: document.pdf_driver,
       signatureProvider: document.signature_provider,
       pdfSha256: document.pdf_hash,

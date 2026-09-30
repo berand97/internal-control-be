@@ -49,6 +49,18 @@ export interface DocumentLifecycleEvent {
 
 export type DocumentLifecycleCallback = (manager: EntityManager, event: DocumentLifecycleEvent) => Promise<void>;
 
+/**
+ * Cómo volver desde el acta a lo que la originó, más allá de entityType/entityId (GET /documents/:id → links). Cada
+ * proceso llena lo que le aplica; lo que no, queda null. Hoy: la toma física de un acta OCI-21-37 (entityId es la fila
+ * de physical_inventory_act, no la toma) y su centro de costo.
+ */
+export interface DocumentLinks {
+  readonly inventoryId: string | null;
+  readonly costCenterId: string | null;
+}
+
+export const EMPTY_DOCUMENT_LINKS: DocumentLinks = { inventoryId: null, costCenterId: null };
+
 export interface DocumentLifecycleHandler {
   readonly entityType: string;
   readonly onGenerated?: DocumentLifecycleCallback;
@@ -60,6 +72,8 @@ export interface DocumentLifecycleHandler {
    * un proceso es desarrollo: se declara aquí, no desde la interfaz.
    */
   readonly formats?: ReadonlyArray<ProcessFormatBinding>;
+  /** Enlaces de navegación del acta (solo lectura, fuera de transacción). */
+  readonly links?: (manager: EntityManager, entityId: string) => Promise<Partial<DocumentLinks>>;
 }
 
 export type DocumentLifecyclePhase = 'onGenerated' | 'onSigned' | 'onRejected';
@@ -155,6 +169,15 @@ export class DocumentLifecycleRegistry {
   /** Proceso de negocio que usa el formato (declarado en código), o undefined si es un formato libre. */
   bindingFor(formatKey: string): ProcessFormatBinding | undefined {
     return this.bindings.get(formatKey);
+  }
+
+  /** Enlaces de navegación de un acta según su proceso; todos null si el proceso no los declara. */
+  async links(entityType: string | null, entityId: string | null, manager?: EntityManager): Promise<DocumentLinks> {
+    const handler = entityType ? this.handlers.get(entityType) : undefined;
+    if (!handler?.links || !entityId || !UUID.test(entityId)) {
+      return EMPTY_DOCUMENT_LINKS;
+    }
+    return { ...EMPTY_DOCUMENT_LINKS, ...(await handler.links(manager ?? this.dataSource.manager, entityId)) };
   }
 
   has(entityType: string | null | undefined): boolean {

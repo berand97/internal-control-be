@@ -121,6 +121,13 @@ export class InventoryActService implements OnModuleInit {
       onGenerated: (manager, event) => this.onGenerated(manager, event),
       onSigned: (manager, event) => this.assertOwnAct(manager, event).then(() => undefined),
       onRejected: (manager, event) => this.assertOwnAct(manager, event).then(() => undefined),
+      links: async (manager, entityId) => {
+        const [row] = (await manager.query(
+          'SELECT inventory_id AS "inventoryId", cost_center_id AS "costCenterId" FROM physical_inventory_act WHERE id = $1',
+          [entityId],
+        )) as Array<{ inventoryId: string; costCenterId: string | null }>;
+        return row ?? {};
+      },
     });
   }
 

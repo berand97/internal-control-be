@@ -112,6 +112,7 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
       ['/cost-centers', 'wallet'],
       ['/categories', 'tags'],
       ['/assets', 'package'],
+      ['/assets/price-zero', 'calculator'],
       ['/imports', 'file-spreadsheet'],
       ['/handovers', 'package-check'],
       ['/inventories', 'clipboard-check'],
@@ -143,21 +144,27 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
       resource: 'asset',
       required_action: 'read',
     });
+    expect(rows.find((row) => row.path === '/assets/price-zero')).toMatchObject({
+      label: 'Precio cero',
+      resource: 'asset',
+      required_action: 'read',
+      sort_order: 71,
+    });
   });
 
   it('/imports solo con asset:create; /handovers con asset:read; el ícono viaja en /auth/me', async () => {
     const creator = await menu('creator');
-    expect(creator.map((item) => item.path)).toEqual(['/assets', '/imports', '/handovers']);
-    expect(creator.map((item) => item.icon)).toEqual(['package', 'file-spreadsheet', 'package-check']);
+    expect(creator.map((item) => item.path)).toEqual(['/assets', '/assets/price-zero', '/imports', '/handovers']);
+    expect(creator.map((item) => item.icon)).toEqual(['package', 'calculator', 'file-spreadsheet', 'package-check']);
 
     const reader = await menu('reader');
-    expect(reader.map((item) => item.path)).toEqual(['/assets', '/handovers']);
+    expect(reader.map((item) => item.path)).toEqual(['/assets', '/assets/price-zero', '/handovers']);
     expect(reader.find((item) => item.path === '/imports')).toBeUndefined();
 
     // El menú no mira el alcance: asset:read:org_unit también publica /handovers aunque la ruta del frontend
     // exija asset:read:global (comportamiento previo de actionSatisfies, documentado en el reporte).
     const orgReader = await menu('orgReader');
-    expect(orgReader.map((item) => item.path)).toEqual(['/assets', '/handovers']);
+    expect(orgReader.map((item) => item.path)).toEqual(['/assets', '/assets/price-zero', '/handovers']);
   });
 
   it('Historial de permisos: lo publica role:audit (la Directora, sin role:read); ni un VIEWER ni administrar roles', async () => {

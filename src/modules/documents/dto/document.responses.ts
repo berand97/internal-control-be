@@ -620,6 +620,24 @@ export class DocumentSignatureDto {
   readonly signingLink!: DocumentSigningLinkDto | null;
 }
 
+export class DocumentLinksDto {
+  @ApiProperty({
+    type: 'string',
+    format: 'uuid',
+    nullable: true,
+    description: 'Toma física del acta (OCI-21-37, entityType PHYSICAL_INVENTORY_ACT): GET /inventories/{inventoryId}. null en otros procesos',
+  })
+  readonly inventoryId!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'uuid',
+    nullable: true,
+    description: 'Centro de costo del acta cuando el proceso tiene una por centro (acta de toma física). null en otros procesos',
+  })
+  readonly costCenterId!: string | null;
+}
+
 export class DocumentDetailResponseDto {
   @ApiProperty({ type: () => DocumentCurrentTurnDto, nullable: true, description: 'null si el acta no está pendiente de firma' })
   readonly currentTurn!: DocumentCurrentTurnDto | null;
@@ -654,6 +672,12 @@ export class DocumentDetailResponseDto {
 
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly entityId!: string | null;
+
+  @ApiProperty({
+    type: () => DocumentLinksDto,
+    description: 'Cómo volver a lo que originó el acta (entityId no siempre lo dice: en el acta de toma es la fila del acta por centro). Campos null si no aplican',
+  })
+  readonly links!: DocumentLinksDto;
 
   @ApiProperty({ enum: STORAGE_DRIVERS, enumName: 'StorageDriver' })
   readonly pdfDriver!: (typeof STORAGE_DRIVERS)[number];
@@ -847,6 +871,7 @@ export const DOCUMENT_RESPONSE_MODELS = [
   UploadedTemplateResponseDto,
   GeneratedDocumentResponseDto,
   DocumentDetailResponseDto,
+  DocumentLinksDto,
   SignatureAttestationResponseDto,
   SigningLinkViewResponseDto,
   SigningLinkIdentityResponseDto,

@@ -23,9 +23,15 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  *    desactiva: antes no se sugería ni se asignaba, y así sigue. down() vuelve a crear la columna en FALSE (valor de
  *    todas las filas después de 1767225990000); no puede saber cuáles se desactivaron por estar pendientes, esas
  *    quedan inactivas.
+ *
+ * 3. Menú «Precio cero» (/assets/price-zero) en Activos, junto a «Activos»: lo publica asset:read (la lista de trabajo
+ *    GET /assets/price-zero se acota al alcance de lectura de activos). Id fijo y ON CONFLICT (path) DO NOTHING; down()
+ *    borra por ese id y nunca toca una fila creada a mano.
  */
 
 const RETIRED_ROLE = 'CUSTODIAN';
+
+const PRICE_ZERO_NAV_ID = '6f1d2c3a-7b4e-4a1f-9c2d-000000020101';
 
 export class CustodianRetirementLoanCancelAndSurplusCenter1767226010000 implements MigrationInterface {
   name = 'CustodianRetirementLoanCancelAndSurplusCenter1767226010000';
@@ -37,9 +43,18 @@ export class CustodianRetirementLoanCancelAndSurplusCenter1767226010000 implemen
       'UPDATE inventory_finding_category SET is_active = FALSE, updated_at = NOW() WHERE pending_definition AND is_active',
     );
     await queryRunner.query('ALTER TABLE inventory_finding_category DROP COLUMN pending_definition');
+
+    await queryRunner.query(
+      `INSERT INTO navigation_item (id, module, module_label, resource, path, label, required_action, sort_order, icon)
+       VALUES ($1, 'ASSET', 'Activos', 'asset', '/assets/price-zero', 'Precio cero', 'read', 71, 'calculator')
+       ON CONFLICT (path) DO NOTHING`,
+      [PRICE_ZERO_NAV_ID],
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query('DELETE FROM navigation_item WHERE id = $1', [PRICE_ZERO_NAV_ID]);
+
     await queryRunner.query(
       'ALTER TABLE inventory_finding_category ADD COLUMN pending_definition BOOLEAN NOT NULL DEFAULT FALSE',
     );
