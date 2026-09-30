@@ -10,7 +10,7 @@ export class TimelineActorDto {
   @ApiProperty({ format: 'uuid' })
   readonly userId!: string;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   readonly name!: string | null;
 }
 

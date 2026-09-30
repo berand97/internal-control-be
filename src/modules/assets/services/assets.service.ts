@@ -39,6 +39,7 @@ import {
 } from '../dto/responses/asset.response.dto.js';
 import { UpdateAssetDto } from '../dto/update-asset.dto.js';
 import { AssetIdentifier } from '../entities/asset-identifier.entity.js';
+import { Asset as AssetEntity } from '../entities/asset.entity.js';
 import type { Asset } from '../entities/asset.entity.js';
 import {
   AssetIdentifierOrigin,
@@ -290,6 +291,9 @@ export class AssetsService {
     }
     await this.assertNotUnderInventory(asset.id);
     await this.assertNoActiveLoan(asset.id);
+    assertAcquisitionUnchanged(asset, dto);
+    const priceChange = acquisitionPriceChange(asset, dto);
+    const photoUrl = dto.photoUrl?.trim() || null;
     if (dto.locationId) {
       await this.requireLocation(dto.locationId);
     }
@@ -338,11 +342,21 @@ export class AssetsService {
           ...(dto.insurancePolicyNumber !== undefined
             ? { insurancePolicyNumber: dto.insurancePolicyNumber }
             : {}),
+          ...(dto.acquisitionDocument !== undefined
+            ? { acquisitionDocument: dto.acquisitionDocument || null }
+            : {}),
+          ...(priceChange ? { acquisitionPrice: priceChange.to } : {}),
         },
         guard: assertMutable,
         ...(movement ? { movement } : {}),
-        audit: { action: AuditAction.AssetUpdated, changes: { ...dto } },
+        audit: { action: AuditAction.AssetUpdated, changes: auditChanges(dto, priceChange) },
         alsoWrite: async (manager, current) => {
+          if (priceChange) {
+            await this.recordPriceCorrection(manager, asset.id, priceChange, dto.priceChangeReason ?? '', actor.id);
+          }
+          if (photoUrl) {
+            await this.replacePrimaryPhoto(manager, asset.id, photoUrl, actor.id);
+          }
           if (customWrites) {
             await this.assetsRepository.replaceCustomValues(
               asset.id,
@@ -359,6 +373,73 @@ export class AssetsService {
       this.rethrowUnique(error);
     }
     return this.toDetail(updated);
+  }
+
+  /**
+   * Corrección del precio de compra, en la transacción de la edición: el precio ya quedó escrito (el trigger
+   * trg_asset_price_zero_flag pone o quita PRICE_ZERO) y aquí se quita PRICE_MISSING (el precio ya no falta: alguien lo
+   * fijó con un motivo) y se deja el movimiento CORRECTION con el valor anterior y el nuevo, que el historial muestra.
+   * La clasificación de precio cero (motivo) no se toca: queda como histórico. La depreciación ya calculada no se
+   * recalcula; los cálculos siguientes usan el precio nuevo.
+   */
+  private async recordPriceCorrection(
+    manager: EntityManager,
+    assetId: string,
+    change: PriceChange,
+    reason: string,
+    actorId: string,
+  ): Promise<void> {
+    await manager.query(
+      `UPDATE asset SET data_quality_flags = array_remove(data_quality_flags, 'PRICE_MISSING')
+       WHERE id = $1 AND 'PRICE_MISSING' = ANY(data_quality_flags)`,
+      [assetId],
+    );
+    const next = await manager.getRepository(AssetEntity).findOneOrFail({ where: { id: assetId } });
+    await this.movementsService.record(
+      {
+        assetId,
+        movementType: MovementType.Correction,
+        fromCostCenterId: next.costCenterId,
+        fromLocationId: next.locationId,
+        fromResponsibleId: next.responsibleId,
+        fromOperationalStatus: next.operationalStatus,
+        fromPhysicalCondition: next.physicalCondition,
+        toCostCenterId: next.costCenterId,
+        toLocationId: next.locationId,
+        toResponsibleId: next.responsibleId,
+        toOperationalStatus: next.operationalStatus,
+        toPhysicalCondition: next.physicalCondition,
+        requestedBy: actorId,
+        authorizedBy: actorId,
+        reason: `Corrección del precio de compra: ${reason}`.slice(0, 500),
+        documentReference: null,
+        metadata: { priceChange: { field: 'acquisitionPrice', from: change.from, to: change.to } },
+      },
+      manager,
+    );
+  }
+
+  /** photoUrl distinta de la foto principal: pasa a ser la principal; la anterior queda como foto del historial. */
+  private async replacePrimaryPhoto(
+    manager: EntityManager,
+    assetId: string,
+    fileUrl: string,
+    actorId: string,
+  ): Promise<void> {
+    const [primary] = (await manager.query(
+      'SELECT file_url FROM asset_photo WHERE asset_id = $1 AND is_primary',
+      [assetId],
+    )) as Array<{ file_url: string }>;
+    if (primary?.file_url === fileUrl) {
+      return;
+    }
+    await manager.query('UPDATE asset_photo SET is_primary = FALSE WHERE asset_id = $1 AND is_primary', [assetId]);
+    await this.assetsRepository.insertPhoto(assetId, fileUrl, actorId, manager);
+    await manager.query(
+      `UPDATE asset SET data_quality_flags = array_remove(data_quality_flags, 'PHOTO_MISSING')
+       WHERE id = $1 AND 'PHOTO_MISSING' = ANY(data_quality_flags)`,
+      [assetId],
+    );
   }
 
   async changeStatus(
@@ -768,7 +849,7 @@ export class AssetsService {
   }
 
   private async toDetail(asset: Asset): Promise<AssetResponseDto> {
-    const [category, costCenter, location, custom, movements, loans, identifiers] =
+    const [category, costCenter, location, custom, movements, loans, identifiers, priceZeroReason] =
       await Promise.all([
         this.assetsRepository.findNamedCategory(asset.categoryId),
         this.assetsRepository.findNamedCostCenter(asset.costCenterId),
@@ -779,6 +860,7 @@ export class AssetsService {
         this.assetsRepository.findRecentMovements(asset.id, 10),
         this.assetsRepository.findActiveLoans(asset.id),
         this.assetsRepository.findIdentifiers([asset.id]),
+        this.assetsRepository.findPriceZeroClassification(asset.id),
       ]);
     return AssetResponseDto.from(asset, identifiers, {
       ...(category ? { category } : {}),
@@ -807,6 +889,7 @@ export class AssetsService {
         }),
       ),
       activeLoans: loans,
+      priceZeroReason,
     });
   }
 
@@ -910,6 +993,55 @@ const assertMutable = (asset: Asset): void => {
   if (asset.operationalStatus === OperationalStatus.OnLoan) {
     throw new ApiException(ErrorCode.AssetCannotBeModified);
   }
+};
+
+interface PriceChange {
+  readonly from: string;
+  readonly to: string;
+}
+
+const cents = (value: number | string): number => Math.round(Number(value) * 100);
+
+/**
+ * El precio cambia si acquisitionPrice viene y difiere del actual (a dos decimales, la escala de la columna). Un cambio
+ * exige priceChangeReason. null: sin cambio (el mismo precio no es una corrección).
+ */
+const acquisitionPriceChange = (asset: Asset, dto: UpdateAssetDto): PriceChange | null => {
+  if (dto.acquisitionPrice === undefined || cents(dto.acquisitionPrice) === cents(asset.acquisitionPrice)) {
+    return null;
+  }
+  if (!dto.priceChangeReason) {
+    throw new ApiException(ErrorCode.ValidationFailed, 'Cambiar el precio de compra exige el motivo de la corrección', [
+      { field: 'priceChangeReason', message: 'Obligatorio cuando acquisitionPrice cambia (3 a 500 caracteres)' },
+    ]);
+  }
+  return { from: (cents(asset.acquisitionPrice) / 100).toFixed(2), to: (cents(dto.acquisitionPrice) / 100).toFixed(2) };
+};
+
+/** Tipo y fecha de adquisición no se editan: iguales al actual se aceptan (el formulario los reenvía), distintos no. */
+const assertAcquisitionUnchanged = (asset: Asset, dto: UpdateAssetDto): void => {
+  const details: Array<{ field: string; message: string }> = [];
+  if (dto.acquisitionTypeId !== undefined && dto.acquisitionTypeId !== asset.acquisitionTypeId) {
+    details.push({ field: 'acquisitionTypeId', message: 'El tipo de adquisición no se edita' });
+  }
+  if (
+    dto.acquisitionDate !== undefined &&
+    dto.acquisitionDate.slice(0, 10) !== (asset.acquisitionDate ? String(asset.acquisitionDate).slice(0, 10) : null)
+  ) {
+    details.push({
+      field: 'acquisitionDate',
+      message: 'La fecha de adquisición no se edita: define el código interno y la depreciación',
+    });
+  }
+  if (details.length > 0) {
+    throw new ApiException(ErrorCode.ValidationFailed, 'Hay datos de la adquisición que no se editan', details);
+  }
+};
+
+/** Bitácora de la edición: lo enviado, con el precio como { from, to } y sin el texto del motivo (va al historial). */
+const auditChanges = (dto: UpdateAssetDto, priceChange: PriceChange | null): Record<string, unknown> => {
+  const { priceChangeReason: _reason, acquisitionPrice: _price, ...rest } = dto;
+  return { ...rest, ...(priceChange ? { acquisitionPrice: priceChange } : {}) };
 };
 
 const editMovement = (

@@ -15,6 +15,7 @@ import { AssetPhoto } from '../entities/asset-photo.entity.js';
 import { Asset } from '../entities/asset.entity.js';
 import type {
   AssetIdentifierWrite,
+  AssetPriceZeroClassificationRecord,
   AssetSearchFilters,
   AssetsRepository,
   CreateAssetRecord,
@@ -434,6 +435,36 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
       [assetId, OPEN_LOAN_STATUSES],
     );
     return countFrom(rows);
+  }
+
+  async findPriceZeroClassification(assetId: string): Promise<AssetPriceZeroClassificationRecord | null> {
+    const [row] = (await this.dataSource.query(
+      `SELECT r.id, r.label AS name, c.note, c.classified_at, c.classified_by,
+              nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') AS classified_by_name
+       FROM asset_price_zero_classification c
+       JOIN asset_price_zero_reason r ON r.id = c.reason_id
+       LEFT JOIN app_user u ON u.id = c.classified_by
+       LEFT JOIN person p ON p.id = u.person_id
+       WHERE c.asset_id = $1`,
+      [assetId],
+    )) as Array<{
+      id: string;
+      name: string;
+      note: string | null;
+      classified_at: Date;
+      classified_by: string | null;
+      classified_by_name: string | null;
+    }>;
+    if (!row) {
+      return null;
+    }
+    return {
+      id: row.id,
+      name: row.name,
+      note: row.note,
+      classifiedAt: new Date(row.classified_at).toISOString(),
+      classifiedBy: row.classified_by ? { userId: row.classified_by, name: row.classified_by_name ?? '' } : null,
+    };
   }
 
   async findActiveLoans(

@@ -40,8 +40,19 @@ export interface CreateAssetRecord {
   readonly createdBy: string;
 }
 
+/** Motivo de precio cero registrado para el activo (asset_price_zero_classification), con quién y cuándo. */
+export interface AssetPriceZeroClassificationRecord {
+  readonly id: string;
+  readonly name: string;
+  readonly note: string | null;
+  readonly classifiedAt: string;
+  readonly classifiedBy: { readonly userId: string; readonly name: string } | null;
+}
+
 export interface UpdateAssetRecord {
   readonly categoryId?: string;
+  readonly acquisitionPrice?: string;
+  readonly acquisitionDocument?: string | null;
   readonly description?: string;
   readonly model?: string | null;
   readonly barcode?: string | null;
@@ -184,6 +195,7 @@ export interface AssetsRepository {
     assetId: string,
   ): Promise<ReadonlyArray<{ readonly id: string; readonly status: string }>>;
   countOpenInventories(assetId: string): Promise<number>;
+  findPriceZeroClassification(assetId: string): Promise<AssetPriceZeroClassificationRecord | null>;
   saveImportBatch(record: {
     readonly filename: string;
     readonly payload: unknown;

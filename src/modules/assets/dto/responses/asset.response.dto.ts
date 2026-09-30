@@ -25,6 +25,31 @@ export class AssetCustomValueResponseDto {
   readonly value!: unknown;
 }
 
+export class AssetPriceZeroClassifierDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly userId!: string;
+
+  @ApiProperty({ description: 'Nombre y apellidos' })
+  readonly name!: string;
+}
+
+export class AssetPriceZeroReasonDto {
+  @ApiProperty({ format: 'uuid', description: 'Motivo del catálogo (GET /assets/price-zero-reasons)' })
+  readonly id!: string;
+
+  @ApiProperty({ description: 'Nombre del motivo (label del catálogo)' })
+  readonly name!: string;
+
+  @ApiProperty({ type: 'string', nullable: true })
+  readonly note!: string | null;
+
+  @ApiProperty({ format: 'date-time' })
+  readonly classifiedAt!: string;
+
+  @ApiProperty({ type: () => AssetPriceZeroClassifierDto, nullable: true })
+  readonly classifiedBy!: AssetPriceZeroClassifierDto | null;
+}
+
 export class AssetMovementResponseDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
@@ -32,10 +57,10 @@ export class AssetMovementResponseDto {
   @ApiProperty()
   readonly movementType!: string;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   readonly reason!: string | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   readonly documentReference!: string | null;
 
   @ApiProperty()
@@ -47,16 +72,16 @@ export class AssetMovementResponseDto {
   @ApiProperty({ nullable: true, enum: OperationalStatus })
   readonly toOperationalStatus!: OperationalStatus | null;
 
-  @ApiProperty({ format: 'uuid', nullable: true })
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly fromLocationId!: string | null;
 
-  @ApiProperty({ format: 'uuid', nullable: true })
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly toLocationId!: string | null;
 
-  @ApiProperty({ format: 'uuid', nullable: true })
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly fromCostCenterId!: string | null;
 
-  @ApiProperty({ format: 'uuid', nullable: true })
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly toCostCenterId!: string | null;
 }
 
@@ -109,16 +134,16 @@ export class AssetResponseDto {
   @ApiProperty()
   readonly internalCode!: string;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   readonly barcode!: string | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   readonly serialNumber!: string | null;
 
   @ApiProperty()
   readonly description!: string;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   readonly model!: string | null;
 
   @ApiProperty({ format: 'uuid' })
@@ -127,19 +152,19 @@ export class AssetResponseDto {
   @ApiProperty({ format: 'uuid' })
   readonly costCenterId!: string;
 
-  @ApiProperty({ format: 'uuid', nullable: true })
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly locationId!: string | null;
 
-  @ApiProperty({ format: 'uuid', nullable: true })
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly responsibleId!: string | null;
 
   @ApiProperty({ format: 'uuid' })
   readonly acquisitionTypeId!: string;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', format: 'date', nullable: true })
   readonly acquisitionDate!: string | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   readonly acquisitionDocument!: string | null;
 
   @ApiProperty()
@@ -157,13 +182,13 @@ export class AssetResponseDto {
   @ApiProperty({ enum: DepreciationMethod })
   readonly depreciationMethod!: DepreciationMethod;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'integer', nullable: true })
   readonly usefulLifeYears!: number | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   readonly notes!: string | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', format: 'date', nullable: true })
   readonly writtenOffAt!: string | null;
 
   @ApiProperty({ nullable: true })
@@ -190,6 +215,15 @@ export class AssetResponseDto {
   @ApiPropertyOptional({ type: [AssetMovementResponseDto] })
   readonly movements?: ReadonlyArray<AssetMovementResponseDto>;
 
+  @ApiPropertyOptional({
+    type: () => AssetPriceZeroReasonDto,
+    nullable: true,
+    description:
+      'Solo en el detalle (GET/PATCH /assets/:id): motivo de precio cero registrado por Control Interno ' +
+      '(PUT /assets/:id/price-zero-reason); null si no tiene. Se conserva como histórico aunque el precio deje de ser 0 (dataQualityFlags dice si hoy es PRICE_ZERO)',
+  })
+  readonly priceZeroReason?: AssetPriceZeroReasonDto | null;
+
   @ApiPropertyOptional({ type: [Object] })
   readonly activeLoans?: ReadonlyArray<{ readonly id: string; readonly status: string }>;
 
@@ -203,6 +237,7 @@ export class AssetResponseDto {
       readonly customValues?: ReadonlyArray<AssetCustomValueResponseDto>;
       readonly movements?: ReadonlyArray<AssetMovementResponseDto>;
       readonly activeLoans?: ReadonlyArray<{ readonly id: string; readonly status: string }>;
+      readonly priceZeroReason?: AssetPriceZeroReasonDto | null;
     },
   ): AssetResponseDto {
     return {
@@ -242,6 +277,7 @@ export class AssetResponseDto {
       ...(extras?.customValues ? { customValues: extras.customValues } : {}),
       ...(extras?.movements ? { movements: extras.movements } : {}),
       ...(extras?.activeLoans ? { activeLoans: extras.activeLoans } : {}),
+      ...(extras && 'priceZeroReason' in extras ? { priceZeroReason: extras.priceZeroReason ?? null } : {}),
     };
   }
 }

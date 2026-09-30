@@ -87,7 +87,8 @@ const EVENTS_SQL = `
                ELSE jsonb_build_object('id', tl.id, 'code', tl.code, 'name', tl.name) END,
              'loanId', m.loan_id,
              'inventoryId', m.metadata->>'inventoryId',
-             'result', m.metadata->>'result')
+             'result', m.metadata->>'result',
+             'priceChange', m.metadata->'priceChange')
     FROM asset_movement m
     LEFT JOIN document_asset da ON da.movement_id = m.id
     LEFT JOIN cost_center fcc ON fcc.id = m.from_cost_center_id
@@ -221,6 +222,10 @@ export class AssetTimelineService {
         }
         if (row.type === 'RELOCATION' && (place('fromLocation') || place('toLocation'))) {
           return `${label}: ${place('fromLocation') ?? '—'} → ${place('toLocation') ?? '—'}`;
+        }
+        const price = details['priceChange'] as { from?: string; to?: string } | null | undefined;
+        if (row.type === 'CORRECTION' && price?.from !== undefined && price.to !== undefined) {
+          return `Corrección del precio de compra: ${price.from} → ${price.to}`;
         }
         if (row.type === 'PHYSICAL_VERIFICATION' && text('result')) {
           return `${label} (${INVENTORY_LABELS[text('result') ?? ''] ?? text('result')})`;

@@ -298,8 +298,13 @@ export class AssetsController {
   @ApiOperation({
     summary: 'Actualizar activo',
     description:
-      'internalCode no es editable. El centro de costo solo cambia con un traslado firmado (POST /transfers, acta OCI-17-89). Bloqueado (406 ASSET_HAS_ACTIVE_LOAN) si el activo está en un préstamo abierto.',
+      'internalCode no es editable. El centro de costo solo cambia con un traslado firmado (POST /transfers, acta OCI-17-89). Bloqueado (406 ASSET_HAS_ACTIVE_LOAN) si el activo está en un préstamo abierto. ' +
+      'Ningún campo se descarta en silencio: acquisitionTypeId y acquisitionDate distintos de los actuales responden 400 VALIDATION_FAILED (con details por campo); ' +
+      'acquisitionPrice distinto del actual exige priceChangeReason (400 sin él), queda en la bitácora como { from, to } y en el historial como movimiento CORRECTION ' +
+      '(PRICE_ZERO se pone o se quita solo, PRICE_MISSING se quita, la clasificación de precio cero se conserva y la depreciación ya calculada no se recalcula); ' +
+      'acquisitionDocument se guarda; photoUrl distinta de la foto principal pasa a ser la principal.',
   })
+  @ApiResponse({ status: 200, schema: envelopedSchema(AssetResponseDto) })
   update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateAssetDto,
