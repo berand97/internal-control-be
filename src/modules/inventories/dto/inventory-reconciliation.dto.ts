@@ -135,8 +135,9 @@ export class ResolveSurplusDto {
   @ApiPropertyOptional({
     format: 'uuid',
     description:
-      'Solo CREATE_ASSET en tomas cuyo alcance no es un centro de costo (obligatorio ahí). En alcance COST_CENTER el ' +
-      'activo queda en el centro de la toma y este campo, si viene, debe ser ese mismo centro.',
+      'Centro de costo del sobrante en tomas cuyo alcance no es un centro de costo: el del activo (CREATE_ASSET) o el del acta ' +
+      'que lo lista sin resolver (LEAVE_UNRESOLVED). Obligatorio ahí salvo que ya se haya elegido con PUT …/surplus-center ' +
+      '(entonces se usa ese). En alcance COST_CENTER es el centro de la toma y este campo, si viene, debe ser ese mismo centro.',
   })
   @IsOptional()
   @IsUUID('4')
@@ -147,6 +148,15 @@ export class ResolveSurplusDto {
   @ValidateNested()
   @Type(() => SurplusAssetDto)
   readonly asset?: SurplusAssetDto;
+}
+
+export class SetSurplusCenterDto {
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Centro de costo activo que admite activos: el sobrante pasa a su acta OCI-21-37',
+  })
+  @IsUUID('4')
+  readonly costCenterId!: string;
 }
 
 /** POST /inventories/:id/act/enqueue: cuerpo opcional. */

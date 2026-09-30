@@ -41,6 +41,7 @@ const liveItemFields = (item: PhysicalInventoryItem, context: ItemViewContext) =
     bookValue: valuation.bookValue,
     bookValueSource: valuation.bookValueSource,
     surplusResolution: item.surplusResolution ?? null,
+    surplusCostCenterId: item.surplusCostCenterId ?? null,
     surplusResolutionReason: item.surplusResolutionReason ?? null,
     resolvedAssetId: item.resolvedAssetId ?? null,
     resolvedAt: item.resolvedAt ?? null,

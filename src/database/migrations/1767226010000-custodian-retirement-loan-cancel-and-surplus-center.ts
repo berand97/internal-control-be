@@ -32,6 +32,10 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  *    el motivo (3 a 500). asset_request.status CLOSED_LOAN_CANCELLED: la solicitud TEMPORARY cuyo préstamo programado se
  *    canceló antes de entregarse; como CLOSED_LOAN_REJECTED, conserva loan_id y la aceptación. down() se niega si hay
  *    solicitudes CLOSED_LOAN_CANCELLED o préstamos con motivo de cancelación (no hay dónde guardarlos antes).
+ *
+ * 5. Centro de un sobrante sin activo (physical_inventory_item.surplus_cost_center_id): en tomas por ubicación, unidad
+ *    o global el sobrante no es de ningún centro; se elige (PUT /inventories/:id/items/:itemId/surplus-center o al
+ *    dejarlo sin resolver) y va al acta de ese centro. down() se niega si hay alguno elegido (se perdería de qué acta es).
  */
 
 const RETIRED_ROLE = 'CUSTODIAN';
@@ -88,18 +92,24 @@ export class CustodianRetirementLoanCancelAndSurplusCenter1767226010000 implemen
     `);
     await queryRunner.query(DROP_REQUEST_STATUS_CHECKS);
     await queryRunner.query(REQUEST_STATUS_CHECKS(true));
+
+    await queryRunner.query(
+      'ALTER TABLE physical_inventory_item ADD COLUMN surplus_cost_center_id UUID REFERENCES cost_center(id)',
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     const [blocking] = (await queryRunner.query(
       `SELECT (SELECT count(*)::int FROM asset_request WHERE status = 'CLOSED_LOAN_CANCELLED') AS requests,
-              (SELECT count(*)::int FROM asset_loan WHERE cancelled_reason IS NOT NULL) AS loans`,
-    )) as Array<{ requests: number; loans: number }>;
-    if ((blocking?.requests ?? 0) > 0 || (blocking?.loans ?? 0) > 0) {
+              (SELECT count(*)::int FROM asset_loan WHERE cancelled_reason IS NOT NULL) AS loans,
+              (SELECT count(*)::int FROM physical_inventory_item WHERE surplus_cost_center_id IS NOT NULL) AS surplus`,
+    )) as Array<{ requests: number; loans: number; surplus: number }>;
+    if ((blocking?.requests ?? 0) > 0 || (blocking?.loans ?? 0) > 0 || (blocking?.surplus ?? 0) > 0) {
       throw new Error(
-        `No se puede revertir sin perder datos: hay ${blocking?.requests} solicitudes CLOSED_LOAN_CANCELLED y ${blocking?.loans} préstamos cancelados con motivo`,
+        `No se puede revertir sin perder datos: hay ${blocking?.requests} solicitudes CLOSED_LOAN_CANCELLED, ${blocking?.loans} préstamos cancelados con motivo y ${blocking?.surplus} sobrantes con centro elegido`,
       );
     }
+    await queryRunner.query('ALTER TABLE physical_inventory_item DROP COLUMN surplus_cost_center_id');
     await queryRunner.query(DROP_REQUEST_STATUS_CHECKS);
     await queryRunner.query(REQUEST_STATUS_CHECKS(false));
     await queryRunner.query('ALTER TABLE asset_loan DROP CONSTRAINT chk_asset_loan_cancelled_reason, DROP COLUMN cancelled_reason');

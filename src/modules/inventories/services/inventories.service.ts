@@ -448,6 +448,7 @@ export class InventoriesService {
     if (inventory.reconcileRequestedBy) {
       throw new ApiException(ErrorCode.InvalidState);
     }
+    await this.signerHead.assertNoUnassignedSurplus(inventory);
     inventory.reconcileRequestedAt = new Date();
     inventory.reconcileRequestedBy = actor.id;
     await this.inventories.save(inventory);
@@ -467,6 +468,8 @@ export class InventoriesService {
     }
     const items = await this.items.find({ where: { inventoryId: inventory.id } });
     await this.dataSource.transaction(async (manager) => {
+      // Dentro de la transacción: un sobrante sin centro no llega a ninguna acta.
+      await this.signerHead.assertNoUnassignedSurplus(inventory, manager);
       for (const item of items) {
         if (!item.assetId) {
           continue;

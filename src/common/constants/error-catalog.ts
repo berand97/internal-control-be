@@ -897,6 +897,12 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     message:
       'Solo se resuelve un sobrante vigente sin activo registrado, con la toma cerrada y sin conciliar, y una sola vez como activo',
   },
+  [ErrorCode.InventoryUnassignedSurplus]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message:
+      'Hay sobrantes sin centro de costo: no pertenecen a ninguna acta. Elija el centro de cada uno o regístrelo como activo antes de conciliar',
+  },
   [ErrorCode.AssetPriceZeroReasonUnavailable]: {
     httpStatus: 406,
     action: 'CANCEL',

@@ -19,12 +19,16 @@ export const INVENTORY_ACT_ENTITY_TYPE = 'PHYSICAL_INVENTORY_ACT';
  * Centro de costo al que va un ítem de la toma (alias i = physical_inventory_item, a = su activo, ra = el activo creado
  * al resolver el sobrante; $2 = scope_type y $3 = scope_id de la toma). Alcance COST_CENTER: siempre el centro de la
  * toma (una sola acta). Otro alcance: el centro del activo en la foto (expected_cost_center_id); un sobrante, el centro
- * actual de su activo o del activo creado al resolverlo. NULL: el ítem no va a ninguna acta (sobrante sin activo ni
- * resolución, o activo sin centro en la foto).
+ * actual de su activo o del activo creado al resolverlo o, sin activo, el centro elegido para él
+ * (surplus_cost_center_id). NULL: el ítem no va a ninguna acta (sobrante sin activo ni centro elegido, o activo sin
+ * centro en la foto); un sobrante así bloquea la conciliación (UNASSIGNED_SURPLUS_SQL).
  */
 export const ITEM_ACT_CENTER_SQL = `CASE WHEN $2::text = 'COST_CENTER' THEN $3::uuid
-  WHEN i.verification_result = 'SURPLUS' THEN coalesce(a.current_cost_center_id, ra.current_cost_center_id)
+  WHEN i.verification_result = 'SURPLUS' THEN coalesce(a.current_cost_center_id, ra.current_cost_center_id, i.surplus_cost_center_id)
   ELSE i.expected_cost_center_id END`;
+
+/** Sobrantes vigentes que no van a ninguna acta (mismos alias y parámetros que ITEM_ACT_CENTER_SQL). */
+export const UNASSIGNED_SURPLUS_SQL = `i.voided_at IS NULL AND i.verification_result = 'SURPLUS' AND (${ITEM_ACT_CENTER_SQL}) IS NULL`;
 
 export const INVENTORY_ACT_GENERATIONS = ['NONE', 'PENDING', 'FAILED', 'GENERATED', 'NOT_ENQUEUED'] as const;
 export type InventoryActGeneration = (typeof INVENTORY_ACT_GENERATIONS)[number];

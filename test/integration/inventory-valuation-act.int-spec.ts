@@ -473,7 +473,10 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     });
     expect(left.status, JSON.stringify(left.body)).toBe(200);
     expectConforms('post', '/api/v1/inventories/{id}/items/{itemId}/resolve-surplus', 200, left.body);
-    expect(left.body.data).toMatchObject({ surplusResolution: 'LEAVE_UNRESOLVED', resolvedAssetId: null, assetCode: null });
+    expect(left.body.data).toMatchObject({ surplusResolution: 'LEAVE_UNRESOLVED', resolvedAssetId: null, assetCode: null, surplusCostCenterId: null });
+    // En una toma por centro el sobrante ya es de ese centro: no se elige otro.
+    const ownCenter = await http().put(`/api/v1/inventories/${id}/items/${surplusId}/surplus-center`).set(as(director)).send({ costCenterId: await center('Centro elegido') });
+    expect([ownCenter.status, ownCenter.body.error.code]).toEqual([406, 'INVALID_STATE']);
 
     // Un fallo al registrar el movimiento revierte también el activo y la resolución.
     await dataSource.query(`
@@ -1023,6 +1026,34 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(resolved.status, JSON.stringify(resolved.body)).toBe(200);
     expect(((await detail(id)) as unknown as { unassignedItems: number }).unassignedItems).toBe(1);
 
+    // La caja no es de ningún centro: no se concilia hasta elegir su centro (o registrarla como activo).
+    const blockedReconcile = await post(director, `/${id}/reconcile`);
+    expect([blockedReconcile.status, blockedReconcile.body.error.code]).toEqual([409, 'INVENTORY_UNASSIGNED_SURPLUS']);
+    expect(blockedReconcile.body.error.details).toEqual([{ field: 'unassignedSurplus', message: '1' }]);
+    expect(blockedReconcile.body.error.message).toContain('1 sobrante sin centro de costo');
+    const boxId = ((await detail(id)).items as unknown as Array<{ id: string; notes: string | null }>)
+      .find((item) => item.notes === 'Caja sin placa')?.id as string;
+    // Dejarla sin resolver también pide el centro: sin él nadie respondería por ella.
+    const leftWithoutCenter = await post(director, `/${id}/items/${boxId}/resolve-surplus`, { action: 'LEAVE_UNRESOLVED', reason: 'Sin datos' });
+    expect([leftWithoutCenter.status, leftWithoutCenter.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect(leftWithoutCenter.body.error.details).toEqual([expect.objectContaining({ field: 'costCenterId' })]);
+    const inactiveCenter = await center('Inactivo');
+    await dataSource.query('UPDATE cost_center SET is_active = FALSE WHERE id = $1', [inactiveCenter]);
+    const toInactive = await put(`/${id}/items/${boxId}/surplus-center`, { costCenterId: inactiveCenter });
+    expect([toInactive.status, toInactive.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    const chairAgain = await put(`/${id}/items/${chair.body.data.id as string}/surplus-center`, { costCenterId: systems });
+    expect([chairAgain.status, chairAgain.body.error.code]).toEqual([406, 'INVENTORY_SURPLUS_NOT_RESOLVABLE']);
+    const boxToSystems = await put(`/${id}/items/${boxId}/surplus-center`, { costCenterId: systems });
+    expect(boxToSystems.status, JSON.stringify(boxToSystems.body)).toBe(200);
+    expectConforms('put', '/api/v1/inventories/{id}/items/{itemId}/surplus-center', 200, boxToSystems.body);
+    expect(boxToSystems.body.data).toMatchObject({ id: boxId, surplusCostCenterId: systems, surplusResolution: null });
+    expect(((await detail(id)) as unknown as { unassignedItems: number }).unassignedItems).toBe(0);
+    const [centerAudit] = (await dataSource.query(
+      `SELECT changes FROM audit_log WHERE entity_type = 'INVENTORY' AND entity_id = $1 AND action = 'INV_SURPLUS_CENTER'`,
+      [id],
+    )) as Array<{ changes: Record<string, unknown> }>;
+    expect(centerAudit?.changes).toEqual({ itemId: boxId, surplusCostCenterId: { from: null, to: systems } });
+
     expect((await post(director, `/${id}/reconcile`)).status).toBe(200);
     const approved = await post(approver, `/${id}/reconcile/approve`);
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
@@ -1077,9 +1108,11 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
 
     const systemsText = await text(systemsAct['documentId']);
     expect(systemsText).toContain(`CENTRO|${await code(systems)}|Técnico de sistemas|${String(systemsAct['number'])}|`);
-    expect(systemsText).toContain('TOTALES|1|1|0|0|');
+    expect(systemsText).toContain('TOTALES|1|1|0|1|');
     expect(systemsText).toContain(`H|AU|1|${formatMoney(300)}|100,00 %|`);
-    expect(systemsText).not.toContain('sin placa');
+    // La caja quedó en el acta de Sistemas, sin decisión; la silla, en la de la facultad.
+    expect(systemsText).toContain('S|Caja sin placa|Sin decisión|');
+    expect(systemsText).not.toContain('Silla sin placa');
     expect(systemsText).toContain('FIRMAS|Jefe Sistemas Valoración|Aprobador Valoración|');
 
     // Mantenimiento: sin jefe no se encola; se le asigna jefe, se indica y se encola sola.

@@ -158,6 +158,16 @@ export class InventoryItemDto {
   @ApiProperty({ type: 'string', nullable: true })
   readonly surplusResolutionReason!: string | null;
 
+  @ApiProperty({
+    type: 'string',
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Sobrante sin activo en una toma que no es de un centro: centro de costo elegido para él (PUT …/items/:itemId/surplus-center o al ' +
+      'dejarlo sin resolver), el de su acta. null: sin elegir (bloquea la conciliación) o no aplica',
+  })
+  readonly surplusCostCenterId!: string | null;
+
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Activo creado a partir del sobrante' })
   readonly resolvedAssetId!: string | null;
 

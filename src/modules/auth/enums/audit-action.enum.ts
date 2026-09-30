@@ -95,6 +95,7 @@ export enum AuditAction {
   InventoryFindingSet = 'INV_FINDING_SET',
   InventoryCatalogChanged = 'INV_CATALOG_CHANGED',
   InventorySurplusResolved = 'INV_SURPLUS_RESOLVED',
+  InventorySurplusCenterSet = 'INV_SURPLUS_CENTER',
   InventoryCutLinked = 'INV_CUT_LINKED',
   InventoryActEnqueued = 'INV_ACT_ENQUEUED',
   PriceZeroCatalogChanged = 'PRICE_ZERO_CATALOG',

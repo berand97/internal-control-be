@@ -91,6 +91,13 @@ export class PhysicalInventoryItem {
   @Column({ name: 'surplus_resolution_reason', type: 'text', nullable: true })
   surplusResolutionReason!: string | null;
 
+  /**
+   * Centro de costo al que pertenece un sobrante sin activo, en tomas que no son de un centro (PUT
+   * /inventories/:id/items/:itemId/surplus-center o al dejarlo sin resolver): define en qué acta aparece.
+   */
+  @Column({ name: 'surplus_cost_center_id', type: 'uuid', nullable: true })
+  surplusCostCenterId!: string | null;
+
   /** Activo creado a partir del sobrante (solo CREATE_ASSET). */
   @Column({ name: 'resolved_asset_id', type: 'uuid', nullable: true })
   resolvedAssetId!: string | null;

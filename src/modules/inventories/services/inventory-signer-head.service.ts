@@ -3,7 +3,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
-import { ITEM_ACT_CENTER_SQL } from '../domain/inventory-act.js';
+import { ITEM_ACT_CENTER_SQL, UNASSIGNED_SURPLUS_SQL } from '../domain/inventory-act.js';
 import { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 import { PhysicalInventoryAct } from '../entities/physical-inventory-act.entity.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
@@ -100,6 +100,27 @@ export class InventorySignerHeadService {
       [inventory.id, inventory.scopeType, inventory.scopeId],
     )) as Array<{ total: number }>;
     return row?.total ?? 0;
+  }
+
+  /**
+   * Conciliar (solicitar o aprobar) exige que todo sobrante vigente tenga centro, es decir, acta: 409
+   * INVENTORY_UNASSIGNED_SURPLUS con el conteo en details (unassignedSurplus) si no.
+   */
+  async assertNoUnassignedSurplus(inventory: PhysicalInventory, manager: EntityManager = this.dataSource.manager): Promise<void> {
+    const [row] = (await manager.query(
+      `SELECT count(*)::int AS total FROM ${ITEM_JOINS} WHERE i.inventory_id = $1 AND ${UNASSIGNED_SURPLUS_SQL}`,
+      [inventory.id, inventory.scopeType, inventory.scopeId],
+    )) as Array<{ total: number }>;
+    const total = row?.total ?? 0;
+    if (total > 0) {
+      throw new ApiException(
+        ErrorCode.InventoryUnassignedSurplus,
+        total === 1
+          ? 'Hay 1 sobrante sin centro de costo: no pertenece a ninguna acta. Elija su centro (PUT /inventories/:id/items/:itemId/surplus-center) o regístrelo como activo antes de conciliar'
+          : `Hay ${total} sobrantes sin centro de costo: no pertenecen a ninguna acta. Elija el centro de cada uno (PUT /inventories/:id/items/:itemId/surplus-center) o regístrelos como activos antes de conciliar`,
+        [{ field: 'unassignedSurplus', message: String(total) }],
+      );
+    }
   }
 
   async costCenters(manager: EntityManager, ids: ReadonlyArray<string>): Promise<Map<string, CostCenterRef>> {

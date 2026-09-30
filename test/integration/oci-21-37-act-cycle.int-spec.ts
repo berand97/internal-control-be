@@ -678,6 +678,10 @@ describe
             .send({ code: 'AU' });
           expect(set.status, JSON.stringify(set.body)).toBe(200);
         }
+        expect(
+          (await post(responsible, `/${id}/report-unexpected`, { notes: 'Fuente de poder sin placa', locationId: lab, condition: 'GOOD' }))
+            .status,
+        ).toBe(200);
         const closed = await post(responsible, `/${id}/close`, {
           allowUnverified: true,
           attendedBy: [
@@ -687,6 +691,17 @@ describe
         });
         expect(closed.status, JSON.stringify(closed.body)).toBe(200);
         expect(closed.body.data.acts).toHaveLength(3);
+        // El sobrante sin placa no es de ningún centro: bloquea la conciliación hasta elegir el suyo (la facultad).
+        const blocked = await post(responsible, `/${id}/reconcile`);
+        expect([blocked.status, blocked.body.error.code]).toEqual([409, 'INVENTORY_UNASSIGNED_SURPLUS']);
+        const surplusId = ((await detail(id)).items as unknown as Array<{ id: string; notes: string | null }>).find(
+          (item) => item.notes === 'Fuente de poder sin placa',
+        )?.id;
+        const assigned = await http()
+          .put(`/api/v1/inventories/${id}/items/${surplusId}/surplus-center`)
+          .set(as(responsible))
+          .send({ costCenterId: faculty });
+        expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
         expect((await post(responsible, `/${id}/reconcile`)).status).toBe(200);
         const approved = await post(approver, `/${id}/reconcile/approve`);
         expect(approved.status, JSON.stringify(approved.body)).toBe(200);
@@ -720,9 +735,11 @@ describe
           'Atendió por el área Laboratorista de la facultad',
           'OSCILOSCOPIO DIGITAL TEKTRONIX',
           `AU — Activos en uso 1 ${money(3_200_000)} 100,00 %`,
+          'Fuente de poder sin placa',
         ]) {
           expect(facultyPdf.text, fragment).toContain(fragment);
         }
+        expect(systemsPdf.text).not.toContain('Fuente de poder sin placa');
         expect(facultyPdf.text).not.toContain('SERVIDOR DELL POWEREDGE R250');
         expect(facultyPdf.text).not.toContain('TALADRO PERCUTOR DEWALT');
         for (const fragment of [

@@ -50,7 +50,12 @@ import {
   InventoryScheduleResponseDto,
   InventorySummaryDto,
 } from './dto/inventory-schedule.responses.js';
-import { EnqueueInventoryActDto, ResolveSurplusDto, SetInventoryAccountingCutDto } from './dto/inventory-reconciliation.dto.js';
+import {
+  EnqueueInventoryActDto,
+  ResolveSurplusDto,
+  SetInventoryAccountingCutDto,
+  SetSurplusCenterDto,
+} from './dto/inventory-reconciliation.dto.js';
 import {
   InventoryResponsibleCandidatesPageDto,
   QueryInventoryResponsibleCandidatesDto,
@@ -547,7 +552,8 @@ export class InventoriesController {
     description:
       `${ACTOR_RULE} CREATE_ASSET exige además asset:create:global y los datos del activo: se crea en el centro de la ` +
       'toma (alcance COST_CENTER) o en costCenterId (otros alcances), con movimiento REGISTRATION que cita la toma, y ' +
-      'se enlaza al ítem en una transacción. LEAVE_UNRESOLVED deja el motivo y admite cambiar luego a CREATE_ASSET. ' +
+      'se enlaza al ítem en una transacción. LEAVE_UNRESOLVED deja el motivo y admite cambiar luego a CREATE_ASSET; fuera del alcance COST_CENTER ' +
+      'también exige el centro (costCenterId o el ya elegido con PUT …/surplus-center), cuya acta lo lista como sobrante sin resolver. ' +
       'Un sobrante de un activo LOST responde 406 INVENTORY_SURPLUS_WAS_LOST; uno con activo registrado, anulado o ya ' +
       'creado, 406 INVENTORY_SURPLUS_NOT_RESOLVABLE.',
   })
@@ -559,6 +565,29 @@ export class InventoriesController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.surplus.resolve(id, itemId, dto, actor);
+  }
+
+  @Put(':id/items/:itemId/surplus-center')
+  @RequirePermission('inventory:execute:global')
+  @ApiOperation({
+    summary: 'Elegir el centro de costo de un sobrante sin activo (toma por ubicación, unidad o global)',
+    description:
+      `${ACTOR_RULE} Mismo momento y permisos que resolver el sobrante: toma CLOSED antes de aprobar la conciliación (si no, 406 INVALID_STATE). ` +
+      'En esas tomas un sobrante sin activo no es de ningún centro ni va a ningún acta, y la conciliación (solicitar y aprobar) responde 409 ' +
+      'INVENTORY_UNASSIGNED_SURPLUS (details[0] = { field: unassignedSurplus, message: <cuántos> }) mientras haya alguno. Con el centro elegido pasa al ' +
+      'acta OCI-21-37 de ese centro (se crea si la toma no la tenía, con su único jefe vigente como firmante). Se puede cambiar mientras no se ' +
+      'registre como activo. El centro debe estar activo y admitir activos: si no, 400 VALIDATION_FAILED. Toma por centro de costo: 406 INVALID_STATE ' +
+      '(el sobrante ya es de ese centro). Sobrante con activo, anulado o ya registrado: 406 INVENTORY_SURPLUS_NOT_RESOLVABLE; de un activo LOST: 406 ' +
+      'INVENTORY_SURPLUS_WAS_LOST. Auditado (INV_SURPLUS_CENTER).',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryItemDto) })
+  setSurplusCenter(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: SetSurplusCenterDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.surplus.setCenter(id, itemId, dto.costCenterId, actor);
   }
 
   @Post(':id/acts/:costCenterId/enqueue')

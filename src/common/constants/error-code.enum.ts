@@ -178,6 +178,7 @@ export enum ErrorCode {
   InventoryCatalogEntryExists = 'INVENTORY_CATALOG_ENTRY_EXISTS',
   InventorySurplusWasLost = 'INVENTORY_SURPLUS_WAS_LOST',
   InventorySurplusNotResolvable = 'INVENTORY_SURPLUS_NOT_RESOLVABLE',
+  InventoryUnassignedSurplus = 'INVENTORY_UNASSIGNED_SURPLUS',
   AssetPriceZeroReasonUnavailable = 'ASSET_PRICE_ZERO_REASON_UNAVAILABLE',
   AssetPriceZeroReasonInUse = 'ASSET_PRICE_ZERO_REASON_IN_USE',
   AssetPriceZeroReasonExists = 'ASSET_PRICE_ZERO_REASON_EXISTS',
