@@ -112,6 +112,34 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
     await app.close();
   });
 
+  it('sin rol CUSTODIAN: el jefe de dependencia hereda de VIEWER y conserva como propios los permisos que heredaba', async () => {
+    expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM role WHERE code = 'CUSTODIAN'`)).toBe(0);
+    expect(
+      await scalar<string>(
+        dataSource,
+        `SELECT p.code FROM role r JOIN role p ON p.id = r.parent_role_id WHERE r.code = 'DEPARTMENT_HEAD'`,
+      ),
+    ).toBe('VIEWER');
+    const own = (await dataSource.query(
+      `SELECT p.code FROM role_permission rp JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id
+       WHERE r.code = 'DEPARTMENT_HEAD'`,
+    )) as Array<{ code: string }>;
+    expect(own.map((row) => row.code)).toEqual(
+      expect.arrayContaining([
+        'asset:read:org_unit',
+        'asset_request:read:own',
+        'inventory:execute:global',
+        'inventory:read:global',
+        'loan:read:org_unit',
+        'loan:request:own',
+      ]),
+    );
+    const [retired] = (await dataSource.query(
+      `SELECT changes FROM audit_log WHERE entity_type = 'ROLE' AND action = 'ROLE_DELETED' AND changes->>'code' = 'CUSTODIAN'`,
+    )) as Array<{ changes: { snapshot: { permissionCodes: string[] } } }>;
+    expect(retired?.changes.snapshot.permissionCodes).toContain('loan:request:own');
+  });
+
   describe('BE-02: la herencia pasa por las mismas reglas que otorgar permisos', () => {
     // Decisión del desarrollador: asignar herencia sigue la regla de otorgar permisos. SUPER_ADMIN (administración pura)
     // puede hacerlo sin tener los permisos del padre; la BD sigue impidiendo que un SUPER_ADMIN termine con ese rol.
