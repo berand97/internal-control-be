@@ -607,11 +607,11 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
       }
       return who;
     };
-    const free = await withRole('A', 'CUSTODIAN');
-    const headOf = await withRole('B', 'CUSTODIAN');
-    const keeper = await withRole('C', 'CUSTODIAN');
+    const free = await withRole('A', 'DEPARTMENT_HEAD');
+    const headOf = await withRole('B', 'DEPARTMENT_HEAD');
+    const keeper = await withRole('C', 'DEPARTMENT_HEAD');
     await withRole('D', 'VIEWER');
-    const inactive = await withRole('E', 'CUSTODIAN');
+    const inactive = await withRole('E', 'DEPARTMENT_HEAD');
     await dataSource.query(`UPDATE app_user SET status = 'INACTIVE' WHERE id = $1`, [inactive.userId]);
     const centerId = await center('Centro candidatos');
     await head(headOf.personId, centerId);

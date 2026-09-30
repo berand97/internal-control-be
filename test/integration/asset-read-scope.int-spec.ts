@@ -110,7 +110,7 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
     await userWith('consulta', [{ role: 'VIEWER', scopeType: 'COST_CENTER', scopeId: centerA }]);
     await userWith('dosCentros', [
       { role: 'DEPARTMENT_HEAD', scopeType: 'COST_CENTER', scopeId: centerA },
-      { role: 'CUSTODIAN', scopeType: 'COST_CENTER', scopeId: centerB },
+      { role: 'VIEWER', scopeType: 'COST_CENTER', scopeId: centerB },
     ]);
     await userWith('jefeGlobal', [{ role: 'DEPARTMENT_HEAD', scopeType: 'GLOBAL' }]);
     await userWith('revocado', [

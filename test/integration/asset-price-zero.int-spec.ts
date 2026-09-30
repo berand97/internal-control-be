@@ -108,7 +108,7 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
     );
     acquisitionTypeId = await scalar<string>(dataSource, `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`);
     director = await userWith('director', 'INTERNAL_CONTROL_DIRECTOR', 'GLOBAL');
-    await userWith('custodianA', 'CUSTODIAN', 'COST_CENTER', centerA);
+    await userWith('viewerA', 'VIEWER', 'COST_CENTER', centerA);
   });
 
   afterAll(async () => {
@@ -117,7 +117,7 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
 
   it('el catálogo de motivos nace vacío y solo quien tiene el permiso de gestión lo administra', async () => {
     expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_price_zero_reason')).toBe(0);
-    const empty = await http().get('/api/v1/assets/price-zero-reasons').set(auth('custodianA')).expect(200);
+    const empty = await http().get('/api/v1/assets/price-zero-reasons').set(auth('viewerA')).expect(200);
     expectConforms('get', '/api/v1/assets/price-zero-reasons', 200, empty.body);
     expect(empty.body.data).toEqual([]);
     // Sembrado solo a la Dirección de Control Interno.
@@ -129,7 +129,7 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
       ),
     ).toEqual(['INTERNAL_CONTROL_DIRECTOR']);
 
-    const denied = await http().post('/api/v1/assets/price-zero-reasons').set(auth('custodianA')).send({ label: 'Donación' });
+    const denied = await http().post('/api/v1/assets/price-zero-reasons').set(auth('viewerA')).send({ label: 'Donación' });
     expect(denied.status).toBe(403);
     const created = await http().post('/api/v1/assets/price-zero-reasons').set(auth('director')).send({ label: 'Donación sin avalúo' });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
@@ -190,14 +190,14 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
     const all = await list('director', { costCenterId: centerA });
     expect(all.items.map((row) => row.id).sort()).toEqual([a1, a2].sort());
     expect(all.summary).toEqual({ total: 2, classified: 0, unclassified: 2 });
-    // El custodio del centro A solo ve su centro, aunque pida el B.
-    expect((await list('custodianA')).items.every((row) => row.costCenter?.id === centerA)).toBe(true);
-    expect((await list('custodianA', { costCenterId: centerB })).total).toBe(0);
+    // La consulta del centro A solo ve su centro, aunque pida el B.
+    expect((await list('viewerA')).items.every((row) => row.costCenter?.id === centerA)).toBe(true);
+    expect((await list('viewerA', { costCenterId: centerB })).total).toBe(0);
     expect((await list('director', { costCenterId: centerB })).items.map((row) => row.id)).toContain(b1);
 
     const put = (who: string, id: string, body: Record<string, unknown>) =>
       http().put(`/api/v1/assets/${id}/price-zero-reason`).set(auth(who)).send(body);
-    expect((await put('custodianA', a1, { reasonId })).status).toBe(403);
+    expect((await put('viewerA', a1, { reasonId })).status).toBe(403);
     const set = await put('director', a1, { reasonId, note: 'Acta de comodato 2019' });
     expect(set.status, JSON.stringify(set.body)).toBe(200);
     expectConforms('put', '/api/v1/assets/{id}/price-zero-reason', 200, set.body);

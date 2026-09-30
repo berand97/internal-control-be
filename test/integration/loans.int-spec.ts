@@ -336,7 +336,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     ]);
     await user('jefeB', 'JefeDestino', 'Decano', [{ role: 'DEPARTMENT_HEAD', scopeType: 'COST_CENTER', scopeId: centerB }]);
     await user('jefeGlobal', 'JefeGlobal', 'Jefe', [{ role: 'DEPARTMENT_HEAD', scopeType: 'GLOBAL' }]);
-    await user('custodio', 'Custodio', 'Auxiliar', [{ role: 'CUSTODIAN', scopeType: 'COST_CENTER', scopeId: centerA }]);
+    await user('lector', 'Lector', 'Auxiliar', [{ role: 'VIEWER', scopeType: 'COST_CENTER', scopeId: centerA }]);
     await user('entrega', 'Entregadora', 'JEFE CENTRO DE IDIOMAS', []);
     await user('recibe', 'Receptor', 'DOCENTE AULA', []);
     await user('audita', 'Auditora', 'PROFESIONAL DE CONTROL INTERNO', []);
@@ -403,8 +403,8 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     const global = await approve(byHead, 'jefeGlobal');
     expect([global.status, global.body.error.code]).toEqual([403, 'SCOPE_NO_COST_CENTER']);
     // Sin ningún permiso de aprobación.
-    const custodian = await approve(byHead, 'custodio');
-    expect([custodian.status, custodian.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
+    const reader = await approve(byHead, 'lector');
+    expect([reader.status, reader.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
 
     const head = await approve(byHead, 'jefeA');
     expect(head.status).toBe(200);
@@ -884,7 +884,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         );
 
       // Jefe del origen (el que aprueba) y jefe del destino (la dependencia que recibe) ven el préstamo.
-      for (const who of ['jefeA', 'jefeB', 'custodio']) {
+      for (const who of ['jefeA', 'jefeB', 'lector']) {
         const response = await get(who).expect(200);
         expectConforms('get', '/api/v1/loans/{id}', 200, response.body);
         expect(await listIds(who)).toContain(id);
@@ -1161,7 +1161,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect([own.status, own.body.error.code]).toEqual([403, 'LOAN_SOD_VIOLATION']);
       // Jefe del destino: no aprueba (404 como en la aprobación del préstamo); sin permiso: 403.
       expect((await http().post(`/api/v1/loans/${loan.id}/extension/approve`).set(auth('jefeB')).send({})).status).toBe(404);
-      expect((await http().post(`/api/v1/loans/${loan.id}/extension/approve`).set(auth('custodio')).send({})).status).toBe(403);
+      expect((await http().post(`/api/v1/loans/${loan.id}/extension/approve`).set(auth('lector')).send({})).status).toBe(403);
 
       const approved = await http().post(`/api/v1/loans/${loan.id}/extension/approve`).set(auth('jefeA')).send({}).expect(200);
       expectConforms('post', '/api/v1/loans/{id}/extension/approve', 200, approved.body);

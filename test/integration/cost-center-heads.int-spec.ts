@@ -83,7 +83,7 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
     await userWith('jefe', [{ role: 'DEPARTMENT_HEAD', scopeType: 'GLOBAL' }]);
     await userWith('consulta', [{ role: 'VIEWER', scopeType: 'COST_CENTER', scopeId: centerA }]);
     await userWith('sinRol', []);
-    await userWith('custodio', [{ role: 'CUSTODIAN', scopeType: 'COST_CENTER', scopeId: centerA }]);
+    await userWith('jefeAcotado', [{ role: 'DEPARTMENT_HEAD', scopeType: 'COST_CENTER', scopeId: centerA }]);
     await userWith('auditor', [{ role: 'AUDITOR', scopeType: 'GLOBAL' }]);
   });
 
@@ -269,21 +269,21 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
     expect(endDenied.status).toBe(403);
   });
 
-  it(':own con asignación COST_CENTER: el custodio acotado puede solicitar un préstamo, no a nombre de otro', async () => {
+  it(':own con asignación COST_CENTER: un jefe con rol acotado puede solicitar un préstamo, no a nombre de otro', async () => {
     const loan = {
       assets: [assetsA[0]],
       targetCostCenterId: centerB,
       expectedReturnDate: '2030-12-01',
       justification: 'Préstamo para una actividad académica del semestre',
-      contactPerson: users['custodio']?.personId,
+      contactPerson: users['jefeAcotado']?.personId,
     };
-    const own = await http().post('/api/v1/loans').set(auth('custodio')).send(loan);
+    const own = await http().post('/api/v1/loans').set(auth('jefeAcotado')).send(loan);
     expect(own.status).toBe(201);
-    expect(own.body.data.requestedBy).toBe(users['custodio']?.id);
+    expect(own.body.data.requestedBy).toBe(users['jefeAcotado']?.id);
 
     const onBehalf = await http()
       .post('/api/v1/loans')
-      .set(auth('custodio'))
+      .set(auth('jefeAcotado'))
       .send({ ...loan, assets: [assetsA[1]], requestedBy: users['admin']?.id });
     expect(onBehalf.status).toBe(403);
     expect(onBehalf.body.error.code).toBe('OUT_OF_SCOPE');

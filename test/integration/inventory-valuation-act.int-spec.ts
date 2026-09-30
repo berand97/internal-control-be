@@ -351,7 +351,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       valuationDate: '2026-06-30',
     });
     // Sin el permiso de programar no se asocia.
-    const outsider = await person('Ajena', 'CUSTODIAN');
+    const outsider = await person('Ajena', 'DEPARTMENT_HEAD');
     expect((await http().put(`/api/v1/inventories/${id}/accounting-cut`).set(as(outsider)).send({ accountingCutId: null })).status).toBe(403);
 
     expect((await post(director, `/${id}/start`)).status).toBe(200);
@@ -595,7 +595,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       expect(errorCode(blocked)).toBe('DOCUMENT_FORMAT_NOT_READY');
       expect(blocked.body.error.details).toEqual([{ field: 'reason', message: 'FORMAT_NOT_READY' }]);
       // Encolar exige el permiso de programar tomas.
-      const custodian = await person('Custodia', 'CUSTODIAN');
+      const custodian = await person('Custodia', 'DEPARTMENT_HEAD');
       expect((await post(custodian, `/${orphan}/act/enqueue`)).status).toBe(403);
 
       await restore();

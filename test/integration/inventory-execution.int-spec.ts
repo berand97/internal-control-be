@@ -48,7 +48,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
   let director: Who;
   let approver: Who;
   let responsible: Who;
-  let outsiderCustodian: Who;
+  let outsiderExecutor: Who;
   let outsiderHead: Who;
   let base: { categoryId: string; acquisitionTypeId: string; roomA: string; roomB: string; otherCenter: string };
   const today = bogotaDate(new Date());
@@ -186,8 +186,8 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     };
     director = await person('Directora', 'INTERNAL_CONTROL_DIRECTOR');
     approver = await person('Aprobador', 'INTERNAL_CONTROL_DIRECTOR');
-    responsible = await person('Responsable', 'CUSTODIAN', otherCenter);
-    outsiderCustodian = await person('Custodio', 'CUSTODIAN', otherCenter);
+    responsible = await person('Responsable', 'DEPARTMENT_HEAD', otherCenter);
+    outsiderExecutor = await person('Custodio', 'DEPARTMENT_HEAD', otherCenter);
     outsiderHead = await person('Jefe', 'DEPARTMENT_HEAD', otherCenter);
   });
 
@@ -203,9 +203,9 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     await head(headDirector.personId, centerId);
     const inventoryId = await schedule(centerId, responsible.userId);
 
-    const byCustodian = await post(outsiderCustodian, `/${inventoryId}/start`);
-    expect(byCustodian.status).toBe(403);
-    expect(errorCode(byCustodian)).toBe('INVENTORY_ACTOR_NOT_ALLOWED');
+    const byExecutor = await post(outsiderExecutor, `/${inventoryId}/start`);
+    expect(byExecutor.status).toBe(403);
+    expect(errorCode(byExecutor)).toBe('INVENTORY_ACTOR_NOT_ALLOWED');
     const byHead = await post(outsiderHead, `/${inventoryId}/start`);
     expect(byHead.status).toBe(403);
     expect(errorCode(byHead)).toBe('INVENTORY_ACTOR_NOT_ALLOWED');
@@ -222,7 +222,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expectConforms('post', '/api/v1/inventories/{id}/start', 200, started.body);
 
     const [item] = started.body.data.items as Item[];
-    const verifyByOutsider = await post(outsiderCustodian, `/${inventoryId}/verify-asset`, {
+    const verifyByOutsider = await post(outsiderExecutor, `/${inventoryId}/verify-asset`, {
       assetId: item?.assetId,
       condition: 'GOOD',
     });
@@ -231,9 +231,9 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect(closeByAuditedHead.status).toBe(403);
     expect(errorCode(closeByAuditedHead)).toBe('INVENTORY_CONFLICT_OF_INTEREST');
 
-    // Leer el detalle (trae activos) exige alcance sobre el centro de la toma: el custodio de otro centro recibe 404
+    // Leer el detalle (trae activos) exige alcance sobre el centro de la toma: un ejecutor de otro centro recibe 404
     // aunque tenga inventory:read:global; quien tiene asset:read:global sí lo lee. La lista no trae activos.
-    const hidden = await http().get(`/api/v1/inventories/${inventoryId}`).set(as(outsiderCustodian));
+    const hidden = await http().get(`/api/v1/inventories/${inventoryId}`).set(as(outsiderExecutor));
     expect([hidden.status, errorCode(hidden)]).toEqual([404, 'RESOURCE_NOT_FOUND']);
     const read = await http().get(`/api/v1/inventories/${inventoryId}`).set(as(director));
     expect(read.status).toBe(200);
@@ -245,7 +245,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
 
   it('el custodio de un activo del alcance no ejecuta la toma aunque sea su responsable; quien programa sí', async () => {
     const centerId = await center('Custodia');
-    const custodianResponsible = await person('CustodioResponsable', 'CUSTODIAN', base.otherCenter);
+    const custodianResponsible = await person('CustodioResponsable', 'DEPARTMENT_HEAD', base.otherCenter);
     await newAsset(centerId, { responsibleId: custodianResponsible.personId });
     const inventoryId = await schedule(centerId, custodianResponsible.userId);
 
@@ -443,7 +443,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       ),
     ).rejects.toThrow(/chk_inv_item_missing_cause/);
 
-    const usage = await http().get('/api/v1/inventories/catalogs/missing-causes/other-usage').set(as(outsiderCustodian));
+    const usage = await http().get('/api/v1/inventories/catalogs/missing-causes/other-usage').set(as(outsiderExecutor));
     expect(usage.status).toBe(200);
     expectConforms('get', '/api/v1/inventories/catalogs/missing-causes/other-usage', 200, usage.body);
     expect(usage.body.data.items).toEqual(
@@ -480,7 +480,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect(errorCode(ani)).toBe('INVENTORY_CATALOG_ENTRY_UNAVAILABLE');
     const setByOutsider = await http()
       .put(`/api/v1/inventories/${inventoryId}/items/${foundItemId}/finding-category`)
-      .set(as(outsiderCustodian))
+      .set(as(outsiderExecutor))
       .send({ code: 'AU' });
     expect(errorCode(setByOutsider)).toBe('INVENTORY_ACTOR_NOT_ALLOWED');
 
@@ -605,7 +605,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
   });
 
   it('catálogos: leer con inventory:read, administrar solo con inventory_catalog:manage; tres categorías, sin ANI ni marca de pendiente', async () => {
-    const list = await http().get('/api/v1/inventories/catalogs/finding-categories').set(as(outsiderCustodian));
+    const list = await http().get('/api/v1/inventories/catalogs/finding-categories').set(as(outsiderExecutor));
     expect(list.status).toBe(200);
     expectConforms('get', '/api/v1/inventories/catalogs/finding-categories', 200, list.body);
     const rows = list.body.data as Array<{ code: string; label: string; isActive: boolean } & Record<string, unknown>>;
@@ -621,7 +621,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
 
     const denied = await http()
       .post('/api/v1/inventories/catalogs/finding-categories')
-      .set(as(outsiderCustodian))
+      .set(as(outsiderExecutor))
       .send({ code: 'XX', label: 'No permitida' });
     expect(denied.status).toBe(403);
 

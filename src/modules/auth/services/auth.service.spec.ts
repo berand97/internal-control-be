@@ -791,7 +791,7 @@ describe('requiresMfaEnrollment', () => {
     ).toBe(false);
     expect(
       requiresMfaEnrollment({
-        roleCodes: ['VIEWER', 'CUSTODIAN'],
+        roleCodes: ['VIEWER', 'DEPARTMENT_HEAD'],
         permissionCodes: ['asset:read:org_unit'],
       }),
     ).toBe(false);
