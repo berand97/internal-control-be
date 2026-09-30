@@ -27,6 +27,7 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
   let categoryId: string;
   let acquisitionTypeId: string;
   const tokens: Record<string, string> = {};
+  const reasonIds: string[] = [];
 
   const http = () => request(app.getHttpServer());
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who] ?? ''}` });
@@ -88,6 +89,9 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
   });
 
   afterAll(async () => {
+    // El catálogo de motivos nace vacío (asset-price-zero lo comprueba): no se dejan motivos de este archivo.
+    await dataSource.query('DELETE FROM asset_price_zero_classification WHERE reason_id = ANY($1::uuid[])', [reasonIds]);
+    await dataSource.query('DELETE FROM asset_price_zero_reason WHERE id = ANY($1::uuid[])', [reasonIds]);
     await app.close();
   });
 
@@ -96,6 +100,7 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
     expect(await flagsOf(id)).toContain('PRICE_ZERO');
     const reason = await http().post('/api/v1/assets/price-zero-reasons').set(auth('director')).send({ label: `Donación ${randomUUID().slice(0, 4)}` });
     const reasonId = reason.body.data.id as string;
+    reasonIds.push(reasonId);
     await http().put(`/api/v1/assets/${id}/price-zero-reason`).set(auth('director')).send({ reasonId, note: 'Sin factura' }).expect(200);
 
     // El detalle trae el motivo de precio cero.
