@@ -193,6 +193,8 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
 
   afterAll(async () => {
     await discardInventoryActRequests(dataSource);
+    // Los avisos de tomas no quedan en la cola compartida: otro archivo despacha el outbox por orden de llegada.
+    await dataSource.query(`DELETE FROM mail_outbox WHERE entity_type = 'INVENTORY' AND delivery_status = 'PENDING_SEND'`);
     await app.close();
   });
 

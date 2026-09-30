@@ -192,6 +192,8 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
 
   afterAll(async () => {
     delete process.env['INVENTORY_WEEKLY_CONCENTRATION_THRESHOLD'];
+    // Los avisos de tomas no quedan en la cola compartida: otro archivo despacha el outbox por orden de llegada.
+    await dataSource.query(`DELETE FROM mail_outbox WHERE entity_type = 'INVENTORY' AND delivery_status = 'PENDING_SEND'`);
     await app.close();
   });
 

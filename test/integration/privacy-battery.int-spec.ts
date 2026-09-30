@@ -275,6 +275,8 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
   });
 
   afterAll(async () => {
+    // Los avisos de tomas no quedan en la cola compartida: otro archivo despacha el outbox por orden de llegada.
+    await dataSource.query(`DELETE FROM mail_outbox WHERE entity_type = 'INVENTORY' AND delivery_status = 'PENDING_SEND'`);
     const docs = ((await dataSource.query(`SELECT id FROM document WHERE entity_type = 'LOAN' AND entity_id = $1`, [ids['loan'] ?? null])) as Array<{
       id: string;
     }>).map((row) => row.id);
