@@ -243,4 +243,15 @@ describe('plan del Excel del organigrama', () => {
     const plan = planOrgChart(baseSnapshot(), only({ centers: [centerRow(2, { code: '4110', name: 'CENTRO 4110' })] }));
     expect(plan.changes).toEqual([]);
   });
+
+  it('códigos internos que solo difieren en mayúsculas son unidades distintas (ida y vuelta sin cambios)', async () => {
+    const snapshot = baseSnapshot();
+    const withCase = {
+      ...snapshot,
+      units: [...snapshot.units, unit('low', 'S24c5809', 'Unidad de prueba', null, null), unit('up', 'S24C5809', 'Unidad de prueba', null, null)],
+    };
+    const plan = planOrgChart(withCase, await roundTrip(withCase));
+    expect(plan.errors).toEqual([]);
+    expect(plan.changes).toEqual([]);
+  });
 });

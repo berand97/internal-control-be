@@ -329,8 +329,10 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         valid = false;
       }
 
-      let existing = row.code ? unitByCode.get(row.code.toUpperCase()) : undefined;
-      let code = row.code ? row.code.toUpperCase() : null;
+      // El código interno distingue mayúsculas en la base (S24c5809 y S24C5809 pueden ser dos unidades): primero el
+      // exacto; en mayúsculas solo si no hay exacto.
+      let existing = row.code ? (unitByCode.get(row.code) ?? unitByCode.get(row.code.toUpperCase())) : undefined;
+      let code = row.code ? (existing?.code ?? row.code.toUpperCase()) : null;
       if (!existing && code) {
         if (!UNIT_CODE_PATTERN.test(code) || code.length > UNIT_CODE_MAX) {
           unitError(
@@ -418,7 +420,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       unit.parentKey = null;
       continue;
     }
-    const parent = /^[0-9]+$/.test(text) ? finalPrefix.get(text) : finalUnitByCode.get(text.toUpperCase());
+    const parent = /^[0-9]+$/.test(text) ? finalPrefix.get(text) : (finalUnitByCode.get(text) ?? finalUnitByCode.get(text.toUpperCase()));
     if (!parent) {
       unitError(unit.rowNumber, UNIT_HEADERS.parent, `No hay ninguna unidad activa con prefijo o código interno «${text}»`);
       continue;
