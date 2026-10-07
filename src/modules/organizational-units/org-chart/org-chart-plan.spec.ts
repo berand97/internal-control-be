@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import { OrgRelationType, OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { orgChartExportRows } from './org-chart-export.js';
 import { planOrgChart } from './org-chart-plan.js';
@@ -377,5 +378,22 @@ describe('plan del Excel del organigrama', () => {
         ]);
       }
     });
+  });
+
+  it('cada encabezado de las dos hojas tiene un comentario que lo explica', async () => {
+    const [units, centers] = orgChartExportRows(baseSnapshot().units, baseSnapshot().centers);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load((await buildOrgChartWorkbook(units, centers, { example: false, generatedAt: new Date() })) as unknown as ArrayBuffer);
+    const noteText = (note: ExcelJS.Cell['note']): string =>
+      typeof note === 'string' ? note : (note?.texts ?? []).map((part) => part.text).join('');
+    for (const name of ['Organigrama', 'Centros de costo']) {
+      const header = workbook.getWorksheet(name)?.getRow(1);
+      const cells: Array<[string, string]> = [];
+      header?.eachCell((cell) => cells.push([String(cell.value), noteText(cell.note).trim()]));
+      expect(cells).toHaveLength(9);
+      for (const [title, note] of cells) {
+        expect(note.length, `${name} · ${title}`).toBeGreaterThan(20);
+      }
+    }
   });
 });
