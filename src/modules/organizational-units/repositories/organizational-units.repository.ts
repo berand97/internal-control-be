@@ -61,6 +61,10 @@ export class TypeOrmOrganizationalUnitsRepository
     });
   }
 
+  costCenterExists(id: string): Promise<boolean> {
+    return this.costCenters.exists({ where: { id } });
+  }
+
   insert(record: CreateOrgUnitRecord): Promise<OrganizationalUnit> {
     const now = new Date();
     const entity = this.units.create({

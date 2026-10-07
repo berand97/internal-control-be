@@ -1,6 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type { OrganizationalUnit } from '../../entities/organizational-unit.entity.js';
-import { OrgUnitType } from '../../enums/org-unit-type.enum.js';
+import {
+  ORG_RELATION_TYPE_LABELS,
+  ORG_UNIT_TYPE_LABELS,
+  OrgRelationType,
+  OrgUnitType,
+} from '../../enums/org-unit-type.enum.js';
 
 export class OrganizationalUnitTreeResponseDto {
   @ApiProperty({ format: 'uuid' })
@@ -15,8 +20,29 @@ export class OrganizationalUnitTreeResponseDto {
   @ApiProperty()
   readonly name!: string;
 
-  @ApiProperty({ enum: OrgUnitType })
+  @ApiProperty({ enum: OrgUnitType, enumName: 'OrgUnitType' })
   readonly type!: OrgUnitType;
+
+  @ApiProperty({ description: 'Tipo en español (Rectoría, Vicerrectoría, Facultad, …)' })
+  readonly unitTypeLabel!: string;
+
+  @ApiProperty({
+    enum: OrgRelationType,
+    enumName: 'OrgRelationType',
+    description: 'Línea del organigrama hacia su padre: AUTHORITY (autoridad), ADVISORY (asesoría), COORDINATION',
+  })
+  readonly relationType!: OrgRelationType;
+
+  @ApiProperty({ description: 'Línea en español (Autoridad, Asesoría, Coordinación)' })
+  readonly relationTypeLabel!: string;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'uuid',
+    nullable: true,
+    description: 'Centro de costo «propio» del cuadro (p. ej. unidad 25 → 2510 Decanatura). Solo por Excel o PATCH',
+  })
+  readonly headCostCenterId!: string | null;
 
   @ApiProperty()
   readonly hierarchyLevel!: number;
@@ -47,6 +73,10 @@ export class OrganizationalUnitTreeResponseDto {
       code: unit.code,
       name: unit.name,
       type: unit.unitType,
+      unitTypeLabel: ORG_UNIT_TYPE_LABELS[unit.unitType] ?? unit.unitType,
+      relationType: unit.relationType,
+      relationTypeLabel: ORG_RELATION_TYPE_LABELS[unit.relationType] ?? unit.relationType,
+      headCostCenterId: unit.headCostCenterId,
       hierarchyLevel: unit.hierarchyLevel,
       hierarchyPath: unit.hierarchyPath,
       isActive: unit.isActive,

@@ -47,6 +47,7 @@ describe('OrganizationalUnitsService', () => {
       findChildren: vi.fn(),
       countActiveChildren: vi.fn().mockResolvedValue(0),
       countActiveCostCenters: vi.fn().mockResolvedValue(0),
+      costCenterExists: vi.fn().mockResolvedValue(true),
       insert: vi.fn(),
       update: vi.fn(),
       deactivate: vi.fn(),

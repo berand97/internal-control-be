@@ -1,5 +1,5 @@
 import type { OrganizationalUnit } from '../entities/organizational-unit.entity.js';
-import type { OrgUnitType } from '../enums/org-unit-type.enum.js';
+import type { OrgRelationType, OrgUnitType } from '../enums/org-unit-type.enum.js';
 
 export interface CreateOrgUnitRecord {
   readonly parentId: string | null;
@@ -10,6 +10,8 @@ export interface CreateOrgUnitRecord {
   readonly hierarchyPath: string;
   readonly isActive: boolean;
   readonly codePrefix: string | null;
+  readonly relationType?: OrgRelationType;
+  readonly headCostCenterId?: string | null;
 }
 
 export interface UpdateOrgUnitRecord {
@@ -21,6 +23,8 @@ export interface UpdateOrgUnitRecord {
   readonly hierarchyPath?: string;
   readonly isActive?: boolean;
   readonly codePrefix?: string | null;
+  readonly relationType?: OrgRelationType;
+  readonly headCostCenterId?: string | null;
 }
 
 export interface OrganizationalUnitsRepository {
@@ -37,6 +41,7 @@ export interface OrganizationalUnitsRepository {
    * que conservan su referencia y su historial de ubicación (igual que los hijos, que solo cuentan si están activos).
    */
   countActiveCostCenters(orgUnitId: string): Promise<number>;
+  costCenterExists(id: string): Promise<boolean>;
   insert(record: CreateOrgUnitRecord): Promise<OrganizationalUnit>;
   update(id: string, record: UpdateOrgUnitRecord): Promise<void>;
   deactivate(id: string): Promise<void>;

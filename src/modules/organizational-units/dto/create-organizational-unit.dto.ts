@@ -10,7 +10,12 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
-import { ORG_UNIT_TYPES, OrgUnitType } from '../enums/org-unit-type.enum.js';
+import {
+  ORG_RELATION_TYPES,
+  ORG_UNIT_TYPES,
+  OrgRelationType,
+  OrgUnitType,
+} from '../enums/org-unit-type.enum.js';
 
 export class CreateOrganizationalUnitDto {
   @ApiProperty({ example: 'DCI', maxLength: 20 })
@@ -59,4 +64,24 @@ export class CreateOrganizationalUnitDto {
   @IsOptional()
   @Matches(/^[0-9]{1,4}$/, { message: 'El prefijo son de 1 a 4 dígitos' })
   readonly codePrefix?: string | null;
+
+  @ApiPropertyOptional({
+    enum: ORG_RELATION_TYPES,
+    enumName: 'OrgRelationType',
+    description: 'Línea del organigrama hacia su padre (por defecto AUTHORITY)',
+  })
+  @IsOptional()
+  @IsIn(ORG_RELATION_TYPES)
+  readonly relationType?: OrgRelationType;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    format: 'uuid',
+    nullable: true,
+    description: 'Centro de costo «propio» del cuadro (p. ej. 2510 Decanatura para la unidad 25). null lo quita',
+  })
+  @Transform(({ value }: { value: unknown }) => (value === '' ? null : value))
+  @IsOptional()
+  @IsUUID('4')
+  readonly headCostCenterId?: string | null;
 }

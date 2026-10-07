@@ -91,6 +91,9 @@ export class OrganizationalUnitsService {
     if (dto.codePrefix && (dto.isActive ?? true)) {
       await this.assertPrefixFree(dto.codePrefix, null);
     }
+    if (dto.headCostCenterId) {
+      await this.requireCostCenter(dto.headCostCenterId);
+    }
     try {
       const unit = await this.unitsRepository.insert({
         parentId: parent?.id ?? null,
@@ -101,6 +104,8 @@ export class OrganizationalUnitsService {
         hierarchyPath: childPath(parent?.hierarchyPath ?? null, dto.code),
         isActive: dto.isActive ?? true,
         codePrefix: dto.codePrefix ?? null,
+        ...(dto.relationType ? { relationType: dto.relationType } : {}),
+        headCostCenterId: dto.headCostCenterId ?? null,
       });
       await this.auditLogsRepository.record({
         action: AuditAction.OrgUnitCreated,
@@ -155,6 +160,10 @@ export class OrganizationalUnitsService {
       await this.assertPrefixFree(nextPrefix, unit.id);
     }
 
+    if (dto.headCostCenterId) {
+      await this.requireCostCenter(dto.headCostCenterId);
+    }
+
     const nextCode = dto.code ?? unit.code;
     const nextPath = childPath(parent?.hierarchyPath ?? null, nextCode);
     const nextLevel = parent ? parent.hierarchyLevel + 1 : 0;
@@ -168,6 +177,8 @@ export class OrganizationalUnitsService {
         ...(dto.code !== undefined ? { code: dto.code } : {}),
         ...(dto.codePrefix !== undefined ? { codePrefix: dto.codePrefix } : {}),
         ...(dto.parentId !== undefined ? { parentId } : {}),
+        ...(dto.relationType !== undefined ? { relationType: dto.relationType } : {}),
+        ...(dto.headCostCenterId !== undefined ? { headCostCenterId: dto.headCostCenterId } : {}),
         ...(pathChanged
           ? { hierarchyPath: nextPath, hierarchyLevel: nextLevel }
           : {}),
@@ -239,6 +250,14 @@ export class OrganizationalUnitsService {
         `El prefijo ${codePrefix} ya es de la unidad ${holder.name}`,
         [{ field: 'codePrefix', message: holder.code }],
       );
+    }
+  }
+
+  private async requireCostCenter(id: string): Promise<void> {
+    if (!(await this.unitsRepository.costCenterExists(id))) {
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo propio indicado', [
+        { field: 'headCostCenterId', message: id },
+      ]);
     }
   }
 
