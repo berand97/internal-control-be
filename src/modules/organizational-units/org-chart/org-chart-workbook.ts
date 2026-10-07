@@ -79,10 +79,10 @@ const UNIT_COLUMNS: ReadonlyArray<ColumnSpec> = [
   { header: UNIT_HEADERS.prefix, width: 10, readOnly: false, note: 'Dígitos con que empiezan los códigos de sus centros (4, 43…). El de una hija es el de su padre más un dígito. Vacío: sin prefijo (consejos, cuadros sin centros).' },
   { header: UNIT_HEADERS.name, width: 52, readOnly: false, note: 'Nombre del cuadro del organigrama. Obligatorio.' },
   { header: UNIT_HEADERS.type, width: 20, readOnly: false, list: ORG_UNIT_TYPES.map((type) => ORG_UNIT_TYPE_LABELS[type]), note: 'Tipo de cuadro (lista). Obligatorio en las nuevas.' },
-  { header: UNIT_HEADERS.parent, width: 14, readOnly: false, note: 'Prefijo de la unidad de la que depende; si esa unidad no tiene prefijo, su código interno. Vacío: raíz.' },
-  { header: UNIT_HEADERS.relation, width: 16, readOnly: false, list: ORG_RELATION_TYPES.map((type) => ORG_RELATION_TYPE_LABELS[type]), note: 'Línea del organigrama hacia la unidad de la que depende. Vacío: Autoridad.' },
-  { header: UNIT_HEADERS.headCenter, width: 14, readOnly: false, note: 'Código del centro de costo propio del cuadro (p. ej. 2510 para la Facultad 25). Opcional.' },
-  { header: UNIT_HEADERS.status, width: 12, readOnly: false, list: [STATUS_ACTIVE, STATUS_ARCHIVED], note: 'Activo o Archivado.' },
+  { header: UNIT_HEADERS.parent, width: 14, readOnly: false, note: 'Prefijo de la unidad de la que depende; si esa unidad no tiene prefijo, su código interno. RAÍZ: queda en la raíz. Vacío: una existente conserva su padre; una nueva lo deduce del prefijo (43 → 4; 431 → 43) o, con prefijo de un dígito, cuelga de la Rectoría; si no, raíz.' },
+  { header: UNIT_HEADERS.relation, width: 16, readOnly: false, list: ORG_RELATION_TYPES.map((type) => ORG_RELATION_TYPE_LABELS[type]), note: 'Línea del organigrama hacia la unidad de la que depende. Vacío: una existente conserva la suya; una nueva, Autoridad.' },
+  { header: UNIT_HEADERS.headCenter, width: 14, readOnly: false, note: 'Código del centro de costo propio del cuadro (p. ej. 2510 para la Facultad 25). NINGUNO: se le quita. Vacío: una existente conserva el suyo; una nueva de prefijo X toma X010 si existe.' },
+  { header: UNIT_HEADERS.status, width: 12, readOnly: false, list: [STATUS_ACTIVE, STATUS_ARCHIVED], note: 'Activo o Archivado. Vacío: una existente conserva su estado; una nueva, Activo.' },
   { header: UNIT_HEADERS.action, width: 12, readOnly: false, list: [ACTION_DELETE, ACTION_ARCHIVE], note: 'Vacío: se crea o actualiza. ELIMINAR: se borra (o se archiva si tiene historia). ARCHIVAR: se desactiva.' },
   { header: UNIT_HEADERS.code, width: 22, readOnly: true, note: 'Identifica la unidad (no lo cambie). En una fila nueva déjelo vacío: se genera.' },
 ];
@@ -114,6 +114,11 @@ const INSTRUCTIONS: ReadonlyArray<string> = [
   '7. Para cambiar el código de un centro escriba el código actual en «Código anterior» y el nuevo en «Código».',
   '8. Las columnas grises son de solo lectura (las hojas están protegidas sin contraseña).',
   '9. Unidades nuevas: deje vacío «Código interno»; se genera solo.',
+  '10. Celdas vacías en el Organigrama: una unidad existente conserva lo que tiene (Depende de, Línea, Centro propio,',
+  '   Estado). Para volverla raíz escriba RAÍZ en «Depende de»; para quitarle el centro propio, NINGUNO.',
+  '11. Una unidad nueva sin «Depende de» lo deduce del prefijo (43 → 4; 431 → 43, si no 4); con prefijo de un dígito',
+  '   cuelga de la Rectoría (si hay una sola); sin prefijo queda en la raíz. Sin «Centro propio», la de prefijo X toma',
+  '   X010 si existe. Sin «Línea», Autoridad. La previsualización avisa de cada valor deducido.',
 ];
 
 const columnLetter = (index: number): string => String.fromCharCode(65 + index);
