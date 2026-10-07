@@ -67,3 +67,92 @@ export const childPrefixError = (childPrefix: string, ancestorPrefix: string | n
   }
   return `El prefijo ${childPrefix} no cuadra con el de la unidad de la que depende (${ancestorPrefix}): debe ser ${ancestorPrefix} seguido de un dígito (${ancestorPrefix}0–${ancestorPrefix}9)`;
 };
+
+export interface PrefixCheck {
+  readonly level: 'OK' | 'WARNING' | 'ERROR';
+  readonly message: string | null;
+}
+
+/**
+ * Regla jerárquica con una excepción para el organigrama real: si el prefijo no empieza por el del ancestro pero
+ * ninguna otra unidad activa es dueña de sus dígitos iniciales (30 bajo la Académica «2» cuando no existe la unidad
+ * «3»: los centros 30xx son de la Académica), se acepta con advertencia. Si otra unidad lo es (53 bajo «4» con la
+ * unidad «5»), es error.
+ */
+export const checkUnitPrefix = (
+  childPrefix: string,
+  ancestorPrefix: string | null,
+  otherActivePrefixes: ReadonlySet<string>,
+): PrefixCheck => {
+  const message = childPrefixError(childPrefix, ancestorPrefix);
+  if (!message) {
+    return { level: 'OK', message: null };
+  }
+  const owner = [...otherActivePrefixes]
+    .filter((prefix) => prefix.length < childPrefix.length && childPrefix.startsWith(prefix))
+    .sort((left, right) => right.length - left.length)[0];
+  if (owner) {
+    return { level: 'ERROR', message: `${message}; los códigos que empiezan por ${owner} son de otra unidad` };
+  }
+  return {
+    level: 'WARNING',
+    message: `El prefijo ${childPrefix} no empieza por el de la unidad de la que depende (${ancestorPrefix ?? ''}); se acepta porque ninguna otra unidad tiene sus dígitos iniciales`,
+  };
+};
+
+export interface OrgChartCodeSuggestion {
+  /** Parte fija del código (el front la muestra bloqueada). */
+  readonly fixedPrefix: string;
+  /** Siguiente código libre; null si no queda ninguno. */
+  readonly code: string | null;
+  /** Candidatos en orden (para mostrar el rango). */
+  readonly candidates: ReadonlyArray<string>;
+}
+
+const firstFree = (candidates: ReadonlyArray<string>, used: ReadonlySet<string>): string | null =>
+  candidates.find((candidate) => !used.has(candidate)) ?? null;
+
+/** Hijo de un centro XYZ0 (Z ≠ 0): XYZ1–XYZ9 sin XYZ5 (XYZ5 es hermano, no hijo). null si el padre no es XYZ0. */
+export const suggestUnderGroupCenter = (parentCode: string, used: ReadonlySet<string>): OrgChartCodeSuggestion | null => {
+  if (!isDetailCode(parentCode) || parentCode[3] !== '0' || parentCode[2] === '0') {
+    return null;
+  }
+  const fixedPrefix = parentCode.slice(0, 3);
+  const candidates = ['1', '2', '3', '4', '6', '7', '8', '9'].map((digit) => `${fixedPrefix}${digit}`);
+  return { fixedPrefix, code: firstFree(candidates, used), candidates };
+};
+
+/**
+ * Centro de una unidad por su prefijo: X → X010, X020… (los centros propios de la rectoría o vicerrectoría van en
+ * X0Z0); XY → XY10, XY20…; XYZ → XYZ0, XYZ1…; XYZW → él mismo.
+ */
+export const suggestForUnitPrefix = (prefix: string, used: ReadonlySet<string>): OrgChartCodeSuggestion => {
+  let candidates: string[];
+  if (prefix.length === 1) {
+    candidates = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => `${prefix}0${digit}0`);
+  } else if (prefix.length === 2) {
+    candidates = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => `${prefix}${digit}0`);
+  } else if (prefix.length === 3) {
+    candidates = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => `${prefix}${digit}`);
+  } else {
+    candidates = [prefix];
+  }
+  return { fixedPrefix: prefix, code: firstFree(candidates, used), candidates };
+};
+
+export interface UnitPrefixSuggestion {
+  readonly fixedPrefix: string;
+  readonly suggested: string | null;
+  readonly taken: ReadonlyArray<string>;
+}
+
+/**
+ * Prefijo de una unidad nueva bajo un ancestro con prefijo p: p seguido de un dígito 1–9 (p0 queda para los centros
+ * propios del ancestro). Sin ancestro con prefijo: un dígito 1–9.
+ */
+export const suggestUnitPrefix = (ancestorPrefix: string | null, takenPrefixes: ReadonlySet<string>): UnitPrefixSuggestion => {
+  const fixedPrefix = ancestorPrefix ?? '';
+  const candidates = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => `${fixedPrefix}${digit}`);
+  const taken = candidates.filter((candidate) => takenPrefixes.has(candidate));
+  return { fixedPrefix, suggested: firstFree(candidates, takenPrefixes), taken };
+};

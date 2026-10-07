@@ -1,4 +1,13 @@
-import { childPrefixError, expectedParentCode, resolveCenterParent, resolveCenterUnit } from './org-chart-rules.js';
+import {
+  checkUnitPrefix,
+  childPrefixError,
+  expectedParentCode,
+  resolveCenterParent,
+  resolveCenterUnit,
+  suggestForUnitPrefix,
+  suggestUnderGroupCenter,
+  suggestUnitPrefix,
+} from './org-chart-rules.js';
 
 const existing = new Set(['4110', '4115', '4120', '4350', '4351', '4352', '2510', '2520', '2521', '3051', '3052', '3053', '9206']);
 const exists = (code: string) => existing.has(code);
@@ -69,5 +78,38 @@ describe('prefijo jerárquico de unidades', () => {
     expect(childPrefixError('53', '4')).toContain('debe ser 4 seguido de un dígito (40–49)');
     expect(childPrefixError('4', '4')).not.toBeNull();
     expect(childPrefixError('431', '4')).not.toBeNull();
+  });
+});
+
+describe('sugerencias del organigrama', () => {
+  it('bajo 4350: 4351, 4352… sin 4355', () => {
+    expect(suggestUnderGroupCenter('4350', new Set(['4351', '4352']))).toMatchObject({ fixedPrefix: '435', code: '4353' });
+    expect(suggestUnderGroupCenter('4350', new Set(['4351', '4352', '4353', '4354']))?.code).toBe('4356');
+    expect(suggestUnderGroupCenter('4300', new Set())).toBeNull();
+    expect(suggestUnderGroupCenter('4351', new Set())).toBeNull();
+  });
+  it('en la unidad 43: el siguiente 43Z0 libre; en la 4: 40Z0', () => {
+    expect(suggestForUnitPrefix('43', new Set(['4310', '4320', '4330']))).toMatchObject({ fixedPrefix: '43', code: '4340' });
+    expect(suggestForUnitPrefix('4', new Set(['4010']))).toMatchObject({ fixedPrefix: '4', code: '4020' });
+  });
+  it('prefijo de unidad: el siguiente libre bajo el del ancestro', () => {
+    expect(suggestUnitPrefix('4', new Set(['41', '43', '7']))).toEqual({ fixedPrefix: '4', suggested: '42', taken: ['41', '43'] });
+    expect(suggestUnitPrefix(null, new Set(['1', '2']))).toMatchObject({ fixedPrefix: '', suggested: '3' });
+  });
+});
+
+describe('excepción del prefijo jerárquico', () => {
+  it('30 bajo la Académica (2) sin unidad 3: se acepta con advertencia', () => {
+    expect(checkUnitPrefix('30', '2', new Set(['1', '2', '4', '5', '9']))).toMatchObject({ level: 'WARNING' });
+  });
+  it('53 bajo 4 con la unidad 5: error', () => {
+    expect(checkUnitPrefix('53', '4', new Set(['4', '5']))).toMatchObject({
+      level: 'ERROR',
+      message: expect.stringContaining('los códigos que empiezan por 5 son de otra unidad'),
+    });
+  });
+  it('431 bajo 4 con la unidad 43: error; 43 bajo 4: bien', () => {
+    expect(checkUnitPrefix('431', '4', new Set(['4', '43'])).level).toBe('ERROR');
+    expect(checkUnitPrefix('43', '4', new Set(['4'])).level).toBe('OK');
   });
 });

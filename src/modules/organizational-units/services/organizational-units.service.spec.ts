@@ -246,6 +246,9 @@ describe('OrganizationalUnitsService', () => {
     const vice = unit('1', 'VF', null, 0);
     vice.codePrefix = '4';
     vi.mocked(unitsRepository.findById).mockResolvedValue(vice);
+    const bienestar = unit('5', 'VB', null, 0);
+    bienestar.codePrefix = '5';
+    vi.mocked(unitsRepository.findAll).mockResolvedValue([vice, bienestar]);
     await expect(
       service.create({ code: 'DSA', name: 'Servicios', type: OrgUnitType.Department, parentId: '1', codePrefix: '53' }, actor),
     ).rejects.toMatchObject({

@@ -189,12 +189,22 @@ describe('plan del Excel del organigrama', () => {
   it('unidad nueva con prefijo fuera del de su padre: ORG_UNIT_PREFIX_OUT_OF_PARENT en español', () => {
     const plan = planOrgChart(
       baseSnapshot(),
-      only({ units: [unitRow(2, { prefix: '53', name: 'Oficina X', type: 'Oficina', parent: '4' })] }),
+      only({
+        units: [
+          unitRow(2, { prefix: '33', name: 'Oficina X', type: 'Oficina', parent: '4' }),
+          unitRow(3, { prefix: '53', name: 'Oficina Y', type: 'Oficina', parent: '4' }),
+        ],
+      }),
     );
-    expect(plan.errors[0]).toMatchObject({
-      column: 'Prefijo',
-      message: expect.stringContaining('debe ser 4 seguido de un dígito (40–49)'),
-    });
+    expect(plan.errors).toEqual([
+      expect.objectContaining({
+        rowNumber: 2,
+        column: 'Prefijo',
+        message: expect.stringContaining('debe ser 4 seguido de un dígito (40–49); los códigos que empiezan por 3 son de otra unidad'),
+      }),
+    ]);
+    // Ninguna unidad tiene el «5»: se acepta con advertencia (como 30 bajo la Académica).
+    expect(plan.warnings).toEqual([expect.objectContaining({ rowNumber: 3, message: expect.stringContaining('se acepta') })]);
   });
 
   it('unidad nueva bajo 4 con centros nuevos: los centros quedan en ella y con su padre', () => {

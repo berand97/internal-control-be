@@ -259,7 +259,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     if (!units) {
       throw new Error('falta la hoja');
     }
-    units.getRow(units.rowCount + 1).values = ['73', 'Fuera de rango', 'Oficina', '6'];
+    units.getRow(units.rowCount + 1).values = ['612', 'Fuera de rango', 'Oficina', '6'];
     const previewed = await preview(Buffer.from(await workbook.xlsx.writeBuffer()));
     expect(previewed.status).toBe(201);
     expect(previewed.body.data.canConfirm).toBe(false);

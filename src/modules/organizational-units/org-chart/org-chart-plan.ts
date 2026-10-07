@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isDetailCode } from '../../cost-centers/domain/code-prefix.js';
 import {
-  childPrefixError,
+  checkUnitPrefix,
   resolveCenterParent,
   resolveCenterUnit,
 } from '../../cost-centers/domain/org-chart-rules.js';
@@ -467,13 +467,14 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     for (let depth = 0; ancestor && !ancestor.codePrefix && depth < MAX_DEPTH; depth += 1) {
       ancestor = ancestor.parentKey ? units.get(ancestor.parentKey) : undefined;
     }
-    const message = childPrefixError(unit.codePrefix, ancestor?.codePrefix ?? null);
-    if (!message) {
+    const others = new Set([...finalPrefix.keys()].filter((prefix) => prefix !== unit.codePrefix));
+    const check = checkUnitPrefix(unit.codePrefix, ancestor?.codePrefix ?? null, others);
+    if (check.level === 'OK' || !check.message) {
       continue;
     }
     const before = unit.existingId ? snapshotUnits.get(unit.existingId) : undefined;
     const changed = !before || before.codePrefix !== unit.codePrefix || before.parentId !== unit.parentKey;
-    (changed ? unitError : unitWarning)(unit.rowNumber, UNIT_HEADERS.prefix, message);
+    (check.level === 'ERROR' && changed ? unitError : unitWarning)(unit.rowNumber, UNIT_HEADERS.prefix, check.message);
   }
 
   // ─── Hoja Centros de costo ─────────────────────────────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import {
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
-import { childPrefixError } from '../../cost-centers/domain/org-chart-rules.js';
+import { checkUnitPrefix } from '../../cost-centers/domain/org-chart-rules.js';
 import type { StructureRemovalResultDto } from '../../cost-centers/dto/responses/structure-removal.response.dto.js';
 import {
   type OrgHistoryEntry,
@@ -103,7 +103,7 @@ export class OrganizationalUnitsService {
       : null;
     this.assertCouncilWithoutPrefix(dto.type, dto.codePrefix ?? null);
     if (dto.codePrefix) {
-      await this.assertPrefixInParent(dto.codePrefix, parent);
+      await this.assertPrefixInParent(dto.codePrefix, parent, null);
     }
     if (dto.codePrefix && (dto.isActive ?? true)) {
       await this.assertPrefixFree(dto.codePrefix, null);
@@ -175,7 +175,7 @@ export class OrganizationalUnitsService {
     const nextPrefix = dto.codePrefix !== undefined ? dto.codePrefix : unit.codePrefix;
     this.assertCouncilWithoutPrefix(dto.type ?? unit.unitType, nextPrefix);
     if (nextPrefix && (nextPrefix !== unit.codePrefix || parentId !== unit.parentId)) {
-      await this.assertPrefixInParent(nextPrefix, parent);
+      await this.assertPrefixInParent(nextPrefix, parent, unit.id);
     }
     if (nextPrefix && (dto.isActive ?? unit.isActive)) {
       await this.assertPrefixFree(nextPrefix, unit.id);
@@ -286,17 +286,27 @@ export class OrganizationalUnitsService {
 
   /**
    * El prefijo de una unidad empieza por el de su ancestro más cercano con prefijo y tiene un dígito más (4 → 41–49).
-   * Sin ancestro con prefijo vale cualquiera. 400 ORG_UNIT_PREFIX_OUT_OF_PARENT con el rango esperado.
+   * Sin ancestro con prefijo vale cualquiera. 400 ORG_UNIT_PREFIX_OUT_OF_PARENT con el rango esperado, salvo que
+   * ninguna otra unidad activa tenga sus dígitos iniciales (checkUnitPrefix: 30 bajo la Académica sin unidad «3»).
    */
-  private async assertPrefixInParent(codePrefix: string, parent: OrganizationalUnit | null): Promise<void> {
+  private async assertPrefixInParent(
+    codePrefix: string,
+    parent: OrganizationalUnit | null,
+    unitId: string | null,
+  ): Promise<void> {
     let ancestor = parent;
     for (let depth = 0; ancestor && !ancestor.codePrefix && depth < 64; depth += 1) {
       ancestor = ancestor.parentId ? await this.unitsRepository.findById(ancestor.parentId) : null;
     }
     const expected = ancestor?.codePrefix ?? null;
-    const message = childPrefixError(codePrefix, expected);
-    if (message) {
-      throw new ApiException(ErrorCode.OrgUnitPrefixOutOfParent, message, [
+    const others = new Set(
+      (await this.unitsRepository.findAll(true)).flatMap((unit) =>
+        unit.codePrefix && unit.id !== unitId && unit.codePrefix !== codePrefix ? [unit.codePrefix] : [],
+      ),
+    );
+    const check = checkUnitPrefix(codePrefix, expected, others);
+    if (check.level === 'ERROR') {
+      throw new ApiException(ErrorCode.OrgUnitPrefixOutOfParent, check.message ?? undefined, [
         { field: 'codePrefix', message: `${expected ?? ''}0–${expected ?? ''}9` },
       ]);
     }
