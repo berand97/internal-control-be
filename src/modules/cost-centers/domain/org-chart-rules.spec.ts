@@ -108,6 +108,9 @@ describe('excepción del prefijo jerárquico', () => {
       message: expect.stringContaining('los códigos que empiezan por 5 son de otra unidad'),
     });
   });
+  it('una vicerrectoría (un dígito) bajo la Rectoría 1: bien', () => {
+    expect(checkUnitPrefix('4', '1', new Set(['1', '2']))).toEqual({ level: 'OK', message: null });
+  });
   it('431 bajo 4 con la unidad 43: error; 43 bajo 4: bien', () => {
     expect(checkUnitPrefix('431', '4', new Set(['4', '43'])).level).toBe('ERROR');
     expect(checkUnitPrefix('43', '4', new Set(['4'])).level).toBe('OK');

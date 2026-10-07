@@ -77,14 +77,15 @@ export interface PrefixCheck {
  * Regla jerárquica con una excepción para el organigrama real: si el prefijo no empieza por el del ancestro pero
  * ninguna otra unidad activa es dueña de sus dígitos iniciales (30 bajo la Académica «2» cuando no existe la unidad
  * «3»: los centros 30xx son de la Académica), se acepta con advertencia. Si otra unidad lo es (53 bajo «4» con la
- * unidad «5»), es error.
+ * unidad «5»), es error. Un prefijo de un dígito (vicerrectoría bajo la Rectoría «1») siempre vale.
  */
 export const checkUnitPrefix = (
   childPrefix: string,
   ancestorPrefix: string | null,
   otherActivePrefixes: ReadonlySet<string>,
 ): PrefixCheck => {
-  const message = childPrefixError(childPrefix, ancestorPrefix);
+  // Un dígito = rectoría o vicerrectoría: su bloque de códigos no depende del de la Rectoría de la que cuelga.
+  const message = childPrefix.length === 1 ? null : childPrefixError(childPrefix, ancestorPrefix);
   if (!message) {
     return { level: 'OK', message: null };
   }
