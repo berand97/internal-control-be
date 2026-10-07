@@ -15,6 +15,7 @@ import {
   CENTER_HEADERS,
   CENTER_SHEET,
   type CenterRowInput,
+  normalizeText,
   type OrgChartInput,
   type OrgChartSnapshot,
   parseAction,
@@ -38,6 +39,9 @@ import {
  *   interno se genera del prefijo o del nombre).
  * - Centro: por «Código anterior» (recodificación: el mismo centro, con sus activos e historia, pasa al código nuevo) o
  *   por «Código»; si no, es nuevo.
+ * - Columnas vacías de una unidad: la existente conserva su valor (Depende de, Línea, Centro propio, Estado); para
+ *   quitarlo a propósito se escribe «RAÍZ» o «NINGUNO». La nueva deduce lo que puede: el padre por el prefijo (43 → 4)
+ *   o la Rectoría (prefijo de un dígito), Línea Autoridad y, con prefijo X, el centro propio X010 si existe.
  * - Unidad y padre de cada centro del archivo se derivan del código (org-chart-rules.ts); un centro sin unidad que
  *   cuadre conserva la suya.
  */
@@ -195,6 +199,12 @@ const isBlankUnitRow = (row: UnitRowInput): boolean =>
     (value) => value === null,
   );
 
+/** «RAÍZ» en Depende de: la unidad queda en la raíz a propósito. */
+const isRootText = (text: string): boolean => normalizeText(text) === 'raiz';
+
+/** «NINGUNO» en Centro propio: se le quita a propósito. */
+const isNoneText = (text: string): boolean => ['ninguno', 'ninguna'].includes(normalizeText(text));
+
 const isBlankCenterRow = (row: CenterRowInput): boolean =>
   [row.code, row.name, row.movement, row.status, row.action, row.previousCode].every((value) => value === null);
 
@@ -313,8 +323,9 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         unitError(at, UNIT_HEADERS.type, `Tipo desconocido «${row.type}»: elija uno de la lista`);
         valid = false;
       }
-      const relation = row.relation ? parseRelation(row.relation) : OrgRelationType.Authority;
-      if (!relation) {
+      // Vacío: la existente conserva su línea; la nueva queda en Autoridad.
+      const relation = row.relation ? parseRelation(row.relation) : undefined;
+      if (row.relation && !relation) {
         unitError(at, UNIT_HEADERS.relation, `Línea desconocida «${row.relation ?? ''}»: Autoridad, Asesoría o Coordinación`);
         valid = false;
       }
@@ -376,10 +387,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         code: existing?.code ?? code ?? '',
         name: row.name ?? '',
         unitType: type ?? current?.unitType ?? OrgUnitType.Other,
-        relationType: relation ?? OrgRelationType.Authority,
+        relationType: relation ?? current?.relationType ?? OrgRelationType.Authority,
         codePrefix: row.prefix,
-        parentKey: null,
-        headCenterKey: null,
+        // Vacíos en el archivo: la existente conserva padre y centro propio (se resuelven más abajo).
+        parentKey: current?.parentKey ?? null,
+        headCenterKey: current?.headCenterKey ?? null,
         isActive: action === 'ARCHIVE' ? false : (status ?? current?.isActive ?? true),
         removal: action ?? null,
         parentText: row.parent,
@@ -410,14 +422,54 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
   }
   const finalUnitByCode = new Map([...units.values()].map((unit) => [unit.code, unit]));
 
+  /**
+   * «Depende de» vacío en una unidad nueva: con prefijo de 2+ dígitos, la unidad activa con el prefijo propio más largo
+   * (43 → 4; 431 → 43, si no 4); con prefijo de 1 dígito, la Rectoría si hay exactamente una activa; si no, raíz.
+   */
+  const deduceParent = (unit: FinalUnit): void => {
+    const at = unit.rowNumber ?? 0;
+    const prefix = unit.codePrefix;
+    let parent: FinalUnit | undefined;
+    if (prefix && prefix.length > 1) {
+      for (let length = prefix.length - 1; length >= 1 && !parent; length -= 1) {
+        parent = finalPrefix.get(prefix.slice(0, length));
+      }
+      if (parent) {
+        unit.parentKey = parent.key;
+        unitWarning(at, UNIT_HEADERS.parent, `Depende de deducido del prefijo: ${parent.codePrefix ?? parent.code}`);
+        return;
+      }
+    } else if (prefix) {
+      const rectorates = [...units.values()].filter(
+        (other) => other.key !== unit.key && other.unitType === OrgUnitType.Rectorate && isLiveUnit(other),
+      );
+      parent = rectorates.length === 1 ? rectorates[0] : undefined;
+      if (parent) {
+        unit.parentKey = parent.key;
+        unitWarning(at, UNIT_HEADERS.parent, `Depende de deducido: la Rectoría ${parent.codePrefix ?? parent.code}`);
+        return;
+      }
+    }
+    unit.parentKey = null;
+    if (unit.unitType !== OrgUnitType.Rectorate) {
+      unitWarning(at, UNIT_HEADERS.parent, 'Sin Depende de: queda en la raíz');
+    }
+  };
+
   // Padres de las filas del archivo.
   for (const unit of units.values()) {
     if (unit.rowNumber === null) {
       continue;
     }
     const text = unit.parentText;
-    if (!text) {
+    if (text && isRootText(text)) {
       unit.parentKey = null;
+      continue;
+    }
+    if (!text) {
+      if (unit.existingId === null) {
+        deduceParent(unit);
+      }
       continue;
     }
     const parent = /^[0-9]+$/.test(text) ? finalPrefix.get(text) : (finalUnitByCode.get(text) ?? finalUnitByCode.get(text.toUpperCase()));
@@ -665,8 +717,22 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     if (unit.rowNumber === null) {
       continue;
     }
-    if (!unit.headCenterText) {
+    if (unit.headCenterText && isNoneText(unit.headCenterText)) {
       unit.headCenterKey = null;
+      continue;
+    }
+    if (!unit.headCenterText) {
+      // Vacío: la existente conserva el suyo; la nueva de prefijo X toma X010 si existe.
+      if (unit.existingId === null) {
+        const deduced =
+          unit.codePrefix?.length === 1 && unit.unitType !== OrgUnitType.Council
+            ? liveCenterByCode.get(`${unit.codePrefix}010`)
+            : undefined;
+        unit.headCenterKey = deduced?.key ?? null;
+        if (deduced) {
+          unitWarning(unit.rowNumber, UNIT_HEADERS.headCenter, `Centro propio deducido del prefijo: ${deduced.code}`);
+        }
+      }
       continue;
     }
     if (unit.unitType === OrgUnitType.Council) {
