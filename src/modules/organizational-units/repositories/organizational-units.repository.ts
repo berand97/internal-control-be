@@ -65,6 +65,11 @@ export class TypeOrmOrganizationalUnitsRepository
     return this.costCenters.exists({ where: { id } });
   }
 
+  async costCenterCode(id: string): Promise<string | null> {
+    const center = await this.costCenters.findOne({ where: { id }, select: { id: true, externalCode: true } });
+    return center?.externalCode ?? null;
+  }
+
   insert(record: CreateOrgUnitRecord): Promise<OrganizationalUnit> {
     const now = new Date();
     const entity = this.units.create({

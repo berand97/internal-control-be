@@ -24,7 +24,6 @@ import {
   ApiProduces,
   ApiResponse,
   ApiTags,
-  getSchemaPath,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
@@ -37,8 +36,12 @@ import {
   errorEnvelopeSchema,
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
+import { envelopedArraySchema } from '../documents/dto/document.responses.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
 import { BoundedFileInterceptor, UPLOAD_LIMITS } from '../../shared/storage/uploads/bounded-file.interceptor.js';
+import { StructureRemovalResultDto } from '../cost-centers/dto/responses/structure-removal.response.dto.js';
+import { OrgStructureHistoryService } from '../cost-centers/services/org-structure-history.service.js';
+import { OrgStructureHistoryEventDto } from './dto/responses/org-structure-history.response.dto.js';
 import {
   OrgChartConfirmDto,
   OrgChartPreviewDto,
@@ -46,7 +49,7 @@ import {
 import { XLSX_MIME } from './org-chart/org-chart-workbook.js';
 import { type OrgChartFile, OrgChartService, type OrgChartUpload } from './org-chart/org-chart.service.js';
 import { CreateOrganizationalUnitDto } from './dto/create-organizational-unit.dto.js';
-import { QueryOrganizationalUnitsDto } from './dto/query-organizational-units.dto.js';
+import { IncludeArchivedQueryDto, QueryOrganizationalUnitsDto } from './dto/query-organizational-units.dto.js';
 import { OrganizationalUnitTreeResponseDto } from './dto/responses/organizational-unit-tree.response.dto.js';
 import { OrganizationalUnitResponseDto } from './dto/responses/organizational-unit.response.dto.js';
 import { UpdateOrganizationalUnitDto } from './dto/update-organizational-unit.dto.js';
@@ -61,6 +64,8 @@ import { OrganizationalUnitsService } from './services/organizational-units.serv
   OrganizationalUnitTreeResponseDto,
   OrgChartPreviewDto,
   OrgChartConfirmDto,
+  StructureRemovalResultDto,
+  OrgStructureHistoryEventDto,
 )
 @Feature('organizational-units')
 @Controller('organizational-units')
@@ -68,6 +73,7 @@ export class OrganizationalUnitsController {
   constructor(
     private readonly organizationalUnitsService: OrganizationalUnitsService,
     private readonly orgChart: OrgChartService,
+    private readonly historyService: OrgStructureHistoryService,
   ) {}
 
   @Get('export')
@@ -142,13 +148,31 @@ export class OrganizationalUnitsController {
 
   @Get('tree')
   @RequirePermission('org_unit:read:global')
-  @ApiOperation({ summary: 'Árbol organizacional completo' })
+  @ApiOperation({
+    summary: 'Árbol organizacional',
+    description: 'Por defecto solo unidades activas; ?includeArchived=true incluye las archivadas.',
+  })
   @ApiResponse({
     status: 200,
     schema: envelopedSchema(OrganizationalUnitTreeResponseDto),
   })
-  tree(): Promise<ReadonlyArray<OrganizationalUnitTreeResponseDto>> {
-    return this.organizationalUnitsService.tree();
+  tree(@Query() query: IncludeArchivedQueryDto): Promise<ReadonlyArray<OrganizationalUnitTreeResponseDto>> {
+    return this.organizationalUnitsService.tree(query.includeArchived ?? false);
+  }
+
+  @Get(':id/history')
+  @RequirePermission('org_unit:read:global')
+  @ApiOperation({
+    summary: 'Historial de una unidad: nombre, código, tipo, padre, prefijo, línea, centro propio y estado',
+    description: 'Un evento por campo cambiado, del más reciente al más antiguo (cambios manuales y por el Excel del organigrama).',
+  })
+  @ApiOkResponse({ schema: envelopedArraySchema(OrgStructureHistoryEventDto) })
+  @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
+  async history(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ReadonlyArray<OrgStructureHistoryEventDto>> {
+    await this.organizationalUnitsService.getById(id);
+    return this.historyService.list('ORG_UNIT', id);
   }
 
   @Get(':id/descendants')
@@ -240,15 +264,17 @@ export class OrganizationalUnitsController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('org_unit:manage:global')
-  @ApiOperation({ summary: 'Desactivar unidad organizacional' })
-  @ApiResponse({
-    status: 200,
-    schema: { $ref: getSchemaPath(ApiSuccessEnvelope) },
+  @ApiOperation({
+    summary: 'Eliminar (o archivar) una unidad organizacional',
+    description:
+      'Con unidades hijas activas: 406 ORG_UNIT_HAS_CHILDREN; con centros activos: 406 HAS_DEPENDENT_ENTITIES (details activeCostCenters). Si no, se borra de verdad (deleted=true); si algo la referencia (hijas o centros inactivos, historial de ubicación de centros…) se archiva (archived=true, reason).',
   })
+  @ApiResponse({ status: 200, schema: envelopedSchema(StructureRemovalResultDto) })
+  @ApiResponse({ status: 406, schema: errorEnvelopeSchema() })
   remove(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<null> {
+  ): Promise<StructureRemovalResultDto> {
     return this.organizationalUnitsService.remove(id, user);
   }
 

@@ -42,6 +42,7 @@ export interface OrganizationalUnitsRepository {
    */
   countActiveCostCenters(orgUnitId: string): Promise<number>;
   costCenterExists(id: string): Promise<boolean>;
+  costCenterCode(id: string): Promise<string | null>;
   insert(record: CreateOrgUnitRecord): Promise<OrganizationalUnit>;
   update(id: string, record: UpdateOrgUnitRecord): Promise<void>;
   deactivate(id: string): Promise<void>;

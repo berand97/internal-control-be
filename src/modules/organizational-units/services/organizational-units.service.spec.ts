@@ -5,6 +5,9 @@ import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.rep
 import { OrganizationalUnit } from '../entities/organizational-unit.entity.js';
 import { OrgUnitType } from '../enums/org-unit-type.enum.js';
 import type { OrganizationalUnitsRepository } from '../repositories/organizational-units.repository.interface.js';
+import type { DataSource } from 'typeorm';
+import type { OrgStructureHistoryService } from '../../cost-centers/services/org-structure-history.service.js';
+import type { StructureRemovalService, UnitRemovalCheck } from '../../cost-centers/services/structure-removal.service.js';
 import { OrganizationalUnitsService } from './organizational-units.service.js';
 
 const actor: AuthenticatedUser = {
@@ -36,6 +39,8 @@ const unit = (
 describe('OrganizationalUnitsService', () => {
   let unitsRepository: OrganizationalUnitsRepository;
   let service: OrganizationalUnitsService;
+  let removal: { inspectUnit: ReturnType<typeof vi.fn>; deleteUnit: ReturnType<typeof vi.fn> };
+  let manager: { query: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     unitsRepository = {
@@ -48,6 +53,7 @@ describe('OrganizationalUnitsService', () => {
       countActiveChildren: vi.fn().mockResolvedValue(0),
       countActiveCostCenters: vi.fn().mockResolvedValue(0),
       costCenterExists: vi.fn().mockResolvedValue(true),
+      costCenterCode: vi.fn().mockResolvedValue('4010'),
       insert: vi.fn(),
       update: vi.fn(),
       deactivate: vi.fn(),
@@ -57,9 +63,20 @@ describe('OrganizationalUnitsService', () => {
       record: vi.fn().mockResolvedValue(undefined),
       findLastLogins: vi.fn(),
     };
+    manager = { query: vi.fn().mockResolvedValue([]) };
+    const dataSource = {
+      manager,
+      transaction: vi.fn(async (work: (m: typeof manager) => Promise<unknown>) => work(manager)),
+    } as unknown as DataSource;
+    const noReferences: UnitRemovalCheck = { activeChildren: 0, activeCenters: 0, references: [] };
+    removal = { inspectUnit: vi.fn().mockResolvedValue(noReferences), deleteUnit: vi.fn() };
+    const history = { record: vi.fn().mockResolvedValue(0) } as unknown as OrgStructureHistoryService;
     service = new OrganizationalUnitsService(
       unitsRepository,
       auditLogsRepository,
+      dataSource,
+      removal as unknown as StructureRemovalService,
+      history,
     );
   });
 
@@ -202,10 +219,49 @@ describe('OrganizationalUnitsService', () => {
     expect(unitsRepository.deactivate).not.toHaveBeenCalled();
   });
 
-  it('desactiva una unidad cuyos centros están todos inactivos', async () => {
+  it('archiva una unidad cuyos centros están todos inactivos (los centros la referencian)', async () => {
     vi.mocked(unitsRepository.findById).mockResolvedValue(unit('1', 'REC', null, 0));
-    await expect(service.remove('1', actor)).resolves.toBeNull();
+    removal.inspectUnit.mockResolvedValue({
+      activeChildren: 0,
+      activeCenters: 0,
+      references: [{ table: 'cost_center', column: 'organizational_unit_id', label: 'centros de costo (inactivos)', count: 2 }],
+    });
+    await expect(service.remove('1', actor)).resolves.toEqual({
+      deleted: false,
+      archived: true,
+      reason: 'Se archiva porque tiene historia: 2 centros de costo (inactivos)',
+    });
     expect(unitsRepository.countActiveCostCenters).toHaveBeenCalledWith('1');
-    expect(unitsRepository.deactivate).toHaveBeenCalledWith('1');
+    expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('SET is_active = FALSE'), ['1']);
+    expect(removal.deleteUnit).not.toHaveBeenCalled();
+  });
+
+  it('borra de verdad una unidad sin nada que la referencie', async () => {
+    vi.mocked(unitsRepository.findById).mockResolvedValue(unit('1', 'REC', null, 0));
+    await expect(service.remove('1', actor)).resolves.toEqual({ deleted: true, archived: false, reason: null });
+    expect(removal.deleteUnit).toHaveBeenCalledWith(manager, '1');
+  });
+
+  it('el prefijo de una hija es el del padre más un dígito: ORG_UNIT_PREFIX_OUT_OF_PARENT', async () => {
+    const vice = unit('1', 'VF', null, 0);
+    vice.codePrefix = '4';
+    vi.mocked(unitsRepository.findById).mockResolvedValue(vice);
+    await expect(
+      service.create({ code: 'DSA', name: 'Servicios', type: OrgUnitType.Department, parentId: '1', codePrefix: '53' }, actor),
+    ).rejects.toMatchObject({
+      code: ErrorCode.OrgUnitPrefixOutOfParent,
+      message: expect.stringContaining('debe ser 4 seguido de un dígito (40–49)'),
+      details: [{ field: 'codePrefix', message: '40–49' }],
+    });
+    vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
+    await expect(
+      service.create({ code: 'DSA', name: 'Servicios', type: OrgUnitType.Department, parentId: '1', codePrefix: '43' }, actor),
+    ).resolves.toMatchObject({ codePrefix: '43', parentId: '1' });
+  });
+
+  it('un consejo no lleva prefijo', async () => {
+    await expect(
+      service.create({ code: 'CS', name: 'Consejo Superior', type: OrgUnitType.Council, codePrefix: '7' }, actor),
+    ).rejects.toMatchObject({ code: ErrorCode.ValidationFailed });
   });
 });

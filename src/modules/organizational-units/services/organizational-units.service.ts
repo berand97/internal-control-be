@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import {
@@ -8,6 +9,14 @@ import {
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
+import { childPrefixError } from '../../cost-centers/domain/org-chart-rules.js';
+import type { StructureRemovalResultDto } from '../../cost-centers/dto/responses/structure-removal.response.dto.js';
+import {
+  type OrgHistoryEntry,
+  OrgStructureHistoryService,
+} from '../../cost-centers/services/org-structure-history.service.js';
+import { decideUnitRemoval, StructureRemovalService } from '../../cost-centers/services/structure-removal.service.js';
+import { OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { CreateOrganizationalUnitDto } from '../dto/create-organizational-unit.dto.js';
 import { QueryOrganizationalUnitsDto } from '../dto/query-organizational-units.dto.js';
 import { OrganizationalUnitTreeResponseDto } from '../dto/responses/organizational-unit-tree.response.dto.js';
@@ -40,6 +49,9 @@ export class OrganizationalUnitsService {
     private readonly unitsRepository: OrganizationalUnitsRepository,
     @Inject('AuditLogsRepository')
     private readonly auditLogsRepository: AuditLogsRepository,
+    private readonly dataSource: DataSource,
+    private readonly removal: StructureRemovalService,
+    private readonly history: OrgStructureHistoryService,
   ) {}
 
   async list(
@@ -49,8 +61,9 @@ export class OrganizationalUnitsService {
     return items.map(OrganizationalUnitResponseDto.from);
   }
 
-  async tree(): Promise<ReadonlyArray<OrganizationalUnitTreeResponseDto>> {
-    const items = await this.unitsRepository.findAll();
+  /** Por defecto solo las activas (una archivada no aparece ni con sus hijas); includeArchived=true las muestra. */
+  async tree(includeArchived = false): Promise<ReadonlyArray<OrganizationalUnitTreeResponseDto>> {
+    const items = await this.unitsRepository.findAll(includeArchived ? undefined : true);
     return buildTree(items, null);
   }
 
@@ -88,6 +101,10 @@ export class OrganizationalUnitsService {
     const parent = dto.parentId
       ? await this.requireUnit(dto.parentId)
       : null;
+    this.assertCouncilWithoutPrefix(dto.type, dto.codePrefix ?? null);
+    if (dto.codePrefix) {
+      await this.assertPrefixInParent(dto.codePrefix, parent);
+    }
     if (dto.codePrefix && (dto.isActive ?? true)) {
       await this.assertPrefixFree(dto.codePrefix, null);
     }
@@ -156,9 +173,14 @@ export class OrganizationalUnitsService {
     }
 
     const nextPrefix = dto.codePrefix !== undefined ? dto.codePrefix : unit.codePrefix;
+    this.assertCouncilWithoutPrefix(dto.type ?? unit.unitType, nextPrefix);
+    if (nextPrefix && (nextPrefix !== unit.codePrefix || parentId !== unit.parentId)) {
+      await this.assertPrefixInParent(nextPrefix, parent);
+    }
     if (nextPrefix && (dto.isActive ?? unit.isActive)) {
       await this.assertPrefixFree(nextPrefix, unit.id);
     }
+    const previousParent = unit.parentId ? await this.unitsRepository.findById(unit.parentId) : null;
 
     if (dto.headCostCenterId) {
       await this.requireCostCenter(dto.headCostCenterId);
@@ -209,14 +231,90 @@ export class OrganizationalUnitsService {
       userAgent: null,
       changes: { ...dto },
     });
-    return OrganizationalUnitResponseDto.from(await this.requireUnit(id));
+    const updated = await this.requireUnit(id);
+    await this.recordHistory(unit, updated, previousParent, parent, actor);
+    return OrganizationalUnitResponseDto.from(updated);
   }
 
-  async remove(id: string, actor: AuthenticatedUser): Promise<null> {
+  /** Historial de nombre, código, tipo, padre, prefijo, línea, centro propio y estado (org_structure_history). */
+  private async recordHistory(
+    before: OrganizationalUnit,
+    after: OrganizationalUnit,
+    previousParent: OrganizationalUnit | null,
+    nextParent: OrganizationalUnit | null,
+    actor: AuthenticatedUser,
+  ): Promise<void> {
+    const label = (unit: OrganizationalUnit | null): string | null =>
+      unit ? `${unit.codePrefix ? `${unit.codePrefix} · ` : ''}${unit.name}` : null;
+    const centerCode = async (id: string | null): Promise<string | null> =>
+      id ? ((await this.unitsRepository.costCenterCode(id)) ?? id) : null;
+    const status = (active: boolean): string => (active ? 'ACTIVE' : 'ARCHIVED');
+    const parentMoved = before.parentId !== after.parentId;
+    const headChanged = before.headCostCenterId !== after.headCostCenterId;
+    const entries: OrgHistoryEntry[] = [
+      { entityType: 'ORG_UNIT', entityId: after.id, field: 'NAME', oldValue: before.name, newValue: after.name },
+      { entityType: 'ORG_UNIT', entityId: after.id, field: 'CODE', oldValue: before.code, newValue: after.code },
+      { entityType: 'ORG_UNIT', entityId: after.id, field: 'TYPE', oldValue: before.unitType, newValue: after.unitType },
+      {
+        entityType: 'ORG_UNIT',
+        entityId: after.id,
+        field: 'PARENT',
+        oldValue: parentMoved ? label(previousParent) : null,
+        newValue: parentMoved ? (label(nextParent) ?? '(raíz)') : null,
+      },
+      { entityType: 'ORG_UNIT', entityId: after.id, field: 'PREFIX', oldValue: before.codePrefix, newValue: after.codePrefix },
+      { entityType: 'ORG_UNIT', entityId: after.id, field: 'RELATION', oldValue: before.relationType, newValue: after.relationType },
+      {
+        entityType: 'ORG_UNIT',
+        entityId: after.id,
+        field: 'HEAD_COST_CENTER',
+        oldValue: headChanged ? await centerCode(before.headCostCenterId) : null,
+        newValue: headChanged ? ((await centerCode(after.headCostCenterId)) ?? '(ninguno)') : null,
+      },
+      { entityType: 'ORG_UNIT', entityId: after.id, field: 'STATUS', oldValue: status(before.isActive), newValue: status(after.isActive) },
+    ];
+    await this.history.record(this.dataSource.manager, entries, { actorId: actor.id, source: 'MANUAL' });
+  }
+
+  private assertCouncilWithoutPrefix(type: OrgUnitType, codePrefix: string | null): void {
+    if (type === OrgUnitType.Council && codePrefix) {
+      throw new ApiException(ErrorCode.ValidationFailed, 'Un consejo o comité no lleva prefijo: no recibe centros de costo', [
+        { field: 'codePrefix', message: 'Sin prefijo para un consejo o comité' },
+      ]);
+    }
+  }
+
+  /**
+   * El prefijo de una unidad empieza por el de su ancestro más cercano con prefijo y tiene un dígito más (4 → 41–49).
+   * Sin ancestro con prefijo vale cualquiera. 400 ORG_UNIT_PREFIX_OUT_OF_PARENT con el rango esperado.
+   */
+  private async assertPrefixInParent(codePrefix: string, parent: OrganizationalUnit | null): Promise<void> {
+    let ancestor = parent;
+    for (let depth = 0; ancestor && !ancestor.codePrefix && depth < 64; depth += 1) {
+      ancestor = ancestor.parentId ? await this.unitsRepository.findById(ancestor.parentId) : null;
+    }
+    const expected = ancestor?.codePrefix ?? null;
+    const message = childPrefixError(codePrefix, expected);
+    if (message) {
+      throw new ApiException(ErrorCode.OrgUnitPrefixOutOfParent, message, [
+        { field: 'codePrefix', message: `${expected ?? ''}0–${expected ?? ''}9` },
+      ]);
+    }
+  }
+
+  /**
+   * Sin hijas activas ni centros activos: se borra de verdad, o se archiva (is_active=false) si algo la referencia
+   * (hijas o centros inactivos, historial de ubicación de algún centro…). Ver StructureRemovalService.
+   */
+  async remove(id: string, actor: AuthenticatedUser): Promise<StructureRemovalResultDto> {
     const unit = await this.requireUnit(id);
     const children = await this.unitsRepository.countActiveChildren(unit.id);
     if (children > 0) {
-      throw new ApiException(ErrorCode.OrgUnitHasChildren);
+      throw new ApiException(
+        ErrorCode.OrgUnitHasChildren,
+        children === 1 ? 'La unidad tiene 1 unidad hija activa' : `La unidad tiene ${children} unidades hijas activas`,
+        [{ field: 'activeChildren', message: String(children) }],
+      );
     }
     const activeCenters = await this.unitsRepository.countActiveCostCenters(unit.id);
     if (activeCenters > 0) {
@@ -228,17 +326,47 @@ export class OrganizationalUnitsService {
         [{ field: 'activeCostCenters', message: String(activeCenters) }],
       );
     }
-    await this.unitsRepository.deactivate(unit.id);
-    await this.auditLogsRepository.record({
-      action: AuditAction.OrgUnitDeleted,
-      entityType: ORG_UNIT_ENTITY_TYPE,
-      entityId: unit.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { code: unit.code },
+    return this.dataSource.transaction(async (manager) => {
+      const verdict = decideUnitRemoval(await this.removal.inspectUnit(manager, unit.id));
+      if (verdict.decision === 'BLOCKED') {
+        throw new ApiException(ErrorCode.HasDependentEntities, verdict.reason ?? undefined);
+      }
+      if (verdict.decision === 'DELETE') {
+        await this.removal.deleteUnit(manager, unit.id);
+      } else {
+        await manager.query('UPDATE organizational_unit SET is_active = FALSE, updated_at = NOW() WHERE id = $1', [unit.id]);
+        await this.history.record(
+          manager,
+          [
+            {
+              entityType: 'ORG_UNIT',
+              entityId: unit.id,
+              field: 'STATUS',
+              oldValue: unit.isActive ? 'ACTIVE' : 'ARCHIVED',
+              newValue: 'ARCHIVED',
+            },
+          ],
+          { actorId: actor.id, source: 'MANUAL', reason: verdict.reason },
+        );
+      }
+      await this.auditLogsRepository.record(
+        {
+          action: verdict.decision === 'DELETE' ? AuditAction.OrgUnitDeleted : AuditAction.OrgUnitArchived,
+          entityType: ORG_UNIT_ENTITY_TYPE,
+          entityId: unit.id,
+          performedBy: actor.id,
+          ipAddress: null,
+          userAgent: null,
+          changes: { code: unit.code, name: unit.name, codePrefix: unit.codePrefix, physical: verdict.decision === 'DELETE' },
+        },
+        manager,
+      );
+      return {
+        deleted: verdict.decision === 'DELETE',
+        archived: verdict.decision === 'ARCHIVE',
+        reason: verdict.reason,
+      };
     });
-    return null;
   }
 
   /** El prefijo de código de centros es único entre unidades activas (uq_org_unit_code_prefix_active). */
