@@ -91,6 +91,10 @@ const quoteIdent = (value: string): string => `"${value.replace(/"/g, '""')}"`;
 const describe = (references: ReadonlyArray<ReferenceCount>): string =>
   references.map((reference) => `${reference.count} ${reference.label}`).join(', ');
 
+/** Motivo para archivar en vez de borrar; null si no hay ninguna referencia histórica. */
+export const historyReason = (references: ReadonlyArray<ReferenceCount>): string | null =>
+  references.length > 0 ? `Se archiva porque tiene historia: ${describe(references)}` : null;
+
 export const decideCenterRemoval = (check: CenterRemovalCheck): RemovalVerdict => {
   if (check.activeAssets > 0) {
     return { decision: 'BLOCKED', reason: `Tiene ${check.activeAssets} activos asignados` };
@@ -98,8 +102,9 @@ export const decideCenterRemoval = (check: CenterRemovalCheck): RemovalVerdict =
   if (check.activeChildren > 0) {
     return { decision: 'BLOCKED', reason: `Tiene ${check.activeChildren} centros hijos activos` };
   }
-  if (check.references.length > 0) {
-    return { decision: 'ARCHIVE', reason: `Se archiva porque tiene historia: ${describe(check.references)}` };
+  const history = historyReason(check.references);
+  if (history) {
+    return { decision: 'ARCHIVE', reason: history };
   }
   return { decision: 'DELETE', reason: null };
 };
@@ -112,8 +117,9 @@ export const decideUnitRemoval = (check: UnitRemovalCheck): RemovalVerdict => {
     ];
     return { decision: 'BLOCKED', reason: `Tiene ${parts.join(' y ')}` };
   }
-  if (check.references.length > 0) {
-    return { decision: 'ARCHIVE', reason: `Se archiva porque tiene historia: ${describe(check.references)}` };
+  const history = historyReason(check.references);
+  if (history) {
+    return { decision: 'ARCHIVE', reason: history };
   }
   return { decision: 'DELETE', reason: null };
 };
