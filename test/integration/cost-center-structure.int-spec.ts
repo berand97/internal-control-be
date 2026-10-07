@@ -154,10 +154,12 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     const byUnit = await http().get('/api/v1/cost-centers/suggest-code').query({ unitId: ids['u7'] }).set(auth('viewer'));
     expect(byUnit.status).toBe(200);
     expectConforms('get', '/api/v1/cost-centers/suggest-code', 200, byUnit.body);
+    // Regla del organigrama: los centros propios de una unidad de un dígito van en X0Z0 (7010, 7020…).
     expect(byUnit.body.data).toEqual({
-      code: '7300',
-      rangeFrom: '7000',
-      rangeTo: '7999',
+      code: '7010',
+      rangeFrom: '7010',
+      rangeTo: '7090',
+      fixedPrefix: '7',
       basis: 'UNIT',
       matchesUnitPrefix: true,
       reason: null,
@@ -166,7 +168,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
       .get('/api/v1/cost-centers/suggest-code')
       .query({ unitId: ids['u8'], parentId: ids['c7200'] })
       .set(auth('viewer'));
-    expect(byParent.body.data).toMatchObject({ code: '7211', rangeFrom: '7201', rangeTo: '7299', basis: 'PARENT', matchesUnitPrefix: false });
+    expect(byParent.body.data).toMatchObject({ code: '7211', rangeFrom: '7201', rangeTo: '7299', fixedPrefix: null, basis: 'PARENT', matchesUnitPrefix: false });
     const neither = await http().get('/api/v1/cost-centers/suggest-code').set(auth('viewer'));
     expect(neither.status).toBe(400);
   });

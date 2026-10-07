@@ -492,8 +492,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         continue;
       }
       if (!CENTER_CODE_PATTERN.test(row.code)) {
-        centerError(at, CENTER_HEADERS.code, `«${row.code}» no es un código de centro de costo (solo dígitos)`);
-        continue;
+        // Los centros existentes con códigos viejos (no numéricos) se aceptan tal cual; uno nuevo o un código nuevo, no.
+        if (!centerByCode.has(row.code) || row.previousCode) {
+          centerError(at, CENTER_HEADERS.code, `«${row.code}» no es un código de centro de costo (solo dígitos)`);
+          continue;
+        }
       }
       if (!row.name) {
         centerError(at, CENTER_HEADERS.name, 'El nombre es obligatorio');
