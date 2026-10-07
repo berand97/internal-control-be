@@ -5,7 +5,7 @@
 //   node scripts/formats/build-oci-17-89-template.mjs templates/formats/OCI-01-65-v2.docx "docs/acta de traslado de activos fijos mdf.xlsx" templates/formats/OCI-17-89-v1.docx
 // y se carga al motor como plantilla del formato (POST /documents/formats/OCI-17-89/templates, sgcVersion=1).
 // No usa Gotenberg: renderiza el DOCX con el renderizador real del repo.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import PizZip from 'pizzip';
 import { readDocxPlaceholders, renderDocx } from '../../src/modules/document-templates/domain/docx-template.js';
 import { build, SAMPLE } from '../../scripts/formats/build-oci-17-89-template.mjs';
@@ -136,9 +136,12 @@ const context = (count: number, substitution: boolean): Record<string, unknown> 
 describe('Plantilla OCI-17-89 (traslado de activos, construida desde el Excel institucional)', () => {
   const template = readFileSync(TEMPLATE);
 
-  it('el constructor reproduce la plantilla versionada (mismos marcadores) y no deja nada del ejemplo', async () => {
+  it.runIf(existsSync(XLSX))('el constructor reproduce la plantilla versionada (mismos marcadores) desde el Excel institucional', async () => {
     const rebuilt = await build(readFileSync(BASE), readFileSync(XLSX));
     expect([...readDocxPlaceholders(rebuilt.output)].sort()).toEqual([...readDocxPlaceholders(template)].sort());
+  });
+
+  it('la plantilla versionada no deja nada del ejemplo', () => {
     expect(findLeftovers(template, SAMPLE, { metadata: true })).toEqual([]);
     expect(() => assertTemplateClean(template, SAMPLE, { metadata: true })).not.toThrow();
   });

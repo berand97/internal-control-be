@@ -6,7 +6,7 @@
 // y se carga al motor como plantilla del formato (POST /documents/formats/OCI-21-37/templates, sgcVersion=2).
 // Renderiza el DOCX con el renderizador real del repo y el contenido real del acta (buildInventoryActContent). Con
 // GOTENBERG_URL, además lo convierte a PDF y revisa la capa de texto.
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import PizZip from 'pizzip';
@@ -39,7 +39,7 @@ const BASE = 'templates/formats/OCI-01-65-v2.docx';
 // El nombre del Excel lleva tilde: se busca por su forma normalizada (el disco puede guardarlo en NFD).
 const XLSX = join(
   'docs',
-  readdirSync('docs').find(
+  (existsSync('docs') ? readdirSync('docs') : []).find(
     (name) =>
       name.normalize('NFC') ===
       'acta de toma física de inventario de activos fijos mdf.xlsx',
@@ -339,11 +339,14 @@ const context = (options: {
 describe('Plantilla OCI-21-37 (acta de toma física, construida desde el Excel institucional)', () => {
   const template = readFileSync(TEMPLATE);
 
-  it('el constructor reproduce la plantilla versionada (mismos marcadores) y no deja nada del ejemplo', async () => {
+  it.runIf(existsSync(XLSX))('el constructor reproduce la plantilla versionada (mismos marcadores) desde el Excel institucional', async () => {
     const rebuilt = await build(readFileSync(BASE), readFileSync(XLSX));
     expect([...readDocxPlaceholders(rebuilt.output)].sort()).toEqual(
       [...readDocxPlaceholders(template)].sort(),
     );
+  });
+
+  it('la plantilla versionada no deja nada del ejemplo', () => {
     expect(findLeftovers(template, SAMPLE, { metadata: true })).toEqual([]);
     expect(() =>
       assertTemplateClean(template, SAMPLE, { metadata: true }),
