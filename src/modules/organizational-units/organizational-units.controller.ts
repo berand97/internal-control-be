@@ -49,7 +49,12 @@ import {
 import { XLSX_MIME } from './org-chart/org-chart-workbook.js';
 import { type OrgChartFile, OrgChartService, type OrgChartUpload } from './org-chart/org-chart.service.js';
 import { CreateOrganizationalUnitDto } from './dto/create-organizational-unit.dto.js';
-import { IncludeArchivedQueryDto, QueryOrganizationalUnitsDto } from './dto/query-organizational-units.dto.js';
+import {
+  IncludeArchivedQueryDto,
+  QueryOrganizationalUnitsDto,
+  SuggestUnitPrefixQueryDto,
+} from './dto/query-organizational-units.dto.js';
+import { UnitPrefixSuggestionDto } from './dto/responses/unit-prefix-suggestion.response.dto.js';
 import { OrganizationalUnitTreeResponseDto } from './dto/responses/organizational-unit-tree.response.dto.js';
 import { OrganizationalUnitResponseDto } from './dto/responses/organizational-unit.response.dto.js';
 import { UpdateOrganizationalUnitDto } from './dto/update-organizational-unit.dto.js';
@@ -66,6 +71,7 @@ import { OrganizationalUnitsService } from './services/organizational-units.serv
   OrgChartConfirmDto,
   StructureRemovalResultDto,
   OrgStructureHistoryEventDto,
+  UnitPrefixSuggestionDto,
 )
 @Feature('organizational-units')
 @Controller('organizational-units')
@@ -158,6 +164,18 @@ export class OrganizationalUnitsController {
   })
   tree(@Query() query: IncludeArchivedQueryDto): Promise<ReadonlyArray<OrganizationalUnitTreeResponseDto>> {
     return this.organizationalUnitsService.tree(query.includeArchived ?? false);
+  }
+
+  @Get('suggest-prefix')
+  @RequirePermission('org_unit:read:global')
+  @ApiOperation({
+    summary: 'Sugerir el prefijo de una unidad nueva',
+    description:
+      'fixedPrefix = prefijo del ancestro más cercano con prefijo (parentId o sus ancestros; "" si ninguno); suggested = fixedPrefix + el primer dígito 1–9 libre entre las unidades activas (null si no queda); taken = los ya usados de ese nivel.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(UnitPrefixSuggestionDto) })
+  suggestPrefix(@Query() query: SuggestUnitPrefixQueryDto): Promise<UnitPrefixSuggestionDto> {
+    return this.organizationalUnitsService.suggestPrefix(query.parentId);
   }
 
   @Get(':id/history')

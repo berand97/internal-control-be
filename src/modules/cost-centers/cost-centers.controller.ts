@@ -24,7 +24,6 @@ import {
   ApiOperation,
   ApiResponse,
   ApiTags,
-  getSchemaPath,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
@@ -42,6 +41,7 @@ import { envelopedArraySchema } from '../documents/dto/document.responses.js';
 import {
   ChangeCostCenterPlacementDto,
   CostCenterAtQueryDto,
+  CostCenterTreeQueryDto,
   SuggestCostCenterCodeQueryDto,
 } from './dto/cost-center-placement.dto.js';
 import { CreateCostCenterDto } from './dto/create-cost-center.dto.js';
@@ -56,6 +56,7 @@ import {
 import { QueryCostCentersDto } from './dto/query-cost-centers.dto.js';
 import { CostCenterSyncResponseDto } from './dto/responses/cost-center-sync.response.dto.js';
 import { CostCenterResponseDto } from './dto/responses/cost-center.response.dto.js';
+import { StructureRemovalResultDto } from './dto/responses/structure-removal.response.dto.js';
 import { UpdateCostCenterDto } from './dto/update-cost-center.dto.js';
 import {
   CostCenterPlacementService,
@@ -88,6 +89,7 @@ const STRUCTURE_NOTE =
   CostCenterTreeDto,
   CostCenterCodeSuggestionDto,
   CostCenterPrefixMismatchDto,
+  StructureRemovalResultDto,
 )
 @Feature('cost-centers')
 @Controller('cost-centers')
@@ -145,11 +147,11 @@ export class CostCentersController {
   @RequirePermission('cost_center:read:global')
   @ApiOperation({
     summary: 'Árbol de centros de costo por centro padre a una fecha',
-    description: `${STRUCTURE_NOTE} Cada nodo trae la unidad y el movimiento vigentes a esa fecha, los jefes vigentes a esa fecha y los activos (no dados de baja) que hoy apuntan directamente al centro. Un centro que aún no existía en esa fecha no aparece.`,
+    description: `${STRUCTURE_NOTE} Cada nodo trae la unidad y el movimiento vigentes a esa fecha, los jefes vigentes a esa fecha y los activos (no dados de baja) que hoy apuntan directamente al centro. Un centro que aún no existía en esa fecha no aparece. Por defecto solo centros activos; ?includeArchived=true incluye los archivados.`,
   })
   @ApiOkResponse({ schema: envelopedSchema(CostCenterTreeDto) })
-  tree(@Query() query: CostCenterAtQueryDto): Promise<CostCenterTreeDto> {
-    return this.placements.tree(resolveAt(query.at));
+  tree(@Query() query: CostCenterTreeQueryDto): Promise<CostCenterTreeDto> {
+    return this.placements.tree(resolveAt(query.at), query.includeArchived ?? false);
   }
 
   @Get('suggest-code')
@@ -157,7 +159,7 @@ export class CostCentersController {
   @ApiOperation({
     summary: 'Sugerir el siguiente código libre para un centro nuevo',
     description:
-      'Con parentId: bajo X, X000; bajo XY00 (o X000), el siguiente XYnn libre; bajo un subgrupo XYZ0, el siguiente XYZn. Solo con unitId: el siguiente bloque libre en el rango del prefijo de la unidad (4 → 4100, 4200…). 400 si no hay ninguno de los dos o la unidad no tiene prefijo. code=null si el rango está lleno.',
+      'Con parentId de un centro XYZ0 (Z ≠ 0): fixedPrefix=XYZ y el siguiente XYZn libre (sin XYZ5, que es hermano). Con otro padre (regla vieja): bajo X, X000; bajo XY00 (o X000), el siguiente XYnn libre (fixedPrefix=null). Solo con unitId: fixedPrefix = prefijo de la unidad y el siguiente …0 libre (43 → 4310, 4320…; 4 → 4010, 4020…). 400 si no hay ninguno de los dos o la unidad no tiene prefijo. code=null si el rango está lleno.',
   })
   @ApiOkResponse({ schema: envelopedSchema(CostCenterCodeSuggestionDto) })
   suggestCode(@Query() query: SuggestCostCenterCodeQueryDto): Promise<CostCenterCodeSuggestionDto> {
@@ -169,7 +171,7 @@ export class CostCentersController {
   @ApiOperation({
     summary: 'Centros activos cuyo código no cuadra con su unidad vigente',
     description:
-      'Motivo: NO_UNIT (sin unidad), UNIT_WITHOUT_PREFIX (su unidad no tiene prefijo) o CODE_OUT_OF_RANGE (el código no empieza por el prefijo; incluye los centros que se movieron de unidad). Los existentes nunca se corrigen solos.',
+      'Motivo: NO_UNIT (sin unidad), UNIT_WITHOUT_PREFIX (su unidad no tiene prefijo), CODE_OUT_OF_RANGE (el código no empieza por el prefijo; incluye los centros que se movieron de unidad) o EXPECTED_PARENT_MISSING (XYZn sin su XYZ0: 3051 sin 3050; expectedParentCode dice cuál falta). Los existentes nunca se corrigen solos.',
   })
   @ApiOkResponse({ schema: envelopedArraySchema(CostCenterPrefixMismatchDto) })
   prefixMismatches(): Promise<CostCenterPrefixMismatchDto[]> {
@@ -179,8 +181,8 @@ export class CostCentersController {
   @Get(':id/history')
   @RequirePermission('cost_center:read:global')
   @ApiOperation({
-    summary: 'Historial de un centro de costo: ubicaciones y jefaturas',
-    description: `${STRUCTURE_NOTE} Ubicaciones y jefaturas (vigentes e históricas) juntas, de la más reciente a la más antigua.`,
+    summary: 'Historial de un centro de costo: ubicaciones, jefaturas y cambios de nombre/código/estado',
+    description: `${STRUCTURE_NOTE} Ubicaciones y jefaturas (vigentes e históricas) y cambios de nombre, código y estado (kind=ATTRIBUTE) juntos, de la más reciente a la más antigua.`,
   })
   @ApiOkResponse({ schema: envelopedSchema(CostCenterHistoryDto) })
   @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
@@ -279,21 +281,18 @@ export class CostCentersController {
   @HttpCode(HttpStatus.OK)
   @RequirePermission('cost_center:manage:global')
   @ApiOperation({
-    summary: 'Desactivar centro de costo',
+    summary: 'Eliminar (o archivar) un centro de costo',
     description:
-      'Se rechaza si tiene activos no dados de baja: 406 COST_CENTER_HAS_ACTIVE_ASSETS («No puede desactivarse: tiene activos asignados») con details[{field:"activeAssets", message:"<n>"}].',
+      'Se rechaza si tiene activos no dados de baja: 406 COST_CENTER_HAS_ACTIVE_ASSETS («No puede desactivarse: tiene activos asignados») con details[{field:"activeAssets", message:"<n>"}]; con centros hijos activos: 406 HAS_DEPENDENT_ENTITIES. Sin historia se borra de verdad (deleted=true: también sus jefaturas, roles con alcance en el centro e historial de ubicación; las personas quedan sin centro). Con historia (activos dados de baja, movimientos, traslados, préstamos, tomas/actas, documentos, solicitudes…) se archiva: archived=true y reason.',
   })
-  @ApiResponse({
-    status: 200,
-    schema: { $ref: getSchemaPath(ApiSuccessEnvelope) },
-  })
+  @ApiResponse({ status: 200, schema: envelopedSchema(StructureRemovalResultDto) })
   @ApiResponse({ status: 406, schema: errorEnvelopeSchema() })
   remove(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Ip() ipAddress: string | undefined,
     @Headers('user-agent') userAgent: string | undefined,
-  ): Promise<null> {
+  ): Promise<StructureRemovalResultDto> {
     return this.costCentersService.remove(id, user, meta(ipAddress, userAgent));
   }
 }

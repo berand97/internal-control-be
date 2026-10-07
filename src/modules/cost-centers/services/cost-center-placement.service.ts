@@ -4,13 +4,14 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
+import { OrgStructureHistoryService } from './org-structure-history.service.js';
 import { HEAD_SELECT, type HeadRow, toDto as headToDto, userDisplayNameSubquery } from '../../persons/services/cost-center-heads.service.js';
 import {
   codeMatchesPrefix,
   longestPrefix,
-  suggestInPrefix,
   suggestUnderParent,
 } from '../domain/code-prefix.js';
+import { resolveCenterParent, suggestForUnitPrefix, suggestUnderGroupCenter } from '../domain/org-chart-rules.js';
 import { validAt } from '../domain/placement-at.js';
 import type {
   CostCenterCodeSuggestionDto,
@@ -153,6 +154,7 @@ export class CostCenterPlacementService {
     private readonly dataSource: DataSource,
     @Inject('AuditLogsRepository')
     private readonly auditLogs: AuditLogsRepository,
+    private readonly attributes: OrgStructureHistoryService,
   ) {}
 
   /**
@@ -378,23 +380,37 @@ export class CostCenterPlacementService {
           validUntil: placement.validUntil,
           placement,
           head: null,
+          attribute: null,
         };
       }),
       ...heads.map((row) => {
         const head = headToDto(row);
-        return { kind: 'HEAD' as const, validFrom: head.validFrom, validUntil: head.validUntil, placement: null, head };
+        return { kind: 'HEAD' as const, validFrom: head.validFrom, validUntil: head.validUntil, placement: null, head, attribute: null };
       }),
+      ...(await this.attributes.list('COST_CENTER', costCenterId)).map((attribute) => ({
+        kind: 'ATTRIBUTE' as const,
+        validFrom: attribute.changedAt,
+        validUntil: null,
+        placement: null,
+        head: null,
+        attribute,
+      })),
     ].sort(
       (left, right) =>
         right.validFrom.localeCompare(left.validFrom) ||
         left.kind.localeCompare(right.kind) ||
-        (left.placement?.id ?? left.head?.id ?? '').localeCompare(right.placement?.id ?? right.head?.id ?? ''),
+        (left.placement?.id ?? left.head?.id ?? left.attribute?.id ?? '').localeCompare(
+          right.placement?.id ?? right.head?.id ?? right.attribute?.id ?? '',
+        ),
     );
     return { costCenter: { id: center.id, externalCode: center.external_code, name: center.name }, events };
   }
 
-  /** Árbol por centro padre a una fecha: unidad y movimiento de esa fecha; activos directos y estado, de hoy. */
-  async tree(at: Date): Promise<CostCenterTreeDto> {
+  /**
+   * Árbol por centro padre a una fecha: unidad y movimiento de esa fecha; activos directos y estado, de hoy. Por defecto
+   * solo los centros activos (un archivado no aparece; sus hijos activos suben a la raíz); includeArchived los muestra.
+   */
+  async tree(at: Date, includeArchived = false): Promise<CostCenterTreeDto> {
     const rows = (await this.dataSource.query(
       `SELECT cc.id, cc.external_code, cc.name, cc.is_active, p.parent_cost_center_id AS parent_id, p.has_movement,
               u.id AS unit_id, u.code AS unit_code, u.name AS unit_name, u.code_prefix AS unit_prefix,
@@ -405,9 +421,9 @@ export class CostCenterPlacementService {
        LEFT JOIN (SELECT current_cost_center_id, count(*) AS count FROM asset
                   WHERE operational_status <> 'WRITTEN_OFF' GROUP BY current_cost_center_id) a
          ON a.current_cost_center_id = cc.id
-       WHERE ${validAt('$1')}
+       WHERE ${validAt('$1')} AND (cc.is_active OR $2::boolean)
        ORDER BY cc.external_code`,
-      [at],
+      [at, includeArchived],
     )) as Array<{
       id: string;
       external_code: string;
@@ -487,14 +503,21 @@ export class CostCenterPlacementService {
       `SELECT id, code, name, code_prefix AS "codePrefix" FROM organizational_unit
        WHERE is_active AND code_prefix IS NOT NULL`,
     )) as Array<CostCenterUnitRefDto & { codePrefix: string }>;
+    const activeCodes = new Set(rows.map((row) => row.external_code));
     return rows.flatMap((row) => {
+      const missingParent = resolveCenterParent(
+        row.external_code,
+        (code) => code !== row.external_code && activeCodes.has(code),
+      ).missingParentCode;
       const reason: PrefixMismatchReason | null = !row.unit_id
         ? 'NO_UNIT'
         : !row.unit_prefix
           ? 'UNIT_WITHOUT_PREFIX'
-          : codeMatchesPrefix(row.external_code, row.unit_prefix)
-            ? null
-            : 'CODE_OUT_OF_RANGE';
+          : !codeMatchesPrefix(row.external_code, row.unit_prefix)
+            ? 'CODE_OUT_OF_RANGE'
+            : missingParent
+              ? 'EXPECTED_PARENT_MISSING'
+              : null;
       if (!reason) {
         return [];
       }
@@ -506,6 +529,7 @@ export class CostCenterPlacementService {
           reason,
           organizationalUnit: unitRef(row.unit_id, row.unit_code, row.unit_name, row.unit_prefix),
           expectedUnit: longestPrefix(row.external_code, units) ?? null,
+          expectedParentCode: missingParent,
         },
       ];
     });
@@ -520,9 +544,24 @@ export class CostCenterPlacementService {
     );
     if (parentId) {
       const parent = await this.requireCenter(parentId);
+      const group = suggestUnderGroupCenter(parent.external_code, used);
+      if (group) {
+        const rangeFrom = group.candidates[0] ?? '';
+        const rangeTo = group.candidates[group.candidates.length - 1] ?? '';
+        return {
+          code: group.code,
+          rangeFrom,
+          rangeTo,
+          reason: group.code ? null : `No quedan códigos libres bajo ${parent.external_code} (${rangeFrom}–${rangeTo}, sin ${group.fixedPrefix}5)`,
+          fixedPrefix: group.fixedPrefix,
+          basis: 'PARENT',
+          matchesUnitPrefix: prefix && group.code ? codeMatchesPrefix(group.code, prefix) : null,
+        };
+      }
       const suggestion = suggestUnderParent(parent.external_code, used);
       return {
         ...suggestion,
+        fixedPrefix: null,
         basis: 'PARENT',
         matchesUnitPrefix: prefix && suggestion.code ? codeMatchesPrefix(suggestion.code, prefix) : null,
       };
@@ -537,7 +576,18 @@ export class CostCenterPlacementService {
         { field: 'unitId', message: 'Unidad sin prefijo de código' },
       ]);
     }
-    return { ...suggestInPrefix(prefix, used), basis: 'UNIT', matchesUnitPrefix: true };
+    const byUnit = suggestForUnitPrefix(prefix, used);
+    const rangeFrom = byUnit.candidates[0] ?? '';
+    const rangeTo = byUnit.candidates[byUnit.candidates.length - 1] ?? '';
+    return {
+      code: byUnit.code,
+      rangeFrom,
+      rangeTo,
+      reason: byUnit.code ? null : `No quedan códigos libres entre ${rangeFrom} y ${rangeTo}`,
+      fixedPrefix: byUnit.fixedPrefix,
+      basis: 'UNIT',
+      matchesUnitPrefix: true,
+    };
   }
 
   private async unitPrefix(unitId: string): Promise<string | null> {

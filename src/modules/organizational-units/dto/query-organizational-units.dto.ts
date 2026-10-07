@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsOptional, IsUUID } from 'class-validator';
 
 export class QueryOrganizationalUnitsDto {
   @ApiPropertyOptional()
@@ -34,4 +34,11 @@ export class IncludeArchivedQueryDto {
   @Transform(toBoolean)
   @IsBoolean()
   readonly includeArchived?: boolean;
+}
+
+export class SuggestUnitPrefixQueryDto {
+  @ApiPropertyOptional({ format: 'uuid', description: 'Unidad de la que dependerá la nueva; omitir para una raíz' })
+  @IsOptional()
+  @IsUUID('4')
+  readonly parentId?: string;
 }

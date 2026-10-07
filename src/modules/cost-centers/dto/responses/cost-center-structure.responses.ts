@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { CostCenterHeadDto } from '../../../persons/dto/cost-center-head.dto.js';
+import { OrgStructureHistoryEventDto } from '../../../organizational-units/dto/responses/org-structure-history.response.dto.js';
 
 /**
  * Respuestas de la estructura de centros de costo (CostCenterPlacementService): ubicación con historial, árbol a una
@@ -10,10 +11,10 @@ import { CostCenterHeadDto } from '../../../persons/dto/cost-center-head.dto.js'
 export const PLACEMENT_SOURCES = ['MANUAL', 'IMPORT', 'MIGRATION'] as const;
 export type PlacementSource = (typeof PLACEMENT_SOURCES)[number];
 
-export const HISTORY_EVENT_KINDS = ['PLACEMENT', 'HEAD'] as const;
+export const HISTORY_EVENT_KINDS = ['PLACEMENT', 'HEAD', 'ATTRIBUTE'] as const;
 export type HistoryEventKind = (typeof HISTORY_EVENT_KINDS)[number];
 
-export const PREFIX_MISMATCH_REASONS = ['NO_UNIT', 'UNIT_WITHOUT_PREFIX', 'CODE_OUT_OF_RANGE'] as const;
+export const PREFIX_MISMATCH_REASONS = ['NO_UNIT', 'UNIT_WITHOUT_PREFIX', 'CODE_OUT_OF_RANGE', 'EXPECTED_PARENT_MISSING'] as const;
 export type PrefixMismatchReason = (typeof PREFIX_MISMATCH_REASONS)[number];
 
 export const CODE_SUGGESTION_BASES = ['PARENT', 'UNIT'] as const;
@@ -115,6 +116,13 @@ export class CostCenterHistoryEventDto {
 
   @ApiProperty({ type: CostCenterHeadDto, nullable: true, description: 'Solo en kind=HEAD' })
   readonly head!: CostCenterHeadDto | null;
+
+  @ApiProperty({
+    type: OrgStructureHistoryEventDto,
+    nullable: true,
+    description: 'Solo en kind=ATTRIBUTE: cambio de nombre (NAME), código (CODE) o estado (STATUS)',
+  })
+  readonly attribute!: OrgStructureHistoryEventDto | null;
 }
 
 export class CostCenterHistoryDto {
@@ -123,7 +131,7 @@ export class CostCenterHistoryDto {
 
   @ApiProperty({
     type: [CostCenterHistoryEventDto],
-    description: 'Ubicaciones y jefaturas juntas, de la más reciente a la más antigua (por validFrom)',
+    description: 'Ubicaciones, jefaturas y cambios de nombre/código/estado juntos, de la más reciente a la más antigua (por validFrom)',
   })
   readonly events!: ReadonlyArray<CostCenterHistoryEventDto>;
 }
@@ -195,6 +203,13 @@ export class CostCenterCodeSuggestionDto {
 
   @ApiProperty({ type: 'string', nullable: true })
   readonly reason!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Parte fija del código (la de la unidad o la del centro XYZ0 padre); null con la regla vieja (padre XY00/X000)',
+  })
+  readonly fixedPrefix!: string | null;
 }
 
 export class CostCenterPrefixMismatchDto {
@@ -210,7 +225,8 @@ export class CostCenterPrefixMismatchDto {
   @ApiProperty({
     enum: PREFIX_MISMATCH_REASONS,
     enumName: 'CostCenterPrefixMismatchReason',
-    description: 'NO_UNIT: sin unidad; UNIT_WITHOUT_PREFIX: su unidad no tiene prefijo; CODE_OUT_OF_RANGE: el código no empieza por el prefijo de su unidad',
+    description:
+      'NO_UNIT: sin unidad; UNIT_WITHOUT_PREFIX: su unidad no tiene prefijo; CODE_OUT_OF_RANGE: el código no empieza por el prefijo de su unidad; EXPECTED_PARENT_MISSING: le corresponde un centro padre XYZ0 que no existe (3051 sin 3050)',
   })
   readonly reason!: PrefixMismatchReason;
 
@@ -223,4 +239,11 @@ export class CostCenterPrefixMismatchDto {
     description: 'Unidad activa cuyo prefijo (el más largo) corresponde al código, si hay',
   })
   readonly expectedUnit!: CostCenterUnitRefDto | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Centro padre que pide la regla del organigrama (XYZn → XYZ0) y no existe; null si no falta ninguno',
+  })
+  readonly expectedParentCode!: string | null;
 }

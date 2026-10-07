@@ -15,7 +15,10 @@ import { CostCenterResponseDto } from '../dto/responses/cost-center.response.dto
 import { UpdateCostCenterDto } from '../dto/update-cost-center.dto.js';
 import { CostCenterSyncSource } from '../enums/cost-center-sync-source.enum.js';
 import type { CostCentersRepository } from '../repositories/cost-centers.repository.interface.js';
+import type { StructureRemovalResultDto } from '../dto/responses/structure-removal.response.dto.js';
 import { CostCenterPlacementService, NO_REQUEST, type RequestMeta } from './cost-center-placement.service.js';
+import { OrgStructureHistoryService } from './org-structure-history.service.js';
+import { decideCenterRemoval, StructureRemovalService } from './structure-removal.service.js';
 
 const COST_CENTER_ENTITY_TYPE = 'COST_CENTER';
 
@@ -33,6 +36,8 @@ export class CostCentersService {
     private readonly auditLogsRepository: AuditLogsRepository,
     private readonly dataSource: DataSource,
     private readonly placements: CostCenterPlacementService,
+    private readonly removal: StructureRemovalService,
+    private readonly history: OrgStructureHistoryService,
   ) {}
 
   async list(
@@ -159,23 +164,73 @@ export class CostCentersService {
       userAgent: request.userAgent,
       changes: { ...dto },
     });
-    return CostCenterResponseDto.from(await this.requireCenter(id));
+    const updated = await this.requireCenter(id);
+    await this.history.record(
+      this.dataSource.manager,
+      [
+        { entityType: 'COST_CENTER', entityId: center.id, field: 'NAME', oldValue: center.name, newValue: updated.name },
+        {
+          entityType: 'COST_CENTER',
+          entityId: center.id,
+          field: 'STATUS',
+          oldValue: center.isActive ? 'ACTIVE' : 'ARCHIVED',
+          newValue: updated.isActive ? 'ACTIVE' : 'ARCHIVED',
+        },
+      ],
+      { actorId: actor.id, source: 'MANUAL' },
+    );
+    return CostCenterResponseDto.from(updated);
   }
 
-  async remove(id: string, actor: AuthenticatedUser, request: RequestMeta = NO_REQUEST): Promise<null> {
+  /**
+   * Con activos no dados de baja: 406 como siempre. Con hijos activos: 406 HAS_DEPENDENT_ENTITIES. Si no, se borra de
+   * verdad (con sus jefaturas, roles con alcance en el centro e historial de ubicación) o, si tiene historia
+   * (movimientos, traslados, préstamos, tomas, documentos, solicitudes…), se archiva. StructureRemovalService.
+   */
+  async remove(
+    id: string,
+    actor: AuthenticatedUser,
+    request: RequestMeta = NO_REQUEST,
+  ): Promise<StructureRemovalResultDto> {
     const center = await this.requireCenter(id);
     await this.assertNoActiveAssets(center.id);
-    await this.costCentersRepository.deactivate(center.id);
-    await this.auditLogsRepository.record({
-      action: AuditAction.CostCenterDeleted,
-      entityType: COST_CENTER_ENTITY_TYPE,
-      entityId: center.id,
-      performedBy: actor.id,
-      ipAddress: request.ip,
-      userAgent: request.userAgent,
-      changes: { externalCode: center.externalCode },
+    return this.dataSource.transaction(async (manager) => {
+      const verdict = decideCenterRemoval(await this.removal.inspectCostCenter(manager, center.id));
+      if (verdict.decision === 'BLOCKED') {
+        throw new ApiException(ErrorCode.HasDependentEntities, verdict.reason ?? undefined);
+      }
+      if (verdict.decision === 'DELETE') {
+        await this.removal.deleteCostCenter(manager, center.id);
+      } else {
+        await manager.query('UPDATE cost_center SET is_active = FALSE, updated_at = NOW() WHERE id = $1', [center.id]);
+        await this.history.record(
+          manager,
+          [
+            {
+              entityType: 'COST_CENTER',
+              entityId: center.id,
+              field: 'STATUS',
+              oldValue: center.isActive ? 'ACTIVE' : 'ARCHIVED',
+              newValue: 'ARCHIVED',
+            },
+          ],
+          { actorId: actor.id, source: 'MANUAL', reason: verdict.reason },
+        );
+      }
+      await this.auditLogsRepository.record(
+        {
+          action: verdict.decision === 'DELETE' ? AuditAction.CostCenterDeleted : AuditAction.CostCenterArchived,
+          entityType: COST_CENTER_ENTITY_TYPE,
+          entityId: center.id,
+          performedBy: actor.id,
+          ipAddress: request.ip,
+          userAgent: request.userAgent,
+          changes: { externalCode: center.externalCode, name: center.name, physical: verdict.decision === 'DELETE' },
+        },
+        manager,
+      );
+      return { deleted: verdict.decision === 'DELETE', archived: verdict.decision === 'ARCHIVE', reason: verdict.reason };
     });
-    return null;
   }
 
   /** 406 COST_CENTER_HAS_ACTIVE_ASSETS con el número de activos (no dados de baja) en details[activeAssets]. */

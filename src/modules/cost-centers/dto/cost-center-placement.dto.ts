@@ -63,3 +63,11 @@ export class SuggestCostCenterCodeQueryDto {
   @IsUUID('4')
   readonly parentId?: string;
 }
+
+export class CostCenterTreeQueryDto extends CostCenterAtQueryDto {
+  @ApiPropertyOptional({ default: false, description: 'true: incluye los archivados (inactivos); por defecto solo activos' })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  readonly includeArchived?: boolean;
+}

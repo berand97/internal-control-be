@@ -268,4 +268,123 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(rejected.status).toBe(422);
     expect(rejected.body.error.code).toBe('ORG_CHART_IMPORT_HAS_ERRORS');
   });
+  it('DELETE de un centro: sin historia lo borra con jefaturas y roles; con historia lo archiva; el árbol solo muestra activos', async () => {
+    const make = async (code: string) => {
+      const response = await http()
+        .post('/api/v1/cost-centers')
+        .set(auth('admin'))
+        .send({ externalCode: code, name: `CENTRO ${code}`, organizationalUnitId: ids['u61'] });
+      expect(response.status).toBe(201);
+      return response.body.data.id as string;
+    };
+    const plain = await make('6160');
+    await dataSource.query(`INSERT INTO cost_center_head (person_id, cost_center_id, reason) VALUES ($1, $2, 'Prueba')`, [admin.personId, plain]);
+    await dataSource.query(
+      `INSERT INTO user_role (user_id, role_id, scope_type, scope_id) SELECT $1, id, 'COST_CENTER', $2 FROM role WHERE code = 'DEPARTMENT_HEAD'`,
+      [reader.id, plain],
+    );
+    const removed = await http().delete(`/api/v1/cost-centers/${plain}`).set(auth('admin'));
+    expect(removed.status).toBe(200);
+    expectConforms('delete', '/api/v1/cost-centers/{id}', 200, removed.body);
+    expect(removed.body.data).toEqual({ deleted: true, archived: false, reason: null });
+    expect(await centerByCode('6160')).toBeUndefined();
+    expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM user_role WHERE scope_id = $1`, [plain])).toBe(0);
+    const audit = (await dataSource.query(`SELECT changes FROM audit_log WHERE entity_id = $1 AND action = 'COST_CTR_DELETED'`, [plain])) as Array<{
+      changes: Record<string, unknown>;
+    }>;
+    expect(audit[0]?.changes).toMatchObject({ externalCode: '6160', name: 'CENTRO 6160', physical: true });
+
+    const withHistory = await make('6170');
+    const category = await scalar<string>(dataSource, `SELECT id FROM asset_category LIMIT 1`);
+    await dataSource.query(
+      `INSERT INTO asset (internal_code, description, category_id, acquisition_type_id, acquisition_date, current_cost_center_id,
+         created_by, operational_status, written_off_at)
+       VALUES ($1, 'Baja', $2, (SELECT id FROM acquisition_type WHERE code = 'PURCHASE'), '2021-03-01', $3, $4, 'WRITTEN_OFF', NOW())`,
+      [`OC-${randomUUID().slice(0, 8)}`, category, withHistory, admin.id],
+    );
+    const archived = await http().delete(`/api/v1/cost-centers/${withHistory}`).set(auth('admin'));
+    expect(archived.status).toBe(200);
+    expect(archived.body.data).toMatchObject({ deleted: false, archived: true, reason: expect.stringContaining('activos (dados de baja)') });
+
+    const tree = await http().get('/api/v1/cost-centers/tree').set(auth('admin'));
+    expect(JSON.stringify(tree.body.data.roots)).not.toContain('"6170"');
+    const all = await http().get('/api/v1/cost-centers/tree?includeArchived=true').set(auth('admin'));
+    expect(JSON.stringify(all.body.data.roots)).toContain('"6170"');
+
+    const history = await http().get(`/api/v1/cost-centers/${withHistory}/history`).set(auth('admin'));
+    expect(history.status).toBe(200);
+    expectConforms('get', '/api/v1/cost-centers/{id}/history', 200, history.body);
+    expect(history.body.data.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'ATTRIBUTE', attribute: expect.objectContaining({ field: 'STATUS', newValue: 'ARCHIVED' }) }),
+      ]),
+    );
+  });
+
+  it('DELETE de una unidad sin nada la borra; el árbol de unidades por defecto solo muestra activas', async () => {
+    const created = await http()
+      .post('/api/v1/organizational-units')
+      .set(auth('admin'))
+      .send({ code: 'IT_OC_BORRABLE', name: 'Unidad borrable', type: 'OFFICE', parentId: ids['u6'], codePrefix: '69' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const archivedUnit = await http()
+      .post('/api/v1/organizational-units')
+      .set(auth('admin'))
+      .send({ code: 'IT_OC_ARCHIVADA', name: 'Unidad archivada', type: 'COUNCIL', parentId: ids['u6'], isActive: false });
+    expect(archivedUnit.status).toBe(201);
+    const tree = await http().get('/api/v1/organizational-units/tree').set(auth('admin'));
+    expect(JSON.stringify(tree.body.data)).not.toContain('IT_OC_ARCHIVADA');
+    const withArchived = await http().get('/api/v1/organizational-units/tree?includeArchived=true').set(auth('admin'));
+    expect(JSON.stringify(withArchived.body.data)).toContain('IT_OC_ARCHIVADA');
+
+    const renamed = await http()
+      .patch(`/api/v1/organizational-units/${created.body.data.id}`)
+      .set(auth('admin'))
+      .send({ name: 'Unidad borrable renombrada' });
+    expect(renamed.status).toBe(200);
+    const unitHistory = await http().get(`/api/v1/organizational-units/${created.body.data.id}/history`).set(auth('admin'));
+    expect(unitHistory.status).toBe(200);
+    expectConforms('get', '/api/v1/organizational-units/{id}/history', 200, unitHistory.body);
+    expect(unitHistory.body.data).toEqual([
+      expect.objectContaining({ field: 'NAME', oldValue: 'Unidad borrable', newValue: 'Unidad borrable renombrada', source: 'MANUAL' }),
+    ]);
+
+    const removed = await http().delete(`/api/v1/organizational-units/${created.body.data.id}`).set(auth('admin'));
+    expect(removed.status).toBe(200);
+    expectConforms('delete', '/api/v1/organizational-units/{id}', 200, removed.body);
+    expect(removed.body.data).toEqual({ deleted: true, archived: false, reason: null });
+    expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM organizational_unit WHERE id = $1', [created.body.data.id])).toBe(0);
+
+    const outOfParent = await http()
+      .post('/api/v1/organizational-units')
+      .set(auth('admin'))
+      .send({ code: 'IT_OC_MAL', name: 'Mal prefijo', type: 'OFFICE', parentId: ids['u6'], codePrefix: '611' });
+    expect(outOfParent.status).toBe(400);
+    expect(outOfParent.body.error.code).toBe('ORG_UNIT_PREFIX_OUT_OF_PARENT');
+  });
+
+  it('sugerencias: prefijo de unidad, código bajo XYZ0 y en la unidad; 6181 sin 6180 aparece en códigos que no cuadran', async () => {
+    const prefix = await http().get(`/api/v1/organizational-units/suggest-prefix?parentId=${ids['u6']}`).set(auth('admin'));
+    expect(prefix.status).toBe(200);
+    expectConforms('get', '/api/v1/organizational-units/suggest-prefix', 200, prefix.body);
+    expect(prefix.body.data).toMatchObject({ fixedPrefix: '6', suggested: '63', taken: expect.arrayContaining(['61', '62']) });
+
+    const underGroup = await http().get(`/api/v1/cost-centers/suggest-code?parentId=${ids['6110']}`).set(auth('admin'));
+    expect(underGroup.status).toBe(200);
+    expectConforms('get', '/api/v1/cost-centers/suggest-code', 200, underGroup.body);
+    expect(underGroup.body.data).toMatchObject({ fixedPrefix: '611', code: '6112', basis: 'PARENT' });
+    const inUnit = await http().get(`/api/v1/cost-centers/suggest-code?unitId=${ids['u61']}`).set(auth('admin'));
+    expect(inUnit.body.data).toMatchObject({ fixedPrefix: '61', code: '6120', basis: 'UNIT' });
+
+    const orphan = await http()
+      .post('/api/v1/cost-centers')
+      .set(auth('admin'))
+      .send({ externalCode: '6181', name: 'Sin padre', organizationalUnitId: ids['u61'] });
+    expect(orphan.status).toBe(201);
+    const mismatches = await http().get('/api/v1/cost-centers/prefix-mismatches').set(auth('admin'));
+    expectConforms('get', '/api/v1/cost-centers/prefix-mismatches', 200, mismatches.body);
+    expect(mismatches.body.data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ externalCode: '6181', reason: 'EXPECTED_PARENT_MISSING', expectedParentCode: '6180' })]),
+    );
+  });
 });

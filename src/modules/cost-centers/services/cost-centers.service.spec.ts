@@ -10,6 +10,8 @@ import { CostCenterSyncSource } from '../enums/cost-center-sync-source.enum.js';
 import type { CostCentersRepository } from '../repositories/cost-centers.repository.interface.js';
 import type { CostCenterPlacementService } from './cost-center-placement.service.js';
 import { CostCentersService } from './cost-centers.service.js';
+import type { OrgStructureHistoryService } from './org-structure-history.service.js';
+import type { StructureRemovalService } from './structure-removal.service.js';
 
 const actor: AuthenticatedUser = {
   id: 'admin-1',
@@ -76,6 +78,8 @@ describe('CostCentersService', () => {
       auditLogsRepository,
       {} as DataSource,
       {} as CostCenterPlacementService,
+      {} as StructureRemovalService,
+      {} as OrgStructureHistoryService,
     );
   });
 

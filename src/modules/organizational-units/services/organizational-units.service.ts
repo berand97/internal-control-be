@@ -9,7 +9,8 @@ import {
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
-import { checkUnitPrefix } from '../../cost-centers/domain/org-chart-rules.js';
+import { checkUnitPrefix, suggestUnitPrefix } from '../../cost-centers/domain/org-chart-rules.js';
+import type { UnitPrefixSuggestionDto } from '../dto/responses/unit-prefix-suggestion.response.dto.js';
 import type { StructureRemovalResultDto } from '../../cost-centers/dto/responses/structure-removal.response.dto.js';
 import {
   type OrgHistoryEntry,
@@ -65,6 +66,18 @@ export class OrganizationalUnitsService {
   async tree(includeArchived = false): Promise<ReadonlyArray<OrganizationalUnitTreeResponseDto>> {
     const items = await this.unitsRepository.findAll(includeArchived ? undefined : true);
     return buildTree(items, null);
+  }
+
+  /** Prefijo para una unidad nueva bajo parentId: el del ancestro más cercano con prefijo + un dígito libre. */
+  async suggestPrefix(parentId: string | undefined): Promise<UnitPrefixSuggestionDto> {
+    let ancestor = parentId ? await this.requireUnit(parentId) : null;
+    for (let depth = 0; ancestor && !ancestor.codePrefix && depth < 64; depth += 1) {
+      ancestor = ancestor.parentId ? await this.unitsRepository.findById(ancestor.parentId) : null;
+    }
+    const taken = new Set(
+      (await this.unitsRepository.findAll(true)).flatMap((unit) => (unit.codePrefix ? [unit.codePrefix] : [])),
+    );
+    return suggestUnitPrefix(ancestor?.codePrefix ?? null, taken);
   }
 
   async getById(id: string): Promise<OrganizationalUnitResponseDto> {
