@@ -995,6 +995,31 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Otra unidad activa ya usa ese prefijo de código',
   },
+  [ErrorCode.OrgUnitPrefixOutOfParent]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El prefijo no cuadra con el de la unidad de la que depende: debe ser su prefijo seguido de un dígito',
+  },
+  [ErrorCode.OrgChartImportHasErrors]: {
+    httpStatus: 422,
+    action: 'CANCEL',
+    message: 'El archivo del organigrama tiene errores: corríjalos y vuelva a previsualizar',
+  },
+  [ErrorCode.OrgChartImportStale]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El organigrama cambió desde la previsualización: vuelva a previsualizar el archivo',
+  },
+  [ErrorCode.OrgChartImportClosed]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Esa previsualización ya se aplicó o venció: vuelva a previsualizar el archivo',
+  },
+  [ErrorCode.OrgChartInvalidFile]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'El archivo no es un Excel del organigrama: debe traer la hoja «Organigrama» o «Centros de costo» con sus encabezados',
+  },
   [ErrorCode.ImportJobNotRetryable]: {
     httpStatus: 409,
     action: 'CANCEL',

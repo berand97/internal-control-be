@@ -200,6 +200,11 @@ export enum ErrorCode {
   CostCenterGroupingHasAssets = 'COST_CENTER_GROUPING_HAS_ASSETS',
   CostCenterCodeOutOfUnitRange = 'COST_CENTER_CODE_OUT_OF_UNIT_RANGE',
   OrgUnitCodePrefixExists = 'ORG_UNIT_CODE_PREFIX_EXISTS',
+  OrgUnitPrefixOutOfParent = 'ORG_UNIT_PREFIX_OUT_OF_PARENT',
+  OrgChartImportHasErrors = 'ORG_CHART_IMPORT_HAS_ERRORS',
+  OrgChartImportStale = 'ORG_CHART_IMPORT_STALE',
+  OrgChartImportClosed = 'ORG_CHART_IMPORT_CLOSED',
+  OrgChartInvalidFile = 'ORG_CHART_INVALID_FILE',
 
   ImportJobNotRetryable = 'IMPORT_JOB_NOT_RETRYABLE',
 
