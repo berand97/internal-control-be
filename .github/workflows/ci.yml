@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches-ignore: [qa, prod]
   pull_request:
 
 jobs:

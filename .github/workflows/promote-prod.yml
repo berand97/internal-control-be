@@ -1,0 +1,34 @@
+name: Promover a PROD
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Candidata aprobada en QA (v1.4.0-rc.2), o una versión anterior para volver atrás (v1.3.0)'
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Etiquetar la versión y mover prod
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          bash .github/scripts/release.sh promote "$VERSION"
