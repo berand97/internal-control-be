@@ -116,6 +116,7 @@ import { CustodianRetirementLoanCancelAndSurplusCenter1767226010000 } from './mi
 import { OrgChartStructure1767226020000 } from './migrations/1767226020000-org-chart-structure.js';
 import { UnitHeadCostCenterCode1767226030000 } from './migrations/1767226030000-unit-head-cost-center-code.js';
 import { CostCenterPlacementMode1767226040000 } from './migrations/1767226040000-cost-center-placement-mode.js';
+import { OrgChartImportConfirmedBy1767226050000 } from './migrations/1767226050000-org-chart-import-confirmed-by.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -266,6 +267,7 @@ const dataSource = new DataSource({
     OrgChartStructure1767226020000,
     UnitHeadCostCenterCode1767226030000,
     CostCenterPlacementMode1767226040000,
+    OrgChartImportConfirmedBy1767226050000,
   ],
 });
 
