@@ -8,8 +8,13 @@ import { OrgStructureHistoryEventDto } from '../../../organizational-units/dto/r
  * devuelve: cambiar un shape exige cambiar ambos.
  */
 
-export const PLACEMENT_SOURCES = ['MANUAL', 'IMPORT', 'MIGRATION'] as const;
+/** AUTO: el conciliador de estructura (StructureReconcilerService). */
+export const PLACEMENT_SOURCES = ['MANUAL', 'IMPORT', 'MIGRATION', 'AUTO'] as const;
 export type PlacementSource = (typeof PLACEMENT_SOURCES)[number];
+
+/** AUTO: la unidad y el padre los decide el código; MANUAL: los fijó una persona y el conciliador no los toca. */
+export const PLACEMENT_MODES = ['AUTO', 'MANUAL'] as const;
+export type PlacementMode = (typeof PLACEMENT_MODES)[number];
 
 export const HISTORY_EVENT_KINDS = ['PLACEMENT', 'HEAD', 'ATTRIBUTE'] as const;
 export type HistoryEventKind = (typeof HISTORY_EVENT_KINDS)[number];
@@ -75,6 +80,14 @@ export class CostCenterPlacementDto {
 
   @ApiProperty({ enum: PLACEMENT_SOURCES, enumName: 'CostCenterPlacementSource' })
   readonly source!: PlacementSource;
+
+  @ApiProperty({
+    enum: PLACEMENT_MODES,
+    enumName: 'CostCenterPlacementMode',
+    description:
+      'AUTO: unidad por el prefijo más largo y padre XYZ0 (el conciliador la mantiene al día); MANUAL: fijada por una persona, el conciliador no la toca (POST /cost-centers/{id}/placement/auto la devuelve a AUTO)',
+  })
+  readonly mode!: PlacementMode;
 
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Importación que hizo el cambio' })
   readonly stagingImportId!: string | null;

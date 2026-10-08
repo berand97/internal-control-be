@@ -23,7 +23,8 @@ export const ORG_HISTORY_FIELDS = [
 ] as const;
 export type OrgHistoryField = (typeof ORG_HISTORY_FIELDS)[number];
 
-export const ORG_HISTORY_SOURCES = ['MANUAL', 'IMPORT'] as const;
+/** AUTO: el conciliador de estructura (amarre del centro propio). */
+export const ORG_HISTORY_SOURCES = ['MANUAL', 'IMPORT', 'AUTO'] as const;
 export type OrgHistorySource = (typeof ORG_HISTORY_SOURCES)[number];
 
 export interface OrgHistoryEntry {

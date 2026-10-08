@@ -23,6 +23,7 @@ import type {
   CostCenterTreeDto,
   CostCenterTreeNodeDto,
   CostCenterUnitRefDto,
+  PlacementMode,
   PlacementSource,
   PrefixMismatchReason,
 } from '../dto/responses/cost-center-structure.responses.js';
@@ -47,6 +48,11 @@ export interface PlacementContext extends RequestMeta {
   readonly actorId: string | null;
   readonly source: Exclude<PlacementSource, 'MIGRATION'>;
   readonly stagingImportId?: string | null;
+  /**
+   * Marca de la fila nueva. Sin indicar: open() abre AUTO y change() conserva la de la fila vigente. MANUAL: cambio de
+   * una persona en la pantalla del centro; AUTO: el conciliador o la vuelta a automático.
+   */
+  readonly mode?: PlacementMode;
 }
 
 export interface PlacementState {
@@ -59,6 +65,8 @@ export interface PlacementChange {
   readonly placementId: string;
   readonly from: PlacementState;
   readonly to: PlacementState;
+  readonly fromMode: PlacementMode;
+  readonly toMode: PlacementMode;
   /** El centro quedó agrupador y dejó de aceptar activos. */
   readonly acceptsAssetsCleared: boolean;
 }
@@ -75,6 +83,7 @@ interface PlacementRow {
   is_current: boolean;
   reason: string;
   source: PlacementSource;
+  mode: PlacementMode;
   staging_import_id: string | null;
   changed_by: string | null;
   changed_by_name: string | null;
@@ -91,7 +100,7 @@ interface PlacementRow {
 const PLACEMENT_SELECT = `
   SELECT p.id, p.cost_center_id, p.has_movement, p.valid_from, p.valid_until,
          (p.valid_from <= NOW() AND (p.valid_until IS NULL OR p.valid_until > NOW())) AS is_current,
-         p.reason, p.source, p.staging_import_id, p.changed_by,
+         p.reason, p.source, p.mode, p.staging_import_id, p.changed_by,
          ${userDisplayNameSubquery('p.changed_by')} AS changed_by_name, p.changed_at,
          u.id AS unit_id, u.code AS unit_code, u.name AS unit_name, u.code_prefix AS unit_prefix,
          pc.id AS parent_id, pc.external_code AS parent_code, pc.name AS parent_name
@@ -113,6 +122,7 @@ const toPlacementDto = (row: PlacementRow): CostCenterPlacementDto => ({
   isCurrent: row.is_current,
   reason: row.reason,
   source: row.source,
+  mode: row.mode,
   stagingImportId: row.staging_import_id,
   changedBy: row.changed_by,
   changedByName: row.changed_by_name,
@@ -164,8 +174,8 @@ export class CostCenterPlacementService {
   async open(manager: EntityManager, costCenterId: string, context: PlacementContext): Promise<string> {
     const [row] = (await manager.query(
       `INSERT INTO cost_center_placement (cost_center_id, organizational_unit_id, parent_cost_center_id, has_movement,
-         valid_from, reason, changed_by, ip_address, user_agent, source, staging_import_id)
-       SELECT id, organizational_unit_id, parent_id, has_movement, created_at, $2, $3, $4, $5, $6, $7
+         valid_from, reason, changed_by, ip_address, user_agent, source, staging_import_id, mode)
+       SELECT id, organizational_unit_id, parent_id, has_movement, created_at, $2, $3, $4, $5, $6, $7, $8
        FROM cost_center WHERE id = $1
        RETURNING id`,
       [
@@ -176,6 +186,7 @@ export class CostCenterPlacementService {
         context.userAgent?.slice(0, USER_AGENT_MAX) ?? null,
         context.source,
         context.stagingImportId ?? null,
+        context.mode ?? 'AUTO',
       ],
     )) as Array<{ id: string }>;
     if (!row) {
@@ -191,8 +202,8 @@ export class CostCenterPlacementService {
     }
     const rows = (await manager.query(
       `INSERT INTO cost_center_placement (cost_center_id, organizational_unit_id, parent_cost_center_id, has_movement,
-         valid_from, reason, changed_by, ip_address, user_agent, source, staging_import_id)
-       SELECT id, organizational_unit_id, parent_id, has_movement, created_at, $2, $3, $4, $5, $6, $7
+         valid_from, reason, changed_by, ip_address, user_agent, source, staging_import_id, mode)
+       SELECT id, organizational_unit_id, parent_id, has_movement, created_at, $2, $3, $4, $5, $6, $7, $8
        FROM cost_center WHERE id = ANY($1::uuid[])
        RETURNING id`,
       [
@@ -203,6 +214,7 @@ export class CostCenterPlacementService {
         context.userAgent?.slice(0, USER_AGENT_MAX) ?? null,
         context.source,
         context.stagingImportId ?? null,
+        context.mode ?? 'AUTO',
       ],
     )) as unknown[];
     return rows.length;
@@ -243,7 +255,13 @@ export class CostCenterPlacementService {
       parentId: patch.parentId !== undefined ? patch.parentId : from.parentId,
       hasMovement: patch.hasMovement ?? from.hasMovement,
     };
-    if (sameState(from, to)) {
+    const [current] = (await manager.query(
+      'SELECT mode FROM cost_center_placement WHERE cost_center_id = $1 AND valid_until IS NULL',
+      [costCenterId],
+    )) as Array<{ mode: PlacementMode }>;
+    const fromMode: PlacementMode = current?.mode ?? 'AUTO';
+    const toMode: PlacementMode = context.mode ?? fromMode;
+    if (sameState(from, to) && fromMode === toMode) {
       return null;
     }
     if (to.unitId && to.unitId !== from.unitId) {
@@ -291,8 +309,8 @@ export class CostCenterPlacementService {
     const validFrom = closedRows[0]?.valid_until ?? now;
     const [created] = (await manager.query(
       `INSERT INTO cost_center_placement (cost_center_id, organizational_unit_id, parent_cost_center_id, has_movement,
-         valid_from, reason, changed_by, ip_address, user_agent, source, staging_import_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         valid_from, reason, changed_by, ip_address, user_agent, source, staging_import_id, mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
         costCenterId,
@@ -306,6 +324,7 @@ export class CostCenterPlacementService {
         context.userAgent?.slice(0, USER_AGENT_MAX) ?? null,
         context.source,
         context.stagingImportId ?? null,
+        toMode,
       ],
     )) as Array<{ id: string }>;
     const placementId = created?.id ?? '';
@@ -331,12 +350,14 @@ export class CostCenterPlacementService {
           stagingImportId: context.stagingImportId ?? null,
           from,
           to,
+          fromMode,
+          toMode,
           acceptsAssetsCleared,
         },
       },
       manager,
     );
-    return { placementId, from, to, acceptsAssetsCleared };
+    return { placementId, from, to, fromMode, toMode, acceptsAssetsCleared };
   }
 
   /** Cambio manual (POST /cost-centers/:id/placement): en su propia transacción; sin cambios es un error. */

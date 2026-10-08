@@ -209,7 +209,7 @@ export class CostCentersController {
   @RequirePermission('cost_center:manage:global')
   @ApiOperation({
     summary: 'Cambiar la unidad, el centro padre o el movimiento de un centro de costo',
-    description: `${STRUCTURE_NOTE} Cierra la ubicación vigente y abre la nueva desde ahora, con el motivo, quién, IP y agente. Nunca cambia el código. 409 COST_CENTER_PLACEMENT_CYCLE si el padre está por debajo del centro; 409 COST_CENTER_GROUPING_HAS_ASSETS (details[activeAssets]) si queda agrupador con activos; 409 COST_CENTER_PLACEMENT_UNCHANGED si no cambia nada.`,
+    description: `${STRUCTURE_NOTE} Cierra la ubicación vigente y abre la nueva desde ahora, con el motivo, quién, IP y agente. Nunca cambia el código. Si cambia la unidad o el padre la ubicación queda MANUAL: el conciliador de estructura ya no la mueve (POST /cost-centers/{id}/placement/auto la devuelve a automática). 409 COST_CENTER_PLACEMENT_CYCLE si el padre está por debajo del centro; 409 COST_CENTER_GROUPING_HAS_ASSETS (details[activeAssets]) si queda agrupador con activos; 409 COST_CENTER_PLACEMENT_UNCHANGED si no cambia nada.`,
   })
   @ApiResponse({ status: 201, schema: envelopedSchema(CostCenterPlacementDto) })
   @ApiResponse({ status: 409, schema: errorEnvelopeSchema() })
@@ -227,7 +227,14 @@ export class CostCentersController {
         ...(dto.parentId !== undefined ? { parentId: dto.parentId } : {}),
         ...(dto.hasMovement !== undefined ? { hasMovement: dto.hasMovement } : {}),
       },
-      { reason: dto.reason, actorId: user.id, source: 'MANUAL', ...meta(ipAddress, userAgent) },
+      {
+        reason: dto.reason,
+        actorId: user.id,
+        source: 'MANUAL',
+        // Unidad o padre fijados por una persona: MANUAL (el conciliador ya no los toca). Solo el movimiento: conserva.
+        ...(dto.organizationalUnitId !== undefined || dto.parentId !== undefined ? { mode: 'MANUAL' as const } : {}),
+        ...meta(ipAddress, userAgent),
+      },
     );
   }
 
