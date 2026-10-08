@@ -234,12 +234,13 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(await centerByCode('6115')).toMatchObject({ id: ids['6115'] });
     expect(await centerByCode('6125')).toBeUndefined();
     expect(await centerByCode('6299')).toBeUndefined();
-    expect(await centerByCode('6210')).toMatchObject({ organizational_unit_id: ids['u6'] });
     // Las unidades sí cambian: la 62 nueva toma como Centro propio el 6210 que ya existía.
     const office = (await dataSource.query(
       `SELECT id, parent_id, head_cost_center_id, hierarchy_level FROM organizational_unit WHERE code_prefix = '62' AND is_active`,
     )) as Array<{ id: string; parent_id: string; head_cost_center_id: string; hierarchy_level: number }>;
     expect(office[0]).toMatchObject({ parent_id: ids['u6'], head_cost_center_id: ids['6210'], hierarchy_level: 1 });
+    // El conciliador (misma transacción) lleva el 6210 a la unidad 62: el código manda (prefijo más largo).
+    expect(await centerByCode('6210')).toMatchObject({ organizational_unit_id: office[0]?.id });
     expect(await scalar<string>(dataSource, 'SELECT name FROM organizational_unit WHERE id = $1', [ids['u61']])).toBe(
       'Departamento Excel renombrado',
     );
@@ -263,13 +264,19 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     if (!units) {
       throw new Error('falta la hoja');
     }
-    // 641 bajo 61 no empieza por el de su jefe y los números 64… son de la otra fila nueva.
+    // 641 bajo 61 no empieza por el de su jefe: solo advertencia. Dos filas con el mismo prefijo 64: error.
     units.getRow(units.rowCount + 1).values = ['64', 'Otra oficina', 'Oficina', '6'];
     units.getRow(units.rowCount + 1).values = ['641', 'Fuera de rango', 'Oficina', '61'];
+    units.getRow(units.rowCount + 1).values = ['64', 'Repetida', 'Oficina', '6'];
     const previewed = await preview(Buffer.from(await workbook.xlsx.writeBuffer()));
     expect(previewed.status).toBe(201);
     expect(previewed.body.data.canConfirm).toBe(false);
-    expect(previewed.body.data.errors[0].message).toBe('El prefijo 641 no empieza por el de su jefe (61) y los números 64… son de Otra oficina');
+    expect(previewed.body.data.errors).toEqual([expect.objectContaining({ column: 'Prefijo', message: expect.stringContaining('64') })]);
+    expect(previewed.body.data.warnings).toContainEqual(
+      expect.objectContaining({
+        message: 'Fuera de rango (641) depende de Departamento Excel renombrado (61) pero conserva los códigos 641… de Otra oficina',
+      }),
+    );
     const rejected = await confirm(previewed.body.data.previewId as string);
     expect(rejected.status).toBe(422);
     expect(rejected.body.error.code).toBe('ORG_CHART_IMPORT_HAS_ERRORS');
@@ -333,13 +340,22 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       .set(auth('admin'))
       .send({ code: 'IT_OC_BORRABLE', name: 'Unidad borrable', type: 'OFFICE', parentId: ids['u6'], codePrefix: '69' });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
-    // 691 bajo 61 no empieza por 61 y los números 69… son de la unidad recién creada.
+    // 691 bajo 61 no empieza por 61 y los números 69… son de la unidad recién creada: se acepta con advertencia.
     const outOfParent = await http()
       .post('/api/v1/organizational-units')
       .set(auth('admin'))
       .send({ code: 'IT_OC_MAL', name: 'Mal prefijo', type: 'OFFICE', parentId: ids['u61'], codePrefix: '691' });
-    expect(outOfParent.status).toBe(400);
-    expect(outOfParent.body.error.code).toBe('ORG_UNIT_PREFIX_OUT_OF_PARENT');
+    expect(outOfParent.status).toBe(201);
+    expect(outOfParent.body.data.warnings).toEqual([
+      'Mal prefijo (691) depende de Departamento Excel renombrado (61) pero conserva los códigos 691… de Unidad borrable',
+    ]);
+    // El mismo prefijo de su jefe sí es error.
+    const samePrefix = await http()
+      .post('/api/v1/organizational-units')
+      .set(auth('admin'))
+      .send({ code: 'IT_OC_MISMO', name: 'Mismo prefijo', type: 'OFFICE', parentId: ids['u61'], codePrefix: '61' });
+    expect(samePrefix.status).toBe(400);
+    expect(samePrefix.body.error.code).toBe('ORG_UNIT_PREFIX_OUT_OF_PARENT');
     const archivedUnit = await http()
       .post('/api/v1/organizational-units')
       .set(auth('admin'))

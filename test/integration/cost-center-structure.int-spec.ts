@@ -535,10 +535,13 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
       expect(await structureOf('3040')).toMatchObject({ parent: '3000', unit: null });
       expect(await structureOf('3051')).toMatchObject({ parent: '3050', unit: null });
       expect(await structureOf('9205')).toMatchObject({ parent: '9200', unit: 'CC_9', has_movement: false });
-      for (const external of ['9206', '9207', '9210', '9211']) {
+      for (const external of ['9206', '9207', '9210']) {
         expect((await structureOf(external))?.parent).toBe('9200');
       }
-      expect(await structureOf('1120')).toMatchObject({ parent: null, unit: null, name: 'CENTRO QUE NO ESTÁ EN LA HOJA' });
+      // El conciliador (misma transacción) aplica la regla del organigrama: 9211 cuelga de 9210 porque existe.
+      expect((await structureOf('9211'))?.parent).toBe('9210');
+      // No viene en la hoja, pero su código empieza por 1: el conciliador lo lleva a la unidad CC_1.
+      expect(await structureOf('1120')).toMatchObject({ parent: null, unit: 'CC_1', name: 'CENTRO QUE NO ESTÁ EN LA HOJA' });
       expect(
         await dataSource.query(`SELECT code, name, unit_type, code_prefix FROM organizational_unit WHERE code IN ('CC_1', 'CC_9') ORDER BY code`),
       ).toEqual([
