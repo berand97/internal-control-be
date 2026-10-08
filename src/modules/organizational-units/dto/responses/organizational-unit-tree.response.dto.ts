@@ -11,7 +11,7 @@ export class OrganizationalUnitTreeResponseDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
 
-  @ApiProperty({ format: 'uuid', nullable: true })
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly parentId!: string | null;
 
   @ApiProperty()
@@ -59,7 +59,7 @@ export class OrganizationalUnitTreeResponseDto {
   @ApiProperty()
   readonly hierarchyLevel!: number;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   readonly hierarchyPath!: string | null;
 
   @ApiProperty()
