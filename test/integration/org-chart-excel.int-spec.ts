@@ -1,6 +1,6 @@
 // Excel del organigrama: exportar → importar (previsualizar y confirmar) con HTTP real + PostgreSQL real.
-// Ida y vuelta sin cambios = 0 cambios; renombrar, recodificar con «Código anterior», eliminar (borrado físico con
-// limpieza de jefaturas y roles con alcance) y eliminar con historia (archiva).
+// Solo unidades: ida y vuelta sin cambios = 0 cambios; una hoja vieja «Centros de costo» se ignora con advertencia y
+// la confirmación no exige permisos sobre centros. Además, el DELETE de centros y unidades.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
@@ -114,26 +114,9 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     await center('6111', { parentId: ids['6110'] });
     await center('6115');
     await center('6130');
-    await center('6140');
-    // 6130: jefatura y rol con alcance en el centro (se limpian al borrar). 6140: un activo dado de baja (historia).
-    await dataSource.query(`INSERT INTO cost_center_head (person_id, cost_center_id, reason) VALUES ($1, $2, 'Prueba de borrado')`, [
-      admin.personId,
-      ids['6130'],
-    ]);
-    await dataSource.query(
-      `INSERT INTO user_role (user_id, role_id, scope_type, scope_id) SELECT $1, id, 'COST_CENTER', $2 FROM role WHERE code = 'DEPARTMENT_HEAD'`,
-      [reader.id, ids['6130']],
-    );
-    const categoryId = await scalar<string>(dataSource, `INSERT INTO asset_category (code, name) VALUES ($1, 'Organigrama') RETURNING id`, [
-      `OC-${randomUUID().slice(0, 6)}`,
-    ]);
-    await dataSource.query(
-      `INSERT INTO asset (internal_code, description, category_id, acquisition_type_id, acquisition_date, current_cost_center_id,
-         created_by, operational_status, written_off_at)
-       VALUES ($1, 'Activo dado de baja', $2, (SELECT id FROM acquisition_type WHERE code = 'PURCHASE'), '2021-03-01', $3, $4,
-         'WRITTEN_OFF', NOW())`,
-      [`OC-${randomUUID().slice(0, 8)}`, categoryId, ids['6140'], admin.id],
-    );
+    // Centro de la vicerrectoría que será el Centro propio de la oficina 62 creada desde el Excel.
+    await center('6210', { organizationalUnitId: ids['u6'] });
+    await dataSource.query(`INSERT INTO asset_category (code, name) VALUES ($1, 'Organigrama')`, [`OC-${randomUUID().slice(0, 6)}`]);
   });
 
   afterAll(async () => {
@@ -149,11 +132,14 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(template.status).toBe(200);
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(template.body as unknown as ArrayBuffer);
-    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Centros de costo', 'Instrucciones']);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Instrucciones']);
+    const exported = new ExcelJS.Workbook();
+    await exported.xlsx.load((await exportFile()) as unknown as ArrayBuffer);
+    expect(exported.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Instrucciones']);
   });
 
   it('ida y vuelta: tras normalizar, el mismo archivo exportado da 0 cambios', async () => {
-    // Otros archivos de prueba dejan centros con la regla vieja de padres: la primera importación los normaliza.
+    // Otros archivos de prueba pueden dejar unidades que la primera importación normaliza.
     const first = await preview(await exportFile());
     expect(first.status, JSON.stringify(first.body)).toBe(201);
     expectConforms('post', '/api/v1/organizational-units/import/preview', 201, first.body);
@@ -169,82 +155,100 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(again.body.data.canConfirm).toBe(false);
   });
 
-  it('renombrar, recodificar, crear, eliminar y archivar en una confirmación', async () => {
+  it('solo unidades: la hoja vieja «Centros de costo» se ignora con advertencia y se confirma sin permiso de centros', async () => {
+    // Usuario que administra unidades pero no centros de costo.
+    const roleCode = `IT_OC_UNIDADES_${randomUUID().slice(0, 6).toUpperCase()}`;
+    await dataSource.query(`INSERT INTO role (code, name) VALUES ($1, 'Solo unidades')`, [roleCode]);
+    await dataSource.query(
+      `INSERT INTO role_permission (role_id, permission_id)
+       SELECT r.id, p.id FROM role r JOIN permission p ON p.code IN ('org_unit:read:global', 'org_unit:manage:global') WHERE r.code = $1`,
+      [roleCode],
+    );
+    const unitsAdmin = await createActor(dataSource);
+    await grant(unitsAdmin.id, roleCode);
+    tokens['units'] = await token(unitsAdmin);
+
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load((await exportFile()) as unknown as ArrayBuffer);
-    const centers = workbook.getWorksheet('Centros de costo');
     const units = workbook.getWorksheet('Organigrama');
-    if (!centers || !units) {
-      throw new Error('faltan hojas');
+    if (!units) {
+      throw new Error('falta la hoja');
     }
-    const rowOf = (sheet: ExcelJS.Worksheet, value: string): ExcelJS.Row => {
-      let found: ExcelJS.Row | undefined;
-      sheet.eachRow((row) => {
-        if (String(row.getCell(1).value ?? '') === value) {
-          found = row;
-        }
-      });
-      if (!found) {
-        throw new Error(`no está ${value}`);
+    let department: ExcelJS.Row | undefined;
+    units.eachRow((row) => {
+      if (String(row.getCell(1).value ?? '') === '61') {
+        department = row;
       }
-      return found;
-    };
-    expect(rowOf(centers, '6111').getCell(5).value).toBe('6110');
-    expect(rowOf(centers, '6115').getCell(5).value).toBeNull();
-    rowOf(centers, '6111').getCell(2).value = 'CENTRO 6111 RENOMBRADO';
-    const recode = rowOf(centers, '6115');
-    recode.getCell(1).value = '6125';
-    recode.getCell(9).value = '6115';
-    rowOf(centers, '6130').getCell(8).value = 'ELIMINAR';
-    rowOf(centers, '6140').getCell(8).value = 'ELIMINAR';
-    const next = centers.rowCount + 1;
-    centers.getRow(next).values = ['6210', 'CENTRO NUEVO 6210', 1];
+    });
+    if (!department) {
+      throw new Error('no está la 61');
+    }
+    department.getCell(2).value = 'Departamento Excel renombrado';
     units.getRow(units.rowCount + 1).values = ['62', 'Oficina Excel', 'Oficina', '6', 'Autoridad', '6210'];
-    const file = Buffer.from(await workbook.xlsx.writeBuffer());
+    // Hoja de un archivo viejo: renombrar, eliminar y crear centros. Nada de esto se aplica.
+    const old = workbook.addWorksheet('Centros de costo');
+    old.addRow(['Código', 'Nombre', 'Movimiento', 'Unidad', 'Padre', 'Activos', 'Estado', 'Acción', 'Código anterior']);
+    old.addRow(['6111', 'CENTRO 6111 RENOMBRADO', 1, null, null, 0, 'Activo', null, null]);
+    old.addRow(['6130', 'CENTRO 6130', 1, null, null, 0, 'Activo', 'ELIMINAR', null]);
+    old.addRow(['6299', 'CENTRO NUEVO 6299', 1]);
+    old.addRow(['6125', 'CENTRO 6115', 1, null, null, 0, 'Activo', null, '6115']);
 
-    const previewed = await preview(file);
+    const previewed = await preview(Buffer.from(await workbook.xlsx.writeBuffer()), 'units');
     expect(previewed.status, JSON.stringify(previewed.body)).toBe(201);
+    expectConforms('post', '/api/v1/organizational-units/import/preview', 201, previewed.body);
     const data = previewed.body.data;
     expect(data.errors).toEqual([]);
-    expect(data.summary.units).toMatchObject({ created: 1 });
-    expect(data.summary.centers).toMatchObject({ created: 1, renamed: 1, recoded: 1, deleted: 1, archived: 1 });
+    expect(data.summary.units).toMatchObject({ created: 1, renamed: 1 });
+    expect(data.summary.centers).toEqual({
+      created: 0,
+      renamed: 0,
+      recoded: 0,
+      relocated: 0,
+      movementChanged: 0,
+      reactivated: 0,
+      archived: 0,
+      deleted: 0,
+    });
+    expect(data.summary.totalChanges).toBe(2);
+    expect(data.changes.map((change: { entity: string }) => change.entity)).toEqual(['ORG_UNIT', 'ORG_UNIT']);
     expect(data.warnings).toEqual(
-      expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('No se elimina: Se archiva porque tiene historia') })]),
+      expect.arrayContaining([
+        {
+          sheet: 'Centros de costo',
+          rowNumber: 1,
+          column: null,
+          message: 'La hoja Centros de costo se ignoró: los centros se administran en su propia pantalla',
+        },
+      ]),
     );
-    expect(data.requiresCostCenterPermission).toBe(true);
+    expect(data.requiresCostCenterPermission).toBe(false);
     expect(data.canConfirm).toBe(true);
 
-    const applied = await confirm(data.previewId as string);
+    const applied = await confirm(data.previewId as string, 'units');
     expect(applied.status, JSON.stringify(applied.body)).toBe(201);
     expectConforms('post', '/api/v1/organizational-units/import/{previewId}/confirm', 201, applied.body);
 
-    expect(await centerByCode('6130')).toBeUndefined();
-    const heads = await scalar<number>(dataSource, 'SELECT count(*)::int FROM cost_center_head WHERE cost_center_id = $1', [ids['6130']]);
-    const roles = await scalar<number>(dataSource, `SELECT count(*)::int FROM user_role WHERE scope_type = 'COST_CENTER' AND scope_id = $1`, [ids['6130']]);
-    expect([heads, roles]).toEqual([0, 0]);
-    expect(await centerByCode('6140')).toMatchObject({ is_active: false });
-    expect(await centerByCode('6125')).toMatchObject({ id: ids['6115'] });
-    expect(await centerByCode('6111')).toMatchObject({ name: 'CENTRO 6111 RENOMBRADO', parent_id: ids['6110'] });
-    const office = (await dataSource.query(`SELECT id, parent_id, head_cost_center_id, hierarchy_level FROM organizational_unit WHERE code_prefix = '62' AND is_active`)) as Array<{
-      id: string;
-      parent_id: string;
-      head_cost_center_id: string;
-      hierarchy_level: number;
-    }>;
-    const created = await centerByCode('6210');
-    expect(office[0]).toMatchObject({ parent_id: ids['u6'], head_cost_center_id: created?.id, hierarchy_level: 1 });
-    expect(created).toMatchObject({ organizational_unit_id: office[0]?.id, parent_id: null });
-    const history = (await dataSource.query(
-      `SELECT field, old_value, new_value FROM org_structure_history WHERE entity_id = $1 ORDER BY field`,
-      [ids['6115']],
-    )) as unknown[];
-    expect(history).toEqual([{ field: 'CODE', old_value: '6115', new_value: '6125' }]);
+    // Los centros quedan como estaban.
+    expect(await centerByCode('6111')).toMatchObject({ name: 'CENTRO 6111', parent_id: ids['6110'], is_active: true });
+    expect(await centerByCode('6130')).toMatchObject({ id: ids['6130'], is_active: true });
+    expect(await centerByCode('6115')).toMatchObject({ id: ids['6115'] });
+    expect(await centerByCode('6125')).toBeUndefined();
+    expect(await centerByCode('6299')).toBeUndefined();
+    expect(await centerByCode('6210')).toMatchObject({ organizational_unit_id: ids['u6'] });
+    // Las unidades sí cambian: la 62 nueva toma como Centro propio el 6210 que ya existía.
+    const office = (await dataSource.query(
+      `SELECT id, parent_id, head_cost_center_id, hierarchy_level FROM organizational_unit WHERE code_prefix = '62' AND is_active`,
+    )) as Array<{ id: string; parent_id: string; head_cost_center_id: string; hierarchy_level: number }>;
+    expect(office[0]).toMatchObject({ parent_id: ids['u6'], head_cost_center_id: ids['6210'], hierarchy_level: 1 });
+    expect(await scalar<string>(dataSource, 'SELECT name FROM organizational_unit WHERE id = $1', [ids['u61']])).toBe(
+      'Departamento Excel renombrado',
+    );
     const audit = await scalar<number>(dataSource, `SELECT count(*)::int FROM audit_log WHERE action = 'ORG_CHART_IMPORTED' AND entity_id = $1`, [
       data.previewId,
     ]);
     expect(audit).toBe(1);
 
-    const twice = await confirm(data.previewId as string);
+    const twice = await confirm(data.previewId as string, 'units');
     expect(twice.status).toBe(409);
     expect(twice.body.error.code).toBe('ORG_CHART_IMPORT_CLOSED');
 
