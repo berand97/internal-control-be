@@ -135,6 +135,7 @@ const INSTRUCTIONS: ReadonlyArray<string> = [
   '   No se puede quitar un cuadro que todavía tenga dependencias o centros de costo activos.',
   '5. Números (prefijo) de cada cuadro: 1 número para la Rectoría y las vicerrectorías (4 = Vicerrectoría Financiera);',
   '   una dependencia empieza por los de su jefe y lleva más (43 = Servicios Administrativos, bajo 4; 4115 = Logística).',
+  '   Si un cuadro se mueve a otro jefe conserva sus números (Control Interno 432 bajo la Rectoría): solo es una advertencia.',
   '   Puede escribir el código de Contabilidad completo: 1200 se toma como 12 y 1210 como 121. Consejos y comités van sin números.',
   '   En «Depende de» sirven los números del jefe, su código de Contabilidad (1200) o el de su centro propio (4010 = Vicerrectoría Financiera).',
   '6. Los centros de costo no se editan en este archivo: se administran en la pantalla Centros de costo.',

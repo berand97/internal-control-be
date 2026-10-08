@@ -255,7 +255,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Crear unidad organizacional',
     description:
-      'headCostCenterCode con un código que aún no existe se guarda como centro propio pendiente (warnings) y se amarra solo cuando el centro se crea.',
+      'headCostCenterCode con un código que aún no existe se guarda como centro propio pendiente (warnings) y se amarra solo cuando el centro se crea. Un prefijo que no empieza por el del jefe es solo una advertencia (warnings); el mismo prefijo del jefe: 400 ORG_UNIT_PREFIX_OUT_OF_PARENT; el de otra unidad activa: 409 ORG_UNIT_CODE_PREFIX_EXISTS. En la misma transacción concilia los centros del prefijo (unidad por prefijo más largo).',
   })
   @ApiResponse({
     status: 201,
@@ -273,7 +273,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Actualizar o mover una unidad organizacional',
     description:
-      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio. headCostCenterCode con un código que aún no existe queda pendiente (warnings).',
+      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio. headCostCenterCode con un código que aún no existe queda pendiente (warnings). Un prefijo que no empieza por el del jefe (unidad movida a otro jefe) es solo una advertencia y la unidad conserva sus centros. Si cambian el prefijo, el padre o el estado, concilia los centros del prefijo viejo y del nuevo en la misma transacción.',
   })
   @ApiResponse({
     status: 200,

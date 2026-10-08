@@ -212,7 +212,7 @@ describe('plan del Excel del organigrama', () => {
     });
   });
 
-  it('unidad nueva con prefijo fuera del de su padre: ORG_UNIT_PREFIX_OUT_OF_PARENT en español', () => {
+  it('unidad nueva con prefijo fuera del de su padre: advertencia en español (el código manda), nunca error', () => {
     const plan = planOrgChart(
       baseSnapshot(),
       only({
@@ -222,15 +222,16 @@ describe('plan del Excel del organigrama', () => {
         ],
       }),
     );
-    expect(plan.errors).toEqual([
+    expect(plan.errors).toEqual([]);
+    expect(plan.warnings).toEqual([
       expect.objectContaining({
         rowNumber: 2,
         column: 'Prefijo',
-        message: 'El prefijo 33 no empieza por el de su jefe (4) y los números 3… son de Vicerrectoría Académica',
+        message: expect.stringMatching(/^Oficina X \(33\) depende de .* \(4\) pero conserva los códigos 33… de Vicerrectoría Académica$/),
       }),
+      // Ninguna unidad tiene el «5».
+      expect.objectContaining({ rowNumber: 3, message: expect.stringContaining('pero sus códigos 53… no empiezan por 4') }),
     ]);
-    // Ninguna unidad tiene el «5»: se acepta con advertencia (como 30 bajo la Académica).
-    expect(plan.warnings).toEqual([expect.objectContaining({ rowNumber: 3, message: expect.stringContaining('se acepta') })]);
   });
 
   it('unidad con centros activos no se elimina; un consejo no lleva prefijo', () => {
@@ -661,7 +662,7 @@ describe('plan del Excel del organigrama', () => {
       ]);
     });
 
-    it('53 bajo 4 con la unidad 5: el mensaje nombra a la dueña, nunca al jefe ni a sus ancestros', () => {
+    it('53 bajo 4 con la unidad 5: advertencia que nombra a la dueña, nunca al jefe ni a sus ancestros', () => {
       const plan = planOrgChart(
         financeSnapshot(),
         only({
@@ -671,12 +672,13 @@ describe('plan del Excel del organigrama', () => {
           ],
         }),
       );
-      expect(plan.errors.map((issue) => [issue.rowNumber, issue.message])).toEqual([
-        [2, 'El prefijo 53 no empieza por el de su jefe (4) y los números 5… son de VICERRECTORÍA BIENESTAR'],
-      ]);
-      // 111 bajo 4: los números 1… son de la Rectoría, ancestro de 4; se acepta con advertencia, sin citarla.
-      expect(plan.warnings.find((issue) => issue.rowNumber === 3 && issue.message.startsWith('El prefijo 111'))?.message).toBe(
-        'El prefijo 111 no empieza por el de su jefe (4); se acepta porque ninguna otra unidad tiene sus dígitos iniciales',
+      expect(plan.errors).toEqual([]);
+      expect(plan.warnings.find((issue) => issue.rowNumber === 2 && issue.column === 'Prefijo')?.message).toMatch(
+        /^OFICINA X \(53\) depende de .+ \(4\) pero conserva los códigos 53… de VICERRECTORÍA BIENESTAR$/,
+      );
+      // 111 bajo 4: los números 1… son de la Rectoría, ancestro de 4; advertencia sin citarla.
+      expect(plan.warnings.find((issue) => issue.rowNumber === 3 && issue.message.startsWith('OFICINA JURÍDICA (111)'))?.message).toMatch(
+        /pero sus códigos 111… no empiezan por 4$/,
       );
       // 111 bajo la Rectoría 1100 (11), que cuelga de la 1: la 1 es ancestro, no «otra unidad».
       const nested = planOrgChart(

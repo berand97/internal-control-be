@@ -809,7 +809,10 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         .filter(([prefix]) => prefix !== unit.codePrefix)
         .map(([prefix, holder]) => [prefix, holder.name] as const),
     );
-    const check = checkUnitPrefix(unit.codePrefix, ancestor?.codePrefix ?? null, others, chain);
+    const check = checkUnitPrefix(unit.codePrefix, ancestor?.codePrefix ?? null, others, chain, {
+      child: unit.name,
+      ancestor: ancestor?.name ?? null,
+    });
     if (check.level === 'OK' || !check.message) {
       continue;
     }

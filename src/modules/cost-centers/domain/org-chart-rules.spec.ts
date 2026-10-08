@@ -124,11 +124,25 @@ describe('excepción del prefijo jerárquico', () => {
   it('30 bajo la Académica (2) sin unidad 3: se acepta con advertencia', () => {
     expect(checkUnitPrefix('30', '2', names('1', '2', '4', '5', '9'))).toMatchObject({ level: 'WARNING' });
   });
-  it('53 bajo 4 con la unidad 5: error que nombra a la dueña', () => {
+  it('53 bajo 4 con la unidad 5: advertencia que nombra a la dueña de los códigos', () => {
     expect(checkUnitPrefix('53', '4', new Map([['4', 'VICERRECTORÍA FINANCIERA'], ['5', 'VICERRECTORÍA BIENESTAR']]))).toEqual({
-      level: 'ERROR',
-      message: 'El prefijo 53 no empieza por el de su jefe (4) y los números 5… son de VICERRECTORÍA BIENESTAR',
+      level: 'WARNING',
+      message: 'La unidad (53) depende de su jefe (4) pero conserva los códigos 53… de VICERRECTORÍA BIENESTAR',
     });
+  });
+  it('Control Interno (432) movido de Contabilidad (43) a Rectoría (1): advertencia, nunca error', () => {
+    expect(
+      checkUnitPrefix('432', '1', new Map([['1', 'Rectoría'], ['4', 'Vicerrectoría Financiera'], ['43', 'Contabilidad']]), new Set(['1']), {
+        child: 'Control Interno',
+        ancestor: 'Rectoría',
+      }),
+    ).toEqual({
+      level: 'WARNING',
+      message: 'Control Interno (432) depende de Rectoría (1) pero conserva los códigos 432… de Contabilidad',
+    });
+  });
+  it('el mismo prefijo de su jefe sigue siendo error', () => {
+    expect(checkUnitPrefix('43', '43', names('4', '43')).level).toBe('ERROR');
   });
   it('una vicerrectoría (un dígito) bajo la Rectoría 1: bien', () => {
     expect(checkUnitPrefix('4', '1', names('1', '2'))).toEqual({ level: 'OK', message: null });

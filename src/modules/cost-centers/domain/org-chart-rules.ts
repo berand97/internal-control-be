@@ -88,12 +88,23 @@ export interface PrefixCheck {
   readonly message: string | null;
 }
 
+/** Nombres para los mensajes de checkUnitPrefix (sin ellos: «La unidad», «su jefe»). */
+export interface PrefixCheckNames {
+  readonly child?: string | null;
+  readonly ancestor?: string | null;
+}
+
 /**
- * Regla jerárquica con una excepción para el organigrama real: si el prefijo no empieza por el del jefe pero ninguna
- * otra unidad activa es dueña de sus dígitos iniciales (30 bajo la Académica «2» cuando no existe la unidad «3»: los
- * centros 30xx son de la Académica), se acepta con advertencia. Si otra unidad lo es (53 bajo «4» con la unidad «5»),
- * es error. El jefe y los ancestros del jefe (ancestorChain) nunca cuentan como «otra unidad». Un prefijo de un dígito
- * (vicerrectoría bajo la Rectoría «1») siempre vale.
+ * Prefijo de una unidad frente al de su jefe (el ancestro más cercano con prefijo). El código manda: los centros van a
+ * la unidad del prefijo más largo, así que una unidad que se mueve a otro jefe conserva sus números.
+ *
+ * - OK: empieza por el del jefe y es más largo (4 → 43), sin jefe con prefijo, o un dígito (vicerrectoría bajo la
+ *   Rectoría «1»).
+ * - WARNING (siempre): no empieza por el del jefe. «Control Interno (432) depende de Rectoría (1) pero conserva los
+ *   códigos 432… de Contabilidad» cuando otra unidad activa es dueña de sus dígitos iniciales (el jefe y sus ancestros,
+ *   ancestorChain, nunca cuentan como «otra unidad»).
+ * - ERROR: el mismo prefijo de su jefe (duplicado). El duplicado con cualquier otra unidad activa lo rechaza el índice
+ *   único de prefijos (ORG_UNIT_CODE_PREFIX_EXISTS) y el plan del Excel.
  *
  * otherActivePrefixes: prefijo → nombre de las demás unidades activas.
  */
@@ -102,11 +113,15 @@ export const checkUnitPrefix = (
   ancestorPrefix: string | null,
   otherActivePrefixes: ReadonlyMap<string, string>,
   ancestorChain: ReadonlySet<string> = new Set(),
+  names: PrefixCheckNames = {},
 ): PrefixCheck => {
   // Un dígito = rectoría o vicerrectoría: su bloque de códigos no depende del de la Rectoría de la que cuelga.
   const message = childPrefix.length === 1 ? null : childPrefixError(childPrefix, ancestorPrefix);
-  if (!message) {
+  if (!message || ancestorPrefix === null) {
     return { level: 'OK', message: null };
+  }
+  if (childPrefix.startsWith(ancestorPrefix)) {
+    return { level: 'ERROR', message };
   }
   const owner = [...otherActivePrefixes.keys()]
     .filter(
@@ -117,15 +132,13 @@ export const checkUnitPrefix = (
         childPrefix.startsWith(prefix),
     )
     .sort((left, right) => right.length - left.length)[0];
-  if (owner) {
-    return {
-      level: 'ERROR',
-      message: `${message} y los números ${owner}… son de ${otherActivePrefixes.get(owner) ?? 'otra unidad'}`,
-    };
-  }
+  const child = `${names.child ?? 'La unidad'} (${childPrefix})`;
+  const boss = names.ancestor ? `${names.ancestor} (${ancestorPrefix})` : `su jefe (${ancestorPrefix})`;
   return {
     level: 'WARNING',
-    message: `${message}; se acepta porque ninguna otra unidad tiene sus dígitos iniciales`,
+    message: owner
+      ? `${child} depende de ${boss} pero conserva los códigos ${childPrefix}… de ${otherActivePrefixes.get(owner) ?? 'otra unidad'}`
+      : `${child} depende de ${boss} pero sus códigos ${childPrefix}… no empiezan por ${ancestorPrefix}`,
   };
 };
 

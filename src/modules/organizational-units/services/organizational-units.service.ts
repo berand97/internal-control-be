@@ -134,14 +134,12 @@ export class OrganizationalUnitsService {
       ? await this.requireUnit(dto.parentId)
       : null;
     this.assertCouncilWithoutPrefix(dto.type, dto.codePrefix ?? null);
-    if (dto.codePrefix) {
-      await this.assertPrefixInParent(dto.codePrefix, parent, null);
-    }
+    const prefixWarning = dto.codePrefix ? await this.assertPrefixInParent(dto.codePrefix, dto.name, parent, null) : null;
     if (dto.codePrefix && (dto.isActive ?? true)) {
       await this.assertPrefixFree(dto.codePrefix, null);
     }
     const head = await this.chooseHeadCenter(dto);
-    const warnings = head?.warning ? [head.warning] : [];
+    const warnings = [prefixWarning, head?.warning ?? null].filter((item): item is string => item !== null);
     try {
       const unit = await this.dataSource.transaction(async (manager) => {
         const created = await this.unitsRepository.insert(
@@ -220,16 +218,17 @@ export class OrganizationalUnitsService {
 
     const nextPrefix = dto.codePrefix !== undefined ? dto.codePrefix : unit.codePrefix;
     this.assertCouncilWithoutPrefix(dto.type ?? unit.unitType, nextPrefix);
-    if (nextPrefix && (nextPrefix !== unit.codePrefix || parentId !== unit.parentId)) {
-      await this.assertPrefixInParent(nextPrefix, parent, unit.id);
-    }
+    const prefixWarning =
+      nextPrefix && (nextPrefix !== unit.codePrefix || parentId !== unit.parentId)
+        ? await this.assertPrefixInParent(nextPrefix, dto.name ?? unit.name, parent, unit.id)
+        : null;
     if (nextPrefix && (dto.isActive ?? unit.isActive)) {
       await this.assertPrefixFree(nextPrefix, unit.id);
     }
     const previousParent = unit.parentId ? await this.unitsRepository.findById(unit.parentId) : null;
 
     const head = await this.chooseHeadCenter(dto);
-    const warnings = head?.warning ? [head.warning] : [];
+    const warnings = [prefixWarning, head?.warning ?? null].filter((item): item is string => item !== null);
 
     const nextCode = dto.code ?? unit.code;
     const nextPath = childPath(parent?.hierarchyPath ?? null, nextCode);
@@ -354,15 +353,16 @@ export class OrganizationalUnitsService {
   }
 
   /**
-   * El prefijo de una unidad empieza por el de su ancestro más cercano con prefijo y tiene un dígito más (4 → 41–49).
-   * Sin ancestro con prefijo vale cualquiera. 400 ORG_UNIT_PREFIX_OUT_OF_PARENT con el rango esperado, salvo que
-   * ninguna otra unidad activa tenga sus dígitos iniciales (checkUnitPrefix: 30 bajo la Académica sin unidad «3»).
+   * Prefijo frente al del jefe (checkUnitPrefix). No empezar por el del jefe es solo una advertencia (se devuelve):
+   * «Control Interno (432) depende de Rectoría (1) pero conserva los códigos 432… de Contabilidad». 400
+   * ORG_UNIT_PREFIX_OUT_OF_PARENT si es el mismo prefijo del jefe.
    */
   private async assertPrefixInParent(
     codePrefix: string,
+    unitName: string,
     parent: OrganizationalUnit | null,
     unitId: string | null,
-  ): Promise<void> {
+  ): Promise<string | null> {
     // Jefe con prefijo más cercano y prefijos de toda la cadena hacia arriba (nunca cuentan como «otra unidad»).
     let ancestor: OrganizationalUnit | null = null;
     const chain = new Set<string>();
@@ -380,12 +380,13 @@ export class OrganizationalUnitsService {
         unit.codePrefix && unit.id !== unitId && unit.codePrefix !== codePrefix ? [[unit.codePrefix, unit.name] as const] : [],
       ),
     );
-    const check = checkUnitPrefix(codePrefix, expected, others, chain);
+    const check = checkUnitPrefix(codePrefix, expected, others, chain, { child: unitName, ancestor: ancestor?.name ?? null });
     if (check.level === 'ERROR') {
       throw new ApiException(ErrorCode.OrgUnitPrefixOutOfParent, check.message ?? undefined, [
         { field: 'codePrefix', message: `${expected ?? ''}…` },
       ]);
     }
+    return check.level === 'WARNING' ? check.message : null;
   }
 
   /**

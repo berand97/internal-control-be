@@ -251,21 +251,27 @@ describe('OrganizationalUnitsService', () => {
     expect(removal.deleteUnit).toHaveBeenCalledWith(manager, '1');
   });
 
-  it('el prefijo de una hija empieza por el del padre y es más largo: ORG_UNIT_PREFIX_OUT_OF_PARENT', async () => {
+  it('prefijo fuera del jefe: advertencia, nunca error; el mismo del jefe: ORG_UNIT_PREFIX_OUT_OF_PARENT', async () => {
     const vice = unit('1', 'VF', null, 0);
     vice.codePrefix = '4';
     vi.mocked(unitsRepository.findById).mockResolvedValue(vice);
     const bienestar = unit('5', 'VB', null, 0);
     bienestar.codePrefix = '5';
     vi.mocked(unitsRepository.findAll).mockResolvedValue([vice, bienestar]);
+    vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
     await expect(
       service.create({ code: 'DSA', name: 'Servicios', type: OrgUnitType.Department, parentId: '1', codePrefix: '53' }, actor),
-    ).rejects.toMatchObject({
-      code: ErrorCode.OrgUnitPrefixOutOfParent,
-      message: expect.stringContaining('El prefijo 53 no empieza por el de su jefe (4) y los números 5… son de'),
-      details: [{ field: 'codePrefix', message: '4…' }],
+    ).resolves.toMatchObject({
+      codePrefix: '53',
+      warnings: ['Servicios (53) depende de VF (4) pero conserva los códigos 53… de VB'],
     });
-    vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
+    const contabilidad = unit('43', 'CONT', '1', 1);
+    contabilidad.codePrefix = '43';
+    vi.mocked(unitsRepository.findById).mockResolvedValue(contabilidad);
+    await expect(
+      service.create({ code: 'CI', name: 'Control', type: OrgUnitType.Department, parentId: '43', codePrefix: '43' }, actor),
+    ).rejects.toMatchObject({ code: ErrorCode.OrgUnitPrefixOutOfParent, details: [{ field: 'codePrefix', message: '43…' }] });
+    vi.mocked(unitsRepository.findById).mockResolvedValue(vice);
     await expect(
       service.create({ code: 'DSA', name: 'Servicios', type: OrgUnitType.Department, parentId: '1', codePrefix: '43' }, actor),
     ).resolves.toMatchObject({ codePrefix: '43', parentId: '1' });

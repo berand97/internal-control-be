@@ -998,7 +998,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
   [ErrorCode.OrgUnitPrefixOutOfParent]: {
     httpStatus: 400,
     action: 'CANCEL',
-    message: 'El prefijo debe empezar por el de la unidad de la que depende y ser más largo; sus números iniciales son de otra unidad',
+    message: 'El prefijo no puede ser el mismo de la unidad de la que depende: agregue al menos un dígito',
   },
   [ErrorCode.OrgChartImportHasErrors]: {
     httpStatus: 422,
