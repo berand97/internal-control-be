@@ -137,7 +137,7 @@ describe
         scalar<string>(
           dataSource,
           `INSERT INTO cost_center (external_code, name) VALUES ($1, $2) RETURNING id`,
-          [`7${Math.floor(Math.random() * 900 + 100)}`, name],
+          [`7${Math.floor(Math.random() * 9000 + 1000)}`, name],
         );
 
       const newAsset = async (
