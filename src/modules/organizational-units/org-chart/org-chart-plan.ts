@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { isDetailCode } from '../../cost-centers/domain/code-prefix.js';
 import {
   checkUnitPrefix,
+  normalizeUnitPrefix,
   resolveCenterParent,
   resolveCenterUnit,
 } from '../../cost-centers/domain/org-chart-rules.js';
@@ -171,6 +172,8 @@ interface FinalUnit {
   unitType: OrgUnitType;
   relationType: OrgRelationType;
   codePrefix: string | null;
+  /** Prefijo tal como vino en el archivo (1200), antes de normalizarlo (12). */
+  rawPrefix: string | null;
   parentKey: string | null;
   headCenterKey: string | null;
   isActive: boolean;
@@ -263,6 +266,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         unitType: unit.unitType,
         relationType: unit.relationType,
         codePrefix: unit.codePrefix,
+        rawPrefix: unit.codePrefix,
         parentKey: unit.parentId,
         headCenterKey: unit.headCostCenterId,
         isActive: unit.isActive,
@@ -354,8 +358,9 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
           valid = false;
         }
       }
+      // Sin código interno: por el prefijo exacto y, si no, por el normalizado (1000 encuentra la Rectoría «1»).
       if (!existing && !code && row.prefix) {
-        existing = activeUnitByPrefix.get(row.prefix);
+        existing = activeUnitByPrefix.get(row.prefix) ?? activeUnitByPrefix.get(normalizeUnitPrefix(row.prefix));
       }
       if (!valid) {
         continue;
@@ -368,8 +373,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         unitError(at, UNIT_HEADERS.type, 'El tipo es obligatorio para una unidad nueva');
         continue;
       }
+      // Código de Contabilidad de 4 dígitos con ceros al final → prefijo corto (1200 → 12), salvo que la unidad ya
+      // tenga guardado ese mismo valor.
+      const prefix = row.prefix && existing?.codePrefix !== row.prefix ? normalizeUnitPrefix(row.prefix) : row.prefix;
       if (!existing) {
-        code = code ?? generateUnitCode(row.prefix, row.name ?? '', usedUnitCodes);
+        code = code ?? generateUnitCode(prefix, row.name ?? '', usedUnitCodes);
         usedUnitCodes.add(code);
       }
       const key = existing ? existing.id : `${NEW}${code ?? ''}`;
@@ -379,6 +387,9 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         continue;
       }
       unitRows.set(key, at);
+      if (prefix !== row.prefix) {
+        unitWarning(at, UNIT_HEADERS.prefix, `${row.prefix ?? ''} se tomó como prefijo ${prefix ?? ''}`);
+      }
       const current = units.get(key);
       units.set(key, {
         key,
@@ -388,7 +399,8 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         name: row.name ?? '',
         unitType: type ?? current?.unitType ?? OrgUnitType.Other,
         relationType: relation ?? current?.relationType ?? OrgRelationType.Authority,
-        codePrefix: row.prefix,
+        codePrefix: prefix,
+        rawPrefix: row.prefix,
         // Vacíos en el archivo: la existente conserva padre y centro propio (se resuelven más abajo).
         parentKey: current?.parentKey ?? null,
         headCenterKey: current?.headCenterKey ?? null,
@@ -401,146 +413,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
   }
 
   const isLiveUnit = (unit: FinalUnit | undefined): boolean => Boolean(unit && unit.isActive && unit.removal === null);
-
-  // Prefijos únicos entre unidades activas al final.
-  const finalPrefix = new Map<string, FinalUnit>();
-  for (const unit of units.values()) {
-    if (!isLiveUnit(unit) || !unit.codePrefix) {
-      continue;
-    }
-    const holder = finalPrefix.get(unit.codePrefix);
-    if (holder) {
-      const [inFile, other] = unit.rowNumber !== null ? [unit, holder] : [holder, unit];
-      unitError(
-        inFile.rowNumber ?? 0,
-        UNIT_HEADERS.prefix,
-        `El prefijo ${unit.codePrefix} ya es de «${other.name}»${other.rowNumber !== null ? ` (fila ${other.rowNumber})` : ''}`,
-      );
-      continue;
-    }
-    finalPrefix.set(unit.codePrefix, unit);
-  }
-  const finalUnitByCode = new Map([...units.values()].map((unit) => [unit.code, unit]));
-
-  /**
-   * «Depende de» vacío en una unidad nueva: con prefijo de 2+ dígitos, la unidad activa con el prefijo propio más largo
-   * (43 → 4; 431 → 43, si no 4); con prefijo de 1 dígito, la Rectoría si hay exactamente una activa; si no, raíz.
-   */
-  const deduceParent = (unit: FinalUnit): void => {
-    const at = unit.rowNumber ?? 0;
-    const prefix = unit.codePrefix;
-    let parent: FinalUnit | undefined;
-    if (prefix && prefix.length > 1) {
-      for (let length = prefix.length - 1; length >= 1 && !parent; length -= 1) {
-        parent = finalPrefix.get(prefix.slice(0, length));
-      }
-      if (parent) {
-        unit.parentKey = parent.key;
-        unitWarning(at, UNIT_HEADERS.parent, `Depende de deducido del prefijo: ${parent.codePrefix ?? parent.code}`);
-        return;
-      }
-    } else if (prefix) {
-      const rectorates = [...units.values()].filter(
-        (other) => other.key !== unit.key && other.unitType === OrgUnitType.Rectorate && isLiveUnit(other),
-      );
-      parent = rectorates.length === 1 ? rectorates[0] : undefined;
-      if (parent) {
-        unit.parentKey = parent.key;
-        unitWarning(at, UNIT_HEADERS.parent, `Depende de deducido: la Rectoría ${parent.codePrefix ?? parent.code}`);
-        return;
-      }
-    }
-    unit.parentKey = null;
-    if (unit.unitType !== OrgUnitType.Rectorate) {
-      unitWarning(at, UNIT_HEADERS.parent, 'Sin Depende de: queda en la raíz');
-    }
-  };
-
-  // Padres de las filas del archivo.
-  for (const unit of units.values()) {
-    if (unit.rowNumber === null) {
-      continue;
-    }
-    const text = unit.parentText;
-    if (text && isRootText(text)) {
-      unit.parentKey = null;
-      continue;
-    }
-    if (!text) {
-      if (unit.existingId === null) {
-        deduceParent(unit);
-      }
-      continue;
-    }
-    const parent = /^[0-9]+$/.test(text) ? finalPrefix.get(text) : (finalUnitByCode.get(text) ?? finalUnitByCode.get(text.toUpperCase()));
-    if (!parent) {
-      unitError(unit.rowNumber, UNIT_HEADERS.parent, `No hay ninguna unidad activa con prefijo o código interno «${text}»`);
-      continue;
-    }
-    if (parent.key === unit.key) {
-      unitError(unit.rowNumber, UNIT_HEADERS.parent, 'Una unidad no puede depender de sí misma');
-      continue;
-    }
-    if (!isLiveUnit(parent) && isLiveUnit(unit)) {
-      unitError(unit.rowNumber, UNIT_HEADERS.parent, `«${parent.name}» está archivada o marcada para eliminar`);
-      continue;
-    }
-    unit.parentKey = parent.key;
-  }
-
-  // Ciclos.
-  const cyclic = new Set<string>();
-  for (const unit of units.values()) {
-    if (unit.rowNumber === null) {
-      continue;
-    }
-    let current = unit.parentKey ? units.get(unit.parentKey) : undefined;
-    for (let depth = 0; current && depth < MAX_DEPTH; depth += 1) {
-      if (current.key === unit.key) {
-        cyclic.add(unit.key);
-        unitError(unit.rowNumber, UNIT_HEADERS.parent, 'Esa dependencia forma un ciclo (la unidad quedaría por debajo de sí misma)');
-        break;
-      }
-      current = current.parentKey ? units.get(current.parentKey) : undefined;
-    }
-  }
-
-  // Prefijo jerárquico y consejos.
-  for (const unit of units.values()) {
-    if (unit.rowNumber === null || cyclic.has(unit.key) || !isLiveUnit(unit)) {
-      continue;
-    }
-    if (unit.unitType === OrgUnitType.Council && unit.codePrefix) {
-      unitError(unit.rowNumber, UNIT_HEADERS.prefix, 'Un consejo o comité no lleva prefijo: no recibe centros de costo');
-      continue;
-    }
-    if (!unit.codePrefix) {
-      continue;
-    }
-    // Jefe con prefijo más cercano y prefijos de toda la cadena hacia arriba (nunca cuentan como «otra unidad»).
-    let ancestor: FinalUnit | undefined;
-    const chain = new Set<string>();
-    let current = unit.parentKey ? units.get(unit.parentKey) : undefined;
-    for (let depth = 0; current && depth < MAX_DEPTH; depth += 1) {
-      if (current.codePrefix) {
-        ancestor ??= current;
-        chain.add(current.codePrefix);
-      }
-      current = current.parentKey ? units.get(current.parentKey) : undefined;
-    }
-    const others = new Map(
-      [...finalPrefix.entries()]
-        .filter(([prefix]) => prefix !== unit.codePrefix)
-        .map(([prefix, holder]) => [prefix, holder.name] as const),
-    );
-    const check = checkUnitPrefix(unit.codePrefix, ancestor?.codePrefix ?? null, others, chain);
-    if (check.level === 'OK' || !check.message) {
-      continue;
-    }
-    const before = unit.existingId ? snapshotUnits.get(unit.existingId) : undefined;
-    const changed = !before || before.codePrefix !== unit.codePrefix || before.parentId !== unit.parentKey;
-    (check.level === 'ERROR' && changed ? unitError : unitWarning)(unit.rowNumber, UNIT_HEADERS.prefix, check.message);
-  }
 
   // ─── Hoja Centros de costo ─────────────────────────────────────────────────────────────────────────────────────
   const centerRows = new Map<string, number>();
@@ -644,6 +516,249 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
   const liveCenterByCode = new Map(
     [...centers.values()].filter((center) => isLiveCenter(center)).map((center) => [center.code, center]),
   );
+
+  // Centro propio de las unidades del archivo (antes que los padres: «Depende de» acepta el centro propio del jefe).
+  // Los avisos se emiten más abajo, en su orden de siempre.
+  const headIssues: Array<{ error: boolean; row: number; message: string }> = [];
+  const explicitHead = new Set<string>();
+  for (const unit of units.values()) {
+    if (unit.rowNumber === null) {
+      continue;
+    }
+    if (unit.headCenterText && isNoneText(unit.headCenterText)) {
+      unit.headCenterKey = null;
+      continue;
+    }
+    if (!unit.headCenterText) {
+      // Vacío: la existente conserva el suyo; la nueva de prefijo X toma X010 si existe.
+      if (unit.existingId === null) {
+        const deduced =
+          unit.codePrefix?.length === 1 && unit.unitType !== OrgUnitType.Council
+            ? liveCenterByCode.get(`${unit.codePrefix}010`)
+            : undefined;
+        unit.headCenterKey = deduced?.key ?? null;
+        if (deduced) {
+          headIssues.push({ error: false, row: unit.rowNumber, message: `Centro propio deducido: ${deduced.code}` });
+        }
+      }
+      continue;
+    }
+    if (unit.unitType === OrgUnitType.Council) {
+      headIssues.push({ error: true, row: unit.rowNumber, message: 'Un consejo o comité no tiene centro de costo propio' });
+      continue;
+    }
+    const head = liveCenterByCode.get(unit.headCenterText);
+    if (!head || !isLiveCenter(head)) {
+      headIssues.push({ error: true, row: unit.rowNumber, message: `No hay un centro de costo activo con código ${unit.headCenterText}` });
+      continue;
+    }
+    unit.headCenterKey = head.key;
+    explicitHead.add(unit.key);
+  }
+
+  // Unidad de cada centro propio (para «Depende de 4010»).
+  const unitByHeadCode = new Map<string, FinalUnit>();
+  for (const unit of units.values()) {
+    const head = unit.headCenterKey ? centers.get(unit.headCenterKey) : undefined;
+    if (head && isLiveUnit(unit) && !unitByHeadCode.has(head.code)) {
+      unitByHeadCode.set(head.code, unit);
+    }
+  }
+
+
+  // Prefijos únicos entre unidades activas al final.
+  const finalPrefix = new Map<string, FinalUnit>();
+  for (const unit of units.values()) {
+    if (!isLiveUnit(unit) || !unit.codePrefix) {
+      continue;
+    }
+    const holder = finalPrefix.get(unit.codePrefix);
+    if (holder) {
+      const [inFile, other] = unit.rowNumber !== null ? [unit, holder] : [holder, unit];
+      unitError(
+        inFile.rowNumber ?? 0,
+        UNIT_HEADERS.prefix,
+        `El prefijo ${unit.codePrefix} ya es de «${other.name}»${other.rowNumber !== null ? ` (fila ${other.rowNumber})` : ''}`,
+      );
+      continue;
+    }
+    finalPrefix.set(unit.codePrefix, unit);
+  }
+  const finalUnitByCode = new Map([...units.values()].map((unit) => [unit.code, unit]));
+
+  /**
+   * «Depende de» vacío en una unidad nueva: con prefijo de 2+ dígitos, la unidad activa con el prefijo propio más largo
+   * (43 → 4; 431 → 43, si no 4); con prefijo de 1 dígito, la Rectoría si hay exactamente una activa; si no, raíz.
+   */
+  const deduceParent = (unit: FinalUnit): void => {
+    const at = unit.rowNumber ?? 0;
+    const prefix = unit.codePrefix;
+    let parent: FinalUnit | undefined;
+    // Una Rectoría nunca se ubica sola bajo otra unidad.
+    if (unit.unitType === OrgUnitType.Rectorate) {
+      unit.parentKey = null;
+      return;
+    }
+    if (prefix && prefix.length > 1) {
+      for (let length = prefix.length - 1; length >= 1 && !parent; length -= 1) {
+        parent = finalPrefix.get(prefix.slice(0, length));
+      }
+      if (parent) {
+        unit.parentKey = parent.key;
+        unitWarning(at, UNIT_HEADERS.parent, `Depende de deducido del prefijo: ${parent.codePrefix ?? parent.code}`);
+        return;
+      }
+    } else if (prefix) {
+      const rectorates = [...units.values()].filter(
+        (other) => other.key !== unit.key && other.unitType === OrgUnitType.Rectorate && isLiveUnit(other),
+      );
+      parent = rectorates.length === 1 ? rectorates[0] : undefined;
+      if (parent) {
+        unit.parentKey = parent.key;
+        unitWarning(at, UNIT_HEADERS.parent, `Depende de deducido: la Rectoría ${parent.codePrefix ?? parent.code}`);
+        return;
+      }
+    }
+    unit.parentKey = null;
+    unitWarning(at, UNIT_HEADERS.parent, 'Sin Depende de: queda en la raíz');
+  };
+
+  // Más de una Rectoría activa: la deducción «un número → la Rectoría» no aplica; se avisa una vez.
+  const liveRectorates = [...units.values()].filter((unit) => unit.unitType === OrgUnitType.Rectorate && isLiveUnit(unit));
+  const firstRectorateRow = liveRectorates
+    .map((unit) => unit.rowNumber)
+    .filter((row): row is number => row !== null)
+    .sort((left, right) => left - right)[0];
+  if (liveRectorates.length > 1 && firstRectorateRow !== undefined) {
+    unitWarning(
+      firstRectorateRow,
+      UNIT_HEADERS.type,
+      `Hay ${liveRectorates.length} cuadros de tipo Rectoría (${liveRectorates
+        .map((unit) => `${unit.codePrefix ? `${unit.codePrefix} ` : ''}${unit.name}`)
+        .join('; ')}): las filas nuevas de un número sin «Depende de» quedan en la raíz`,
+    );
+  }
+
+  const prefixOwners = [...finalPrefix.values()]
+    .filter((unit) => unit.unitType !== OrgUnitType.Council)
+    .map((unit) => ({ codePrefix: unit.codePrefix ?? '', unit }));
+
+  /**
+   * «Depende de», en orden: prefijo exacto; prefijo normalizado (1200 → 12); código del centro propio de una unidad
+   * (4010 → la Vicerrectoría Financiera); código interno.
+   */
+  const resolveParentText = (text: string): { parent: FinalUnit | undefined; viaHead: boolean } => {
+    if (!/^[0-9]+$/.test(text)) {
+      return { parent: finalUnitByCode.get(text) ?? finalUnitByCode.get(text.toUpperCase()), viaHead: false };
+    }
+    const byPrefix = finalPrefix.get(text) ?? finalPrefix.get(normalizeUnitPrefix(text));
+    if (byPrefix) {
+      return { parent: byPrefix, viaHead: false };
+    }
+    return { parent: unitByHeadCode.get(text), viaHead: unitByHeadCode.has(text) };
+  };
+
+  const unresolvedParentMessage = (text: string): string => {
+    if (/^[0-9]+$/.test(text) && liveCenterByCode.has(text)) {
+      const owner = resolveCenterUnit(text, prefixOwners)?.unit;
+      return `${text} es un centro de costo pero ninguna unidad lo tiene como Centro propio; escriba el prefijo de la unidad${owner?.codePrefix ? `, p. ej. ${owner.codePrefix}` : ''}`;
+    }
+    return `No hay ninguna unidad activa con prefijo, centro propio o código interno «${text}»`;
+  };
+
+  // Padres de las filas del archivo.
+  for (const unit of units.values()) {
+    if (unit.rowNumber === null) {
+      continue;
+    }
+    const text = unit.parentText;
+    if (text && isRootText(text)) {
+      unit.parentKey = null;
+      continue;
+    }
+    if (!text) {
+      if (unit.existingId === null) {
+        deduceParent(unit);
+      }
+      continue;
+    }
+    const { parent, viaHead } = resolveParentText(text);
+    if (!parent) {
+      unitError(unit.rowNumber, UNIT_HEADERS.parent, unresolvedParentMessage(text));
+      continue;
+    }
+    if (parent.key === unit.key) {
+      unitError(unit.rowNumber, UNIT_HEADERS.parent, 'Una unidad no puede depender de sí misma');
+      continue;
+    }
+    if (!isLiveUnit(parent) && isLiveUnit(unit)) {
+      unitError(unit.rowNumber, UNIT_HEADERS.parent, `«${parent.name}» está archivada o marcada para eliminar`);
+      continue;
+    }
+    unit.parentKey = parent.key;
+    if (viaHead) {
+      unitWarning(
+        unit.rowNumber,
+        UNIT_HEADERS.parent,
+        `Depende de ${text}: el Centro propio de ${parent.name}${parent.codePrefix ? ` (${parent.codePrefix})` : ''}`,
+      );
+    }
+  }
+
+  // Ciclos.
+  const cyclic = new Set<string>();
+  for (const unit of units.values()) {
+    if (unit.rowNumber === null) {
+      continue;
+    }
+    let current = unit.parentKey ? units.get(unit.parentKey) : undefined;
+    for (let depth = 0; current && depth < MAX_DEPTH; depth += 1) {
+      if (current.key === unit.key) {
+        cyclic.add(unit.key);
+        unitError(unit.rowNumber, UNIT_HEADERS.parent, 'Esa dependencia forma un ciclo (la unidad quedaría por debajo de sí misma)');
+        break;
+      }
+      current = current.parentKey ? units.get(current.parentKey) : undefined;
+    }
+  }
+
+  // Prefijo jerárquico y consejos.
+  for (const unit of units.values()) {
+    if (unit.rowNumber === null || cyclic.has(unit.key) || !isLiveUnit(unit)) {
+      continue;
+    }
+    if (unit.unitType === OrgUnitType.Council && unit.codePrefix) {
+      unitError(unit.rowNumber, UNIT_HEADERS.prefix, 'Un consejo o comité no lleva prefijo: no recibe centros de costo');
+      continue;
+    }
+    if (!unit.codePrefix) {
+      continue;
+    }
+    // Jefe con prefijo más cercano y prefijos de toda la cadena hacia arriba (nunca cuentan como «otra unidad»).
+    let ancestor: FinalUnit | undefined;
+    const chain = new Set<string>();
+    let current = unit.parentKey ? units.get(unit.parentKey) : undefined;
+    for (let depth = 0; current && depth < MAX_DEPTH; depth += 1) {
+      if (current.codePrefix) {
+        ancestor ??= current;
+        chain.add(current.codePrefix);
+      }
+      current = current.parentKey ? units.get(current.parentKey) : undefined;
+    }
+    const others = new Map(
+      [...finalPrefix.entries()]
+        .filter(([prefix]) => prefix !== unit.codePrefix)
+        .map(([prefix, holder]) => [prefix, holder.name] as const),
+    );
+    const check = checkUnitPrefix(unit.codePrefix, ancestor?.codePrefix ?? null, others, chain);
+    if (check.level === 'OK' || !check.message) {
+      continue;
+    }
+    const before = unit.existingId ? snapshotUnits.get(unit.existingId) : undefined;
+    const changed = !before || before.codePrefix !== unit.codePrefix || before.parentId !== unit.parentKey;
+    (check.level === 'ERROR' && changed ? unitError : unitWarning)(unit.rowNumber, UNIT_HEADERS.prefix, check.message);
+  }
+
   const prefixedUnits = [...finalPrefix.values()]
     .filter((unit) => !cyclic.has(unit.key) && unit.unitType !== OrgUnitType.Council)
     .map((unit) => ({ codePrefix: unit.codePrefix ?? '', unit }));
@@ -723,40 +838,13 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-  // Centro propio de las unidades del archivo.
+  // Avisos del centro propio.
+  for (const issue of headIssues) {
+    (issue.error ? unitError : unitWarning)(issue.row, UNIT_HEADERS.headCenter, issue.message);
+  }
   for (const unit of units.values()) {
-    if (unit.rowNumber === null) {
-      continue;
-    }
-    if (unit.headCenterText && isNoneText(unit.headCenterText)) {
-      unit.headCenterKey = null;
-      continue;
-    }
-    if (!unit.headCenterText) {
-      // Vacío: la existente conserva el suyo; la nueva de prefijo X toma X010 si existe.
-      if (unit.existingId === null) {
-        const deduced =
-          unit.codePrefix?.length === 1 && unit.unitType !== OrgUnitType.Council
-            ? liveCenterByCode.get(`${unit.codePrefix}010`)
-            : undefined;
-        unit.headCenterKey = deduced?.key ?? null;
-        if (deduced) {
-          unitWarning(unit.rowNumber, UNIT_HEADERS.headCenter, `Centro propio deducido del prefijo: ${deduced.code}`);
-        }
-      }
-      continue;
-    }
-    if (unit.unitType === OrgUnitType.Council) {
-      unitError(unit.rowNumber, UNIT_HEADERS.headCenter, 'Un consejo o comité no tiene centro de costo propio');
-      continue;
-    }
-    const head = liveCenterByCode.get(unit.headCenterText);
-    if (!head || !isLiveCenter(head)) {
-      unitError(unit.rowNumber, UNIT_HEADERS.headCenter, `No hay un centro de costo activo con código ${unit.headCenterText}`);
-      continue;
-    }
-    unit.headCenterKey = head.key;
-    if (head.unitKey !== unit.key) {
+    const head = unit.headCenterKey ? centers.get(unit.headCenterKey) : undefined;
+    if (unit.rowNumber !== null && head && explicitHead.has(unit.key) && head.unitKey !== unit.key) {
       unitWarning(unit.rowNumber, UNIT_HEADERS.headCenter, `El centro propio ${head.code} no queda en esta unidad`);
     }
   }

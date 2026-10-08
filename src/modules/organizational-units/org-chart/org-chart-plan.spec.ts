@@ -350,7 +350,7 @@ describe('plan del Excel del organigrama', () => {
       expect(plan.units[0]).toMatchObject({ code: 'U5', parentKey: 'u1', headCenterKey: 'new:5010' });
       expect(plan.warnings.map((issue) => issue.message)).toEqual([
         'Depende de deducido: la Rectoría 1',
-        'Centro propio deducido del prefijo: 5010',
+        'Centro propio deducido: 5010',
       ]);
     });
 
@@ -377,6 +377,171 @@ describe('plan del Excel del organigrama', () => {
           [3, 'Sin Depende de: queda en la raíz'],
         ]);
       }
+    });
+  });
+
+  describe('códigos de 4 dígitos de Contabilidad en la hoja Organigrama (como la llena Control Interno)', () => {
+    /** Hoja real de Control Interno: Prefijo con el código de Contabilidad y Depende de con el del jefe. */
+    const MONICA_ROWS: ReadonlyArray<[string, string, string, string, string]> = [
+      ['1', 'RECTORÍA', 'Rectoría', '', 'Autoridad'],
+      ['2', 'VICERRECTORÍA ACADÉMICA', 'Vicerrectoría', '1', 'Autoridad'],
+      ['4', 'VICERRECTORÍA FINANCIERA', 'Vicerrectoría', '1', 'Autoridad'],
+      ['5', 'VICERRECTORÍA BIENESTAR UNIVERSITARIO', 'Vicerrectoría', '1', 'Autoridad'],
+      ['9', 'INSTITUCIONAL', 'Otro', '1', 'Autoridad'],
+      ['1100', 'Rectoría', 'Rectoría', '1', 'Asesoría'],
+      ['1110', 'OFICINA JURÍDICA', 'Oficina', '1100', 'Asesoría'],
+      ['1200', 'DEPARTAMENTO DE PLANEACIÓN E INTERNACIONALIZACIÓN', 'Departamento', '1', 'Asesoría'],
+      ['1210', 'PLANEACIÓN', 'Departamento', '1200', 'Asesoría'],
+      ['1220', 'INTERNACIONALIZACIÓN', 'Departamento', '1200', 'Asesoría'],
+      ['1300', 'OFICINA DE IMAGEN INSTITUCIONAL, RELACIONES PÚBLICAS Y PRENSA', 'Oficina', '1', 'Asesoría'],
+      ['1310', 'OFICINA DE IMAGEN INSTITUCIONAL, RELACIONES PÚBLICAS Y PRENSA', 'Oficina', '1300', 'Asesoría'],
+      ['1400', 'DEPARTAMENTO DE CAPTACIÓN DE RECURSOS', 'Departamento', '1', 'Asesoría'],
+      ['1410', 'DEPARTAMENTO DE CAPTACIÓN DE RECURSOS', 'Departamento', '1400', 'Asesoría'],
+      ['1500', 'SECRETARÍA GENERAL', 'Departamento', '1', 'Asesoría'],
+      ['1510', 'SECRETARÍA GENERAL', 'Departamento', '1500', 'Asesoría'],
+      ['1520', 'OFICINA DE ADMISIONES Y REGISTRO', 'Oficina', '1500', 'Asesoría'],
+      ['1530', 'OFICINA DE GESTIÓN DOCUMENTAL', 'Oficina', '1500', 'Asesoría'],
+    ];
+    const MONICA_CENTERS = ['1010', '1110', '1210', '1220', '1310', '1410', '1510', '1520', '1530'];
+    const monicaInput = (): OrgChartInput =>
+      only({
+        units: MONICA_ROWS.map(([prefix, name, type, parent, relation], index) =>
+          unitRow(index + 2, { prefix, name, type, parent: parent || null, relation }),
+        ),
+        centers: MONICA_CENTERS.map((code, index) => centerRow(index + 2, { code, name: `CENTRO ${code}` })),
+      });
+    const empty = (): OrgChartSnapshot => ({ units: [], centers: [], removal: new Map() });
+
+    it('el archivo de 18 filas pasa sin errores ni ciclos: prefijos cortos y jefes por el código de Contabilidad', () => {
+      const plan = planOrgChart(empty(), monicaInput());
+      expect(plan.errors).toEqual([]);
+      const byKey = new Map(plan.units.map((op) => [op.key, op]));
+      const prefixOf = (key: string | null) => (key ? (byKey.get(key)?.codePrefix ?? '?') : null);
+      expect(plan.units.map((op) => [op.codePrefix, prefixOf(op.parentKey)])).toEqual([
+        ['1', null],
+        ['2', '1'],
+        ['4', '1'],
+        ['5', '1'],
+        ['9', '1'],
+        ['11', '1'],
+        ['111', '11'],
+        ['12', '1'],
+        ['121', '12'],
+        ['122', '12'],
+        ['13', '1'],
+        ['131', '13'],
+        ['14', '1'],
+        ['141', '14'],
+        ['15', '1'],
+        ['151', '15'],
+        ['152', '15'],
+        ['153', '15'],
+      ]);
+      const messages = plan.warnings.map((issue) => `${issue.rowNumber}: ${issue.message}`);
+      expect(messages).toContain('7: 1100 se tomó como prefijo 11');
+      expect(messages).toContain('10: 1210 se tomó como prefijo 121');
+      expect(messages).toContain(
+        '2: Hay 2 cuadros de tipo Rectoría (1 RECTORÍA; 11 Rectoría): las filas nuevas de un número sin «Depende de» quedan en la raíz',
+      );
+      expect(messages.some((message) => message.includes('ciclo'))).toBe(false);
+      // Los centros quedan en la unidad de prefijo más largo.
+      expect(Object.fromEntries(plan.centers.map((op) => [op.code, prefixOf(op.unitKey)]))).toEqual({
+        '1010': '1',
+        '1110': '111',
+        '1210': '121',
+        '1220': '122',
+        '1310': '131',
+        '1410': '141',
+        '1510': '151',
+        '1520': '152',
+        '1530': '153',
+      });
+    });
+
+    it('el prefijo 1000 o 1 sin código interno encuentra la Rectoría existente con prefijo 1', () => {
+      const snapshot: OrgChartSnapshot = {
+        units: [unit('u1', 'U1', 'RECTORÍA', '1', null, OrgUnitType.Rectorate)],
+        centers: [],
+        removal: new Map(),
+      };
+      for (const prefix of ['1', '1000']) {
+        const plan = planOrgChart(snapshot, only({ units: [unitRow(2, { prefix, name: 'RECTORÍA', type: 'Rectoría' })] }));
+        expect(plan.errors).toEqual([]);
+        expect(plan.changes).toEqual([]);
+      }
+    });
+
+    /** Vicerrectoría Financiera «4» con Centro propio 4010 y sus centros 4110…4165 (de 5 en 5). */
+    const FINANCE_CODES = ['4110', '4115', '4120', '4125', '4130', '4135', '4140', '4145', '4150', '4155', '4160', '4165'];
+    const financeSnapshot = (): OrgChartSnapshot => ({
+      units: [
+        unit('u1', 'U1', 'RECTORÍA', '1', null, OrgUnitType.Rectorate),
+        { ...unit('u4', 'U4', 'VICERRECTORÍA FINANCIERA', '4', 'u1', OrgUnitType.Vicerectorate), headCostCenterId: 'c4010' },
+        unit('u5', 'U5', 'VICERRECTORÍA BIENESTAR', '5', 'u1', OrgUnitType.Vicerectorate),
+      ],
+      centers: [center('c4010', '4010', 'u4', null), ...FINANCE_CODES.map((code) => center(`c${code}`, code, 'u4', null))],
+      removal: new Map(),
+    });
+    const financeRows = (): UnitRowInput[] =>
+      FINANCE_CODES.map((code, index) =>
+        unitRow(index + 2, {
+          prefix: code,
+          name: ['DEPARTAMENTO DE SERVICIOS', 'DEPARTAMENTO DE LOGÍSTICA'][index] ?? `CENTRO ${code}`,
+          type: 'Departamento',
+          parent: '4010',
+        }),
+      );
+
+    it('Depende de 4010 (el Centro propio de la Vicerrectoría Financiera): todo queda bajo 4', () => {
+      const plan = planOrgChart(financeSnapshot(), only({ units: financeRows() }));
+      expect(plan.errors).toEqual([]);
+      expect(plan.units.map((op) => [op.codePrefix, op.parentKey])).toEqual(
+        ['411', '4115', '412', '4125', '413', '4135', '414', '4145', '415', '4155', '416', '4165'].map((prefix) => [prefix, 'u4']),
+      );
+      expect(plan.warnings.map((issue) => issue.message)).toContain('Depende de 4010: el Centro propio de VICERRECTORÍA FINANCIERA (4)');
+    });
+
+    it('Depende de con un centro que no es Centro propio de nadie: lo dice y sugiere el prefijo', () => {
+      const plan = planOrgChart(
+        financeSnapshot(),
+        only({ units: [unitRow(2, { prefix: '4170', name: 'ALMACÉN', type: 'Oficina', parent: '4110' })] }),
+      );
+      expect(plan.errors).toEqual([
+        expect.objectContaining({
+          column: 'Depende de',
+          message: '4110 es un centro de costo pero ninguna unidad lo tiene como Centro propio; escriba el prefijo de la unidad, p. ej. 4',
+        }),
+      ]);
+    });
+
+    it('53 bajo 4 con la unidad 5: el mensaje nombra a la dueña, nunca al jefe ni a sus ancestros', () => {
+      const plan = planOrgChart(
+        financeSnapshot(),
+        only({
+          units: [
+            unitRow(2, { prefix: '53', name: 'OFICINA X', type: 'Oficina', parent: '4' }),
+            unitRow(3, { prefix: '1110', name: 'OFICINA JURÍDICA', type: 'Oficina', parent: '4' }),
+          ],
+        }),
+      );
+      expect(plan.errors.map((issue) => [issue.rowNumber, issue.message])).toEqual([
+        [2, 'El prefijo 53 no empieza por el de su jefe (4) y los números 5… son de VICERRECTORÍA BIENESTAR'],
+      ]);
+      // 111 bajo 4: los números 1… son de la Rectoría, ancestro de 4; se acepta con advertencia, sin citarla.
+      expect(plan.warnings.find((issue) => issue.rowNumber === 3 && issue.message.startsWith('El prefijo 111'))?.message).toBe(
+        'El prefijo 111 no empieza por el de su jefe (4); se acepta porque ninguna otra unidad tiene sus dígitos iniciales',
+      );
+      // 111 bajo la Rectoría 1100 (11), que cuelga de la 1: la 1 es ancestro, no «otra unidad».
+      const nested = planOrgChart(
+        financeSnapshot(),
+        only({
+          units: [
+            unitRow(2, { prefix: '1100', name: 'Rectoría', type: 'Rectoría', parent: '1' }),
+            unitRow(3, { prefix: '1110', name: 'OFICINA JURÍDICA', type: 'Oficina', parent: '1100' }),
+          ],
+        }),
+      );
+      expect(nested.errors).toEqual([]);
     });
   });
 
