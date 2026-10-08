@@ -1010,6 +1010,12 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El organigrama cambió desde la previsualización: vuelva a previsualizar el archivo',
   },
+  [ErrorCode.OrgChartImportConflict]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message:
+      'Otra persona cambió las mismas unidades después de que usted descargó el archivo: descargue el organigrama de nuevo y repita sus cambios',
+  },
   [ErrorCode.OrgChartImportClosed]: {
     httpStatus: 409,
     action: 'CANCEL',

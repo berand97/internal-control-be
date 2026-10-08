@@ -1,13 +1,24 @@
 import ExcelJS from 'exceljs';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
-import { type RawSheet, readWorkbook } from '../../staging/excel/read-workbook.js';
+import { type RawSheet, readWorkbookWithProperties } from '../../staging/excel/read-workbook.js';
 import {
   ORG_RELATION_TYPE_LABELS,
   ORG_RELATION_TYPES,
   ORG_UNIT_TYPE_LABELS,
   ORG_UNIT_TYPES,
+  OrgRelationType,
+  OrgUnitType,
 } from '../enums/org-unit-type.enum.js';
+import {
+  type OrgChartStamp,
+  readStampSheet,
+  type StampValues,
+  stampRow,
+  STAMP_FORMAT_VERSION,
+  statusText,
+  writeStampSheet,
+} from './org-chart-stamp.js';
 import {
   ACTION_ARCHIVE,
   ACTION_DELETE,
@@ -53,7 +64,6 @@ const SPARE_ROWS = 500;
 const HEADER_FILL = 'FF1F4E78';
 const READ_ONLY_FILL = 'FFE7E6E6';
 const READ_ONLY_HEADER_FILL = 'FF808080';
-const EXAMPLE_FILL = 'FFFFF2CC';
 
 interface ColumnSpec {
   readonly header: string;
@@ -160,7 +170,6 @@ const fillSheet = async (
   sheet: ExcelJS.Worksheet,
   columns: ReadonlyArray<ColumnSpec>,
   rows: ReadonlyArray<{ readonly depth: number; readonly values: ReadonlyArray<string | number | null> }>,
-  example: boolean,
 ): Promise<void> => {
   columns.forEach((spec, index) => {
     const letter = columnLetter(index);
@@ -186,8 +195,6 @@ const fillSheet = async (
       }
       if (spec.readOnly) {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: READ_ONLY_FILL } };
-      } else if (example) {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXAMPLE_FILL } };
       }
     });
   });
@@ -226,9 +233,45 @@ const fillSheet = async (
   });
 };
 
+/** Valores de las columnas editables tal como se escriben en la hoja (y con los que se calcula la huella del sello). */
+export const exportValues = (unit: ExportUnitRow): StampValues => ({
+  prefix: unit.prefix,
+  name: unit.name,
+  type: unit.typeLabel,
+  parent: unit.parent,
+  relation: unit.relationLabel,
+  headCenter: unit.headCenter,
+  status: statusText(unit.isActive),
+});
+
+/** Fila de ejemplo (va en Instrucciones, nunca en la hoja Organigrama: subida tal cual cambiaría la unidad 4). */
+export const TEMPLATE_EXAMPLE: StampValues = {
+  prefix: '4',
+  name: 'Vicerrectoría Financiera',
+  type: ORG_UNIT_TYPE_LABELS[OrgUnitType.Vicerectorate],
+  parent: null,
+  relation: ORG_RELATION_TYPE_LABELS[OrgRelationType.Authority],
+  headCenter: '4010',
+  status: STATUS_ACTIVE,
+};
+
+const EXAMPLE_LINES: ReadonlyArray<string> = [
+  '',
+  'Ejemplo de una fila (escríbala en la hoja Organigrama solo si de verdad quiere crear o cambiar ese cuadro):',
+  `   Prefijo ${TEMPLATE_EXAMPLE.prefix ?? ''} · Nombre ${TEMPLATE_EXAMPLE.name ?? ''} · Tipo ${TEMPLATE_EXAMPLE.type ?? ''} · Depende de (vacío) · Línea ${TEMPLATE_EXAMPLE.relation ?? ''} · Centro propio ${TEMPLATE_EXAMPLE.headCenter ?? ''} · Estado ${TEMPLATE_EXAMPLE.status ?? ''} · Código interno (vacío)`,
+];
+
+export interface OrgChartWorkbookOptions {
+  /** EXPORT: el organigrama actual; TEMPLATE: hoja Organigrama vacía (el ejemplo va en Instrucciones). */
+  readonly kind: 'EXPORT' | 'TEMPLATE';
+  readonly generatedAt: Date;
+  /** Revisión de la estructura (structureRevision) al exportar. */
+  readonly revision: string;
+}
+
 export const buildOrgChartWorkbook = async (
   units: ReadonlyArray<ExportUnitRow>,
-  options: { readonly example: boolean; readonly generatedAt: Date },
+  options: OrgChartWorkbookOptions,
 ): Promise<Buffer> => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Control Interno UNAC';
@@ -238,34 +281,45 @@ export const buildOrgChartWorkbook = async (
 
   const unitSheet = workbook.addWorksheet(UNIT_SHEET, { views: [{ state: 'frozen', ySplit: 1 }] });
   const instructions = workbook.addWorksheet(INSTRUCTIONS_SHEET);
+  const rows = options.kind === 'TEMPLATE' ? [] : units;
 
   await fillSheet(
     unitSheet,
     UNIT_COLUMNS,
-    units.map((unit) => ({
-      depth: unit.depth,
-      values: [
-        unit.prefix,
-        unit.name,
-        unit.typeLabel,
-        unit.parent,
-        unit.relationLabel,
-        unit.headCenter,
-        unit.isActive ? STATUS_ACTIVE : STATUS_ARCHIVED,
-        null,
-        unit.code,
-      ],
-    })),
-    options.example,
+    rows.map((unit) => {
+      const values = exportValues(unit);
+      return {
+        depth: unit.depth,
+        values: [
+          values.prefix,
+          values.name,
+          values.type,
+          values.parent,
+          values.relation,
+          values.headCenter,
+          values.status,
+          null,
+          unit.code,
+        ],
+      };
+    }),
   );
   instructions.getColumn('A').width = 120;
-  INSTRUCTIONS.forEach((line, index) => {
+  [...INSTRUCTIONS, ...(options.kind === 'TEMPLATE' ? EXAMPLE_LINES : [])].forEach((line, index) => {
     const cell = instructions.getCell(`A${index + 1}`);
     cell.value = line;
     if (index === 0) {
       cell.font = { bold: true, size: 13 };
     }
   });
+  const stamp: OrgChartStamp = {
+    formatVersion: STAMP_FORMAT_VERSION,
+    kind: options.kind,
+    exportedAt: options.generatedAt.toISOString(),
+    revision: options.revision,
+    rows: rows.filter((unit) => unit.code).map((unit) => stampRow(unit.code ?? '', exportValues(unit))),
+  };
+  await writeStampSheet(workbook, stamp);
 
   return Buffer.from(await workbook.xlsx.writeBuffer());
 };
@@ -313,8 +367,9 @@ const reader = (sheet: RawSheet, headers: Record<string, string>) => {
 
 export const parseOrgChartWorkbook = async (content: Buffer): Promise<OrgChartInput> => {
   let sheets: ReadonlyArray<RawSheet>;
+  let createdAt: Date | null;
   try {
-    sheets = await readWorkbook(content);
+    ({ sheets, createdAt } = await readWorkbookWithProperties(content));
   } catch (error) {
     if (error instanceof ApiException) {
       throw error;
@@ -356,5 +411,15 @@ export const parseOrgChartWorkbook = async (content: Buffer): Promise<OrgChartIn
   }
   // Archivos viejos traen «Centros de costo»: se ignora (el plan lo advierte); los centros tienen su propia pantalla.
   const ignoredCenterSheet = findSheet(sheets, CENTER_SHEET) !== undefined;
-  return { units, centers: [], hasUnitSheet, hasCenterSheet: false, ignoredCenterSheet };
+  const stamp = readStampSheet(sheets);
+  return {
+    units,
+    centers: [],
+    hasUnitSheet,
+    hasCenterSheet: false,
+    ignoredCenterSheet,
+    stamp: stamp.status === 'OK' ? stamp.stamp : null,
+    invalidStamp: stamp.status === 'INVALID',
+    fileCreatedAt: createdAt?.toISOString() ?? null,
+  };
 };

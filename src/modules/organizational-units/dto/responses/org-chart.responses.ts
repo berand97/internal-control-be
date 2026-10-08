@@ -120,6 +120,42 @@ export class OrgChartChangeDto {
   readonly detail!: string;
 }
 
+export class OrgChartConflictDto {
+  @ApiProperty({ description: 'Fila del Excel' })
+  readonly rowNumber!: number;
+
+  @ApiProperty({ description: 'Nombre actual de la unidad' })
+  readonly unitName!: string;
+
+  @ApiProperty({ description: 'Encabezado de la columna (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Estado)' })
+  readonly column!: string;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Lo que dice el archivo' })
+  readonly fileValue!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Lo que hay hoy en el sistema (como se exportaría)' })
+  readonly currentValue!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'date-time',
+    nullable: true,
+    description: 'Cuándo cambió en el sistema (último cambio de ese campo en el historial); null si no se registró',
+  })
+  readonly changedAt!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien lo cambió' })
+  readonly changedBy!: string | null;
+}
+
+export class OrgChartAppliedBeforeDto {
+  @ApiProperty({ format: 'date-time', description: 'Cuándo se confirmó un archivo idéntico' })
+  readonly at!: string;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien lo confirmó' })
+  readonly by!: string | null;
+}
+
 export class OrgChartPreviewDto {
   @ApiProperty({ format: 'uuid', description: 'Para POST /organizational-units/import/{previewId}/confirm' })
   readonly previewId!: string;
@@ -147,6 +183,27 @@ export class OrgChartPreviewDto {
 
   @ApiProperty({ type: [OrgChartIssueDto], description: 'No bloquean (p. ej. códigos que no cuadran)' })
   readonly warnings!: ReadonlyArray<OrgChartIssueDto>;
+
+  @ApiProperty({
+    type: [OrgChartConflictDto],
+    description:
+      'Columnas que la persona cambió en su archivo y que otra persona cambió en el sistema después de la descarga (según el sello oculto). Cada una también viene en errors: bloquean; hay que descargar de nuevo',
+  })
+  readonly conflicts!: ReadonlyArray<OrgChartConflictDto>;
+
+  @ApiProperty({
+    type: OrgChartAppliedBeforeDto,
+    nullable: true,
+    description: 'Un archivo idéntico (mismo contenido) ya se confirmó; null si no',
+  })
+  readonly fileAppliedBefore!: OrgChartAppliedBeforeDto | null;
+
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    description: 'Días desde que se descargó el archivo (según su sello); null si no trae sello. Más de 7 deja una advertencia',
+  })
+  readonly fileAgeDays!: number | null;
 }
 
 export class OrgChartConfirmDto {

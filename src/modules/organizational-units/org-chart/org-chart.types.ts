@@ -6,6 +6,7 @@ import {
   type OrgRelationType,
   type OrgUnitType,
 } from '../enums/org-unit-type.enum.js';
+import type { OrgChartStamp } from './org-chart-stamp.js';
 
 /** Estado actual de la estructura (lo que el Excel compara). */
 export interface SnapshotUnit {
@@ -86,6 +87,15 @@ export interface OrgChartInput {
   readonly hasCenterSheet: boolean;
   /** El archivo traía la hoja «Centros de costo» (archivos viejos) y se ignoró: el plan lo advierte. */
   readonly ignoredCenterSheet?: boolean;
+  /**
+   * Sello oculto del archivo (org-chart-stamp.ts): null si no trae (archivo viejo o hecho a mano); undefined en
+   * previsualizaciones guardadas antes del sello (se tratan como sin sello).
+   */
+  readonly stamp?: OrgChartStamp | null;
+  /** El archivo traía una hoja «_sello» dañada o de otro formato: se trata como sin sello y se advierte. */
+  readonly invalidStamp?: boolean;
+  /** Fecha de creación del libro (propiedades del documento, ISO); null si no la trae. */
+  readonly fileCreatedAt?: string | null;
 }
 
 /**
@@ -98,6 +108,9 @@ export const unitsOnly = (input: OrgChartInput): OrgChartInput => ({
   hasUnitSheet: input.hasUnitSheet,
   hasCenterSheet: false,
   ignoredCenterSheet: Boolean(input.ignoredCenterSheet) || input.hasCenterSheet,
+  stamp: input.stamp ?? null,
+  invalidStamp: Boolean(input.invalidStamp),
+  fileCreatedAt: input.fileCreatedAt ?? null,
 });
 
 export const UNIT_SHEET = 'Organigrama';

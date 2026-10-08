@@ -19,27 +19,33 @@ import {
 } from '../../cost-centers/services/structure-removal.service.js';
 import { ALL_SCOPE } from '../../cost-centers/domain/structure-reconcile.js';
 import { StructureReconcilerService } from '../../cost-centers/services/structure-reconciler.service.js';
+import type { OrgHistoryField } from '../../cost-centers/services/org-structure-history.service.js';
+import { userDisplayNameSubquery } from '../../persons/services/cost-center-heads.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import type {
+  OrgChartAppliedBeforeDto,
   OrgChartConfirmDto,
   OrgChartPreviewDto,
   OrgChartSummaryDto,
 } from '../dto/responses/org-chart.responses.js';
-import {
-  ORG_RELATION_TYPE_LABELS,
-  ORG_UNIT_TYPE_LABELS,
-  OrgRelationType,
-  OrgUnitType,
-} from '../enums/org-unit-type.enum.js';
 import { orgChartExportRows } from './org-chart-export.js';
+import {
+  type ChangeInfo,
+  type DeletedUnitInfo,
+  formatWhen,
+  mergeOrgChartInput,
+  type OrgChartConflict,
+} from './org-chart-merge.js';
 import { type CenterOp, type OrgChartPlan, planOrgChart, type UnitOp } from './org-chart-plan.js';
-import { buildOrgChartWorkbook, type ExportUnitRow, parseOrgChartWorkbook } from './org-chart-workbook.js';
+import { structureRevision } from './org-chart-stamp.js';
+import { buildOrgChartWorkbook, parseOrgChartWorkbook } from './org-chart-workbook.js';
 import {
   type OrgChartInput,
   type OrgChartSnapshot,
   type RemovalReferences,
   type SnapshotCenter,
   type SnapshotUnit,
+  UNIT_SHEET,
   unitsOnly,
 } from './org-chart.types.js';
 
@@ -90,6 +96,12 @@ const toSummary = (plan: OrgChartPlan): OrgChartSummaryDto => ({
 
 const unitPath = (code: string): string => code.toLowerCase();
 
+/** Plan del archivo: el de planOrgChart más lo que dijo el sello (conflictos, antigüedad, filas descartadas). */
+type FilePlan = OrgChartPlan & {
+  readonly conflicts: ReadonlyArray<OrgChartConflict>;
+  readonly fileAgeDays: number | null;
+};
+
 /**
  * Excel del organigrama: exportación, plantilla, previsualización y confirmación.
  *
@@ -114,27 +126,16 @@ export class OrgChartService {
   async export(): Promise<OrgChartFile> {
     const { units, centers } = await this.loadState(this.dataSource.manager);
     const body = await buildOrgChartWorkbook(orgChartExportRows(units, centers), {
-      example: false,
+      kind: 'EXPORT',
       generatedAt: new Date(),
+      revision: structureRevision(units),
     });
     return { fileName: `organigrama-${today()}.xlsx`, body };
   }
 
+  /** Hoja Organigrama vacía: el ejemplo va en Instrucciones (subido tal cual no cambia nada). */
   async template(): Promise<OrgChartFile> {
-    const units: ExportUnitRow[] = [
-      {
-        depth: 0,
-        prefix: '4',
-        name: 'Vicerrectoría Financiera',
-        typeLabel: ORG_UNIT_TYPE_LABELS[OrgUnitType.Vicerectorate],
-        parent: null,
-        relationLabel: ORG_RELATION_TYPE_LABELS[OrgRelationType.Authority],
-        headCenter: '4010',
-        isActive: true,
-        code: null,
-      },
-    ];
-    const body = await buildOrgChartWorkbook(units, { example: true, generatedAt: new Date() });
+    const body = await buildOrgChartWorkbook([], { kind: 'TEMPLATE', generatedAt: new Date(), revision: 'TEMPLATE' });
     return { fileName: 'plantilla-organigrama.xlsx', body };
   }
 
@@ -143,7 +144,20 @@ export class OrgChartService {
       throw new ApiException(ErrorCode.OrgChartInvalidFile, 'Adjunte el archivo Excel del organigrama');
     }
     const input = await parseOrgChartWorkbook(file.buffer);
+    const fileSha256 = createHash('sha256').update(file.buffer).digest('hex');
     const plan = await this.plan(this.dataSource.manager, input);
+    const fileAppliedBefore = await this.appliedBefore(fileSha256);
+    const warnings = fileAppliedBefore
+      ? [
+          {
+            sheet: UNIT_SHEET,
+            rowNumber: 1,
+            column: null,
+            message: `Este archivo ya se aplicó el ${formatWhen(fileAppliedBefore.at)}${fileAppliedBefore.by ? ` por ${fileAppliedBefore.by}` : ''}`,
+          },
+          ...plan.warnings,
+        ]
+      : plan.warnings;
     // Siempre false: el Excel del organigrama no toca centros (se mantiene el campo por contrato).
     const requiresCostCenterPermission = plan.centers.length > 0;
     const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS);
@@ -156,14 +170,17 @@ export class OrgChartService {
       summary,
       changes: plan.changes,
       errors: plan.errors,
-      warnings: plan.warnings,
+      warnings,
+      conflicts: plan.conflicts,
+      fileAppliedBefore,
+      fileAgeDays: plan.fileAgeDays,
     };
     const [row] = (await this.dataSource.query(
       `INSERT INTO org_chart_import (file_name, file_sha256, input_rows, plan_hash, summary, has_errors, created_by, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [
         body.fileName,
-        createHash('sha256').update(file.buffer).digest('hex'),
+        fileSha256,
         JSON.stringify(input),
         plan.hash,
         JSON.stringify(summary),
@@ -189,6 +206,16 @@ export class OrgChartService {
         throw new ApiException(ErrorCode.OrgChartImportClosed);
       }
       const plan = await this.plan(manager, stored.input_rows);
+      if (plan.conflicts.length > 0) {
+        throw new ApiException(
+          ErrorCode.OrgChartImportConflict,
+          undefined,
+          plan.conflicts.slice(0, 50).map((conflict) => ({
+            field: `${UNIT_SHEET}!${conflict.rowNumber}:${conflict.column}`,
+            message: `${conflict.unitName}: en el sistema ${conflict.currentValue ?? '(vacío)'}; su archivo ${conflict.fileValue ?? '(vacío)'}`,
+          })),
+        );
+      }
       if (plan.errors.length > 0) {
         throw new ApiException(
           ErrorCode.OrgChartImportHasErrors,
@@ -218,10 +245,10 @@ export class OrgChartService {
         userAgent: null,
       });
       const confirmedAt = new Date();
-      await manager.query(`UPDATE org_chart_import SET status = 'CONFIRMED', confirmed_at = $2 WHERE id = $1`, [
-        stored.id,
-        confirmedAt,
-      ]);
+      await manager.query(
+        `UPDATE org_chart_import SET status = 'CONFIRMED', confirmed_at = $2, confirmed_by = $3 WHERE id = $1`,
+        [stored.id, confirmedAt, actor.id],
+      );
       const summary = toSummary(plan);
       await this.auditLogs.record(
         {
@@ -263,31 +290,110 @@ export class OrgChartService {
     return { units, centers };
   }
 
+  /** Última confirmación de un archivo idéntico (mismo hash del contenido). */
+  private async appliedBefore(fileSha256: string): Promise<OrgChartAppliedBeforeDto | null> {
+    const [row] = (await this.dataSource.query(
+      `SELECT i.confirmed_at AS at, ${userDisplayNameSubquery('coalesce(i.confirmed_by, i.created_by)')} AS by
+       FROM org_chart_import i
+       WHERE i.file_sha256 = $1 AND i.status = 'CONFIRMED'
+       ORDER BY i.confirmed_at DESC LIMIT 1`,
+      [fileSha256],
+    )) as Array<{ at: Date; by: string | null }>;
+    return row ? { at: row.at.toISOString(), by: row.by } : null;
+  }
+
+  /** Lo que el sello necesita saber del historial: último cambio por campo, eliminadas y creación de cada unidad. */
+  private async loadMergeContext(
+    manager: EntityManager,
+    codes: ReadonlyArray<string>,
+  ): Promise<{
+    lastChanges: Map<string, Map<OrgHistoryField, ChangeInfo>>;
+    deletedUnits: Map<string, DeletedUnitInfo>;
+    unitOrigins: Map<string, ChangeInfo>;
+  }> {
+    const changes = (await manager.query(
+      `SELECT DISTINCT ON (h.entity_id, h.field) h.entity_id AS "unitId", h.field, h.changed_at AS at,
+              ${userDisplayNameSubquery('h.changed_by')} AS "byName"
+       FROM org_structure_history h
+       WHERE h.entity_type = 'ORG_UNIT'
+       ORDER BY h.entity_id, h.field, h.changed_at DESC, h.id DESC`,
+    )) as Array<{ unitId: string; field: OrgHistoryField; at: Date; byName: string | null }>;
+    const lastChanges = new Map<string, Map<OrgHistoryField, ChangeInfo>>();
+    for (const row of changes) {
+      const fields = lastChanges.get(row.unitId) ?? new Map<OrgHistoryField, ChangeInfo>();
+      fields.set(row.field, { at: row.at.toISOString(), byName: row.byName });
+      lastChanges.set(row.unitId, fields);
+    }
+    const deleted =
+      codes.length === 0
+        ? []
+        : ((await manager.query(
+            `SELECT DISTINCT ON (a.changes->>'code') a.changes->>'code' AS code, a.changes->>'name' AS name,
+                    a.performed_at AS at, ${userDisplayNameSubquery('a.performed_by')} AS "byName"
+             FROM audit_log a
+             WHERE a.entity_type = 'ORG_UNIT' AND a.action = $1 AND a.changes->>'code' = ANY($2::text[])
+             ORDER BY a.changes->>'code', a.performed_at DESC`,
+            [AuditAction.OrgUnitDeleted, codes],
+          )) as Array<{ code: string; name: string | null; at: Date; byName: string | null }>);
+    const origins = (await manager.query(
+      `SELECT u.id, u.created_at AS at,
+              (SELECT ${userDisplayNameSubquery('a.performed_by')} FROM audit_log a
+               WHERE a.entity_type = 'ORG_UNIT' AND a.entity_id = u.id AND a.action = $1
+               ORDER BY a.performed_at LIMIT 1) AS "byName"
+       FROM organizational_unit u WHERE u.is_active`,
+      [AuditAction.OrgUnitCreated],
+    )) as Array<{ id: string; at: Date; byName: string | null }>;
+    return {
+      lastChanges,
+      deletedUnits: new Map(deleted.map((row) => [row.code, { at: row.at.toISOString(), byName: row.byName, name: row.name }])),
+      unitOrigins: new Map(origins.map((row) => [row.id, { at: row.at.toISOString(), byName: row.byName }])),
+    };
+  }
+
   /**
-   * Planea dos veces: la primera dice qué filas piden ELIMINAR; con su historia leída, la segunda es la definitiva.
-   * Solo unidades (unitsOnly): también las previsualizaciones guardadas con filas de centros las descartan.
+   * Ajusta las filas con el sello (mergeOrgChartInput) y planea dos veces: la primera dice qué filas piden ELIMINAR;
+   * con su historia leída, la segunda es la definitiva. Solo unidades (unitsOnly): también las previsualizaciones
+   * guardadas con filas de centros las descartan.
    */
-  private async plan(manager: EntityManager, rows: OrgChartInput): Promise<OrgChartPlan> {
-    const input = unitsOnly(rows);
+  private async plan(manager: EntityManager, rows: OrgChartInput): Promise<FilePlan> {
     const { units, centers } = await this.loadState(manager);
-    const draft = planOrgChart({ units, centers, removal: new Map() }, input);
+    const known = new Set(units.flatMap((unit) => [unit.code, unit.code.toUpperCase()]));
+    const missingCodes = [
+      ...new Set(
+        rows.units.flatMap((row) => (row.code && !known.has(row.code) ? [row.code, row.code.toUpperCase()] : [])),
+      ),
+    ];
+    const merge = mergeOrgChartInput(unitsOnly(rows), {
+      units,
+      centers,
+      ...(await this.loadMergeContext(manager, missingCodes)),
+      now: new Date(),
+    });
+    const input = merge.input;
+    let plan = planOrgChart({ units, centers, removal: new Map() }, input);
     const removal = new Map<string, RemovalReferences>();
-    for (const op of draft.units) {
+    for (const op of plan.units) {
       if (op.removal === 'DELETE' && op.existingId) {
         const check = await this.removal.inspectUnit(manager, op.existingId);
         removal.set(op.existingId, { history: historyReason(check.references) });
       }
     }
-    for (const op of draft.centers) {
+    for (const op of plan.centers) {
       if (op.removal === 'DELETE' && op.existingId) {
         const check = await this.removal.inspectCostCenter(manager, op.existingId);
         removal.set(op.existingId, { history: historyReason(check.references) });
       }
     }
-    if (removal.size === 0) {
-      return draft;
+    if (removal.size > 0) {
+      plan = planOrgChart({ units, centers, removal } satisfies OrgChartSnapshot, input);
     }
-    return planOrgChart({ units, centers, removal } satisfies OrgChartSnapshot, input);
+    return {
+      ...plan,
+      errors: [...merge.errors, ...plan.errors],
+      warnings: [...merge.warnings, ...plan.warnings],
+      conflicts: merge.conflicts,
+      fileAgeDays: merge.fileAgeDays,
+    };
   }
 
   // ─── Aplicación ─────────────────────────────────────────────────────────────────────────────────────────────────

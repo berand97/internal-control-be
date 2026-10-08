@@ -203,6 +203,7 @@ export enum ErrorCode {
   OrgUnitPrefixOutOfParent = 'ORG_UNIT_PREFIX_OUT_OF_PARENT',
   OrgChartImportHasErrors = 'ORG_CHART_IMPORT_HAS_ERRORS',
   OrgChartImportStale = 'ORG_CHART_IMPORT_STALE',
+  OrgChartImportConflict = 'ORG_CHART_IMPORT_CONFLICT',
   OrgChartImportClosed = 'ORG_CHART_IMPORT_CLOSED',
   OrgChartInvalidFile = 'ORG_CHART_INVALID_FILE',
   StructureReconcileStale = 'STRUCTURE_RECONCILE_STALE',

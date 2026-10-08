@@ -61,7 +61,7 @@ const baseSnapshot = (): OrgChartSnapshot => ({
 
 const roundTrip = async (snapshot: OrgChartSnapshot): Promise<OrgChartInput> => {
   const units = orgChartExportRows(snapshot.units, snapshot.centers);
-  return parseOrgChartWorkbook(await buildOrgChartWorkbook(units, { example: false, generatedAt: new Date() }));
+  return parseOrgChartWorkbook(await buildOrgChartWorkbook(units, { kind: 'EXPORT', generatedAt: new Date(), revision: 'r' }));
 };
 
 const unitRow = (rowNumber: number, values: Partial<UnitRowInput>): UnitRowInput => ({
@@ -124,14 +124,16 @@ describe('plan del Excel del organigrama', () => {
   describe('sin hoja de centros de costo', () => {
     const exported = (): Promise<Buffer> =>
       buildOrgChartWorkbook(orgChartExportRows(baseSnapshot().units, baseSnapshot().centers), {
-        example: false,
+        kind: 'EXPORT',
+        revision: 'r',
         generatedAt: new Date(),
       });
 
     it('el libro trae solo Organigrama e Instrucciones, sin hablar de la hoja de centros ni de activos', async () => {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load((await exported()) as unknown as ArrayBuffer);
-      expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Instrucciones']);
+      expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Instrucciones', '_sello']);
+      expect(workbook.getWorksheet('_sello')?.state).toBe('veryHidden');
       const lines: string[] = [];
       workbook.getWorksheet('Instrucciones')?.eachRow((row) => lines.push(String(row.getCell(1).value ?? '')));
       workbook.getWorksheet('Organigrama')?.getRow(1).eachCell((cell) => {
@@ -697,7 +699,7 @@ describe('plan del Excel del organigrama', () => {
   it('cada encabezado de la hoja Organigrama tiene un comentario que lo explica', async () => {
     const units = orgChartExportRows(baseSnapshot().units, baseSnapshot().centers);
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load((await buildOrgChartWorkbook(units, { example: false, generatedAt: new Date() })) as unknown as ArrayBuffer);
+    await workbook.xlsx.load((await buildOrgChartWorkbook(units, { kind: 'EXPORT', generatedAt: new Date(), revision: 'r' })) as unknown as ArrayBuffer);
     const noteText = (note: ExcelJS.Cell['note']): string =>
       typeof note === 'string' ? note : (note?.texts ?? []).map((part) => part.text).join('');
     for (const name of ['Organigrama']) {
