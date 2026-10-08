@@ -49,6 +49,8 @@ export enum AuditAction {
   CostCenterArchived = 'COST_CTR_ARCHIVED',
   OrgUnitArchived = 'ORG_UNIT_ARCHIVED',
   OrgChartImported = 'ORG_CHART_IMPORTED',
+  /** Conciliador de estructura: conteos de reubicaciones, re-padres y amarres; sin datos personales. */
+  StructureReconciled = 'STRUCTURE_RECONCILED',
   CategoryCreated = 'CATEGORY_CREATED',
   CategoryUpdated = 'CATEGORY_UPDATED',
   CategoryDeleted = 'CATEGORY_DELETED',

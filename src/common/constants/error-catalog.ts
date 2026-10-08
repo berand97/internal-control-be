@@ -1020,6 +1020,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El archivo no es un Excel del organigrama: debe traer la hoja «Organigrama» con sus encabezados',
   },
+  [ErrorCode.StructureReconcileStale]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'La estructura cambió desde la vista previa del recálculo: vuelva a revisarla antes de aplicarla',
+  },
   [ErrorCode.ImportJobNotRetryable]: {
     httpStatus: 409,
     action: 'CANCEL',

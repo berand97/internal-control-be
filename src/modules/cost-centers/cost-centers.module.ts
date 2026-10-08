@@ -9,6 +9,7 @@ import { TypeOrmCostCentersRepository } from './repositories/cost-centers.reposi
 import { CostCenterPlacementService } from './services/cost-center-placement.service.js';
 import { CostCentersService } from './services/cost-centers.service.js';
 import { OrgStructureHistoryService } from './services/org-structure-history.service.js';
+import { StructureReconcilerService } from './services/structure-reconciler.service.js';
 import { StructureRemovalService } from './services/structure-removal.service.js';
 
 @Module({
@@ -21,9 +22,16 @@ import { StructureRemovalService } from './services/structure-removal.service.js
     CostCentersService,
     CostCenterPlacementService,
     StructureRemovalService,
+    StructureReconcilerService,
     OrgStructureHistoryService,
     { provide: 'CostCentersRepository', useClass: TypeOrmCostCentersRepository },
   ],
-  exports: ['CostCentersRepository', CostCenterPlacementService, StructureRemovalService, OrgStructureHistoryService],
+  exports: [
+    'CostCentersRepository',
+    CostCenterPlacementService,
+    StructureRemovalService,
+    StructureReconcilerService,
+    OrgStructureHistoryService,
+  ],
 })
 export class CostCentersModule {}

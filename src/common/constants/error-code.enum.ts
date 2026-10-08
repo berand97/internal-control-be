@@ -205,6 +205,7 @@ export enum ErrorCode {
   OrgChartImportStale = 'ORG_CHART_IMPORT_STALE',
   OrgChartImportClosed = 'ORG_CHART_IMPORT_CLOSED',
   OrgChartInvalidFile = 'ORG_CHART_INVALID_FILE',
+  StructureReconcileStale = 'STRUCTURE_RECONCILE_STALE',
 
   ImportJobNotRetryable = 'IMPORT_JOB_NOT_RETRYABLE',
 
