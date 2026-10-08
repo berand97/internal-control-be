@@ -74,7 +74,17 @@ const readCell = (cell: ExcelJS.Cell): [RawCellValue, string] | null => {
 
 const columnLetter = (address: string): string => address.replace(/\d+/g, '');
 
-export const readWorkbook = async (content: Buffer): Promise<ReadonlyArray<RawSheet>> => {
+export const readWorkbook = async (content: Buffer): Promise<ReadonlyArray<RawSheet>> =>
+  (await readWorkbookWithProperties(content)).sheets;
+
+export interface RawWorkbook {
+  readonly sheets: ReadonlyArray<RawSheet>;
+  /** Fecha de creación del libro (propiedades del documento); null si no la trae. */
+  readonly createdAt: Date | null;
+}
+
+/** Como readWorkbook, más la fecha de creación del libro (Excel la conserva al guardar). */
+export const readWorkbookWithProperties = async (content: Buffer): Promise<RawWorkbook> => {
   assertZipWithinLimits(content, ZIP_LIMITS.XLSX);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(content as unknown as ArrayBuffer);
@@ -91,7 +101,9 @@ export const readWorkbook = async (content: Buffer): Promise<ReadonlyArray<RawSh
       `La hoja "${tooLong.name}" llega hasta la fila ${tooLong.rowCount}; el máximo es ${MAX_SHEET_ROWS}. Borre las filas vacías sobrantes al final de la hoja`,
     );
   }
-  return workbook.worksheets.map((worksheet) => {
+  const created = workbook.created as Date | undefined;
+  const createdAt = created instanceof Date && !Number.isNaN(created.getTime()) ? created : null;
+  const sheets = workbook.worksheets.map((worksheet) => {
     const rows: RawRow[] = [];
     for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
       const cells: Record<string, RawCellValue> = {};
@@ -108,4 +120,5 @@ export const readWorkbook = async (content: Buffer): Promise<ReadonlyArray<RawSh
     }
     return { name: worksheet.name, lastRow: worksheet.rowCount, rows };
   });
+  return { sheets, createdAt };
 };
