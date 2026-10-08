@@ -1,18 +1,15 @@
-import { isDetailCode } from '../../cost-centers/domain/code-prefix.js';
-import { resolveCenterParent, resolveCenterUnit } from '../../cost-centers/domain/org-chart-rules.js';
-import { ORG_RELATION_TYPE_LABELS, ORG_UNIT_TYPE_LABELS, OrgUnitType } from '../enums/org-unit-type.enum.js';
-import type { ExportCenterRow, ExportUnitRow } from './org-chart-workbook.js';
+import { ORG_RELATION_TYPE_LABELS, ORG_UNIT_TYPE_LABELS } from '../enums/org-unit-type.enum.js';
+import type { ExportUnitRow } from './org-chart-workbook.js';
 import type { SnapshotCenter, SnapshotUnit } from './org-chart.types.js';
 
 /**
- * Filas de la exportación: unidades en orden de árbol (prefijo, luego nombre) con su profundidad; centros por código
- * con la unidad y el padre DERIVADOS del código para los activos (lo que dejaría la importación), y los guardados
- * para los archivados.
+ * Filas de la exportación: unidades en orden de árbol (prefijo, luego nombre) con su profundidad. Los centros solo se
+ * usan para escribir el código del Centro propio.
  */
 export const orgChartExportRows = (
   units: ReadonlyArray<SnapshotUnit>,
   centers: ReadonlyArray<SnapshotCenter>,
-): [ExportUnitRow[], ExportCenterRow[]] => {
+): ExportUnitRow[] => {
   const byId = new Map(units.map((unit) => [unit.id, unit]));
   const centerById = new Map(centers.map((center) => [center.id, center]));
   const childrenOf = new Map<string | null, SnapshotUnit[]>();
@@ -54,34 +51,5 @@ export const orgChartExportRows = (
   };
   walk(null, 0);
 
-  const prefixed = units
-    .filter((unit) => unit.isActive && unit.codePrefix && unit.unitType !== OrgUnitType.Council)
-    .map((unit) => ({ codePrefix: unit.codePrefix ?? '', unit }));
-  const liveCodes = new Set(centers.filter((center) => center.isActive).map((center) => center.externalCode));
-  const unitLabel = (unit: SnapshotUnit | undefined): string | null =>
-    unit ? `${unit.codePrefix ? `${unit.codePrefix} · ` : ''}${unit.name}` : null;
-  const centerRows: ExportCenterRow[] = centers.map((center) => {
-    let unit = center.unitId ? byId.get(center.unitId) : undefined;
-    let parent = center.parentId ? (centerById.get(center.parentId)?.externalCode ?? null) : null;
-    if (center.isActive) {
-      unit = resolveCenterUnit(center.externalCode, prefixed)?.unit ?? unit;
-      if (isDetailCode(center.externalCode)) {
-        parent = resolveCenterParent(
-          center.externalCode,
-          (code) => code !== center.externalCode && liveCodes.has(code),
-        ).parentCode;
-      }
-    }
-    return {
-      depth: parent ? 1 : 0,
-      code: center.externalCode,
-      name: center.name,
-      hasMovement: center.hasMovement,
-      unit: unitLabel(unit),
-      parent,
-      assets: center.activeAssets,
-      isActive: center.isActive,
-    };
-  });
-  return [unitRows, centerRows];
+  return unitRows;
 };

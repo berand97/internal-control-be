@@ -46,9 +46,13 @@ import {
  *   para quitarlo a propósito se escribe «RAÍZ» o «NINGUNO». La nueva deduce lo que puede: el padre por el prefijo
  *   (43 → 4) o la Rectoría (prefijo de un dígito, si hay una sola; una Rectoría nunca se ubica sola), Línea Autoridad
  *   y el centro propio: el Prefijo de 4 dígitos si es un centro (1510) o, con prefijo X, X010 si existe.
- * - Unidad y padre de cada centro del archivo se derivan del código (org-chart-rules.ts); un centro sin unidad que
- *   cuadre conserva la suya.
+ * - Centros: el Excel del organigrama no los trae (unitsOnly): Centro propio y Depende de se validan y deducen contra
+ *   los centros que existen en el sistema, y una hoja «Centros de costo» de un archivo viejo solo deja una advertencia.
+ *   La parte de centros de este plan (filas de centros con su unidad y padre derivados del código, org-chart-rules.ts)
+ *   queda sin uso aquí, para el Excel de la pantalla de centros de costo.
  */
+
+export const IGNORED_CENTER_SHEET_WARNING = 'La hoja Centros de costo se ignoró: los centros se administran en su propia pantalla';
 
 export type UnitChangeKind =
   | 'CREATED'
@@ -253,6 +257,10 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     errors.push({ sheet: CENTER_SHEET, rowNumber: row, column, message });
   const centerWarning = (row: number, column: string | null, message: string) =>
     warnings.push({ sheet: CENTER_SHEET, rowNumber: row, column, message });
+
+  if (input.ignoredCenterSheet) {
+    warnings.push({ sheet: CENTER_SHEET, rowNumber: 1, column: null, message: IGNORED_CENTER_SHEET_WARNING });
+  }
 
   // ─── Estado actual ────────────────────────────────────────────────────────────────────────────────────────────
   const snapshotUnits = new Map(snapshot.units.map((unit) => [unit.id, unit]));

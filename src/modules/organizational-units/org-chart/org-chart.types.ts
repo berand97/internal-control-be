@@ -74,11 +74,29 @@ export interface CenterRowInput {
 
 export interface OrgChartInput {
   readonly units: ReadonlyArray<UnitRowInput>;
+  /**
+   * Filas de centros para el plan. El Excel del organigrama nunca las trae (vacío y hasCenterSheet false): los centros
+   * se administran en su propia pantalla. El plan conserva su lógica para reusarla allí.
+   */
   readonly centers: ReadonlyArray<CenterRowInput>;
   /** Hojas que trae el archivo: una hoja ausente no toca nada de lo suyo. */
   readonly hasUnitSheet: boolean;
   readonly hasCenterSheet: boolean;
+  /** El archivo traía la hoja «Centros de costo» (archivos viejos) y se ignoró: el plan lo advierte. */
+  readonly ignoredCenterSheet?: boolean;
 }
+
+/**
+ * Lo que el Excel del organigrama planea: solo unidades. Descarta las filas de centros (también las de previsualizaciones
+ * guardadas antes de quitar la hoja) y marca la hoja como ignorada.
+ */
+export const unitsOnly = (input: OrgChartInput): OrgChartInput => ({
+  units: input.units,
+  centers: [],
+  hasUnitSheet: input.hasUnitSheet,
+  hasCenterSheet: false,
+  ignoredCenterSheet: Boolean(input.ignoredCenterSheet) || input.hasCenterSheet,
+});
 
 export const UNIT_SHEET = 'Organigrama';
 export const CENTER_SHEET = 'Centros de costo';

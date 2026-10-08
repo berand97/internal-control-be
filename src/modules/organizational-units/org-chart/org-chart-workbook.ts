@@ -11,9 +11,7 @@ import {
 import {
   ACTION_ARCHIVE,
   ACTION_DELETE,
-  CENTER_HEADERS,
   CENTER_SHEET,
-  type CenterRowInput,
   cellText,
   INSTRUCTIONS_SHEET,
   normalizeText,
@@ -29,8 +27,9 @@ import {
  * Libro Excel del organigrama (exportación y plantilla) y su lectura (importación).
  *
  * - «Organigrama»: una fila por unidad, en orden de árbol (prefijo y nombre), con sangría por nivel en Nombre.
- * - «Centros de costo»: una fila por centro, por código; Unidad, Padre y Activos son de solo lectura (derivados).
  * - «Instrucciones».
+ * Solo unidades: los centros de costo se administran en su propia pantalla. Centro propio y Depende de aceptan códigos
+ * de centro, que se validan contra los centros del sistema; una hoja «Centros de costo» de un archivo viejo se ignora.
  * Encabezados y columnas de solo lectura en gris y protegidos (protección sin contraseña: Revisar → Desproteger hoja);
  * las columnas editables quedan desbloqueadas y con listas desplegables donde aplica.
  */
@@ -45,17 +44,6 @@ export interface ExportUnitRow {
   readonly headCenter: string | null;
   readonly isActive: boolean;
   readonly code: string | null;
-}
-
-export interface ExportCenterRow {
-  readonly depth: number;
-  readonly code: string;
-  readonly name: string;
-  readonly hasMovement: boolean;
-  readonly unit: string | null;
-  readonly parent: string | null;
-  readonly assets: number | null;
-  readonly isActive: boolean;
 }
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -93,7 +81,7 @@ const UNIT_COLUMNS: ReadonlyArray<ColumnSpec> = [
     width: 20,
     readOnly: false,
     list: ORG_UNIT_TYPES.map((type) => ORG_UNIT_TYPE_LABELS[type]),
-    note: 'Qué clase de cuadro es: Rectoría, Vicerrectoría, Facultad, Departamento, Programa, Área, Dirección, Oficina, Centro, Consejo o comité, u Otro. Obligatorio en filas nuevas. Solo describe; un Consejo o comité no puede tener centros de costo ni activos. Ej.: Tesorería = Departamento; Control Interno = Oficina.',
+    note: 'Qué clase de cuadro es: Rectoría, Vicerrectoría, Facultad, Departamento, Programa, Área, Dirección, Oficina, Centro, Consejo o comité, u Otro. Obligatorio en filas nuevas. Solo describe; un Consejo o comité no lleva prefijo ni centro propio. Ej.: Tesorería = Departamento; Control Interno = Oficina.',
   },
   {
     header: UNIT_HEADERS.parent,
@@ -112,7 +100,7 @@ const UNIT_COLUMNS: ReadonlyArray<ColumnSpec> = [
     header: UNIT_HEADERS.headCenter,
     width: 14,
     readOnly: false,
-    note: 'El centro de costo que corresponde al cuadro mismo (la oficina del jefe), donde quedan sus activos. Ej.: Vicerrectoría Financiera → 4010; Facultad de Administración → 2510 (Decanatura). Puede no tener (Servicios Administrativos). Vacío: una fila que ya existía conserva el que tenía; una nueva cuyo Prefijo se escribió con el código de 4 dígitos de un centro toma ese centro (1510 → 1510); una nueva de un solo número toma el de ese número seguido de 010 si existe (5 → 5010). Para quitarlo escriba NINGUNO.',
+    note: 'El código del centro de costo que corresponde al cuadro mismo (la oficina del jefe). Debe ser un centro activo que ya exista en el sistema (los centros se administran en la pantalla Centros de costo). Ej.: Vicerrectoría Financiera → 4010; Facultad de Administración → 2510 (Decanatura). Puede no tener (Servicios Administrativos). Vacío: una fila que ya existía conserva el que tenía; una nueva cuyo Prefijo se escribió con el código de 4 dígitos de un centro toma ese centro (1510 → 1510); una nueva de un solo número toma el de ese número seguido de 010 si existe (5 → 5010). Para quitarlo escriba NINGUNO.',
   },
   {
     header: UNIT_HEADERS.status,
@@ -136,88 +124,27 @@ const UNIT_COLUMNS: ReadonlyArray<ColumnSpec> = [
   },
 ];
 
-const CENTER_COLUMNS: ReadonlyArray<ColumnSpec> = [
-  {
-    header: CENTER_HEADERS.code,
-    width: 10,
-    readOnly: false,
-    note: 'Código de Contabilidad, 4 números. Obligatorio. Ej.: 4350 Tesorería. Sus primeros números dicen a qué cuadro del organigrama pertenece (4350 → 43).',
-  },
-  {
-    header: CENTER_HEADERS.name,
-    width: 52,
-    readOnly: false,
-    note: 'Nombre del centro de costo tal como lo usa Contabilidad. Obligatorio. Ej.: TESORERÍA.',
-  },
-  {
-    header: CENTER_HEADERS.movement,
-    width: 12,
-    readOnly: false,
-    list: ['1', '0'],
-    note: '1: se le pueden asignar activos. 0: solo agrupa a otros centros. Vacío: una fila que ya existía no cambia; una nueva queda en 1.',
-  },
-  {
-    header: CENTER_HEADERS.unit,
-    width: 40,
-    readOnly: true,
-    note: 'Lo calcula el sistema, no se edita. El cuadro del organigrama al que pertenece, según los primeros números del código. Ej.: 4351 → 43 Servicios Administrativos; 9228 → 9 si no hay un 92.',
-  },
-  {
-    header: CENTER_HEADERS.parent,
-    width: 10,
-    readOnly: true,
-    note: 'Lo calcula el sistema, no se edita. El centro del que cuelga dentro de su cuadro. Ej.: 4351 Control Presupuestal cuelga de 4350 Tesorería. Los terminados en 0 o en 5 no cuelgan de otro centro (4115 va al lado de 4110, no debajo).',
-  },
-  {
-    header: CENTER_HEADERS.assets,
-    width: 10,
-    readOnly: true,
-    note: 'Lo calcula el sistema, no se edita. Cuántos activos (no dados de baja) tiene hoy el centro. Ej.: 12.',
-  },
-  {
-    header: CENTER_HEADERS.status,
-    width: 12,
-    readOnly: false,
-    list: [STATUS_ACTIVE, STATUS_ARCHIVED],
-    note: 'Activo: el centro se usa hoy. Archivado: ya no se usa, pero se guarda su historia. Vacío: no cambia (una fila nueva queda Activa).',
-  },
-  {
-    header: CENTER_HEADERS.action,
-    width: 12,
-    readOnly: false,
-    list: [ACTION_DELETE, ACTION_ARCHIVE],
-    note: 'Solo para quitar algo. Vacío: la fila se crea o se actualiza. ELIMINAR: se borra (si tiene historia, se archiva). ARCHIVAR: se desactiva. Un centro con activos no se puede quitar. Borrar la fila del Excel NO borra nada en el sistema.',
-  },
-  {
-    header: CENTER_HEADERS.previousCode,
-    width: 16,
-    readOnly: false,
-    note: 'Solo para cambiar el código de un centro: escriba aquí el código actual y en Código el nuevo; conserva sus activos e historia. Ej.: Código anterior 4352, Código 4355. En las demás filas déjelo vacío.',
-  },
-];
-
 const INSTRUCTIONS: ReadonlyArray<string> = [
-  'Excel del organigrama y de los centros de costo',
+  'Excel del organigrama (unidades organizacionales)',
   '',
   '1. Cambie lo que necesite y vuelva a subir el archivo. Primero verá una revisión de los cambios (todavía no cambia nada) y luego los confirma.',
   '2. Cada encabezado tiene un comentario que explica la columna: pase el mouse por encima.',
   '3. Las columnas grises las calcula el sistema y no se editan.',
   '4. Borrar una fila del Excel NO borra nada en el sistema. Para quitar algo escriba ELIMINAR o ARCHIVAR en la columna Acción.',
-  '   ELIMINAR solo borra si no hay historia (activos, movimientos, actas, documentos); si la hay, archiva.',
-  '   No se puede quitar un centro con activos ni un cuadro que todavía tenga dependencias o centros activos.',
+  '   ELIMINAR solo borra si no hay historia; si la hay, archiva.',
+  '   No se puede quitar un cuadro que todavía tenga dependencias o centros de costo activos.',
   '5. Números (prefijo) de cada cuadro: 1 número para la Rectoría y las vicerrectorías (4 = Vicerrectoría Financiera);',
   '   una dependencia empieza por los de su jefe y lleva más (43 = Servicios Administrativos, bajo 4; 4115 = Logística).',
   '   Puede escribir el código de Contabilidad completo: 1200 se toma como 12 y 1210 como 121. Consejos y comités van sin números.',
   '   En «Depende de» sirven los números del jefe, su código de Contabilidad (1200) o el de su centro propio (4010 = Vicerrectoría Financiera).',
-  '6. Cada centro de costo pertenece al cuadro cuyos números coinciden con el inicio de su código (2523 → 25; 9228 → 9 si no hay 92).',
-  '   Dentro del cuadro, 4351 cuelga de 4350; los terminados en 0 o en 5 no cuelgan de otro centro (4115 va al lado de 4110).',
+  '6. Los centros de costo no se editan en este archivo: se administran en la pantalla Centros de costo.',
+  '   «Centro propio» y «Depende de» aceptan el código de un centro que ya exista en el sistema.',
   '7. Celdas vacías: una fila que ya existía conserva lo que tenía (números, de quién depende, línea, centro propio, estado).',
   '   Para que un cuadro no dependa de nadie escriba RAÍZ en «Depende de»; para quitarle los números o el centro propio, NINGUNO.',
   '8. Filas nuevas: deje vacío «Código interno». Si no llena «Depende de», el sistema lo ubica por sus números (43 → 4; 431 → 43);',
   '   con un solo número (ej.: 5) queda bajo la Rectoría. Si no llena «Centro propio», el cuadro 5 toma el centro 5010 si existe,',
-  '   y un cuadro escrito con el código de un centro (1510) toma ese centro.',
+  '   y un cuadro escrito con el código de un centro existente (1510) toma ese centro.',
   '   La revisión le muestra cada valor que el sistema completó.',
-  '9. Para cambiar el código de un centro escriba el código actual en «Código anterior» y el nuevo en «Código» (ej.: 4352 → 4355).',
 ];
 
 const columnLetter = (index: number): string => String.fromCharCode(65 + index);
@@ -299,17 +226,15 @@ const fillSheet = async (
 
 export const buildOrgChartWorkbook = async (
   units: ReadonlyArray<ExportUnitRow>,
-  centers: ReadonlyArray<ExportCenterRow>,
   options: { readonly example: boolean; readonly generatedAt: Date },
 ): Promise<Buffer> => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Control Interno UNAC';
   workbook.created = options.generatedAt;
   workbook.modified = options.generatedAt;
-  workbook.title = 'Organigrama y centros de costo';
+  workbook.title = 'Organigrama';
 
   const unitSheet = workbook.addWorksheet(UNIT_SHEET, { views: [{ state: 'frozen', ySplit: 1 }] });
-  const centerSheet = workbook.addWorksheet(CENTER_SHEET, { views: [{ state: 'frozen', ySplit: 1 }] });
   const instructions = workbook.addWorksheet(INSTRUCTIONS_SHEET);
 
   await fillSheet(
@@ -331,26 +256,6 @@ export const buildOrgChartWorkbook = async (
     })),
     options.example,
   );
-  await fillSheet(
-    centerSheet,
-    CENTER_COLUMNS,
-    centers.map((center) => ({
-      depth: center.depth,
-      values: [
-        center.code,
-        center.name,
-        center.hasMovement ? 1 : 0,
-        center.unit,
-        center.parent,
-        center.assets,
-        center.isActive ? STATUS_ACTIVE : STATUS_ARCHIVED,
-        null,
-        null,
-      ],
-    })),
-    options.example,
-  );
-
   instructions.getColumn('A').width = 120;
   INSTRUCTIONS.forEach((line, index) => {
     const cell = instructions.getCell(`A${index + 1}`);
@@ -415,11 +320,8 @@ export const parseOrgChartWorkbook = async (content: Buffer): Promise<OrgChartIn
     throw new ApiException(ErrorCode.OrgChartInvalidFile, 'No se pudo leer el archivo: debe ser un Excel (.xlsx)');
   }
   const unitSheet = findSheet(sheets, UNIT_SHEET);
-  const centerSheet = findSheet(sheets, CENTER_SHEET);
   const units: UnitRowInput[] = [];
-  const centers: CenterRowInput[] = [];
   let hasUnitSheet = false;
-  let hasCenterSheet = false;
 
   if (unitSheet) {
     const { letters, read } = reader(unitSheet, UNIT_HEADERS);
@@ -447,31 +349,10 @@ export const parseOrgChartWorkbook = async (content: Buffer): Promise<OrgChartIn
       }
     }
   }
-  if (centerSheet) {
-    const { letters, read } = reader(centerSheet, CENTER_HEADERS);
-    if (letters['code'] && letters['name']) {
-      hasCenterSheet = true;
-      for (const row of centerSheet.rows) {
-        if (row.rowNumber === 1) {
-          continue;
-        }
-        const centerRow: CenterRowInput = {
-          rowNumber: row.rowNumber,
-          code: read(row.cells, 'code'),
-          name: read(row.cells, 'name'),
-          movement: read(row.cells, 'movement'),
-          status: read(row.cells, 'status'),
-          action: read(row.cells, 'action'),
-          previousCode: read(row.cells, 'previousCode'),
-        };
-        if (Object.entries(centerRow).some(([field, value]) => field !== 'rowNumber' && value !== null)) {
-          centers.push(centerRow);
-        }
-      }
-    }
-  }
-  if (!hasUnitSheet && !hasCenterSheet) {
+  if (!hasUnitSheet) {
     throw new ApiException(ErrorCode.OrgChartInvalidFile);
   }
-  return { units, centers, hasUnitSheet, hasCenterSheet };
+  // Archivos viejos traen «Centros de costo»: se ignora (el plan lo advierte); los centros tienen su propia pantalla.
+  const ignoredCenterSheet = findSheet(sheets, CENTER_SHEET) !== undefined;
+  return { units, centers: [], hasUnitSheet, hasCenterSheet: false, ignoredCenterSheet };
 };

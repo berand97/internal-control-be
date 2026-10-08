@@ -31,18 +31,14 @@ import {
 } from '../enums/org-unit-type.enum.js';
 import { orgChartExportRows } from './org-chart-export.js';
 import { type CenterOp, type OrgChartPlan, planOrgChart, type UnitOp } from './org-chart-plan.js';
+import { buildOrgChartWorkbook, type ExportUnitRow, parseOrgChartWorkbook } from './org-chart-workbook.js';
 import {
-  buildOrgChartWorkbook,
-  type ExportCenterRow,
-  type ExportUnitRow,
-  parseOrgChartWorkbook,
-} from './org-chart-workbook.js';
-import type {
-  OrgChartInput,
-  OrgChartSnapshot,
-  RemovalReferences,
-  SnapshotCenter,
-  SnapshotUnit,
+  type OrgChartInput,
+  type OrgChartSnapshot,
+  type RemovalReferences,
+  type SnapshotCenter,
+  type SnapshotUnit,
+  unitsOnly,
 } from './org-chart.types.js';
 
 export interface OrgChartUpload {
@@ -114,7 +110,7 @@ export class OrgChartService {
 
   async export(): Promise<OrgChartFile> {
     const { units, centers } = await this.loadState(this.dataSource.manager);
-    const body = await buildOrgChartWorkbook(...orgChartExportRows(units, centers), {
+    const body = await buildOrgChartWorkbook(orgChartExportRows(units, centers), {
       example: false,
       generatedAt: new Date(),
     });
@@ -135,10 +131,7 @@ export class OrgChartService {
         code: null,
       },
     ];
-    const centers: ExportCenterRow[] = [
-      { depth: 0, code: '4010', name: 'VICERRECTORÍA FINANCIERA', hasMovement: true, unit: null, parent: null, assets: null, isActive: true },
-    ];
-    const body = await buildOrgChartWorkbook(units, centers, { example: true, generatedAt: new Date() });
+    const body = await buildOrgChartWorkbook(units, { example: true, generatedAt: new Date() });
     return { fileName: 'plantilla-organigrama.xlsx', body };
   }
 
@@ -148,6 +141,7 @@ export class OrgChartService {
     }
     const input = await parseOrgChartWorkbook(file.buffer);
     const plan = await this.plan(this.dataSource.manager, input);
+    // Siempre false: el Excel del organigrama no toca centros (se mantiene el campo por contrato).
     const requiresCostCenterPermission = plan.centers.length > 0;
     const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS);
     const summary = toSummary(plan);
@@ -205,6 +199,7 @@ export class OrgChartService {
       if (plan.hash !== stored.plan_hash) {
         throw new ApiException(ErrorCode.OrgChartImportStale);
       }
+      // Nunca ocurre (unitsOnly): resguardo de la lógica de centros del plan, que el organigrama no usa.
       if (plan.centers.length > 0 && !(await this.permissions.userHasPermission(actor.id, COST_CENTER_MANAGE))) {
         throw new ApiException(
           ErrorCode.InsufficientPermissions,
@@ -257,8 +252,12 @@ export class OrgChartService {
     return { units, centers };
   }
 
-  /** Planea dos veces: la primera dice qué filas piden ELIMINAR; con su historia leída, la segunda es la definitiva. */
-  private async plan(manager: EntityManager, input: OrgChartInput): Promise<OrgChartPlan> {
+  /**
+   * Planea dos veces: la primera dice qué filas piden ELIMINAR; con su historia leída, la segunda es la definitiva.
+   * Solo unidades (unitsOnly): también las previsualizaciones guardadas con filas de centros las descartan.
+   */
+  private async plan(manager: EntityManager, rows: OrgChartInput): Promise<OrgChartPlan> {
+    const input = unitsOnly(rows);
     const { units, centers } = await this.loadState(manager);
     const draft = planOrgChart({ units, centers, removal: new Map() }, input);
     const removal = new Map<string, RemovalReferences>();

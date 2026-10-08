@@ -1,15 +1,16 @@
 import ExcelJS from 'exceljs';
 import { OrgRelationType, OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { orgChartExportRows } from './org-chart-export.js';
-import { planOrgChart } from './org-chart-plan.js';
+import { IGNORED_CENTER_SHEET_WARNING, planOrgChart } from './org-chart-plan.js';
 import { buildOrgChartWorkbook, parseOrgChartWorkbook } from './org-chart-workbook.js';
-import type {
-  CenterRowInput,
-  OrgChartInput,
-  OrgChartSnapshot,
-  SnapshotCenter,
-  SnapshotUnit,
-  UnitRowInput,
+import {
+  type CenterRowInput,
+  type OrgChartInput,
+  type OrgChartSnapshot,
+  type SnapshotCenter,
+  type SnapshotUnit,
+  type UnitRowInput,
+  unitsOnly,
 } from './org-chart.types.js';
 
 const unit = (id: string, code: string, name: string, prefix: string | null, parentId: string | null, type = OrgUnitType.Department): SnapshotUnit => ({
@@ -58,8 +59,8 @@ const baseSnapshot = (): OrgChartSnapshot => ({
 });
 
 const roundTrip = async (snapshot: OrgChartSnapshot): Promise<OrgChartInput> => {
-  const [units, centers] = orgChartExportRows(snapshot.units, snapshot.centers);
-  return parseOrgChartWorkbook(await buildOrgChartWorkbook(units, centers, { example: false, generatedAt: new Date() }));
+  const units = orgChartExportRows(snapshot.units, snapshot.centers);
+  return parseOrgChartWorkbook(await buildOrgChartWorkbook(units, { example: false, generatedAt: new Date() }));
 };
 
 const unitRow = (rowNumber: number, values: Partial<UnitRowInput>): UnitRowInput => ({
@@ -96,21 +97,19 @@ const only = (input: Partial<OrgChartInput>): OrgChartInput => ({
 });
 
 describe('plan del Excel del organigrama', () => {
-  it('exportar y volver a subir sin cambios: 0 cambios, sin errores; avisa 3051 sin 3050', async () => {
+  it('exportar y volver a subir sin cambios: 0 cambios, sin errores ni advertencias; solo unidades', async () => {
     const snapshot = baseSnapshot();
     const input = await roundTrip(snapshot);
     expect(input.units).toHaveLength(6);
-    expect(input.centers).toHaveLength(7);
+    expect(input).toMatchObject({ centers: [], hasUnitSheet: true, hasCenterSheet: false, ignoredCenterSheet: false });
     const plan = planOrgChart(snapshot, input);
     expect(plan.errors).toEqual([]);
     expect(plan.changes).toEqual([]);
-    expect(plan.warnings).toEqual([
-      expect.objectContaining({ sheet: 'Centros de costo', message: expect.stringContaining('centro padre 3050, que no existe') }),
-    ]);
+    expect(plan.warnings).toEqual([]);
   });
 
-  it('la exportación ordena por árbol y deriva unidad y padre; 4115 es hermano de 4110', () => {
-    const [units, centers] = orgChartExportRows(baseSnapshot().units, baseSnapshot().centers);
+  it('la exportación ordena las unidades por árbol', () => {
+    const units = orgChartExportRows(baseSnapshot().units, baseSnapshot().centers);
     expect(units.map((row) => [row.prefix, row.depth, row.parent])).toEqual([
       ['3', 0, null],
       ['30', 1, '3'],
@@ -119,72 +118,84 @@ describe('plan del Excel del organigrama', () => {
       ['43', 1, '4'],
       [null, 0, null],
     ]);
-    const byCode = new Map(centers.map((row) => [row.code, row]));
-    expect(byCode.get('4115')).toMatchObject({ parent: null, unit: '41 · Departamento Financiero' });
-    expect(byCode.get('4351')).toMatchObject({ parent: '4350', depth: 1 });
   });
 
-  it('renombrar un centro y una unidad', () => {
-    const plan = planOrgChart(
-      baseSnapshot(),
-      only({
-        units: [unitRow(2, { prefix: '43', name: 'Dpto. Servicios Administrativos', type: 'Departamento', parent: '4', code: 'U43' })],
-        centers: [centerRow(2, { code: '4351', name: 'TESORERÍA AUXILIAR', movement: '1', status: 'Activo' })],
-      }),
-    );
-    expect(plan.errors).toEqual([]);
-    expect(plan.unitCounts.RENAMED).toBe(1);
-    expect(plan.centerCounts.RENAMED).toBe(1);
-    expect(plan.centers[0]).toMatchObject({ key: 'c4351', kinds: ['RENAMED'], unitKey: 'u43', parentKey: 'c4350' });
-  });
+  describe('sin hoja de centros de costo', () => {
+    const exported = (): Promise<Buffer> =>
+      buildOrgChartWorkbook(orgChartExportRows(baseSnapshot().units, baseSnapshot().centers), {
+        example: false,
+        generatedAt: new Date(),
+      });
 
-  it('recodificar con «Código anterior»: el mismo centro pasa al código nuevo y se reubica', () => {
-    const plan = planOrgChart(
-      baseSnapshot(),
-      only({ centers: [centerRow(2, { code: '4121', name: 'CENTRO 4351', previousCode: '4351' })] }),
-    );
-    expect(plan.errors).toEqual([]);
-    expect(plan.centers[0]).toMatchObject({
-      key: 'c4351',
-      existingId: 'c4351',
-      code: '4121',
-      previousCode: '4351',
-      unitKey: 'u41',
-      parentKey: null,
-      kinds: ['RECODED', 'RELOCATED'],
+    it('el libro trae solo Organigrama e Instrucciones, sin hablar de la hoja de centros ni de activos', async () => {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load((await exported()) as unknown as ArrayBuffer);
+      expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Instrucciones']);
+      const lines: string[] = [];
+      workbook.getWorksheet('Instrucciones')?.eachRow((row) => lines.push(String(row.getCell(1).value ?? '')));
+      workbook.getWorksheet('Organigrama')?.getRow(1).eachCell((cell) => {
+        const note = cell.note;
+        lines.push(typeof note === 'string' ? note : (note?.texts ?? []).map((part) => part.text).join(''));
+      });
+      const text = lines.join('\n');
+      // «centros de costo activos» (estado) sí; activos como bienes, no.
+      expect(text.replace(/centros de costo activos?/gi, '').replace(/centro activo/gi, '')).not.toMatch(/activos/i);
+      expect(text).not.toMatch(/hoja «?Centros de costo/i);
+      expect(text).not.toContain('Código anterior');
     });
-    expect(plan.warnings[0]?.message).toContain('centro padre 4120, que no existe');
-  });
 
-  it('recodificar a un código que ya existe es error', () => {
-    const plan = planOrgChart(baseSnapshot(), only({ centers: [centerRow(2, { code: '4352', name: 'X', previousCode: '4351' })] }));
-    expect(plan.errors[0]?.message).toContain('ya es del centro');
-  });
+    it('un archivo viejo con la hoja «Centros de costo» la ignora con una advertencia y no toca centros', async () => {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load((await exported()) as unknown as ArrayBuffer);
+      const old = workbook.addWorksheet('Centros de costo');
+      old.addRow(['Código', 'Nombre', 'Movimiento', 'Unidad', 'Padre', 'Activos', 'Estado', 'Acción', 'Código anterior']);
+      old.addRow(['4351', 'RENOMBRADO', 1, null, null, 0, 'Activo', null, null]);
+      old.addRow(['4352', 'CENTRO 4352', 1, null, null, 0, 'Activo', 'ELIMINAR', null]);
+      old.addRow(['4999', 'NUEVO', 1, null, null, null, null, null, null]);
+      const input = await parseOrgChartWorkbook(Buffer.from(await workbook.xlsx.writeBuffer()));
+      expect(input).toMatchObject({ centers: [], hasCenterSheet: false, ignoredCenterSheet: true });
+      const plan = planOrgChart(baseSnapshot(), input);
+      expect(plan.errors).toEqual([]);
+      expect(plan.changes).toEqual([]);
+      expect(plan.centers).toEqual([]);
+      expect(plan.warnings).toEqual([{ sheet: 'Centros de costo', rowNumber: 1, column: null, message: IGNORED_CENTER_SHEET_WARNING }]);
+      expect(IGNORED_CENTER_SHEET_WARNING).toBe('La hoja Centros de costo se ignoró: los centros se administran en su propia pantalla');
+    });
 
-  it('eliminar sin historia borra; con historia archiva; con activos es error (409 en el DELETE)', () => {
-    const snapshot = { ...baseSnapshot(), removal: new Map([['c4352', { history: 'Se archiva porque tiene historia: 3 movimientos de activos' }]]) };
-    const plan = planOrgChart(
-      snapshot,
-      only({
-        centers: [
-          centerRow(2, { code: '4351', name: 'CENTRO 4351', action: 'ELIMINAR' }),
-          centerRow(3, { code: '4352', name: 'CENTRO 4352', action: 'ELIMINAR' }),
-          centerRow(4, { code: '4350', name: 'CENTRO 4350', action: 'ARCHIVAR' }),
-        ],
-      }),
-    );
-    expect(plan.centers.find((op) => op.key === 'c4351')).toMatchObject({ removal: 'DELETE', kinds: ['DELETED'] });
-    expect(plan.centers.find((op) => op.key === 'c4352')).toMatchObject({ removal: 'ARCHIVE', kinds: ['ARCHIVED'] });
-    expect(plan.errors).toEqual([expect.objectContaining({ rowNumber: 4, message: 'Tiene 2 activos asignados: no se puede eliminar ni archivar' })]);
-  });
+    it('una previsualización guardada con filas de centros las descarta al planear (unitsOnly)', () => {
+      const stored = only({
+        units: [unitRow(2, { prefix: '43', name: 'Departamento de Servicios Administrativos', code: 'U43' })],
+        centers: [centerRow(2, { code: '4351', name: 'TESORERÍA AUXILIAR' }), centerRow(3, { code: '4352', name: 'X', action: 'ELIMINAR' })],
+      });
+      const plan = planOrgChart(baseSnapshot(), unitsOnly(stored));
+      expect(plan.centers).toEqual([]);
+      expect(plan.changes).toEqual([]);
+      expect(plan.warnings.map((issue) => issue.message)).toEqual([IGNORED_CENTER_SHEET_WARNING]);
+    });
 
-  it('un centro con hijos activos que no están en el archivo no se archiva', () => {
-    const snapshot = baseSnapshot();
-    const plan = planOrgChart(
-      { ...snapshot, centers: snapshot.centers.map((item) => (item.id === 'c4350' ? { ...item, activeAssets: 0 } : item)) },
-      only({ centers: [centerRow(2, { code: '4350', name: 'CENTRO 4350', action: 'ARCHIVAR' })] }),
-    );
-    expect(plan.errors[0]?.message).toContain('Tiene 2 centros hijos activos (4351, 4352)');
+    it('un archivo sin la hoja Organigrama no es un Excel del organigrama (aunque traiga la de centros)', async () => {
+      const workbook = new ExcelJS.Workbook();
+      workbook.addWorksheet('Centros de costo').addRow(['Código', 'Nombre']);
+      await expect(parseOrgChartWorkbook(Buffer.from(await workbook.xlsx.writeBuffer()))).rejects.toMatchObject({
+        code: 'ORG_CHART_INVALID_FILE',
+      });
+    });
+
+    it('Centro propio se valida contra los centros del sistema: uno que no existe es error; uno existente se acepta', () => {
+      const plan = planOrgChart(
+        baseSnapshot(),
+        only({
+          units: [
+            unitRow(2, { prefix: '45', name: 'Departamento de Contabilidad', type: 'Departamento', parent: '4', headCenter: '4510' }),
+            unitRow(3, { prefix: '43', name: 'Departamento de Servicios Administrativos', code: 'U43', headCenter: '4350' }),
+          ],
+        }),
+      );
+      expect(plan.errors).toEqual([
+        expect.objectContaining({ rowNumber: 2, column: 'Centro propio', message: 'No hay un centro de costo activo con código 4510' }),
+      ]);
+      expect(plan.units.find((op) => op.key === 'u43')).toMatchObject({ headCenterKey: 'c4350', kinds: ['HEAD_CHANGED'] });
+    });
   });
 
   it('unidad nueva con prefijo fuera del de su padre: ORG_UNIT_PREFIX_OUT_OF_PARENT en español', () => {
@@ -208,22 +219,6 @@ describe('plan del Excel del organigrama', () => {
     expect(plan.warnings).toEqual([expect.objectContaining({ rowNumber: 3, message: expect.stringContaining('se acepta') })]);
   });
 
-  it('unidad nueva bajo 4 con centros nuevos: los centros quedan en ella y con su padre', () => {
-    const plan = planOrgChart(
-      baseSnapshot(),
-      only({
-        units: [unitRow(2, { prefix: '45', name: 'Departamento de Contabilidad', type: 'Departamento', parent: '4', headCenter: '4510' })],
-        centers: [centerRow(2, { code: '4510', name: 'CONTABILIDAD' }), centerRow(3, { code: '4511', name: 'NÓMINA' })],
-      }),
-    );
-    expect(plan.errors).toEqual([]);
-    expect(plan.units[0]).toMatchObject({ key: 'new:U45', code: 'U45', parentKey: 'u4', headCenterKey: 'new:4510' });
-    expect(plan.centers.map((op) => [op.code, op.unitKey, op.parentKey])).toEqual([
-      ['4510', 'new:U45', null],
-      ['4511', 'new:U45', 'new:4510'],
-    ]);
-  });
-
   it('unidad con centros activos no se elimina; un consejo no lleva prefijo', () => {
     const plan = planOrgChart(
       baseSnapshot(),
@@ -240,8 +235,91 @@ describe('plan del Excel del organigrama', () => {
     ]);
   });
 
+  /** Lógica de centros del plan: el Excel del organigrama no la usa (unitsOnly); se conserva para el de centros. */
+  describe('lógica de centros del plan (sin uso en el Excel del organigrama)', () => {
+    it('renombrar un centro y una unidad', () => {
+      const plan = planOrgChart(
+        baseSnapshot(),
+        only({
+          units: [unitRow(2, { prefix: '43', name: 'Dpto. Servicios Administrativos', type: 'Departamento', parent: '4', code: 'U43' })],
+          centers: [centerRow(2, { code: '4351', name: 'TESORERÍA AUXILIAR', movement: '1', status: 'Activo' })],
+        }),
+      );
+      expect(plan.errors).toEqual([]);
+      expect(plan.unitCounts.RENAMED).toBe(1);
+      expect(plan.centerCounts.RENAMED).toBe(1);
+      expect(plan.centers[0]).toMatchObject({ key: 'c4351', kinds: ['RENAMED'], unitKey: 'u43', parentKey: 'c4350' });
+    });
+
+    it('recodificar con «Código anterior»: el mismo centro pasa al código nuevo y se reubica', () => {
+      const plan = planOrgChart(
+        baseSnapshot(),
+        only({ centers: [centerRow(2, { code: '4121', name: 'CENTRO 4351', previousCode: '4351' })] }),
+      );
+      expect(plan.errors).toEqual([]);
+      expect(plan.centers[0]).toMatchObject({
+        key: 'c4351',
+        existingId: 'c4351',
+        code: '4121',
+        previousCode: '4351',
+        unitKey: 'u41',
+        parentKey: null,
+        kinds: ['RECODED', 'RELOCATED'],
+      });
+      expect(plan.warnings[0]?.message).toContain('centro padre 4120, que no existe');
+    });
+
+    it('recodificar a un código que ya existe es error', () => {
+      const plan = planOrgChart(baseSnapshot(), only({ centers: [centerRow(2, { code: '4352', name: 'X', previousCode: '4351' })] }));
+      expect(plan.errors[0]?.message).toContain('ya es del centro');
+    });
+
+    it('eliminar sin historia borra; con historia archiva; con activos es error (409 en el DELETE)', () => {
+      const snapshot = { ...baseSnapshot(), removal: new Map([['c4352', { history: 'Se archiva porque tiene historia: 3 movimientos de activos' }]]) };
+      const plan = planOrgChart(
+        snapshot,
+        only({
+          centers: [
+            centerRow(2, { code: '4351', name: 'CENTRO 4351', action: 'ELIMINAR' }),
+            centerRow(3, { code: '4352', name: 'CENTRO 4352', action: 'ELIMINAR' }),
+            centerRow(4, { code: '4350', name: 'CENTRO 4350', action: 'ARCHIVAR' }),
+          ],
+        }),
+      );
+      expect(plan.centers.find((op) => op.key === 'c4351')).toMatchObject({ removal: 'DELETE', kinds: ['DELETED'] });
+      expect(plan.centers.find((op) => op.key === 'c4352')).toMatchObject({ removal: 'ARCHIVE', kinds: ['ARCHIVED'] });
+      expect(plan.errors).toEqual([expect.objectContaining({ rowNumber: 4, message: 'Tiene 2 activos asignados: no se puede eliminar ni archivar' })]);
+    });
+
+    it('un centro con hijos activos que no están en el archivo no se archiva', () => {
+      const snapshot = baseSnapshot();
+      const plan = planOrgChart(
+        { ...snapshot, centers: snapshot.centers.map((item) => (item.id === 'c4350' ? { ...item, activeAssets: 0 } : item)) },
+        only({ centers: [centerRow(2, { code: '4350', name: 'CENTRO 4350', action: 'ARCHIVAR' })] }),
+      );
+      expect(plan.errors[0]?.message).toContain('Tiene 2 centros hijos activos (4351, 4352)');
+    });
+
+    it('unidad nueva bajo 4 con centros nuevos: los centros quedan en ella y con su padre', () => {
+      const plan = planOrgChart(
+        baseSnapshot(),
+        only({
+          units: [unitRow(2, { prefix: '45', name: 'Departamento de Contabilidad', type: 'Departamento', parent: '4', headCenter: '4510' })],
+          centers: [centerRow(2, { code: '4510', name: 'CONTABILIDAD' }), centerRow(3, { code: '4511', name: 'NÓMINA' })],
+        }),
+      );
+      expect(plan.errors).toEqual([]);
+      expect(plan.units[0]).toMatchObject({ key: 'new:U45', code: 'U45', parentKey: 'u4', headCenterKey: 'new:4510' });
+      expect(plan.centers.map((op) => [op.code, op.unitKey, op.parentKey])).toEqual([
+        ['4510', 'new:U45', null],
+        ['4511', 'new:U45', 'new:4510'],
+      ]);
+    });
+  });
+
   it('filas que no están en el archivo no se tocan', () => {
-    const plan = planOrgChart(baseSnapshot(), only({ centers: [centerRow(2, { code: '4110', name: 'CENTRO 4110' })] }));
+    const plan = planOrgChart(baseSnapshot(), only({ units: [unitRow(2, { prefix: '41', name: 'Departamento Financiero', code: 'U41' })] }));
+    expect(plan.errors).toEqual([]);
     expect(plan.changes).toEqual([]);
   });
 
@@ -340,14 +418,16 @@ describe('plan del Excel del organigrama', () => {
     it('nueva de un dígito: bajo la única Rectoría activa y con su centro X010 como centro propio', () => {
       const snapshot = baseSnapshot();
       const plan = planOrgChart(
-        { ...snapshot, units: [...snapshot.units, unit('u1', 'U1', 'Rectoría', '1', null, OrgUnitType.Rectorate)] },
-        only({
-          units: [unitRow(2, { prefix: '5', name: 'Vicerrectoría de Bienestar', type: 'Vicerrectoría' })],
-          centers: [centerRow(2, { code: '5010', name: 'VICERRECTORÍA DE BIENESTAR' })],
-        }),
+        {
+          ...snapshot,
+          units: [...snapshot.units, unit('u1', 'U1', 'Rectoría', '1', null, OrgUnitType.Rectorate)],
+          centers: [...snapshot.centers, center('c5010', '5010', null, null)],
+        },
+        only({ units: [unitRow(2, { prefix: '5', name: 'Vicerrectoría de Bienestar', type: 'Vicerrectoría' })] }),
       );
       expect(plan.errors).toEqual([]);
-      expect(plan.units[0]).toMatchObject({ code: 'U5', parentKey: 'u1', headCenterKey: 'new:5010' });
+      expect(plan.centers).toEqual([]);
+      expect(plan.units[0]).toMatchObject({ code: 'U5', parentKey: 'u1', headCenterKey: 'c5010' });
       expect(plan.warnings.map((issue) => issue.message)).toEqual([
         'Depende de deducido: la Rectoría 1',
         'Centro propio deducido: 5010',
@@ -408,9 +488,13 @@ describe('plan del Excel del organigrama', () => {
         units: MONICA_ROWS.map(([prefix, name, type, parent, relation], index) =>
           unitRow(index + 2, { prefix, name, type, parent: parent || null, relation }),
         ),
-        centers: MONICA_CENTERS.map((code, index) => centerRow(index + 2, { code, name: `CENTRO ${code}` })),
       });
-    const empty = (): OrgChartSnapshot => ({ units: [], centers: [], removal: new Map() });
+    /** Sin unidades; los centros ya existen en el sistema (se administran en su pantalla). */
+    const empty = (): OrgChartSnapshot => ({
+      units: [],
+      centers: MONICA_CENTERS.map((code) => center(`c${code}`, code, null, null)),
+      removal: new Map(),
+    });
 
     it('el archivo de 18 filas pasa sin errores ni ciclos: prefijos cortos y jefes por el código de Contabilidad', () => {
       const plan = planOrgChart(empty(), monicaInput());
@@ -444,25 +528,13 @@ describe('plan del Excel del organigrama', () => {
         '2: Hay 2 cuadros de tipo Rectoría (1 RECTORÍA; 11 Rectoría): las filas nuevas de un número sin «Depende de» quedan en la raíz',
       );
       expect(messages.some((message) => message.includes('ciclo'))).toBe(false);
-      // Centro propio deducido del Prefijo de 4 dígitos que es un centro (y 1 → 1010).
-      const headOf = new Map(plan.centers.map((op) => [op.key, op.code]));
-      expect(plan.units.map((op) => (op.headCenterKey ? headOf.get(op.headCenterKey) : null))).toEqual([
+      // Centro propio deducido del Prefijo de 4 dígitos que es un centro del sistema (y 1 → 1010).
+      expect(plan.centers).toEqual([]);
+      expect(plan.units.map((op) => (op.headCenterKey ? op.headCenterKey.slice(1) : null))).toEqual([
         '1010', null, null, null, null, null, '1110', null, '1210', '1220', null, '1310', null, '1410', null, '1510', '1520', '1530',
       ]);
       expect(messages).toContain('17: Centro propio deducido: 1510');
       expect(messages).toContain('13: 1310 tiene el mismo nombre que su jefe 1300; ¿es su Centro propio?');
-      // Los centros quedan en la unidad de prefijo más largo.
-      expect(Object.fromEntries(plan.centers.map((op) => [op.code, prefixOf(op.unitKey)]))).toEqual({
-        '1010': '1',
-        '1110': '111',
-        '1210': '121',
-        '1220': '122',
-        '1310': '131',
-        '1410': '141',
-        '1510': '151',
-        '1520': '152',
-        '1530': '153',
-      });
     });
 
     it('el prefijo 1000 o 1 sin código interno encuentra la Rectoría existente con prefijo 1', () => {
@@ -606,13 +678,13 @@ describe('plan del Excel del organigrama', () => {
     });
   });
 
-  it('cada encabezado de las dos hojas tiene un comentario que lo explica', async () => {
-    const [units, centers] = orgChartExportRows(baseSnapshot().units, baseSnapshot().centers);
+  it('cada encabezado de la hoja Organigrama tiene un comentario que lo explica', async () => {
+    const units = orgChartExportRows(baseSnapshot().units, baseSnapshot().centers);
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load((await buildOrgChartWorkbook(units, centers, { example: false, generatedAt: new Date() })) as unknown as ArrayBuffer);
+    await workbook.xlsx.load((await buildOrgChartWorkbook(units, { example: false, generatedAt: new Date() })) as unknown as ArrayBuffer);
     const noteText = (note: ExcelJS.Cell['note']): string =>
       typeof note === 'string' ? note : (note?.texts ?? []).map((part) => part.text).join('');
-    for (const name of ['Organigrama', 'Centros de costo']) {
+    for (const name of ['Organigrama']) {
       const header = workbook.getWorksheet(name)?.getRow(1);
       const cells: Array<[string, string]> = [];
       header?.eachCell((cell) => cells.push([String(cell.value), noteText(cell.note).trim()]));

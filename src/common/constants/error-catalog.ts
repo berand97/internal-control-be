@@ -1018,7 +1018,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
   [ErrorCode.OrgChartInvalidFile]: {
     httpStatus: 400,
     action: 'CANCEL',
-    message: 'El archivo no es un Excel del organigrama: debe traer la hoja «Organigrama» o «Centros de costo» con sus encabezados',
+    message: 'El archivo no es un Excel del organigrama: debe traer la hoja «Organigrama» con sus encabezados',
   },
   [ErrorCode.ImportJobNotRetryable]: {
     httpStatus: 409,
