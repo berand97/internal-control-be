@@ -242,7 +242,7 @@ describe('OrganizationalUnitsService', () => {
     expect(removal.deleteUnit).toHaveBeenCalledWith(manager, '1');
   });
 
-  it('el prefijo de una hija es el del padre más un dígito: ORG_UNIT_PREFIX_OUT_OF_PARENT', async () => {
+  it('el prefijo de una hija empieza por el del padre y es más largo: ORG_UNIT_PREFIX_OUT_OF_PARENT', async () => {
     const vice = unit('1', 'VF', null, 0);
     vice.codePrefix = '4';
     vi.mocked(unitsRepository.findById).mockResolvedValue(vice);
@@ -253,13 +253,16 @@ describe('OrganizationalUnitsService', () => {
       service.create({ code: 'DSA', name: 'Servicios', type: OrgUnitType.Department, parentId: '1', codePrefix: '53' }, actor),
     ).rejects.toMatchObject({
       code: ErrorCode.OrgUnitPrefixOutOfParent,
-      message: expect.stringContaining('debe ser 4 seguido de un dígito (40–49)'),
-      details: [{ field: 'codePrefix', message: '40–49' }],
+      message: expect.stringContaining('El prefijo 53 no empieza por el de su jefe (4) y los números 5… son de'),
+      details: [{ field: 'codePrefix', message: '4…' }],
     });
     vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
     await expect(
       service.create({ code: 'DSA', name: 'Servicios', type: OrgUnitType.Department, parentId: '1', codePrefix: '43' }, actor),
     ).resolves.toMatchObject({ codePrefix: '43', parentId: '1' });
+    await expect(
+      service.create({ code: 'LOG', name: 'Logística', type: OrgUnitType.Department, parentId: '1', codePrefix: '4115' }, actor),
+    ).resolves.toMatchObject({ codePrefix: '4115', parentId: '1' });
   });
 
   it('un consejo no lleva prefijo', async () => {

@@ -4,7 +4,8 @@ import { isDetailCode, longestPrefix } from './code-prefix.js';
  * Reglas del organigrama para los códigos de centro de costo (lista de Contabilidad sin X000/XY00: todos los centros
  * son de cuatro dígitos y todos con movimiento).
  *
- * - Prefijo de 1 dígito X: rectoría o vicerrectoría; de 2 dígitos XY: un cuadro del organigrama.
+ * - Prefijo de 1 dígito X: rectoría o vicerrectoría; de 2–4 dígitos: un cuadro del organigrama, que empieza por el
+ *   prefijo de su jefe y es más largo (4 → 41 → 4115).
  * - Unidad de un centro: la unidad activa con el prefijo más largo con que empieza el código (2523 → «25»; 4351 → «43»;
  *   9228 → «9» si no hay «92»).
  * - Padre de un centro XYZn:
@@ -54,18 +55,32 @@ export const resolveCenterUnit = <T extends { readonly codePrefix: string }>(
 ): T | undefined => longestPrefix(code, units);
 
 /**
- * Prefijo de una unidad hija respecto del prefijo de su ancestro más cercano con prefijo: debe empezar por él y tener
- * exactamente un dígito más (1 → 2 dígitos; 2 → 3 si alguien lo necesita). Sin ancestro con prefijo, cualquier
- * prefijo vale. Devuelve el mensaje de error en español, o null si es válido.
+ * Prefijo escrito como código de Contabilidad: con 4 dígitos y ceros al final se toma sin ellos (1000 → 1; 1100 → 11;
+ * 1210 → 121; 4110 → 411). Los de 1–3 dígitos y los de 4 sin cero final (4115) quedan igual.
+ */
+export const normalizeUnitPrefix = (raw: string): string => {
+  if (!/^[0-9]{4}$/.test(raw)) {
+    return raw;
+  }
+  return raw.replace(/0+$/, '') || raw;
+};
+
+/**
+ * Prefijo de una unidad hija respecto del prefijo de su ancestro más cercano con prefijo (su jefe): debe empezar por él
+ * y ser más largo (4 → 43; 41 → 4115; 12 → 121). Sin ancestro con prefijo, cualquier prefijo vale. Devuelve el mensaje
+ * de error en español, o null si es válido.
  */
 export const childPrefixError = (childPrefix: string, ancestorPrefix: string | null): string | null => {
   if (ancestorPrefix === null) {
     return null;
   }
-  if (childPrefix.startsWith(ancestorPrefix) && childPrefix.length === ancestorPrefix.length + 1) {
+  if (childPrefix.startsWith(ancestorPrefix) && childPrefix.length > ancestorPrefix.length) {
     return null;
   }
-  return `El prefijo ${childPrefix} no cuadra con el de la unidad de la que depende (${ancestorPrefix}): debe ser ${ancestorPrefix} seguido de un dígito (${ancestorPrefix}0–${ancestorPrefix}9)`;
+  if (childPrefix.startsWith(ancestorPrefix)) {
+    return `El prefijo ${childPrefix} debe tener más dígitos que el de su jefe (${ancestorPrefix})`;
+  }
+  return `El prefijo ${childPrefix} no empieza por el de su jefe (${ancestorPrefix})`;
 };
 
 export interface PrefixCheck {
@@ -74,30 +89,43 @@ export interface PrefixCheck {
 }
 
 /**
- * Regla jerárquica con una excepción para el organigrama real: si el prefijo no empieza por el del ancestro pero
- * ninguna otra unidad activa es dueña de sus dígitos iniciales (30 bajo la Académica «2» cuando no existe la unidad
- * «3»: los centros 30xx son de la Académica), se acepta con advertencia. Si otra unidad lo es (53 bajo «4» con la
- * unidad «5»), es error. Un prefijo de un dígito (vicerrectoría bajo la Rectoría «1») siempre vale.
+ * Regla jerárquica con una excepción para el organigrama real: si el prefijo no empieza por el del jefe pero ninguna
+ * otra unidad activa es dueña de sus dígitos iniciales (30 bajo la Académica «2» cuando no existe la unidad «3»: los
+ * centros 30xx son de la Académica), se acepta con advertencia. Si otra unidad lo es (53 bajo «4» con la unidad «5»),
+ * es error. El jefe y los ancestros del jefe (ancestorChain) nunca cuentan como «otra unidad». Un prefijo de un dígito
+ * (vicerrectoría bajo la Rectoría «1») siempre vale.
+ *
+ * otherActivePrefixes: prefijo → nombre de las demás unidades activas.
  */
 export const checkUnitPrefix = (
   childPrefix: string,
   ancestorPrefix: string | null,
-  otherActivePrefixes: ReadonlySet<string>,
+  otherActivePrefixes: ReadonlyMap<string, string>,
+  ancestorChain: ReadonlySet<string> = new Set(),
 ): PrefixCheck => {
   // Un dígito = rectoría o vicerrectoría: su bloque de códigos no depende del de la Rectoría de la que cuelga.
   const message = childPrefix.length === 1 ? null : childPrefixError(childPrefix, ancestorPrefix);
   if (!message) {
     return { level: 'OK', message: null };
   }
-  const owner = [...otherActivePrefixes]
-    .filter((prefix) => prefix.length < childPrefix.length && childPrefix.startsWith(prefix))
+  const owner = [...otherActivePrefixes.keys()]
+    .filter(
+      (prefix) =>
+        prefix !== ancestorPrefix &&
+        !ancestorChain.has(prefix) &&
+        prefix.length < childPrefix.length &&
+        childPrefix.startsWith(prefix),
+    )
     .sort((left, right) => right.length - left.length)[0];
   if (owner) {
-    return { level: 'ERROR', message: `${message}; los códigos que empiezan por ${owner} son de otra unidad` };
+    return {
+      level: 'ERROR',
+      message: `${message} y los números ${owner}… son de ${otherActivePrefixes.get(owner) ?? 'otra unidad'}`,
+    };
   }
   return {
     level: 'WARNING',
-    message: `El prefijo ${childPrefix} no empieza por el de la unidad de la que depende (${ancestorPrefix ?? ''}); se acepta porque ninguna otra unidad tiene sus dígitos iniciales`,
+    message: `${message}; se acepta porque ninguna otra unidad tiene sus dígitos iniciales`,
   };
 };
 

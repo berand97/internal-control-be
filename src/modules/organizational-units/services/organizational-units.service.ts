@@ -307,20 +307,27 @@ export class OrganizationalUnitsService {
     parent: OrganizationalUnit | null,
     unitId: string | null,
   ): Promise<void> {
-    let ancestor = parent;
-    for (let depth = 0; ancestor && !ancestor.codePrefix && depth < 64; depth += 1) {
-      ancestor = ancestor.parentId ? await this.unitsRepository.findById(ancestor.parentId) : null;
+    // Jefe con prefijo más cercano y prefijos de toda la cadena hacia arriba (nunca cuentan como «otra unidad»).
+    let ancestor: OrganizationalUnit | null = null;
+    const chain = new Set<string>();
+    let current = parent;
+    for (let depth = 0; current && depth < 64; depth += 1) {
+      if (current.codePrefix) {
+        ancestor ??= current;
+        chain.add(current.codePrefix);
+      }
+      current = current.parentId ? await this.unitsRepository.findById(current.parentId) : null;
     }
     const expected = ancestor?.codePrefix ?? null;
-    const others = new Set(
+    const others = new Map(
       (await this.unitsRepository.findAll(true)).flatMap((unit) =>
-        unit.codePrefix && unit.id !== unitId && unit.codePrefix !== codePrefix ? [unit.codePrefix] : [],
+        unit.codePrefix && unit.id !== unitId && unit.codePrefix !== codePrefix ? [[unit.codePrefix, unit.name] as const] : [],
       ),
     );
-    const check = checkUnitPrefix(codePrefix, expected, others);
+    const check = checkUnitPrefix(codePrefix, expected, others, chain);
     if (check.level === 'ERROR') {
       throw new ApiException(ErrorCode.OrgUnitPrefixOutOfParent, check.message ?? undefined, [
-        { field: 'codePrefix', message: `${expected ?? ''}0–${expected ?? ''}9` },
+        { field: 'codePrefix', message: `${expected ?? ''}…` },
       ]);
     }
   }

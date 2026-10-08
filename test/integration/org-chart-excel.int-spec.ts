@@ -259,11 +259,13 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     if (!units) {
       throw new Error('falta la hoja');
     }
-    units.getRow(units.rowCount + 1).values = ['612', 'Fuera de rango', 'Oficina', '6'];
+    // 641 bajo 61 no empieza por el de su jefe y los números 64… son de la otra fila nueva.
+    units.getRow(units.rowCount + 1).values = ['64', 'Otra oficina', 'Oficina', '6'];
+    units.getRow(units.rowCount + 1).values = ['641', 'Fuera de rango', 'Oficina', '61'];
     const previewed = await preview(Buffer.from(await workbook.xlsx.writeBuffer()));
     expect(previewed.status).toBe(201);
     expect(previewed.body.data.canConfirm).toBe(false);
-    expect(previewed.body.data.errors[0].message).toContain('debe ser 6 seguido de un dígito');
+    expect(previewed.body.data.errors[0].message).toBe('El prefijo 641 no empieza por el de su jefe (61) y los números 64… son de Otra oficina');
     const rejected = await confirm(previewed.body.data.previewId as string);
     expect(rejected.status).toBe(422);
     expect(rejected.body.error.code).toBe('ORG_CHART_IMPORT_HAS_ERRORS');
@@ -327,6 +329,13 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       .set(auth('admin'))
       .send({ code: 'IT_OC_BORRABLE', name: 'Unidad borrable', type: 'OFFICE', parentId: ids['u6'], codePrefix: '69' });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
+    // 691 bajo 61 no empieza por 61 y los números 69… son de la unidad recién creada.
+    const outOfParent = await http()
+      .post('/api/v1/organizational-units')
+      .set(auth('admin'))
+      .send({ code: 'IT_OC_MAL', name: 'Mal prefijo', type: 'OFFICE', parentId: ids['u61'], codePrefix: '691' });
+    expect(outOfParent.status).toBe(400);
+    expect(outOfParent.body.error.code).toBe('ORG_UNIT_PREFIX_OUT_OF_PARENT');
     const archivedUnit = await http()
       .post('/api/v1/organizational-units')
       .set(auth('admin'))
@@ -355,12 +364,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(removed.body.data).toEqual({ deleted: true, archived: false, reason: null });
     expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM organizational_unit WHERE id = $1', [created.body.data.id])).toBe(0);
 
-    const outOfParent = await http()
-      .post('/api/v1/organizational-units')
-      .set(auth('admin'))
-      .send({ code: 'IT_OC_MAL', name: 'Mal prefijo', type: 'OFFICE', parentId: ids['u6'], codePrefix: '611' });
-    expect(outOfParent.status).toBe(400);
-    expect(outOfParent.body.error.code).toBe('ORG_UNIT_PREFIX_OUT_OF_PARENT');
   });
 
   it('sugerencias: prefijo de unidad, código bajo XYZ0 y en la unidad; 6181 sin 6180 aparece en códigos que no cuadran', async () => {

@@ -517,12 +517,23 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     if (!unit.codePrefix) {
       continue;
     }
-    let ancestor = unit.parentKey ? units.get(unit.parentKey) : undefined;
-    for (let depth = 0; ancestor && !ancestor.codePrefix && depth < MAX_DEPTH; depth += 1) {
-      ancestor = ancestor.parentKey ? units.get(ancestor.parentKey) : undefined;
+    // Jefe con prefijo más cercano y prefijos de toda la cadena hacia arriba (nunca cuentan como «otra unidad»).
+    let ancestor: FinalUnit | undefined;
+    const chain = new Set<string>();
+    let current = unit.parentKey ? units.get(unit.parentKey) : undefined;
+    for (let depth = 0; current && depth < MAX_DEPTH; depth += 1) {
+      if (current.codePrefix) {
+        ancestor ??= current;
+        chain.add(current.codePrefix);
+      }
+      current = current.parentKey ? units.get(current.parentKey) : undefined;
     }
-    const others = new Set([...finalPrefix.keys()].filter((prefix) => prefix !== unit.codePrefix));
-    const check = checkUnitPrefix(unit.codePrefix, ancestor?.codePrefix ?? null, others);
+    const others = new Map(
+      [...finalPrefix.entries()]
+        .filter(([prefix]) => prefix !== unit.codePrefix)
+        .map(([prefix, holder]) => [prefix, holder.name] as const),
+    );
+    const check = checkUnitPrefix(unit.codePrefix, ancestor?.codePrefix ?? null, others, chain);
     if (check.level === 'OK' || !check.message) {
       continue;
     }

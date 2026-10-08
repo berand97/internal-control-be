@@ -201,7 +201,7 @@ describe('plan del Excel del organigrama', () => {
       expect.objectContaining({
         rowNumber: 2,
         column: 'Prefijo',
-        message: expect.stringContaining('debe ser 4 seguido de un dígito (40–49); los códigos que empiezan por 3 son de otra unidad'),
+        message: 'El prefijo 33 no empieza por el de su jefe (4) y los números 3… son de Vicerrectoría Académica',
       }),
     ]);
     // Ninguna unidad tiene el «5»: se acepta con advertencia (como 30 bajo la Académica).

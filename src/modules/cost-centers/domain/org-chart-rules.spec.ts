@@ -2,6 +2,7 @@ import {
   checkUnitPrefix,
   childPrefixError,
   expectedParentCode,
+  normalizeUnitPrefix,
   resolveCenterParent,
   resolveCenterUnit,
   suggestForUnitPrefix,
@@ -65,19 +66,39 @@ describe('unidad de un centro (prefijo más largo)', () => {
   });
 });
 
+describe('prefijo escrito como código de Contabilidad', () => {
+  it.each([
+    ['1000', '1'],
+    ['1100', '11'],
+    ['1200', '12'],
+    ['1210', '121'],
+    ['1110', '111'],
+    ['4110', '411'],
+    ['4115', '4115'],
+    ['2521', '2521'],
+    ['43', '43'],
+    ['430', '430'],
+    ['0000', '0000'],
+  ])('%s → %s', (raw, prefix) => {
+    expect(normalizeUnitPrefix(raw)).toBe(prefix);
+  });
+});
+
 describe('prefijo jerárquico de unidades', () => {
-  it('hija de 4: 41–49', () => {
+  it('empieza por el del jefe y es más largo', () => {
     expect(childPrefixError('43', '4')).toBeNull();
     expect(childPrefixError('431', '43')).toBeNull();
+    expect(childPrefixError('431', '4')).toBeNull();
+    expect(childPrefixError('4115', '4')).toBeNull();
+    expect(childPrefixError('121', '12')).toBeNull();
   });
   it('sin ancestro con prefijo, cualquiera vale', () => {
     expect(childPrefixError('4', null)).toBeNull();
     expect(childPrefixError('43', null)).toBeNull();
   });
-  it('rechaza otro dígito inicial, el mismo largo o dos dígitos de más', () => {
-    expect(childPrefixError('53', '4')).toContain('debe ser 4 seguido de un dígito (40–49)');
-    expect(childPrefixError('4', '4')).not.toBeNull();
-    expect(childPrefixError('431', '4')).not.toBeNull();
+  it('rechaza otro dígito inicial o el mismo largo', () => {
+    expect(childPrefixError('53', '4')).toBe('El prefijo 53 no empieza por el de su jefe (4)');
+    expect(childPrefixError('4', '4')).toBe('El prefijo 4 debe tener más dígitos que el de su jefe (4)');
   });
 });
 
@@ -99,20 +120,27 @@ describe('sugerencias del organigrama', () => {
 });
 
 describe('excepción del prefijo jerárquico', () => {
+  const names = (...prefixes: string[]) => new Map(prefixes.map((prefix) => [prefix, `Unidad ${prefix}`]));
   it('30 bajo la Académica (2) sin unidad 3: se acepta con advertencia', () => {
-    expect(checkUnitPrefix('30', '2', new Set(['1', '2', '4', '5', '9']))).toMatchObject({ level: 'WARNING' });
+    expect(checkUnitPrefix('30', '2', names('1', '2', '4', '5', '9'))).toMatchObject({ level: 'WARNING' });
   });
-  it('53 bajo 4 con la unidad 5: error', () => {
-    expect(checkUnitPrefix('53', '4', new Set(['4', '5']))).toMatchObject({
+  it('53 bajo 4 con la unidad 5: error que nombra a la dueña', () => {
+    expect(checkUnitPrefix('53', '4', new Map([['4', 'VICERRECTORÍA FINANCIERA'], ['5', 'VICERRECTORÍA BIENESTAR']]))).toEqual({
       level: 'ERROR',
-      message: expect.stringContaining('los códigos que empiezan por 5 son de otra unidad'),
+      message: 'El prefijo 53 no empieza por el de su jefe (4) y los números 5… son de VICERRECTORÍA BIENESTAR',
     });
   });
   it('una vicerrectoría (un dígito) bajo la Rectoría 1: bien', () => {
-    expect(checkUnitPrefix('4', '1', new Set(['1', '2']))).toEqual({ level: 'OK', message: null });
+    expect(checkUnitPrefix('4', '1', names('1', '2'))).toEqual({ level: 'OK', message: null });
   });
-  it('431 bajo 4 con la unidad 43: error; 43 bajo 4: bien', () => {
-    expect(checkUnitPrefix('431', '4', new Set(['4', '43'])).level).toBe('ERROR');
-    expect(checkUnitPrefix('43', '4', new Set(['4'])).level).toBe('OK');
+  it('431 o 4115 bajo 4 aunque exista 43 o 411: bien (empiezan por el del jefe)', () => {
+    expect(checkUnitPrefix('431', '4', names('4', '43')).level).toBe('OK');
+    expect(checkUnitPrefix('4115', '4', names('4', '411')).level).toBe('OK');
+    expect(checkUnitPrefix('43', '4', names('4')).level).toBe('OK');
+  });
+  it('el jefe y sus ancestros nunca son «otra unidad»: 13 bajo 12 (bajo 1) se acepta con advertencia', () => {
+    const check = checkUnitPrefix('13', '12', names('1', '12'), new Set(['12', '1']));
+    expect(check.level).toBe('WARNING');
+    expect(check.message).not.toContain('son de');
   });
 });
