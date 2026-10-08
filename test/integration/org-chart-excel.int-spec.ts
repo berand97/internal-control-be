@@ -70,6 +70,33 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
   const confirm = (previewId: string, who = 'admin') =>
     http().post(`/api/v1/organizational-units/import/${previewId}/confirm`).set(auth(who));
 
+  /** Edita un archivo exportado (conserva el sello) y lo devuelve como se subiría. */
+  const editExport = async (file: Buffer, mutate: (sheet: ExcelJS.Worksheet) => void): Promise<Buffer> => {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(file as unknown as ArrayBuffer);
+    const sheet = workbook.getWorksheet('Organigrama');
+    if (!sheet) {
+      throw new Error('falta la hoja');
+    }
+    mutate(sheet);
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  };
+
+  const rowByPrefix = (sheet: ExcelJS.Worksheet, prefix: string): ExcelJS.Row => {
+    let found: ExcelJS.Row | undefined;
+    sheet.eachRow((row) => {
+      if (String(row.getCell(1).value ?? '') === prefix) {
+        found = row;
+      }
+    });
+    if (!found) {
+      throw new Error(`no está la ${prefix}`);
+    }
+    return found;
+  };
+
+  const unitName = (id: string | undefined) => scalar<string>(dataSource, 'SELECT name FROM organizational_unit WHERE id = $1', [id]);
+
   const centerByCode = async (code: string) =>
     (
       (await dataSource.query('SELECT id, external_code, name, is_active, parent_id, organizational_unit_id FROM cost_center WHERE external_code = $1', [
@@ -132,10 +159,11 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(template.status).toBe(200);
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(template.body as unknown as ArrayBuffer);
-    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Instrucciones']);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Instrucciones', '_sello']);
     const exported = new ExcelJS.Workbook();
     await exported.xlsx.load((await exportFile()) as unknown as ArrayBuffer);
-    expect(exported.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Instrucciones']);
+    expect(exported.worksheets.map((sheet) => sheet.name)).toEqual(['Organigrama', 'Instrucciones', '_sello']);
+    expect(exported.getWorksheet('_sello')?.state).toBe('veryHidden');
   });
 
   it('ida y vuelta: tras normalizar, el mismo archivo exportado da 0 cambios', async () => {
@@ -384,6 +412,108 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(removed.body.data).toEqual({ deleted: true, archived: false, reason: null });
     expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM organizational_unit WHERE id = $1', [created.body.data.id])).toBe(0);
 
+  });
+
+  describe('archivos viejos (sello oculto)', () => {
+    it('la plantilla trae la hoja Organigrama vacía: subida tal cual no cambia nada', async () => {
+      const template = await http().get('/api/v1/organizational-units/template').set(auth('admin')).buffer(true).parse(binaryParser);
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(template.body as unknown as ArrayBuffer);
+      expect(workbook.getWorksheet('Organigrama')?.actualRowCount).toBe(1);
+      const previewed = await preview(template.body as Buffer);
+      expect(previewed.status, JSON.stringify(previewed.body)).toBe(201);
+      expect(previewed.body.data).toMatchObject({ canConfirm: false, conflicts: [], fileAppliedBefore: null, fileAgeDays: 0 });
+      expect(previewed.body.data.summary.totalChanges).toBe(0);
+    });
+
+    it('archivo viejo sin tocar no revierte un renombre hecho después; la fila tocada sí se aplica', async () => {
+      const old = await exportFile();
+      const patched = await http().patch(`/api/v1/organizational-units/${ids['u6']}`).set(auth('admin')).send({ name: 'Vicerrectoría Excel (nuevo nombre)' });
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      const untouched = await preview(old);
+      expect(untouched.status).toBe(201);
+      expectConforms('post', '/api/v1/organizational-units/import/preview', 201, untouched.body);
+      expect(untouched.body.data).toMatchObject({ canConfirm: false, conflicts: [], errors: [] });
+      expect(untouched.body.data.summary.totalChanges).toBe(0);
+
+      const touched = await preview(await editExport(old, (sheet) => (rowByPrefix(sheet, '61').getCell(5).value = 'Asesoría')));
+      expect(touched.body.data.errors).toEqual([]);
+      expect(touched.body.data.changes).toEqual([expect.objectContaining({ code: '61', kind: 'RELATION_CHANGED' })]);
+      expect((await confirm(touched.body.data.previewId as string)).status).toBe(201);
+      expect(await unitName(ids['u6'])).toBe('Vicerrectoría Excel (nuevo nombre)');
+    });
+
+    it('mismo archivo dos veces: 0 cambios y aviso «ya se aplicó» con quién y cuándo', async () => {
+      const file = await editExport(await exportFile(), (sheet) => (rowByPrefix(sheet, '61').getCell(2).value = 'Departamento Excel dos veces'));
+      const first = await preview(file);
+      expect(first.body.data.fileAppliedBefore).toBeNull();
+      expect((await confirm(first.body.data.previewId as string)).status).toBe(201);
+      const again = await preview(file);
+      expect(again.status).toBe(201);
+      expectConforms('post', '/api/v1/organizational-units/import/preview', 201, again.body);
+      expect(again.body.data).toMatchObject({
+        canConfirm: false,
+        conflicts: [],
+        errors: [],
+        fileAppliedBefore: { at: expect.any(String), by: expect.any(String) },
+      });
+      expect(again.body.data.summary.totalChanges).toBe(0);
+      expect(again.body.data.warnings[0]).toMatchObject({ rowNumber: 1, message: expect.stringMatching(/^Este archivo ya se aplicó el /) });
+      const stored = await scalar<string>(dataSource, `SELECT confirmed_by FROM org_chart_import WHERE id = $1`, [first.body.data.previewId]);
+      expect(stored).toBe(admin.id);
+    });
+
+    it('dos personas con archivos del mismo momento cambian el mismo nombre: conflicto para la segunda (409 al confirmar)', async () => {
+      const base = await exportFile();
+      const mine = await editExport(base, (sheet) => (rowByPrefix(sheet, '61').getCell(2).value = 'Departamento Excel A'));
+      const theirs = await editExport(base, (sheet) => (rowByPrefix(sheet, '61').getCell(2).value = 'Departamento Excel B'));
+      const otherColumn = await editExport(base, (sheet) => (rowByPrefix(sheet, '61').getCell(5).value = 'Coordinación'));
+      const first = await preview(mine);
+      expect((await confirm(first.body.data.previewId as string)).status).toBe(201);
+
+      const second = await preview(theirs);
+      expect(second.status).toBe(201);
+      expectConforms('post', '/api/v1/organizational-units/import/preview', 201, second.body);
+      expect(second.body.data.canConfirm).toBe(false);
+      expect(second.body.data.conflicts).toEqual([
+        {
+          rowNumber: expect.any(Number),
+          unitName: 'Departamento Excel A',
+          column: 'Nombre',
+          fileValue: 'Departamento Excel B',
+          currentValue: 'Departamento Excel A',
+          changedAt: expect.any(String),
+          changedBy: expect.any(String),
+        },
+      ]);
+      expect(second.body.data.errors).toEqual([expect.objectContaining({ column: 'Nombre', message: expect.stringContaining('Descargue el organigrama de nuevo') })]);
+      const rejected = await confirm(second.body.data.previewId as string);
+      expect(rejected.status).toBe(409);
+      expect(rejected.body.error.code).toBe('ORG_CHART_IMPORT_CONFLICT');
+
+      // Otra columna de la misma unidad, del mismo archivo base: se aplica y conserva el nombre de la primera.
+      const third = await preview(otherColumn);
+      expect(third.body.data.errors).toEqual([]);
+      expect(third.body.data.changes).toEqual([expect.objectContaining({ kind: 'RELATION_CHANGED' })]);
+      expect((await confirm(third.body.data.previewId as string)).status).toBe(201);
+      expect(await unitName(ids['u61'])).toBe('Departamento Excel A');
+    });
+
+    it('una unidad eliminada después de la descarga no se vuelve a crear', async () => {
+      const created = await http()
+        .post('/api/v1/organizational-units')
+        .set(auth('admin'))
+        .send({ code: 'IT_OC_EFIMERA', name: 'Unidad efímera', type: 'OFFICE', parentId: ids['u6'], codePrefix: '67' });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const old = await editExport(await exportFile(), (sheet) => (rowByPrefix(sheet, '67').getCell(2).value = 'Unidad efímera renombrada'));
+      expect((await http().delete(`/api/v1/organizational-units/${created.body.data.id}`).set(auth('admin'))).status).toBe(200);
+      const previewed = await preview(old);
+      expect(previewed.body.data.errors).toEqual([]);
+      expect(previewed.body.data.summary.totalChanges).toBe(0);
+      expect(previewed.body.data.warnings).toContainEqual(
+        expect.objectContaining({ column: 'Código interno', message: expect.stringContaining('«Unidad efímera» se eliminó el ') }),
+      );
+    });
   });
 
   it('sugerencias: prefijo de unidad, código bajo XYZ0 y en la unidad; 6181 sin 6180 aparece en códigos que no cuadran', async () => {
