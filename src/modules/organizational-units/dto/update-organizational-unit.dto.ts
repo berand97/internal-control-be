@@ -91,4 +91,17 @@ export class UpdateOrganizationalUnitDto {
   @IsOptional()
   @IsUUID('4')
   readonly headCostCenterId?: string | null;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    nullable: true,
+    example: '1510',
+    maxLength: 20,
+    description:
+      'Centro propio por código. Si el centro no existe todavía (o está archivado) se guarda como pendiente con una advertencia y se amarra solo cuando se cree. Tiene prioridad sobre headCostCenterId. null lo quita.',
+  })
+  @Transform(({ value }: { value: unknown }) => (value === '' ? null : value))
+  @IsOptional()
+  @Matches(/^[0-9]{1,20}$/, { message: 'El código del centro propio son solo dígitos' })
+  readonly headCostCenterCode?: string | null;
 }

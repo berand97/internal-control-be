@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, type EntityManager, Repository } from 'typeorm';
 import { CostCenter } from '../../cost-centers/entities/cost-center.entity.js';
 import { OrganizationalUnit } from '../entities/organizational-unit.entity.js';
 import type {
@@ -70,18 +70,25 @@ export class TypeOrmOrganizationalUnitsRepository
     return center?.externalCode ?? null;
   }
 
-  insert(record: CreateOrgUnitRecord): Promise<OrganizationalUnit> {
+  async findCostCenterByCode(code: string): Promise<{ readonly id: string; readonly isActive: boolean } | null> {
+    const center = await this.costCenters.findOne({ where: { externalCode: code }, select: { id: true, isActive: true } });
+    return center ? { id: center.id, isActive: center.isActive } : null;
+  }
+
+  insert(record: CreateOrgUnitRecord, manager?: EntityManager): Promise<OrganizationalUnit> {
+    const units = manager ? manager.getRepository(OrganizationalUnit) : this.units;
     const now = new Date();
-    const entity = this.units.create({
+    const entity = units.create({
       ...record,
       createdAt: now,
       updatedAt: now,
     });
-    return this.units.save(entity);
+    return units.save(entity);
   }
 
-  async update(id: string, record: UpdateOrgUnitRecord): Promise<void> {
-    await this.units.update({ id }, { ...record, updatedAt: new Date() });
+  async update(id: string, record: UpdateOrgUnitRecord, manager?: EntityManager): Promise<void> {
+    const units = manager ? manager.getRepository(OrganizationalUnit) : this.units;
+    await units.update({ id }, { ...record, updatedAt: new Date() });
   }
 
   async deactivate(id: string): Promise<void> {
@@ -95,8 +102,9 @@ export class TypeOrmOrganizationalUnitsRepository
     oldPath: string,
     newPath: string,
     levelDelta: number,
+    manager?: EntityManager,
   ): Promise<void> {
-    await this.dataSource.query(
+    await (manager ?? this.dataSource.manager).query(
       `
       UPDATE organizational_unit
       SET hierarchy_path = $1 || substr(hierarchy_path, $2),

@@ -40,9 +40,21 @@ export class OrganizationalUnitTreeResponseDto {
     type: 'string',
     format: 'uuid',
     nullable: true,
-    description: 'Centro de costo «propio» del cuadro (p. ej. unidad 25 → 2510 Decanatura). Solo por Excel o PATCH',
+    description: 'Centro de costo «propio» del cuadro, amarrado (p. ej. unidad 25 → 2510 Decanatura). null si no tiene o está pendiente',
   })
   readonly headCostCenterId!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Código del centro propio (amarrado o pendiente). null si la unidad no tiene centro propio',
+  })
+  readonly headCostCenterCode!: string | null;
+
+  @ApiProperty({
+    description: 'true si el centro propio se escribió por código pero ese centro aún no existe (o está archivado): se amarra solo cuando se cree',
+  })
+  readonly headCostCenterPending!: boolean;
 
   @ApiProperty()
   readonly hierarchyLevel!: number;
@@ -77,6 +89,8 @@ export class OrganizationalUnitTreeResponseDto {
       relationType: unit.relationType,
       relationTypeLabel: ORG_RELATION_TYPE_LABELS[unit.relationType] ?? unit.relationType,
       headCostCenterId: unit.headCostCenterId,
+      headCostCenterCode: unit.headCostCenterCode,
+      headCostCenterPending: unit.headCostCenterId === null && unit.headCostCenterCode !== null,
       hierarchyLevel: unit.hierarchyLevel,
       hierarchyPath: unit.hierarchyPath,
       isActive: unit.isActive,

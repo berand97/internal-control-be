@@ -9,7 +9,7 @@ import {
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
-import { checkUnitPrefix, suggestUnitPrefix } from '../../cost-centers/domain/org-chart-rules.js';
+import { checkUnitPrefix, pendingHeadCenterMessage, suggestUnitPrefix } from '../../cost-centers/domain/org-chart-rules.js';
 import type { UnitPrefixSuggestionDto } from '../dto/responses/unit-prefix-suggestion.response.dto.js';
 import type { StructureRemovalResultDto } from '../../cost-centers/dto/responses/structure-removal.response.dto.js';
 import {
@@ -21,7 +21,10 @@ import { OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { CreateOrganizationalUnitDto } from '../dto/create-organizational-unit.dto.js';
 import { QueryOrganizationalUnitsDto } from '../dto/query-organizational-units.dto.js';
 import { OrganizationalUnitTreeResponseDto } from '../dto/responses/organizational-unit-tree.response.dto.js';
-import { OrganizationalUnitResponseDto } from '../dto/responses/organizational-unit.response.dto.js';
+import {
+  OrganizationalUnitResponseDto,
+  OrganizationalUnitSaveResponseDto,
+} from '../dto/responses/organizational-unit.response.dto.js';
 import { UpdateOrganizationalUnitDto } from '../dto/update-organizational-unit.dto.js';
 import type { OrganizationalUnit } from '../entities/organizational-unit.entity.js';
 import type { OrganizationalUnitsRepository } from '../repositories/organizational-units.repository.interface.js';
@@ -32,6 +35,12 @@ const toPathSegment = (code: string): string => code.toLowerCase();
 
 const childPath = (parentPath: string | null, code: string): string =>
   parentPath ? `${parentPath}/${toPathSegment(code)}` : `/${toPathSegment(code)}`;
+
+interface HeadCenterChoice {
+  readonly headCostCenterId: string | null;
+  readonly headCostCenterCode: string | null;
+  readonly warning: string | null;
+}
 
 const buildTree = (
   units: ReadonlyArray<OrganizationalUnit>,
@@ -110,7 +119,7 @@ export class OrganizationalUnitsService {
   async create(
     dto: CreateOrganizationalUnitDto,
     actor: AuthenticatedUser,
-  ): Promise<OrganizationalUnitResponseDto> {
+  ): Promise<OrganizationalUnitSaveResponseDto> {
     const parent = dto.parentId
       ? await this.requireUnit(dto.parentId)
       : null;
@@ -121,9 +130,8 @@ export class OrganizationalUnitsService {
     if (dto.codePrefix && (dto.isActive ?? true)) {
       await this.assertPrefixFree(dto.codePrefix, null);
     }
-    if (dto.headCostCenterId) {
-      await this.requireCostCenter(dto.headCostCenterId);
-    }
+    const head = await this.chooseHeadCenter(dto);
+    const warnings = head?.warning ? [head.warning] : [];
     try {
       const unit = await this.unitsRepository.insert({
         parentId: parent?.id ?? null,
@@ -135,7 +143,8 @@ export class OrganizationalUnitsService {
         isActive: dto.isActive ?? true,
         codePrefix: dto.codePrefix ?? null,
         ...(dto.relationType ? { relationType: dto.relationType } : {}),
-        headCostCenterId: dto.headCostCenterId ?? null,
+        headCostCenterId: head?.headCostCenterId ?? null,
+        headCostCenterCode: head?.headCostCenterCode ?? null,
       });
       await this.auditLogsRepository.record({
         action: AuditAction.OrgUnitCreated,
@@ -146,7 +155,7 @@ export class OrganizationalUnitsService {
         userAgent: null,
         changes: { code: unit.code },
       });
-      return OrganizationalUnitResponseDto.from(unit);
+      return { ...OrganizationalUnitResponseDto.from(unit), warnings };
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ApiException(ErrorCode.OrgUnitCodeAlreadyExists);
@@ -162,7 +171,7 @@ export class OrganizationalUnitsService {
     id: string,
     dto: UpdateOrganizationalUnitDto,
     actor: AuthenticatedUser,
-  ): Promise<OrganizationalUnitResponseDto> {
+  ): Promise<OrganizationalUnitSaveResponseDto> {
     const unit = await this.requireUnit(id);
     let parentId = unit.parentId;
     let parent: OrganizationalUnit | null = unit.parentId
@@ -195,9 +204,8 @@ export class OrganizationalUnitsService {
     }
     const previousParent = unit.parentId ? await this.unitsRepository.findById(unit.parentId) : null;
 
-    if (dto.headCostCenterId) {
-      await this.requireCostCenter(dto.headCostCenterId);
-    }
+    const head = await this.chooseHeadCenter(dto);
+    const warnings = head?.warning ? [head.warning] : [];
 
     const nextCode = dto.code ?? unit.code;
     const nextPath = childPath(parent?.hierarchyPath ?? null, nextCode);
@@ -213,7 +221,7 @@ export class OrganizationalUnitsService {
         ...(dto.codePrefix !== undefined ? { codePrefix: dto.codePrefix } : {}),
         ...(dto.parentId !== undefined ? { parentId } : {}),
         ...(dto.relationType !== undefined ? { relationType: dto.relationType } : {}),
-        ...(dto.headCostCenterId !== undefined ? { headCostCenterId: dto.headCostCenterId } : {}),
+        ...(head ? { headCostCenterId: head.headCostCenterId, headCostCenterCode: head.headCostCenterCode } : {}),
         ...(pathChanged
           ? { hierarchyPath: nextPath, hierarchyLevel: nextLevel }
           : {}),
@@ -246,7 +254,7 @@ export class OrganizationalUnitsService {
     });
     const updated = await this.requireUnit(id);
     await this.recordHistory(unit, updated, previousParent, parent, actor);
-    return OrganizationalUnitResponseDto.from(updated);
+    return { ...OrganizationalUnitResponseDto.from(updated), warnings };
   }
 
   /** Historial de nombre, código, tipo, padre, prefijo, línea, centro propio y estado (org_structure_history). */
@@ -263,7 +271,14 @@ export class OrganizationalUnitsService {
       id ? ((await this.unitsRepository.costCenterCode(id)) ?? id) : null;
     const status = (active: boolean): string => (active ? 'ACTIVE' : 'ARCHIVED');
     const parentMoved = before.parentId !== after.parentId;
-    const headChanged = before.headCostCenterId !== after.headCostCenterId;
+    const headChanged =
+      before.headCostCenterId !== after.headCostCenterId || before.headCostCenterCode !== after.headCostCenterCode;
+    const headLabel = async (unit: OrganizationalUnit): Promise<string | null> =>
+      unit.headCostCenterId
+        ? await centerCode(unit.headCostCenterId)
+        : unit.headCostCenterCode
+          ? `${unit.headCostCenterCode} (pendiente)`
+          : null;
     const entries: OrgHistoryEntry[] = [
       { entityType: 'ORG_UNIT', entityId: after.id, field: 'NAME', oldValue: before.name, newValue: after.name },
       { entityType: 'ORG_UNIT', entityId: after.id, field: 'CODE', oldValue: before.code, newValue: after.code },
@@ -281,8 +296,8 @@ export class OrganizationalUnitsService {
         entityType: 'ORG_UNIT',
         entityId: after.id,
         field: 'HEAD_COST_CENTER',
-        oldValue: headChanged ? await centerCode(before.headCostCenterId) : null,
-        newValue: headChanged ? ((await centerCode(after.headCostCenterId)) ?? '(ninguno)') : null,
+        oldValue: headChanged ? await headLabel(before) : null,
+        newValue: headChanged ? ((await headLabel(after)) ?? '(ninguno)') : null,
       },
       { entityType: 'ORG_UNIT', entityId: after.id, field: 'STATUS', oldValue: status(before.isActive), newValue: status(after.isActive) },
     ];
@@ -411,12 +426,41 @@ export class OrganizationalUnitsService {
     }
   }
 
-  private async requireCostCenter(id: string): Promise<void> {
-    if (!(await this.unitsRepository.costCenterExists(id))) {
+  /**
+   * Centro propio pedido en POST/PATCH; undefined si no se toca. Por código (prioridad): amarrado si existe activo; si
+   * no, pendiente con advertencia (el conciliador lo amarra cuando el centro se cree o se reactive). Por id: debe
+   * existir (404) y se guarda también su código.
+   */
+  private async chooseHeadCenter(dto: {
+    readonly headCostCenterId?: string | null;
+    readonly headCostCenterCode?: string | null;
+  }): Promise<HeadCenterChoice | undefined> {
+    if (dto.headCostCenterCode !== undefined) {
+      if (dto.headCostCenterCode === null) {
+        return { headCostCenterId: null, headCostCenterCode: null, warning: null };
+      }
+      const center = await this.unitsRepository.findCostCenterByCode(dto.headCostCenterCode);
+      return center?.isActive
+        ? { headCostCenterId: center.id, headCostCenterCode: dto.headCostCenterCode, warning: null }
+        : {
+            headCostCenterId: null,
+            headCostCenterCode: dto.headCostCenterCode,
+            warning: pendingHeadCenterMessage(dto.headCostCenterCode, Boolean(center)),
+          };
+    }
+    if (dto.headCostCenterId === undefined) {
+      return undefined;
+    }
+    if (dto.headCostCenterId === null) {
+      return { headCostCenterId: null, headCostCenterCode: null, warning: null };
+    }
+    const code = await this.unitsRepository.costCenterCode(dto.headCostCenterId);
+    if (code === null) {
       throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo propio indicado', [
-        { field: 'headCostCenterId', message: id },
+        { field: 'headCostCenterId', message: dto.headCostCenterId },
       ]);
     }
+    return { headCostCenterId: dto.headCostCenterId, headCostCenterCode: code, warning: null };
   }
 
   private async requireUnit(id: string): Promise<OrganizationalUnit> {

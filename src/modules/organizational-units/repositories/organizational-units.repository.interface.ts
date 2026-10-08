@@ -1,3 +1,4 @@
+import type { EntityManager } from 'typeorm';
 import type { OrganizationalUnit } from '../entities/organizational-unit.entity.js';
 import type { OrgRelationType, OrgUnitType } from '../enums/org-unit-type.enum.js';
 
@@ -12,6 +13,7 @@ export interface CreateOrgUnitRecord {
   readonly codePrefix: string | null;
   readonly relationType?: OrgRelationType;
   readonly headCostCenterId?: string | null;
+  readonly headCostCenterCode?: string | null;
 }
 
 export interface UpdateOrgUnitRecord {
@@ -25,6 +27,7 @@ export interface UpdateOrgUnitRecord {
   readonly codePrefix?: string | null;
   readonly relationType?: OrgRelationType;
   readonly headCostCenterId?: string | null;
+  readonly headCostCenterCode?: string | null;
 }
 
 export interface OrganizationalUnitsRepository {
@@ -43,12 +46,15 @@ export interface OrganizationalUnitsRepository {
   countActiveCostCenters(orgUnitId: string): Promise<number>;
   costCenterExists(id: string): Promise<boolean>;
   costCenterCode(id: string): Promise<string | null>;
-  insert(record: CreateOrgUnitRecord): Promise<OrganizationalUnit>;
-  update(id: string, record: UpdateOrgUnitRecord): Promise<void>;
+  /** Centro por código (activo o archivado), para amarrar el centro propio. */
+  findCostCenterByCode(code: string): Promise<{ readonly id: string; readonly isActive: boolean } | null>;
+  insert(record: CreateOrgUnitRecord, manager?: EntityManager): Promise<OrganizationalUnit>;
+  update(id: string, record: UpdateOrgUnitRecord, manager?: EntityManager): Promise<void>;
   deactivate(id: string): Promise<void>;
   rewriteDescendantPaths(
     oldPath: string,
     newPath: string,
     levelDelta: number,
+    manager?: EntityManager,
   ): Promise<void>;
 }

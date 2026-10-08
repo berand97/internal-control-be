@@ -3,6 +3,7 @@ import { isDetailCode } from '../../cost-centers/domain/code-prefix.js';
 import {
   checkUnitPrefix,
   normalizeUnitPrefix,
+  pendingHeadCenterMessage,
   resolveCenterParent,
   resolveCenterUnit,
 } from '../../cost-centers/domain/org-chart-rules.js';
@@ -119,6 +120,8 @@ export interface UnitOp {
   readonly codePrefix: string | null;
   readonly parentKey: string | null;
   readonly headCenterKey: string | null;
+  /** Código del centro propio (amarrado o pendiente: headCenterKey null). */
+  readonly headCenterCode: string | null;
   readonly isActive: boolean;
   readonly removal: 'DELETE' | 'ARCHIVE' | null;
   readonly kinds: ReadonlyArray<UnitChangeKind>;
@@ -167,6 +170,7 @@ const PREFIX_PATTERN = /^[0-9]{1,4}$/;
 const UNIT_CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 const UNIT_CODE_MAX = 20;
 const CENTER_CODE_PATTERN = /^[0-9]{1,10}$/;
+const HEAD_CODE_PATTERN = /^[0-9]{1,20}$/;
 const NAME_MAX = 200;
 const MAX_DEPTH = 64;
 
@@ -183,6 +187,7 @@ interface FinalUnit {
   rawPrefix: string | null;
   parentKey: string | null;
   headCenterKey: string | null;
+  headCenterCode: string | null;
   isActive: boolean;
   removal: 'DELETE' | 'ARCHIVE' | null;
   parentText: string | null;
@@ -280,6 +285,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         rawPrefix: unit.codePrefix,
         parentKey: unit.parentId,
         headCenterKey: unit.headCostCenterId,
+        headCenterCode: unit.headCostCenterCode,
         isActive: unit.isActive,
         removal: null,
         parentText: null,
@@ -424,6 +430,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         // Vacíos en el archivo: la existente conserva padre y centro propio (se resuelven más abajo).
         parentKey: current?.parentKey ?? null,
         headCenterKey: current?.headCenterKey ?? null,
+        headCenterCode: current?.headCenterCode ?? null,
         isActive: action === 'ARCHIVE' ? false : (status ?? current?.isActive ?? true),
         removal: action ?? null,
         parentText: row.parent,
@@ -547,13 +554,15 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
     if (unit.headCenterText && isNoneText(unit.headCenterText)) {
       unit.headCenterKey = null;
+      unit.headCenterCode = null;
       continue;
     }
     if (!unit.headCenterText) {
       // Vacío: la existente conserva el suyo. La nueva (o la existente sin centro propio a la que se le cambia el
       // prefijo) con un Prefijo de 4 dígitos que es un centro (1510) toma ese centro; la nueva de prefijo X, X010.
       const before = unit.existingId ? snapshotUnits.get(unit.existingId) : undefined;
-      const deducible = !before || (!unit.headCenterKey && before.codePrefix !== unit.codePrefix);
+      const deducible =
+        !before || (!unit.headCenterKey && !unit.headCenterCode && before.codePrefix !== unit.codePrefix);
       if (deducible && unit.unitType !== OrgUnitType.Council) {
         const byCode = unit.rawPrefix && isDetailCode(unit.rawPrefix) ? liveCenterByCode.get(unit.rawPrefix) : undefined;
         const byRoot =
@@ -561,6 +570,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         const deduced = byCode ?? byRoot;
         if (deduced) {
           unit.headCenterKey = deduced.key;
+          unit.headCenterCode = deduced.code;
           headIssues.push({ error: false, row: unit.rowNumber, message: `Centro propio deducido: ${deduced.code}` });
         }
       }
@@ -572,10 +582,23 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
     const head = liveCenterByCode.get(unit.headCenterText);
     if (!head || !isLiveCenter(head)) {
-      headIssues.push({ error: true, row: unit.rowNumber, message: `No hay un centro de costo activo con código ${unit.headCenterText}` });
+      if (!HEAD_CODE_PATTERN.test(unit.headCenterText)) {
+        headIssues.push({
+          error: true,
+          row: unit.rowNumber,
+          message: `El centro propio debe ser un código de centro de costo (solo dígitos): ${unit.headCenterText}`,
+        });
+        continue;
+      }
+      // Pendiente: se guarda el código y el conciliador lo amarra cuando el centro se cree o se reactive.
+      const archived = [...centers.values()].some((center) => center.code === unit.headCenterText);
+      unit.headCenterKey = null;
+      unit.headCenterCode = unit.headCenterText;
+      headIssues.push({ error: false, row: unit.rowNumber, message: pendingHeadCenterMessage(unit.headCenterText, archived) });
       continue;
     }
     unit.headCenterKey = head.key;
+    unit.headCenterCode = head.code;
     explicitHead.add(unit.key);
   }
 
@@ -932,6 +955,8 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     return unit ? `${unit.codePrefix ?? unit.code} · ${unit.name}` : '?';
   };
   const centerLabel = (key: string | null): string => (key ? (centers.get(key)?.code ?? '?') : '(sin padre)');
+  const headLabel = (key: string | null, code: string | null): string =>
+    key ? centerLabel(key) : code ? `${code} (pendiente)` : '(ninguno)';
 
   for (const unit of [...units.values()].sort((left, right) => (left.rowNumber ?? 0) - (right.rowNumber ?? 0))) {
     if (unit.rowNumber === null) {
@@ -967,9 +992,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         kinds.push('RELATION_CHANGED');
         details.push(`Línea: ${ORG_RELATION_TYPE_LABELS[before.relationType] ?? before.relationType} → ${ORG_RELATION_TYPE_LABELS[unit.relationType]}`);
       }
-      if (before.headCostCenterId !== unit.headCenterKey) {
+      if (before.headCostCenterId !== unit.headCenterKey || (before.headCostCenterCode ?? null) !== unit.headCenterCode) {
         kinds.push('HEAD_CHANGED');
-        details.push(`Centro propio: ${before.headCostCenterId ? centerLabel(before.headCostCenterId) : '(ninguno)'} → ${unit.headCenterKey ? centerLabel(unit.headCenterKey) : '(ninguno)'}`);
+        details.push(
+          `Centro propio: ${headLabel(before.headCostCenterId, before.headCostCenterCode)} → ${headLabel(unit.headCenterKey, unit.headCenterCode)}`,
+        );
       }
       if (!before.isActive && unit.isActive) {
         kinds.push('REACTIVATED');
@@ -997,6 +1024,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       codePrefix: unit.codePrefix,
       parentKey: unit.parentKey,
       headCenterKey: unit.headCenterKey,
+      headCenterCode: unit.headCenterCode,
       isActive: unit.isActive,
       removal: unit.removal,
       kinds,

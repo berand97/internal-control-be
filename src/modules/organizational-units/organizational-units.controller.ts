@@ -56,7 +56,10 @@ import {
 } from './dto/query-organizational-units.dto.js';
 import { UnitPrefixSuggestionDto } from './dto/responses/unit-prefix-suggestion.response.dto.js';
 import { OrganizationalUnitTreeResponseDto } from './dto/responses/organizational-unit-tree.response.dto.js';
-import { OrganizationalUnitResponseDto } from './dto/responses/organizational-unit.response.dto.js';
+import {
+  OrganizationalUnitResponseDto,
+  OrganizationalUnitSaveResponseDto,
+} from './dto/responses/organizational-unit.response.dto.js';
 import { UpdateOrganizationalUnitDto } from './dto/update-organizational-unit.dto.js';
 import { OrganizationalUnitsService } from './services/organizational-units.service.js';
 
@@ -66,6 +69,7 @@ import { OrganizationalUnitsService } from './services/organizational-units.serv
   ApiSuccessEnvelope,
   ApiErrorEnvelope,
   OrganizationalUnitResponseDto,
+  OrganizationalUnitSaveResponseDto,
   OrganizationalUnitTreeResponseDto,
   OrgChartPreviewDto,
   OrgChartConfirmDto,
@@ -92,7 +96,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Exportar el organigrama (unidades organizacionales) a Excel',
     description:
-      'Hojas «Organigrama» (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Estado, Acción, Código interno) e «Instrucciones». Solo unidades: los centros de costo se administran en su propia pantalla (Centro propio y Depende de aceptan códigos de centros existentes). Incluye las archivadas. Se edita y se sube a POST /organizational-units/import/preview.',
+      'Hojas «Organigrama» (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Estado, Acción, Código interno) e «Instrucciones». Solo unidades: los centros de costo se administran en su propia pantalla (Depende de acepta códigos de centros existentes; Centro propio también uno que aún no exista: queda pendiente y se amarra cuando el centro se crea). Incluye las archivadas. Se edita y se sube a POST /organizational-units/import/preview.',
   })
   async export(@Res() response: Response): Promise<void> {
     this.sendXlsx(response, await this.orgChart.export());
@@ -248,15 +252,19 @@ export class OrganizationalUnitsController {
 
   @Post()
   @RequirePermission('org_unit:manage:global')
-  @ApiOperation({ summary: 'Crear unidad organizacional' })
+  @ApiOperation({
+    summary: 'Crear unidad organizacional',
+    description:
+      'headCostCenterCode con un código que aún no existe se guarda como centro propio pendiente (warnings) y se amarra solo cuando el centro se crea.',
+  })
   @ApiResponse({
     status: 201,
-    schema: envelopedSchema(OrganizationalUnitResponseDto),
+    schema: envelopedSchema(OrganizationalUnitSaveResponseDto),
   })
   create(
     @Body() dto: CreateOrganizationalUnitDto,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<OrganizationalUnitResponseDto> {
+  ): Promise<OrganizationalUnitSaveResponseDto> {
     return this.organizationalUnitsService.create(dto, user);
   }
 
@@ -265,17 +273,17 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Actualizar o mover una unidad organizacional',
     description:
-      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio.',
+      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio. headCostCenterCode con un código que aún no existe queda pendiente (warnings).',
   })
   @ApiResponse({
     status: 200,
-    schema: envelopedSchema(OrganizationalUnitResponseDto),
+    schema: envelopedSchema(OrganizationalUnitSaveResponseDto),
   })
   update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateOrganizationalUnitDto,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<OrganizationalUnitResponseDto> {
+  ): Promise<OrganizationalUnitSaveResponseDto> {
     return this.organizationalUnitsService.update(id, dto, user);
   }
 

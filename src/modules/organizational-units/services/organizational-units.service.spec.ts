@@ -54,6 +54,7 @@ describe('OrganizationalUnitsService', () => {
       countActiveCostCenters: vi.fn().mockResolvedValue(0),
       costCenterExists: vi.fn().mockResolvedValue(true),
       costCenterCode: vi.fn().mockResolvedValue('4010'),
+      findCostCenterByCode: vi.fn().mockResolvedValue(null),
       insert: vi.fn(),
       update: vi.fn(),
       deactivate: vi.fn(),

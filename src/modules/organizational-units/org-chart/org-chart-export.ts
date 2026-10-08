@@ -42,7 +42,11 @@ export const orgChartExportRows = (
         typeLabel: ORG_UNIT_TYPE_LABELS[unit.unitType] ?? unit.unitType,
         parent: parent ? (parent.codePrefix ?? parent.code) : null,
         relationLabel: ORG_RELATION_TYPE_LABELS[unit.relationType] ?? unit.relationType,
-        headCenter: unit.headCostCenterId ? (centerById.get(unit.headCostCenterId)?.externalCode ?? null) : null,
+        // Amarrado: el código vigente del centro; pendiente: el código escrito.
+        headCenter:
+          (unit.headCostCenterId ? centerById.get(unit.headCostCenterId)?.externalCode : undefined) ??
+          unit.headCostCenterCode ??
+          null,
         isActive: unit.isActive,
         code: unit.code,
       });

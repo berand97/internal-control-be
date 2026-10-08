@@ -21,6 +21,7 @@ const unit = (id: string, code: string, name: string, prefix: string | null, par
   parentId,
   relationType: OrgRelationType.Authority,
   headCostCenterId: null,
+  headCostCenterCode: null,
   codePrefix: prefix,
   isActive: true,
 });
@@ -181,7 +182,7 @@ describe('plan del Excel del organigrama', () => {
       });
     });
 
-    it('Centro propio se valida contra los centros del sistema: uno que no existe es error; uno existente se acepta', () => {
+    it('Centro propio por código: uno que no existe queda pendiente con advertencia; uno existente se amarra', () => {
       const plan = planOrgChart(
         baseSnapshot(),
         only({
@@ -191,10 +192,23 @@ describe('plan del Excel del organigrama', () => {
           ],
         }),
       );
-      expect(plan.errors).toEqual([
-        expect.objectContaining({ rowNumber: 2, column: 'Centro propio', message: 'No hay un centro de costo activo con código 4510' }),
-      ]);
-      expect(plan.units.find((op) => op.key === 'u43')).toMatchObject({ headCenterKey: 'c4350', kinds: ['HEAD_CHANGED'] });
+      expect(plan.errors).toEqual([]);
+      expect(plan.warnings).toContainEqual(
+        expect.objectContaining({
+          rowNumber: 2,
+          column: 'Centro propio',
+          message: 'Centro propio 4510 pendiente: el centro aún no existe; se amarrará solo cuando se cree',
+        }),
+      );
+      expect(plan.units.find((op) => op.code !== 'U43' && op.codePrefix === '45')).toMatchObject({
+        headCenterKey: null,
+        headCenterCode: '4510',
+      });
+      expect(plan.units.find((op) => op.key === 'u43')).toMatchObject({
+        headCenterKey: 'c4350',
+        headCenterCode: '4350',
+        kinds: ['HEAD_CHANGED'],
+      });
     });
   });
 
@@ -340,7 +354,7 @@ describe('plan del Excel del organigrama', () => {
       return {
         ...snapshot,
         units: snapshot.units.map((item) =>
-          item.id === 'u43' ? { ...item, headCostCenterId: 'c4350', relationType: OrgRelationType.Coordination } : item,
+          item.id === 'u43' ? { ...item, headCostCenterId: 'c4350', headCostCenterCode: '4350', relationType: OrgRelationType.Coordination } : item,
         ),
       };
     };
@@ -555,7 +569,7 @@ describe('plan del Excel del organigrama', () => {
     const financeSnapshot = (): OrgChartSnapshot => ({
       units: [
         unit('u1', 'U1', 'RECTORÍA', '1', null, OrgUnitType.Rectorate),
-        { ...unit('u4', 'U4', 'VICERRECTORÍA FINANCIERA', '4', 'u1', OrgUnitType.Vicerectorate), headCostCenterId: 'c4010' },
+        { ...unit('u4', 'U4', 'VICERRECTORÍA FINANCIERA', '4', 'u1', OrgUnitType.Vicerectorate), headCostCenterId: 'c4010', headCostCenterCode: '4010' },
         unit('u5', 'U5', 'VICERRECTORÍA BIENESTAR', '5', 'u1', OrgUnitType.Vicerectorate),
       ],
       centers: [center('c4010', '4010', 'u4', null), ...FINANCE_CODES.map((code) => center(`c${code}`, code, 'u4', null))],
@@ -587,7 +601,7 @@ describe('plan del Excel del organigrama', () => {
         ...snapshot,
         units: [
           ...snapshot.units,
-          { ...unit('u411', 'U411', 'DEPARTAMENTO DE SERVICIOS', '411', 'u4'), headCostCenterId: 'c4110' },
+          { ...unit('u411', 'U411', 'DEPARTAMENTO DE SERVICIOS', '411', 'u4'), headCostCenterId: 'c4110', headCostCenterCode: '4110' },
           unit('u4115', 'U4115', 'DEPARTAMENTO DE LOGÍSTICA', '4115', 'u4'),
         ],
         centers: snapshot.centers.map((item) =>

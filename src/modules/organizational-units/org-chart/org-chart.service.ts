@@ -236,7 +236,8 @@ export class OrgChartService {
   ): Promise<{ units: SnapshotUnit[]; centers: SnapshotCenter[] }> {
     const units = (await manager.query(
       `SELECT id, code, name, unit_type AS "unitType", parent_id AS "parentId", relation_type AS "relationType",
-              head_cost_center_id AS "headCostCenterId", code_prefix AS "codePrefix", is_active AS "isActive"
+              head_cost_center_id AS "headCostCenterId",
+              head_cost_center_code AS "headCostCenterCode", code_prefix AS "codePrefix", is_active AS "isActive"
        FROM organizational_unit ORDER BY code`,
     )) as SnapshotUnit[];
     const centers = (await manager.query(
@@ -291,6 +292,8 @@ export class OrgChartService {
     const centerId = (key: string | null): string | null =>
       key ? (key.startsWith(NEW) ? (centerIds.get(key) ?? null) : key) : null;
     const historyEntries: OrgHistoryEntry[] = [];
+    const centerCode = (id: string | null): string | null =>
+      id ? (centerBefore.get(id)?.externalCode ?? plan.centers.find((op) => centerIds.get(op.key) === id)?.code ?? id) : null;
     const placementContext = { reason: IMPORT_REASON, actorId: actor.id, source: 'IMPORT' as const, ip: null, userAgent: null };
 
     // 1. Libera prefijos que cambian y desactiva las unidades que se van (los centros se mueven después).
@@ -397,7 +400,11 @@ export class OrgChartService {
       if (!id || op.removal === 'DELETE' || !(op.kinds.includes('HEAD_CHANGED') || op.kinds.includes('CREATED'))) {
         continue;
       }
-      await manager.query('UPDATE organizational_unit SET head_cost_center_id = $2 WHERE id = $1', [id, centerId(op.headCenterKey)]);
+      const headId = centerId(op.headCenterKey);
+      await manager.query(
+        'UPDATE organizational_unit SET head_cost_center_id = $2, head_cost_center_code = $3 WHERE id = $1',
+        [id, headId, headId ? (centerCode(headId) ?? op.headCenterCode) : op.headCenterCode],
+      );
     }
 
     // 5. Bajas: centros y después unidades (revisando otra vez dentro de la transacción).
@@ -420,8 +427,8 @@ export class OrgChartService {
       const created = plan.units.find((op) => unitIds.get(op.key) === id);
       return created ? `${created.codePrefix ? `${created.codePrefix} · ` : ''}${created.name}` : id;
     };
-    const centerCode = (id: string | null): string | null =>
-      id ? (centerBefore.get(id)?.externalCode ?? plan.centers.find((op) => centerIds.get(op.key) === id)?.code ?? id) : null;
+    const headLabel = (id: string | null, code: string | null): string | null =>
+      id ? centerCode(id) : code ? `${code} (pendiente)` : null;
     for (const op of plan.units.filter((item) => item.existingId && item.removal !== 'DELETE')) {
       const id = op.existingId ?? '';
       const previous = unitBefore.get(id);
@@ -438,8 +445,8 @@ export class OrgChartService {
           entityType: 'ORG_UNIT',
           entityId: id,
           field: 'HEAD_COST_CENTER',
-          oldValue: centerCode(previous.headCostCenterId),
-          newValue: centerCode(centerId(op.headCenterKey)),
+          oldValue: headLabel(previous.headCostCenterId, previous.headCostCenterCode),
+          newValue: headLabel(centerId(op.headCenterKey), op.headCenterCode),
         },
         {
           entityType: 'ORG_UNIT',

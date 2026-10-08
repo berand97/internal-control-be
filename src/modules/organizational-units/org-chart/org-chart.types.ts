@@ -16,6 +16,8 @@ export interface SnapshotUnit {
   readonly parentId: string | null;
   readonly relationType: OrgRelationType;
   readonly headCostCenterId: string | null;
+  /** Código del centro propio (amarrado o pendiente). */
+  readonly headCostCenterCode: string | null;
   readonly codePrefix: string | null;
   readonly isActive: boolean;
 }

@@ -40,9 +40,21 @@ export class OrganizationalUnitResponseDto {
     type: 'string',
     format: 'uuid',
     nullable: true,
-    description: 'Centro de costo «propio» del cuadro (p. ej. unidad 25 → 2510 Decanatura). Solo por Excel o PATCH',
+    description: 'Centro de costo «propio» del cuadro, amarrado (p. ej. unidad 25 → 2510 Decanatura). null si no tiene o está pendiente',
   })
   readonly headCostCenterId!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Código del centro propio (amarrado o pendiente). null si la unidad no tiene centro propio',
+  })
+  readonly headCostCenterCode!: string | null;
+
+  @ApiProperty({
+    description: 'true si el centro propio se escribió por código pero ese centro aún no existe (o está archivado): se amarra solo cuando se cree',
+  })
+  readonly headCostCenterPending!: boolean;
 
   @ApiProperty()
   readonly hierarchyLevel!: number;
@@ -71,10 +83,22 @@ export class OrganizationalUnitResponseDto {
       relationType: unit.relationType,
       relationTypeLabel: ORG_RELATION_TYPE_LABELS[unit.relationType] ?? unit.relationType,
       headCostCenterId: unit.headCostCenterId,
+      headCostCenterCode: unit.headCostCenterCode,
+      headCostCenterPending: unit.headCostCenterId === null && unit.headCostCenterCode !== null,
       hierarchyLevel: unit.hierarchyLevel,
       hierarchyPath: unit.hierarchyPath,
       isActive: unit.isActive,
       codePrefix: unit.codePrefix,
     };
   }
+}
+
+/** Respuesta de POST/PATCH: la unidad guardada y las advertencias (centro propio pendiente, prefijo fuera del jefe…). */
+export class OrganizationalUnitSaveResponseDto extends OrganizationalUnitResponseDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Advertencias en español llano; vacío si no hay ninguna. No impiden guardar.',
+    example: ['Centro propio 1510 pendiente: el centro aún no existe; se amarrará solo cuando se cree'],
+  })
+  readonly warnings!: ReadonlyArray<string>;
 }

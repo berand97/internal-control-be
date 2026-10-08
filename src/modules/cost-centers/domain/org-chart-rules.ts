@@ -185,3 +185,9 @@ export const suggestUnitPrefix = (ancestorPrefix: string | null, takenPrefixes: 
   const taken = candidates.filter((candidate) => takenPrefixes.has(candidate));
   return { fixedPrefix, suggested: firstFree(candidates, takenPrefixes), taken };
 };
+
+/** Advertencia de un centro propio escrito por código que todavía no se puede amarrar. */
+export const pendingHeadCenterMessage = (code: string, archived: boolean): string =>
+  archived
+    ? `Centro propio ${code} pendiente: el centro está archivado; se amarrará solo cuando se reactive`
+    : `Centro propio ${code} pendiente: el centro aún no existe; se amarrará solo cuando se cree`;

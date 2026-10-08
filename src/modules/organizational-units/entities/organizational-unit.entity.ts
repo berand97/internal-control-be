@@ -32,9 +32,16 @@ export class OrganizationalUnit {
   @Column({ name: 'relation_type', type: 'varchar', length: 20, default: OrgRelationType.Authority })
   relationType!: OrgRelationType;
 
-  /** Centro de costo «propio» del cuadro (unidad 25 → 2510 Decanatura). Solo se fija por Excel o PATCH. */
+  /**
+   * Centro de costo «propio» del cuadro (unidad 25 → 2510 Decanatura), amarrado. null si no tiene o si su código aún no
+   * existe (pendiente). Lo fijan el Excel, POST/PATCH y el conciliador de estructura.
+   */
   @Column({ name: 'head_cost_center_id', type: 'uuid', nullable: true })
   headCostCenterId!: string | null;
+
+  /** Código del centro propio tal como se escribió; con head_cost_center_id null queda pendiente. */
+  @Column({ name: 'head_cost_center_code', type: 'varchar', length: 20, nullable: true })
+  headCostCenterCode!: string | null;
 
   @Column({ name: 'is_active', type: 'boolean' })
   isActive!: boolean;
