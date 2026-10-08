@@ -2,7 +2,6 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { generate } from 'otplib';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
@@ -11,6 +10,7 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import type { AppConfig } from '../../src/config/configuration.js';
 import { HashService } from '../../src/shared/crypto/hash.service.js';
 import { scalar } from './helpers.js';
+import { freshTotp } from './totp.js';
 
 const PASSWORD = 'Clave-Segura-2026!';
 const WRONG_PASSWORD = 'Clave-Incorrecta-2026!';
@@ -208,7 +208,7 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       const started = await post('/auth/me/mfa/enrollment', token).send({});
       expect(started.status).toBe(200);
       const secret = started.body.data.secret as string;
-      const confirmed = await post('/auth/me/mfa/enrollment/confirm', token).send({ code: await generate({ secret }) });
+      const confirmed = await post('/auth/me/mfa/enrollment/confirm', token).send({ code: await freshTotp(secret) });
       expect(confirmed.status).toBe(200);
       // El código de la confirmación ya se usó (BE-11); las pruebas de abajo simulan el paso de 30 s siguiente.
       await dataSource.query('UPDATE app_user SET mfa_last_totp_step = NULL WHERE id = $1', [user.id]);
@@ -222,7 +222,7 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
     };
 
     const wrongTotp = async (secret: string): Promise<string> =>
-      String((Number(await generate({ secret })) + 500_000) % 1_000_000).padStart(6, '0');
+      String((Number(await freshTotp(secret)) + 500_000) % 1_000_000).padStart(6, '0');
 
     it('5 TOTP erróneos con desafíos e IP distintos bloquean MFA, aunque el siguiente código sea correcto', async () => {
       const { user, secret, codes } = await enrolledUser();
@@ -231,7 +231,7 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
         expect(response.status).toBe(401);
         expect(response.body.error.code).toBe('MFA_CODE_INVALID');
       }
-      const blocked = await post('/auth/mfa/verify', await challenge(user)).send({ code: await generate({ secret }) });
+      const blocked = await post('/auth/mfa/verify', await challenge(user)).send({ code: await freshTotp(secret) });
       expect(blocked.status).toBe(429);
       expect(blocked.body.error.code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
       expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
@@ -244,7 +244,7 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       ).toBe(codes.length);
 
       await expireLock(`user:${user.id}`, 'MFA');
-      const verified = await post('/auth/mfa/verify', await challenge(user)).send({ code: await generate({ secret }) });
+      const verified = await post('/auth/mfa/verify', await challenge(user)).send({ code: await freshTotp(secret) });
       expect(verified.status).toBe(200);
       expect(await lockRow(`user:${user.id}`, 'MFA')).toBeNull();
     });

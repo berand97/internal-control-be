@@ -3,7 +3,6 @@ import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swag
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { generate } from 'otplib';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
@@ -14,6 +13,7 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { HashService } from '../../src/shared/crypto/hash.service.js';
 import { SecretCipherService } from '../../src/shared/crypto/secret-cipher.service.js';
 import { createPermissionRole, scalar } from './helpers.js';
+import { freshTotp } from './totp.js';
 
 const PASSWORD = 'Clave-Segura-2026!';
 const RESET_REASON = 'Pérdida del celular reportada a mesa de ayuda, caso 2026-1432';
@@ -192,7 +192,7 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
    */
   const totp = async (secret: string): Promise<string> => {
     await dataSource.query('UPDATE app_user SET mfa_last_totp_step = NULL WHERE mfa_last_totp_step IS NOT NULL');
-    return generate({ secret });
+    return freshTotp(secret);
   };
   const wrongTotp = async (secret: string): Promise<string> =>
     String((Number(await totp(secret)) + 1) % 1_000_000).padStart(6, '0');

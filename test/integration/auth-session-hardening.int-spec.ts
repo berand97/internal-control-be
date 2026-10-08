@@ -2,7 +2,6 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { generate } from 'otplib';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module.js';
@@ -18,6 +17,7 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { HashService } from '../../src/shared/crypto/hash.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
 import { openTestSession, scalar, withGrantReason } from './helpers.js';
+import { freshTotp } from './totp.js';
 
 const PASSWORD = 'Clave-Segura-2026!';
 const WRONG_PASSWORD = 'Clave-Incorrecta-2026!';
@@ -660,7 +660,7 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
         'post',
         '/auth/me/mfa/enrollment/confirm',
         token,
-      ).send({ code: await generate({ secret }) });
+      ).send({ code: await freshTotp(secret) });
       expect(confirmed.status).toBe(200);
       return { secret, token };
     };
@@ -686,7 +686,7 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
         'UPDATE app_user SET mfa_last_totp_step = NULL WHERE id = $1',
         [user.id],
       );
-      const code = await generate({ secret });
+      const code = await freshTotp(secret);
 
       const challenge = async () =>
         (await login(user.username, PASSWORD)).body.data
@@ -720,7 +720,7 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       // Solo si seguimos en el mismo paso de 30 s el código es el mismo que se usó al confirmar.
       if (Math.floor(Date.now() / 1000 / 30) === Number(step)) {
         const reuse = await call('post', '/auth/mfa/verify', challenge).send({
-          code: await generate({ secret }),
+          code: await freshTotp(secret),
         });
         expect(reuse.status).toBe(401);
       }
