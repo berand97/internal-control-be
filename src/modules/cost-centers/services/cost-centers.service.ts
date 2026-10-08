@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { isUniqueViolation } from '../../../common/exceptions/postgres-error.js';
@@ -19,6 +19,8 @@ import type { StructureRemovalResultDto } from '../dto/responses/structure-remov
 import { CostCenterPlacementService, NO_REQUEST, type RequestMeta } from './cost-center-placement.service.js';
 import { OrgStructureHistoryService } from './org-structure-history.service.js';
 import { decideCenterRemoval, StructureRemovalService } from './structure-removal.service.js';
+import { StructureReconcilerService } from './structure-reconciler.service.js';
+import { ALL_SCOPE, partialScope } from '../domain/structure-reconcile.js';
 
 const COST_CENTER_ENTITY_TYPE = 'COST_CENTER';
 
@@ -38,6 +40,7 @@ export class CostCentersService {
     private readonly placements: CostCenterPlacementService,
     private readonly removal: StructureRemovalService,
     private readonly history: OrgStructureHistoryService,
+    private readonly reconciler: StructureReconcilerService,
   ) {}
 
   async list(
@@ -112,6 +115,11 @@ export class CostCentersService {
           },
           manager,
         );
+        await this.reconciler.reconcileWithin(manager, partialScope({ centerCodes: [created.externalCode], centerIds: [created.id] }), {
+          actorId: actor.id,
+          reason: `Se creó el centro ${created.externalCode}`,
+          ...request,
+        });
         return created;
       });
       return CostCenterResponseDto.from(center);
@@ -148,25 +156,49 @@ export class CostCentersService {
     if (dto.isActive === false && center.isActive) {
       await this.assertNoActiveAssets(center.id);
     }
-    await this.costCentersRepository.update(center.id, {
-      ...(dto.name !== undefined ? { name: dto.name } : {}),
-      ...(dto.acceptsAssets !== undefined
-        ? { acceptsAssets: dto.acceptsAssets }
-        : {}),
-      ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+    await this.dataSource.transaction(async (manager) => {
+      await this.costCentersRepository.update(
+        center.id,
+        {
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
+          ...(dto.acceptsAssets !== undefined ? { acceptsAssets: dto.acceptsAssets } : {}),
+          ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        },
+        manager,
+      );
+      await this.auditLogsRepository.record(
+        {
+          action: AuditAction.CostCenterUpdated,
+          entityType: COST_CENTER_ENTITY_TYPE,
+          entityId: center.id,
+          performedBy: actor.id,
+          ipAddress: request.ip,
+          userAgent: request.userAgent,
+          changes: { ...dto },
+        },
+        manager,
+      );
+      const after = { ...center, ...(dto.name !== undefined ? { name: dto.name } : {}), isActive: dto.isActive ?? center.isActive };
+      await this.recordUpdateHistory(manager, center, after, actor);
+      if (after.isActive !== center.isActive) {
+        await this.reconciler.reconcileWithin(manager, partialScope({ centerCodes: [center.externalCode], centerIds: [center.id] }), {
+          actorId: actor.id,
+          reason: `Se ${after.isActive ? 'reactivó' : 'archivó'} el centro ${center.externalCode}`,
+          ...request,
+        });
+      }
     });
-    await this.auditLogsRepository.record({
-      action: AuditAction.CostCenterUpdated,
-      entityType: COST_CENTER_ENTITY_TYPE,
-      entityId: center.id,
-      performedBy: actor.id,
-      ipAddress: request.ip,
-      userAgent: request.userAgent,
-      changes: { ...dto },
-    });
-    const updated = await this.requireCenter(id);
+    return CostCenterResponseDto.from(await this.requireCenter(id));
+  }
+
+  private async recordUpdateHistory(
+    manager: EntityManager,
+    center: { readonly id: string; readonly name: string; readonly isActive: boolean },
+    updated: { readonly name: string; readonly isActive: boolean },
+    actor: AuthenticatedUser,
+  ): Promise<void> {
     await this.history.record(
-      this.dataSource.manager,
+      manager,
       [
         { entityType: 'COST_CENTER', entityId: center.id, field: 'NAME', oldValue: center.name, newValue: updated.name },
         {
@@ -179,7 +211,6 @@ export class CostCentersService {
       ],
       { actorId: actor.id, source: 'MANUAL' },
     );
-    return CostCenterResponseDto.from(updated);
   }
 
   /**
@@ -217,6 +248,11 @@ export class CostCentersService {
           { actorId: actor.id, source: 'MANUAL', reason: verdict.reason },
         );
       }
+      await this.reconciler.reconcileWithin(manager, partialScope({ centerCodes: [center.externalCode], centerIds: [center.id] }), {
+        actorId: actor.id,
+        reason: `Se ${verdict.decision === 'DELETE' ? 'eliminó' : 'archivó'} el centro ${center.externalCode}`,
+        ...request,
+      });
       await this.auditLogsRepository.record(
         {
           action: verdict.decision === 'DELETE' ? AuditAction.CostCenterDeleted : AuditAction.CostCenterArchived,
@@ -314,6 +350,15 @@ export class CostCentersService {
       }
     }
 
+    // La sincronización CSV no es transaccional: la estructura se concilia al final, completa, en su propia transacción.
+    await this.dataSource.transaction((manager) =>
+      this.reconciler.reconcileWithin(manager, ALL_SCOPE, {
+        actorId: actor.id,
+        reason: 'Sincronización de centros de costo',
+        ip: null,
+        userAgent: null,
+      }),
+    );
     const log = await this.costCentersRepository.insertSyncLog({
       filename: file.originalname,
       createdCount: created,

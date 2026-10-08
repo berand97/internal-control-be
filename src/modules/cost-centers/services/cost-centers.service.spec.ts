@@ -11,6 +11,7 @@ import type { CostCentersRepository } from '../repositories/cost-centers.reposit
 import type { CostCenterPlacementService } from './cost-center-placement.service.js';
 import { CostCentersService } from './cost-centers.service.js';
 import type { OrgStructureHistoryService } from './org-structure-history.service.js';
+import type { StructureReconcilerService } from './structure-reconciler.service.js';
 import type { StructureRemovalService } from './structure-removal.service.js';
 
 const actor: AuthenticatedUser = {
@@ -38,6 +39,7 @@ const center = (code: string, active = true): CostCenter => {
 describe('CostCentersService', () => {
   let costCentersRepository: CostCentersRepository;
   let service: CostCentersService;
+  let reconciler: { reconcileWithin: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     const org = new OrganizationalUnit();
@@ -73,13 +75,15 @@ describe('CostCentersService', () => {
       record: vi.fn().mockResolvedValue(undefined),
       findLastLogins: vi.fn(),
     };
+    reconciler = { reconcileWithin: vi.fn().mockResolvedValue({}) };
     service = new CostCentersService(
       costCentersRepository,
       auditLogsRepository,
-      {} as DataSource,
+      { transaction: vi.fn(async (work: (manager: unknown) => Promise<unknown>) => work({})) } as unknown as DataSource,
       {} as CostCenterPlacementService,
       {} as StructureRemovalService,
       {} as OrgStructureHistoryService,
+      reconciler as unknown as StructureReconcilerService,
     );
   });
 
@@ -119,6 +123,11 @@ describe('CostCentersService', () => {
     expect(result.updated).toBe(2);
     expect(result.reactivated).toBe(1);
     expect(result.deactivated).toBe(1);
+    expect(reconciler.reconcileWithin).toHaveBeenCalledWith(
+      expect.anything(),
+      { kind: 'ALL' },
+      expect.objectContaining({ reason: 'Sincronización de centros de costo' }),
+    );
   });
 
   it('no desactiva un centro con activos', async () => {

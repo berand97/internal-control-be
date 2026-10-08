@@ -78,8 +78,9 @@ export class TypeOrmCostCentersRepository implements CostCentersRepository {
     return repository.save(entity);
   }
 
-  async update(id: string, record: UpdateCostCenterRecord): Promise<void> {
-    await this.costCenters.update({ id }, { ...record, updatedAt: new Date() });
+  async update(id: string, record: UpdateCostCenterRecord, manager?: EntityManager): Promise<void> {
+    const repository = manager ? manager.getRepository(CostCenter) : this.costCenters;
+    await repository.update({ id }, { ...record, updatedAt: new Date() });
   }
 
   async deactivate(id: string): Promise<void> {

@@ -53,7 +53,7 @@ export interface CostCentersRepository {
   findOrgUnitByCode(code: string): Promise<OrganizationalUnit | null>;
   /** Con manager, dentro de la transacción de quien llama. */
   insert(record: CreateCostCenterRecord, manager?: EntityManager): Promise<CostCenter>;
-  update(id: string, record: UpdateCostCenterRecord): Promise<void>;
+  update(id: string, record: UpdateCostCenterRecord, manager?: EntityManager): Promise<void>;
   deactivate(id: string): Promise<void>;
   countActiveAssets(costCenterId: string): Promise<number>;
   insertSyncLog(record: CreateSyncLogRecord): Promise<CostCenterSyncLog>;
