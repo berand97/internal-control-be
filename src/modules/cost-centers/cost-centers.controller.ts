@@ -67,6 +67,8 @@ import {
   CostCentersService,
   type CsvUpload,
 } from './services/cost-centers.service.js';
+import { StructureReconcilerService } from './services/structure-reconciler.service.js';
+import { StructureReconcileResultDto } from './dto/responses/structure-reconcile.responses.js';
 
 const meta = (ip: string | undefined, userAgent: string | undefined): RequestMeta => ({
   ip: ip ?? null,
@@ -90,6 +92,7 @@ const STRUCTURE_NOTE =
   CostCenterCodeSuggestionDto,
   CostCenterPrefixMismatchDto,
   StructureRemovalResultDto,
+  StructureReconcileResultDto,
 )
 @Feature('cost-centers')
 @Controller('cost-centers')
@@ -97,6 +100,7 @@ export class CostCentersController {
   constructor(
     private readonly costCentersService: CostCentersService,
     private readonly placements: CostCenterPlacementService,
+    private readonly reconciler: StructureReconcilerService,
   ) {}
 
   @Get()
@@ -236,6 +240,24 @@ export class CostCentersController {
         ...meta(ipAddress, userAgent),
       },
     );
+  }
+
+  @Post(':id/placement/auto')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('cost_center:manage:global')
+  @ApiOperation({
+    summary: 'Devolver un centro de costo a ubicación automática',
+    description: `${STRUCTURE_NOTE} Marca la ubicación como AUTO (fila nueva del historial con el mismo estado) y concilia el centro en la misma transacción: su unidad pasa a la del prefijo más largo y su padre al XYZ0 que le corresponda. Si ya era AUTO solo concilia.`,
+  })
+  @ApiOkResponse({ schema: envelopedSchema(StructureReconcileResultDto) })
+  @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
+  placementAuto(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string | undefined,
+    @Headers('user-agent') userAgent: string | undefined,
+  ): Promise<StructureReconcileResultDto> {
+    return this.reconciler.backToAuto(id, user.id, meta(ipAddress, userAgent));
   }
 
   @Get(':id')

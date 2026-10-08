@@ -3,8 +3,10 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
+  Ip,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -41,6 +43,13 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-user.ty
 import { BoundedFileInterceptor, UPLOAD_LIMITS } from '../../shared/storage/uploads/bounded-file.interceptor.js';
 import { StructureRemovalResultDto } from '../cost-centers/dto/responses/structure-removal.response.dto.js';
 import { OrgStructureHistoryService } from '../cost-centers/services/org-structure-history.service.js';
+import { StructureReconcilerService } from '../cost-centers/services/structure-reconciler.service.js';
+import { ReconcileStructureDto } from '../cost-centers/dto/reconcile-structure.dto.js';
+import {
+  StructurePendingDto,
+  StructureReconcilePreviewDto,
+  StructureReconcileResultDto,
+} from '../cost-centers/dto/responses/structure-reconcile.responses.js';
 import { OrgStructureHistoryEventDto } from './dto/responses/org-structure-history.response.dto.js';
 import {
   OrgChartConfirmDto,
@@ -76,6 +85,9 @@ import { OrganizationalUnitsService } from './services/organizational-units.serv
   StructureRemovalResultDto,
   OrgStructureHistoryEventDto,
   UnitPrefixSuggestionDto,
+  StructureReconcilePreviewDto,
+  StructureReconcileResultDto,
+  StructurePendingDto,
 )
 @Feature('organizational-units')
 @Controller('organizational-units')
@@ -84,6 +96,7 @@ export class OrganizationalUnitsController {
     private readonly organizationalUnitsService: OrganizationalUnitsService,
     private readonly orgChart: OrgChartService,
     private readonly historyService: OrgStructureHistoryService,
+    private readonly reconciler: StructureReconcilerService,
   ) {}
 
   @Get('export')
@@ -180,6 +193,49 @@ export class OrganizationalUnitsController {
   @ApiOkResponse({ schema: envelopedSchema(UnitPrefixSuggestionDto) })
   suggestPrefix(@Query() query: SuggestUnitPrefixQueryDto): Promise<UnitPrefixSuggestionDto> {
     return this.organizationalUnitsService.suggestPrefix(query.parentId);
+  }
+
+  @Get('reconcile/preview')
+  @RequirePermission('org_unit:manage:global')
+  @ApiOperation({
+    summary: 'Vista previa de «Recalcular estructura»',
+    description:
+      'Compara la estructura con lo que piden los códigos: relocations (centros AUTO cuya unidad por prefijo más largo es otra), reparents (centros AUTO cuyo padre por regla XYZ0 es otro), headLinks (centros propios pendientes cuyo centro ya existe, o amarrados que cambiaron de código), headUnlinks (centros propios archivados o borrados: vuelven a pendiente) y manualExceptions (ubicaciones MANUAL que no coinciden: no se tocan). No cambia nada. hash va como expectedHash en POST /organizational-units/reconcile.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(StructureReconcilePreviewDto) })
+  reconcilePreview(): Promise<StructureReconcilePreviewDto> {
+    return this.reconciler.preview();
+  }
+
+  @Post('reconcile')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('org_unit:manage:global')
+  @ApiOperation({
+    summary: 'Recalcular estructura',
+    description:
+      'Aplica en una transacción lo que muestra la vista previa: placements nuevos con origen y marca AUTO, amarres del centro propio, historial (motivo «Recalcular estructura») y auditoría STRUCTURE_RECONCILED con conteos. Idempotente: una segunda vez no cambia nada. Con expectedHash: 409 STRUCTURE_RECONCILE_STALE si la estructura cambió desde la vista previa.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(StructureReconcileResultDto) })
+  @ApiResponse({ status: 409, schema: errorEnvelopeSchema() })
+  reconcile(
+    @Body() dto: ReconcileStructureDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Ip() ipAddress: string | undefined,
+    @Headers('user-agent') userAgent: string | undefined,
+  ): Promise<StructureReconcileResultDto> {
+    return this.reconciler.reconcileAll(user.id, dto.expectedHash, { ip: ipAddress ?? null, userAgent: userAgent ?? null });
+  }
+
+  @Get('structure-pending')
+  @RequirePermission('org_unit:read:global')
+  @ApiOperation({
+    summary: 'Pendientes de la estructura',
+    description:
+      'pendingHeadCenters: unidades activas con centro propio escrito por código que aún no existe (o está archivado); centersWithoutUnit: centros activos cuyo código no empieza por el prefijo de ninguna unidad activa; mismatches: lo mismo que GET /cost-centers/prefix-mismatches; manualExceptions: ubicaciones MANUAL que no coinciden con la regla.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(StructurePendingDto) })
+  structurePending(): Promise<StructurePendingDto> {
+    return this.reconciler.pending();
   }
 
   @Get(':id/history')
