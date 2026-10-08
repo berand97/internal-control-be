@@ -90,9 +90,9 @@ export class OrganizationalUnitsController {
     content: { [XLSX_MIME]: { schema: { type: 'string', format: 'binary' } } },
   })
   @ApiOperation({
-    summary: 'Exportar el organigrama y los centros de costo a Excel',
+    summary: 'Exportar el organigrama (unidades organizacionales) a Excel',
     description:
-      'Hojas «Organigrama» (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Estado, Acción, Código interno), «Centros de costo» (Código, Nombre, Movimiento, Unidad*, Padre*, Activos*, Estado, Acción, Código anterior; * solo lectura, derivadas del código) e «Instrucciones». Incluye las archivadas. Se edita y se sube a POST /organizational-units/import/preview.',
+      'Hojas «Organigrama» (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Estado, Acción, Código interno) e «Instrucciones». Solo unidades: los centros de costo se administran en su propia pantalla (Centro propio y Depende de aceptan códigos de centros existentes). Incluye las archivadas. Se edita y se sube a POST /organizational-units/import/preview.',
   })
   async export(@Res() response: Response): Promise<void> {
     this.sendXlsx(response, await this.orgChart.export());
@@ -124,7 +124,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Previsualizar un Excel del organigrama (no cambia nada)',
     description:
-      'Resumen de unidades nuevas/renombradas/movidas/retipadas/a eliminar/a archivar y centros nuevos/renombrados/recodificados/reubicados/a eliminar/a archivar; errores por fila (bloquean) y advertencias (códigos que no cuadran; no bloquean). Las filas que no están en el archivo no se tocan. Subir el mismo archivo exportado sin cambios da 0 cambios. 400 ORG_CHART_INVALID_FILE si no trae las hojas.',
+      'Resumen de unidades nuevas/renombradas/movidas/retipadas/a eliminar/a archivar; errores por fila (bloquean) y advertencias (códigos que no cuadran; no bloquean). Solo lee la hoja «Organigrama»: una hoja «Centros de costo» (archivos viejos) se ignora con una advertencia y summary.centers queda en 0. Las filas que no están en el archivo no se tocan. Subir el mismo archivo exportado sin cambios da 0 cambios. 400 ORG_CHART_INVALID_FILE si no trae la hoja «Organigrama».',
   })
   @ApiResponse({ status: 201, schema: envelopedSchema(OrgChartPreviewDto) })
   @ApiResponse({ status: 400, schema: errorEnvelopeSchema() })
@@ -140,7 +140,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Aplicar una previsualización del organigrama',
     description:
-      'Aplica todo en una transacción, con historial y auditoría. Si el archivo cambia centros de costo exige además cost_center:manage:global (403). 422 ORG_CHART_IMPORT_HAS_ERRORS si tiene errores; 409 ORG_CHART_IMPORT_STALE si el organigrama cambió desde la previsualización; 409 ORG_CHART_IMPORT_CLOSED si ya se aplicó o venció (24 h).',
+      'Aplica todo en una transacción, con historial y auditoría. Solo cambia unidades (no toca centros de costo ni exige permisos sobre ellos). 422 ORG_CHART_IMPORT_HAS_ERRORS si tiene errores; 409 ORG_CHART_IMPORT_STALE si el organigrama cambió desde la previsualización; 409 ORG_CHART_IMPORT_CLOSED si ya se aplicó o venció (24 h).',
   })
   @ApiResponse({ status: 201, schema: envelopedSchema(OrgChartConfirmDto) })
   @ApiResponse({ status: 409, schema: errorEnvelopeSchema() })

@@ -72,7 +72,7 @@ export class OrgChartSummaryDto {
   @ApiProperty({ type: OrgChartUnitCountsDto })
   readonly units!: OrgChartUnitCountsDto;
 
-  @ApiProperty({ type: OrgChartCenterCountsDto })
+  @ApiProperty({ type: OrgChartCenterCountsDto, description: 'Siempre en 0: el Excel del organigrama no toca centros de costo' })
   readonly centers!: OrgChartCenterCountsDto;
 
   @ApiProperty({ description: 'Filas que cambian algo (0: el archivo coincide con el sistema)' })
@@ -80,7 +80,7 @@ export class OrgChartSummaryDto {
 }
 
 export class OrgChartIssueDto {
-  @ApiProperty({ description: 'Hoja: Organigrama o Centros de costo' })
+  @ApiProperty({ description: 'Hoja: Organigrama (o Centros de costo en la advertencia de una hoja vieja ignorada)' })
   readonly sheet!: string;
 
   @ApiProperty({ description: 'Fila del Excel (la 1 es el encabezado)' })
@@ -133,7 +133,7 @@ export class OrgChartPreviewDto {
   @ApiProperty({ description: 'false si hay errores (las advertencias no bloquean) o no hay cambios' })
   readonly canConfirm!: boolean;
 
-  @ApiProperty({ description: 'Confirmar exige además cost_center:manage:global (el archivo cambia centros de costo)' })
+  @ApiProperty({ description: 'Siempre false: el Excel del organigrama no toca centros de costo (se conserva por compatibilidad)' })
   readonly requiresCostCenterPermission!: boolean;
 
   @ApiProperty({ type: OrgChartSummaryDto })
