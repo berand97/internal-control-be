@@ -444,6 +444,13 @@ describe('plan del Excel del organigrama', () => {
         '2: Hay 2 cuadros de tipo Rectoría (1 RECTORÍA; 11 Rectoría): las filas nuevas de un número sin «Depende de» quedan en la raíz',
       );
       expect(messages.some((message) => message.includes('ciclo'))).toBe(false);
+      // Centro propio deducido del Prefijo de 4 dígitos que es un centro (y 1 → 1010).
+      const headOf = new Map(plan.centers.map((op) => [op.key, op.code]));
+      expect(plan.units.map((op) => (op.headCenterKey ? headOf.get(op.headCenterKey) : null))).toEqual([
+        '1010', null, null, null, null, null, '1110', null, '1210', '1220', null, '1310', null, '1410', null, '1510', '1520', '1530',
+      ]);
+      expect(messages).toContain('17: Centro propio deducido: 1510');
+      expect(messages).toContain('13: 1310 tiene el mismo nombre que su jefe 1300; ¿es su Centro propio?');
       // Los centros quedan en la unidad de prefijo más largo.
       expect(Object.fromEntries(plan.centers.map((op) => [op.code, prefixOf(op.unitKey)]))).toEqual({
         '1010': '1',
@@ -499,6 +506,60 @@ describe('plan del Excel del organigrama', () => {
         ['411', '4115', '412', '4125', '413', '4135', '414', '4145', '415', '4155', '416', '4165'].map((prefix) => [prefix, 'u4']),
       );
       expect(plan.warnings.map((issue) => issue.message)).toContain('Depende de 4010: el Centro propio de VICERRECTORÍA FINANCIERA (4)');
+      expect(plan.units.map((op) => op.headCenterKey)).toEqual(FINANCE_CODES.map((code) => `c${code}`));
+    });
+
+    it('después de importar, exportar y volver a subir no cambia nada (prefijos de 3 y 4 dígitos)', async () => {
+      const snapshot = financeSnapshot();
+      const imported: OrgChartSnapshot = {
+        ...snapshot,
+        units: [
+          ...snapshot.units,
+          { ...unit('u411', 'U411', 'DEPARTAMENTO DE SERVICIOS', '411', 'u4'), headCostCenterId: 'c4110' },
+          unit('u4115', 'U4115', 'DEPARTAMENTO DE LOGÍSTICA', '4115', 'u4'),
+        ],
+        centers: snapshot.centers.map((item) =>
+          item.id === 'c4110' ? { ...item, unitId: 'u411' } : item.id === 'c4115' ? { ...item, unitId: 'u4115' } : item,
+        ),
+      };
+      const plan = planOrgChart(imported, await roundTrip(imported));
+      expect(plan.errors).toEqual([]);
+      expect(plan.changes).toEqual([]);
+    });
+
+    it('prefijo repetido en el archivo (tras normalizar): error claro', () => {
+      const plan = planOrgChart(
+        financeSnapshot(),
+        only({
+          units: [
+            unitRow(2, { prefix: '4200', name: 'DEPARTAMENTO DE PLANEACIÓN FINANCIERA', type: 'Departamento', parent: '4' }),
+            unitRow(3, { prefix: '42', name: 'OFICINA DE PRESUPUESTO', type: 'Oficina', parent: '4' }),
+          ],
+        }),
+      );
+      expect(plan.errors).toEqual([
+        expect.objectContaining({
+          rowNumber: 3,
+          column: 'Prefijo',
+          message:
+            'El prefijo 42 ya lo usa la fila 2 (DEPARTAMENTO DE PLANEACIÓN FINANCIERA): cada cuadro necesita uno distinto; si es una oficina de ese cuadro, deje el prefijo vacío o use más dígitos (421)',
+        }),
+      ]);
+    });
+
+    it('Prefijo vacío en una unidad existente lo conserva; NINGUNO lo quita', () => {
+      const keep = planOrgChart(
+        financeSnapshot(),
+        only({ units: [unitRow(2, { name: 'VICERRECTORÍA BIENESTAR', code: 'U5' })] }),
+      );
+      expect(keep.errors).toEqual([]);
+      expect(keep.changes).toEqual([]);
+      const remove = planOrgChart(
+        financeSnapshot(),
+        only({ units: [unitRow(2, { prefix: 'NINGUNO', name: 'VICERRECTORÍA BIENESTAR', code: 'U5' })] }),
+      );
+      expect(remove.errors).toEqual([]);
+      expect(remove.units[0]).toMatchObject({ key: 'u5', codePrefix: null, kinds: ['PREFIX_CHANGED'] });
     });
 
     it('Depende de con un centro que no es Centro propio de nadie: lo dice y sugiere el prefijo', () => {

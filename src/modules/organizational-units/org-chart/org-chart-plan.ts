@@ -40,9 +40,12 @@ import {
  *   interno se genera del prefijo o del nombre).
  * - Centro: por «Código anterior» (recodificación: el mismo centro, con sus activos e historia, pasa al código nuevo) o
  *   por «Código»; si no, es nuevo.
- * - Columnas vacías de una unidad: la existente conserva su valor (Depende de, Línea, Centro propio, Estado); para
- *   quitarlo a propósito se escribe «RAÍZ» o «NINGUNO». La nueva deduce lo que puede: el padre por el prefijo (43 → 4)
- *   o la Rectoría (prefijo de un dígito), Línea Autoridad y, con prefijo X, el centro propio X010 si existe.
+ * - Prefijo con el código de Contabilidad: 4 dígitos con ceros al final se toman sin ellos (1200 → 12); «Depende de»
+ *   acepta además el código del centro propio del jefe (4010 → la Vicerrectoría Financiera).
+ * - Columnas vacías de una unidad: la existente conserva su valor (Prefijo, Depende de, Línea, Centro propio, Estado);
+ *   para quitarlo a propósito se escribe «RAÍZ» o «NINGUNO». La nueva deduce lo que puede: el padre por el prefijo
+ *   (43 → 4) o la Rectoría (prefijo de un dígito, si hay una sola; una Rectoría nunca se ubica sola), Línea Autoridad
+ *   y el centro propio: el Prefijo de 4 dígitos si es un centro (1510) o, con prefijo X, X010 si existe.
  * - Unidad y padre de cada centro del archivo se derivan del código (org-chart-rules.ts); un centro sin unidad que
  *   cuadre conserva la suya.
  */
@@ -318,7 +321,8 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         unitError(at, UNIT_HEADERS.name, `El nombre admite hasta ${NAME_MAX} caracteres`);
         valid = false;
       }
-      if (row.prefix && !PREFIX_PATTERN.test(row.prefix)) {
+      const prefixRemoved = row.prefix !== null && isNoneText(row.prefix);
+      if (row.prefix && !prefixRemoved && !PREFIX_PATTERN.test(row.prefix)) {
         unitError(at, UNIT_HEADERS.prefix, `«${row.prefix}» no es un prefijo: son de 1 a 4 dígitos`);
         valid = false;
       }
@@ -359,7 +363,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         }
       }
       // Sin código interno: por el prefijo exacto y, si no, por el normalizado (1000 encuentra la Rectoría «1»).
-      if (!existing && !code && row.prefix) {
+      if (!existing && !code && row.prefix && !prefixRemoved) {
         existing = activeUnitByPrefix.get(row.prefix) ?? activeUnitByPrefix.get(normalizeUnitPrefix(row.prefix));
       }
       if (!valid) {
@@ -375,7 +379,15 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       }
       // Código de Contabilidad de 4 dígitos con ceros al final → prefijo corto (1200 → 12), salvo que la unidad ya
       // tenga guardado ese mismo valor.
-      const prefix = row.prefix && existing?.codePrefix !== row.prefix ? normalizeUnitPrefix(row.prefix) : row.prefix;
+      // Vacío: la existente conserva el suyo; NINGUNO lo quita.
+      const filePrefix = prefixRemoved ? null : row.prefix;
+      const prefix = !filePrefix
+        ? prefixRemoved
+          ? null
+          : (existing?.codePrefix ?? null)
+        : existing?.codePrefix !== filePrefix
+          ? normalizeUnitPrefix(filePrefix)
+          : filePrefix;
       if (!existing) {
         code = code ?? generateUnitCode(prefix, row.name ?? '', usedUnitCodes);
         usedUnitCodes.add(code);
@@ -387,8 +399,8 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         continue;
       }
       unitRows.set(key, at);
-      if (prefix !== row.prefix) {
-        unitWarning(at, UNIT_HEADERS.prefix, `${row.prefix ?? ''} se tomó como prefijo ${prefix ?? ''}`);
+      if (filePrefix && prefix !== filePrefix) {
+        unitWarning(at, UNIT_HEADERS.prefix, `${filePrefix} se tomó como prefijo ${prefix ?? ''}`);
       }
       const current = units.get(key);
       units.set(key, {
@@ -400,7 +412,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         unitType: type ?? current?.unitType ?? OrgUnitType.Other,
         relationType: relation ?? current?.relationType ?? OrgRelationType.Authority,
         codePrefix: prefix,
-        rawPrefix: row.prefix,
+        rawPrefix: filePrefix ?? prefix,
         // Vacíos en el archivo: la existente conserva padre y centro propio (se resuelven más abajo).
         parentKey: current?.parentKey ?? null,
         headCenterKey: current?.headCenterKey ?? null,
@@ -530,14 +542,17 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       continue;
     }
     if (!unit.headCenterText) {
-      // Vacío: la existente conserva el suyo; la nueva de prefijo X toma X010 si existe.
-      if (unit.existingId === null) {
-        const deduced =
-          unit.codePrefix?.length === 1 && unit.unitType !== OrgUnitType.Council
-            ? liveCenterByCode.get(`${unit.codePrefix}010`)
-            : undefined;
-        unit.headCenterKey = deduced?.key ?? null;
+      // Vacío: la existente conserva el suyo. La nueva (o la existente sin centro propio a la que se le cambia el
+      // prefijo) con un Prefijo de 4 dígitos que es un centro (1510) toma ese centro; la nueva de prefijo X, X010.
+      const before = unit.existingId ? snapshotUnits.get(unit.existingId) : undefined;
+      const deducible = !before || (!unit.headCenterKey && before.codePrefix !== unit.codePrefix);
+      if (deducible && unit.unitType !== OrgUnitType.Council) {
+        const byCode = unit.rawPrefix && isDetailCode(unit.rawPrefix) ? liveCenterByCode.get(unit.rawPrefix) : undefined;
+        const byRoot =
+          unit.existingId === null && unit.codePrefix?.length === 1 ? liveCenterByCode.get(`${unit.codePrefix}010`) : undefined;
+        const deduced = byCode ?? byRoot;
         if (deduced) {
+          unit.headCenterKey = deduced.key;
           headIssues.push({ error: false, row: unit.rowNumber, message: `Centro propio deducido: ${deduced.code}` });
         }
       }
@@ -575,10 +590,12 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     const holder = finalPrefix.get(unit.codePrefix);
     if (holder) {
       const [inFile, other] = unit.rowNumber !== null ? [unit, holder] : [holder, unit];
+      const longer = unit.codePrefix.length < 4 ? ` (${unit.codePrefix}1)` : '';
+      const usedBy = other.rowNumber !== null ? `la fila ${other.rowNumber} (${other.name})` : `«${other.name}»`;
       unitError(
         inFile.rowNumber ?? 0,
         UNIT_HEADERS.prefix,
-        `El prefijo ${unit.codePrefix} ya es de «${other.name}»${other.rowNumber !== null ? ` (fila ${other.rowNumber})` : ''}`,
+        `El prefijo ${unit.codePrefix} ya lo usa ${usedBy}: cada cuadro necesita uno distinto; si es una oficina de ese cuadro, deje el prefijo vacío o use más dígitos${longer}`,
       );
       continue;
     }
@@ -703,6 +720,17 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         `Depende de ${text}: el Centro propio de ${parent.name}${parent.codePrefix ? ` (${parent.codePrefix})` : ''}`,
       );
     }
+  }
+
+  // Misma fila que su jefe con otro código (1310 bajo 1300 con el mismo nombre): probablemente es su centro propio.
+  for (const unit of units.values()) {
+    const parent = unit.parentKey ? units.get(unit.parentKey) : undefined;
+    if (unit.rowNumber === null || !parent || normalizeText(parent.name) !== normalizeText(unit.name)) {
+      continue;
+    }
+    const own = unit.rawPrefix ?? unit.codePrefix ?? unit.code;
+    const head = parent.rawPrefix ?? parent.codePrefix ?? parent.code;
+    unitWarning(unit.rowNumber, UNIT_HEADERS.name, `${own} tiene el mismo nombre que su jefe ${head}; ¿es su Centro propio?`);
   }
 
   // Ciclos.
