@@ -13,6 +13,8 @@ import { MovementType } from '../../assets/enums/movement-type.enum.js';
 import type { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import type { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
 import { CostCenterPlacementService, type PlacementContext } from '../../cost-centers/services/cost-center-placement.service.js';
+import { StructureReconcilerService } from '../../cost-centers/services/structure-reconciler.service.js';
+import { ALL_SCOPE } from '../../cost-centers/domain/structure-reconcile.js';
 import { MovementsService } from '../../movements/services/movements.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import {
@@ -457,6 +459,7 @@ export class ExcelImportService {
     private readonly auditLogsRepository: AuditLogsRepository,
     private readonly placements: CostCenterPlacementService,
     private readonly permissions: PermissionsService,
+    private readonly reconciler: StructureReconcilerService,
   ) {}
 
   /** UPDATE_STRUCTURE cambia centros existentes: exige el permiso de administración de centros de costo. */
@@ -852,6 +855,15 @@ export class ExcelImportService {
       [importId, job.sheet_name, JSON.stringify(classified.reasons)],
     );
     const centers = job.target === 'COST_CENTERS' ? await this.writeCostCenters(manager, job, actorId) : null;
+    if (job.target === 'COST_CENTERS' || costCentersCreated > 0) {
+      // Centros nuevos o reubicados: la estructura se concilia por código en la misma transacción.
+      await this.reconciler.reconcileWithin(manager, ALL_SCOPE, {
+        actorId,
+        reason: `Importación de centros de costo (importación ${job.id})`,
+        ip: null,
+        userAgent: null,
+      });
+    }
     const inserted =
       job.target === 'ASSETS'
         ? await this.insertAssets(manager, job, actorId)

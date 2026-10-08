@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, type EntityManager } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import {
@@ -17,6 +17,8 @@ import {
   OrgStructureHistoryService,
 } from '../../cost-centers/services/org-structure-history.service.js';
 import { decideUnitRemoval, StructureRemovalService } from '../../cost-centers/services/structure-removal.service.js';
+import { StructureReconcilerService } from '../../cost-centers/services/structure-reconciler.service.js';
+import { partialScope } from '../../cost-centers/domain/structure-reconcile.js';
 import { OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { CreateOrganizationalUnitDto } from '../dto/create-organizational-unit.dto.js';
 import { QueryOrganizationalUnitsDto } from '../dto/query-organizational-units.dto.js';
@@ -27,9 +29,16 @@ import {
 } from '../dto/responses/organizational-unit.response.dto.js';
 import { UpdateOrganizationalUnitDto } from '../dto/update-organizational-unit.dto.js';
 import type { OrganizationalUnit } from '../entities/organizational-unit.entity.js';
-import type { OrganizationalUnitsRepository } from '../repositories/organizational-units.repository.interface.js';
+import type {
+  OrganizationalUnitsRepository,
+  UpdateOrgUnitRecord,
+} from '../repositories/organizational-units.repository.interface.js';
 
 const ORG_UNIT_ENTITY_TYPE = 'ORG_UNIT';
+
+/** «43 · Contabilidad», o el nombre si no tiene prefijo (motivos del historial: solo códigos y nombres de la estructura). */
+const unitLabel = (unit: { readonly codePrefix: string | null; readonly name: string }): string =>
+  unit.codePrefix ? `${unit.codePrefix} · ${unit.name}` : unit.name;
 
 const toPathSegment = (code: string): string => code.toLowerCase();
 
@@ -62,6 +71,7 @@ export class OrganizationalUnitsService {
     private readonly dataSource: DataSource,
     private readonly removal: StructureRemovalService,
     private readonly history: OrgStructureHistoryService,
+    private readonly reconciler: StructureReconcilerService,
   ) {}
 
   async list(
@@ -133,27 +143,41 @@ export class OrganizationalUnitsService {
     const head = await this.chooseHeadCenter(dto);
     const warnings = head?.warning ? [head.warning] : [];
     try {
-      const unit = await this.unitsRepository.insert({
-        parentId: parent?.id ?? null,
-        code: dto.code,
-        name: dto.name,
-        unitType: dto.type,
-        hierarchyLevel: parent ? parent.hierarchyLevel + 1 : 0,
-        hierarchyPath: childPath(parent?.hierarchyPath ?? null, dto.code),
-        isActive: dto.isActive ?? true,
-        codePrefix: dto.codePrefix ?? null,
-        ...(dto.relationType ? { relationType: dto.relationType } : {}),
-        headCostCenterId: head?.headCostCenterId ?? null,
-        headCostCenterCode: head?.headCostCenterCode ?? null,
-      });
-      await this.auditLogsRepository.record({
-        action: AuditAction.OrgUnitCreated,
-        entityType: ORG_UNIT_ENTITY_TYPE,
-        entityId: unit.id,
-        performedBy: actor.id,
-        ipAddress: null,
-        userAgent: null,
-        changes: { code: unit.code },
+      const unit = await this.dataSource.transaction(async (manager) => {
+        const created = await this.unitsRepository.insert(
+          {
+            parentId: parent?.id ?? null,
+            code: dto.code,
+            name: dto.name,
+            unitType: dto.type,
+            hierarchyLevel: parent ? parent.hierarchyLevel + 1 : 0,
+            hierarchyPath: childPath(parent?.hierarchyPath ?? null, dto.code),
+            isActive: dto.isActive ?? true,
+            codePrefix: dto.codePrefix ?? null,
+            ...(dto.relationType ? { relationType: dto.relationType } : {}),
+            headCostCenterId: head?.headCostCenterId ?? null,
+            headCostCenterCode: head?.headCostCenterCode ?? null,
+          },
+          manager,
+        );
+        await this.auditLogsRepository.record(
+          {
+            action: AuditAction.OrgUnitCreated,
+            entityType: ORG_UNIT_ENTITY_TYPE,
+            entityId: created.id,
+            performedBy: actor.id,
+            ipAddress: null,
+            userAgent: null,
+            changes: { code: created.code },
+          },
+          manager,
+        );
+        await this.reconciler.reconcileWithin(
+          manager,
+          partialScope({ prefixes: [created.codePrefix], unitIds: [created.id] }),
+          { actorId: actor.id, reason: `Se creó la unidad ${unitLabel(created)}`, ip: null, userAgent: null },
+        );
+        return created;
       });
       return { ...OrganizationalUnitResponseDto.from(unit), warnings };
     } catch (error) {
@@ -212,27 +236,54 @@ export class OrganizationalUnitsService {
     const nextLevel = parent ? parent.hierarchyLevel + 1 : 0;
     const pathChanged = nextPath !== unit.hierarchyPath;
 
+    const record: UpdateOrgUnitRecord = {
+      ...(dto.name !== undefined ? { name: dto.name } : {}),
+      ...(dto.type !== undefined ? { unitType: dto.type } : {}),
+      ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      ...(dto.code !== undefined ? { code: dto.code } : {}),
+      ...(dto.codePrefix !== undefined ? { codePrefix: dto.codePrefix } : {}),
+      ...(dto.parentId !== undefined ? { parentId } : {}),
+      ...(dto.relationType !== undefined ? { relationType: dto.relationType } : {}),
+      ...(head ? { headCostCenterId: head.headCostCenterId, headCostCenterCode: head.headCostCenterCode } : {}),
+      ...(pathChanged ? { hierarchyPath: nextPath, hierarchyLevel: nextLevel } : {}),
+    };
+    const after: OrganizationalUnit = { ...unit, ...record };
+    const reconcileContext = { actorId: actor.id, reason: `Se editó la unidad ${unitLabel(after)}`, ip: null, userAgent: null };
     try {
-      await this.unitsRepository.update(unit.id, {
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.type !== undefined ? { unitType: dto.type } : {}),
-        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.code !== undefined ? { code: dto.code } : {}),
-        ...(dto.codePrefix !== undefined ? { codePrefix: dto.codePrefix } : {}),
-        ...(dto.parentId !== undefined ? { parentId } : {}),
-        ...(dto.relationType !== undefined ? { relationType: dto.relationType } : {}),
-        ...(head ? { headCostCenterId: head.headCostCenterId, headCostCenterCode: head.headCostCenterCode } : {}),
-        ...(pathChanged
-          ? { hierarchyPath: nextPath, hierarchyLevel: nextLevel }
-          : {}),
-      });
-      if (pathChanged && unit.hierarchyPath) {
-        await this.unitsRepository.rewriteDescendantPaths(
-          unit.hierarchyPath,
-          nextPath,
-          nextLevel - unit.hierarchyLevel,
+      await this.dataSource.transaction(async (manager) => {
+        await this.unitsRepository.update(unit.id, record, manager);
+        if (pathChanged && unit.hierarchyPath) {
+          await this.unitsRepository.rewriteDescendantPaths(
+            unit.hierarchyPath,
+            nextPath,
+            nextLevel - unit.hierarchyLevel,
+            manager,
+          );
+        }
+        await this.auditLogsRepository.record(
+          {
+            action: AuditAction.OrgUnitUpdated,
+            entityType: ORG_UNIT_ENTITY_TYPE,
+            entityId: unit.id,
+            performedBy: actor.id,
+            ipAddress: null,
+            userAgent: null,
+            changes: { ...dto },
+          },
+          manager,
         );
-      }
+        await this.recordHistory(manager, unit, after, previousParent, parent, actor);
+        // Prefijo, padre o estado: los centros del prefijo viejo y del nuevo y los que hoy están en la unidad.
+        if (unit.codePrefix !== after.codePrefix || unit.parentId !== after.parentId || unit.isActive !== after.isActive) {
+          await this.reconciler.reconcileWithin(
+            manager,
+            partialScope({ prefixes: [unit.codePrefix, after.codePrefix], unitIds: [unit.id] }),
+            reconcileContext,
+          );
+        } else if (head) {
+          await this.reconciler.reconcileWithin(manager, partialScope({ unitIds: [unit.id] }), reconcileContext);
+        }
+      });
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ApiException(ErrorCode.OrgUnitCodeAlreadyExists);
@@ -242,23 +293,13 @@ export class OrganizationalUnitsService {
       }
       throw error;
     }
-
-    await this.auditLogsRepository.record({
-      action: AuditAction.OrgUnitUpdated,
-      entityType: ORG_UNIT_ENTITY_TYPE,
-      entityId: unit.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { ...dto },
-    });
     const updated = await this.requireUnit(id);
-    await this.recordHistory(unit, updated, previousParent, parent, actor);
     return { ...OrganizationalUnitResponseDto.from(updated), warnings };
   }
 
   /** Historial de nombre, código, tipo, padre, prefijo, línea, centro propio y estado (org_structure_history). */
   private async recordHistory(
+    manager: EntityManager,
     before: OrganizationalUnit,
     after: OrganizationalUnit,
     previousParent: OrganizationalUnit | null,
@@ -301,7 +342,7 @@ export class OrganizationalUnitsService {
       },
       { entityType: 'ORG_UNIT', entityId: after.id, field: 'STATUS', oldValue: status(before.isActive), newValue: status(after.isActive) },
     ];
-    await this.history.record(this.dataSource.manager, entries, { actorId: actor.id, source: 'MANUAL' });
+    await this.history.record(manager, entries, { actorId: actor.id, source: 'MANUAL' });
   }
 
   private assertCouncilWithoutPrefix(type: OrgUnitType, codePrefix: string | null): void {
@@ -394,6 +435,16 @@ export class OrganizationalUnitsService {
           { actorId: actor.id, source: 'MANUAL', reason: verdict.reason },
         );
       }
+      await this.reconciler.reconcileWithin(
+        manager,
+        partialScope({ prefixes: [unit.codePrefix], unitIds: verdict.decision === 'DELETE' ? [] : [unit.id] }),
+        {
+          actorId: actor.id,
+          reason: `Se ${verdict.decision === 'DELETE' ? 'eliminó' : 'archivó'} la unidad ${unitLabel(unit)}`,
+          ip: null,
+          userAgent: null,
+        },
+      );
       await this.auditLogsRepository.record(
         {
           action: verdict.decision === 'DELETE' ? AuditAction.OrgUnitDeleted : AuditAction.OrgUnitArchived,

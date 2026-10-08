@@ -17,6 +17,8 @@ import {
   historyReason,
   StructureRemovalService,
 } from '../../cost-centers/services/structure-removal.service.js';
+import { ALL_SCOPE } from '../../cost-centers/domain/structure-reconcile.js';
+import { StructureReconcilerService } from '../../cost-centers/services/structure-reconciler.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import type {
   OrgChartConfirmDto,
@@ -106,6 +108,7 @@ export class OrgChartService {
     private readonly permissions: PermissionsService,
     @Inject('AuditLogsRepository')
     private readonly auditLogs: AuditLogsRepository,
+    private readonly reconciler: StructureReconcilerService,
   ) {}
 
   async export(): Promise<OrgChartFile> {
@@ -207,6 +210,13 @@ export class OrgChartService {
         );
       }
       await this.apply(manager, plan, actor);
+      // Unidades nuevas, prefijos que cambian, centros propios pendientes: la estructura completa se concilia aquí.
+      await this.reconciler.reconcileWithin(manager, ALL_SCOPE, {
+        actorId: actor.id,
+        reason: IMPORT_REASON,
+        ip: null,
+        userAgent: null,
+      });
       const confirmedAt = new Date();
       await manager.query(`UPDATE org_chart_import SET status = 'CONFIRMED', confirmed_at = $2 WHERE id = $1`, [
         stored.id,

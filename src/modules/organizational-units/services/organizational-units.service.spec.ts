@@ -7,6 +7,7 @@ import { OrgUnitType } from '../enums/org-unit-type.enum.js';
 import type { OrganizationalUnitsRepository } from '../repositories/organizational-units.repository.interface.js';
 import type { DataSource } from 'typeorm';
 import type { OrgStructureHistoryService } from '../../cost-centers/services/org-structure-history.service.js';
+import type { StructureReconcilerService } from '../../cost-centers/services/structure-reconciler.service.js';
 import type { StructureRemovalService, UnitRemovalCheck } from '../../cost-centers/services/structure-removal.service.js';
 import { OrganizationalUnitsService } from './organizational-units.service.js';
 
@@ -41,6 +42,7 @@ describe('OrganizationalUnitsService', () => {
   let service: OrganizationalUnitsService;
   let removal: { inspectUnit: ReturnType<typeof vi.fn>; deleteUnit: ReturnType<typeof vi.fn> };
   let manager: { query: ReturnType<typeof vi.fn> };
+  let reconciler: { reconcileWithin: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     unitsRepository = {
@@ -72,12 +74,14 @@ describe('OrganizationalUnitsService', () => {
     const noReferences: UnitRemovalCheck = { activeChildren: 0, activeCenters: 0, references: [] };
     removal = { inspectUnit: vi.fn().mockResolvedValue(noReferences), deleteUnit: vi.fn() };
     const history = { record: vi.fn().mockResolvedValue(0) } as unknown as OrgStructureHistoryService;
+    reconciler = { reconcileWithin: vi.fn().mockResolvedValue({}) };
     service = new OrganizationalUnitsService(
       unitsRepository,
       auditLogsRepository,
       dataSource,
       removal as unknown as StructureRemovalService,
       history,
+      reconciler as unknown as StructureReconcilerService,
     );
   });
 
@@ -154,11 +158,13 @@ describe('OrganizationalUnitsService', () => {
         hierarchyPath: '/rec/vac/dci',
         hierarchyLevel: 2,
       }),
+      expect.anything(),
     );
     expect(unitsRepository.rewriteDescendantPaths).toHaveBeenCalledWith(
       '/rec/vad/dci',
       '/rec/vac/dci',
       0,
+      expect.anything(),
     );
     expect(result.code).toBe('DCI');
   });
@@ -193,11 +199,13 @@ describe('OrganizationalUnitsService', () => {
         hierarchyPath: '/dci',
         hierarchyLevel: 0,
       }),
+      expect.anything(),
     );
     expect(unitsRepository.rewriteDescendantPaths).toHaveBeenCalledWith(
       '/rec/vad/dci',
       '/dci',
       -2,
+      expect.anything(),
     );
   });
 
