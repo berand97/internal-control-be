@@ -181,7 +181,7 @@ export class OrganizationalUnitsController {
   })
   @ApiResponse({
     status: 200,
-    schema: envelopedSchema(OrganizationalUnitTreeResponseDto),
+    schema: envelopedArraySchema(OrganizationalUnitTreeResponseDto),
   })
   tree(@Query() query: IncludeArchivedQueryDto): Promise<ReadonlyArray<OrganizationalUnitTreeResponseDto>> {
     return this.organizationalUnitsService.tree(query.includeArchived ?? false);
@@ -265,7 +265,7 @@ export class OrganizationalUnitsController {
   })
   @ApiResponse({
     status: 200,
-    schema: envelopedSchema(OrganizationalUnitTreeResponseDto),
+    schema: envelopedArraySchema(OrganizationalUnitTreeResponseDto),
   })
   descendants(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -278,7 +278,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({ summary: 'Cadena hacia la raíz' })
   @ApiResponse({
     status: 200,
-    schema: envelopedSchema(OrganizationalUnitResponseDto),
+    schema: envelopedArraySchema(OrganizationalUnitResponseDto),
   })
   ancestors(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -291,7 +291,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({ summary: 'Listar unidades organizacionales' })
   @ApiResponse({
     status: 200,
-    schema: envelopedSchema(OrganizationalUnitResponseDto),
+    schema: envelopedArraySchema(OrganizationalUnitResponseDto),
   })
   list(
     @Query() query: QueryOrganizationalUnitsDto,
