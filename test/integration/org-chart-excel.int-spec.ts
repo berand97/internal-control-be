@@ -540,4 +540,168 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expect.arrayContaining([expect.objectContaining({ externalCode: '6181', reason: 'EXPECTED_PARENT_MISSING', expectedParentCode: '6180' })]),
     );
   });
+
+  describe('color base de la rama', () => {
+    const colorColumn = (sheet: ExcelJS.Worksheet): number => {
+      let column = 0;
+      sheet.getRow(1).eachCell((cell, index) => {
+        if (cell.value === 'Color') {
+          column = index;
+        }
+      });
+      expect(column).toBeGreaterThan(0);
+      return column;
+    };
+    const colorOf = (id: string | undefined) =>
+      scalar<string | null>(dataSource, 'SELECT color FROM organizational_unit WHERE id = $1', [id]);
+    const findNode = (nodes: ReadonlyArray<Record<string, unknown>>, id: string | undefined): Record<string, unknown> | undefined => {
+      for (const node of nodes) {
+        if (node['id'] === id) {
+          return node;
+        }
+        const found = findNode((node['children'] as Array<Record<string, unknown>> | undefined) ?? [], id);
+        if (found) {
+          return found;
+        }
+      }
+      return undefined;
+    };
+
+    it('POST/PATCH guardan el color en minúsculas, null lo quita, inválido da 400 en español; el árbol trae effectiveColor', async () => {
+      const created = await http()
+        .post('/api/v1/organizational-units')
+        .set(auth('admin'))
+        .send({ code: 'IT_OC_COLOR', name: 'Unidad con color', type: 'OFFICE', parentId: ids['u6'], color: '#ABCDEF' });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      expectConforms('post', '/api/v1/organizational-units', 201, created.body);
+      expect(created.body.data.color).toBe('#abcdef');
+      ids['colored'] = created.body.data.id as string;
+
+      const patched = await http().patch(`/api/v1/organizational-units/${ids['u6']}`).set(auth('admin')).send({ color: '#DE9927' });
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      expectConforms('patch', '/api/v1/organizational-units/{id}', 200, patched.body);
+      expect(patched.body.data.color).toBe('#de9927');
+      expect(await colorOf(ids['u6'])).toBe('#de9927');
+
+      const invalid = await http().patch(`/api/v1/organizational-units/${ids['u6']}`).set(auth('admin')).send({ color: 'DE9927' });
+      expect(invalid.status).toBe(400);
+      expect(JSON.stringify(invalid.body)).toContain('El color debe tener el formato #RRGGBB, por ejemplo #DE9927');
+      expect(await colorOf(ids['u6'])).toBe('#de9927');
+
+      const detail = await http().get(`/api/v1/organizational-units/${ids['u6']}`).set(auth('admin'));
+      expectConforms('get', '/api/v1/organizational-units/{id}', 200, detail.body);
+      expect(detail.body.data.color).toBe('#de9927');
+      const list = await http().get('/api/v1/organizational-units').set(auth('admin'));
+      expectConforms('get', '/api/v1/organizational-units', 200, list.body);
+      expect(list.body.data.find((item: { id: string }) => item.id === ids['u61'])).toMatchObject({ color: null });
+
+      for (const path of ['/api/v1/organizational-units/tree', '/api/v1/organizational-units/tree?includeArchived=true']) {
+        const tree = await http().get(path).set(auth('admin'));
+        expect(tree.status).toBe(200);
+        expectConforms('get', '/api/v1/organizational-units/tree', 200, tree.body);
+        expect(findNode(tree.body.data, ids['u6'])).toMatchObject({ color: '#de9927', effectiveColor: '#de9927' });
+        expect(findNode(tree.body.data, ids['u61'])).toMatchObject({ color: null, effectiveColor: '#de9927' });
+        expect(findNode(tree.body.data, ids['colored'])).toMatchObject({ color: '#abcdef', effectiveColor: '#abcdef' });
+      }
+      const subtree = await http().get(`/api/v1/organizational-units/${ids['u6']}/descendants`).set(auth('admin'));
+      expectConforms('get', '/api/v1/organizational-units/{id}/descendants', 200, subtree.body);
+      expect(findNode(subtree.body.data, ids['u61'])).toMatchObject({ effectiveColor: '#de9927' });
+
+      const cleared = await http().patch(`/api/v1/organizational-units/${ids['colored']}`).set(auth('admin')).send({ color: null });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.data.color).toBeNull();
+      const kept = await http().patch(`/api/v1/organizational-units/${ids['u6']}`).set(auth('admin')).send({ isActive: true });
+      expect(kept.body.data.color).toBe('#de9927');
+
+      const history = await http().get(`/api/v1/organizational-units/${ids['colored']}/history`).set(auth('admin'));
+      expectConforms('get', '/api/v1/organizational-units/{id}/history', 200, history.body);
+      expect(history.body.data).toEqual([
+        expect.objectContaining({ field: 'COLOR', oldValue: '#abcdef', newValue: null, source: 'MANUAL' }),
+      ]);
+      const vfHistory = await http().get(`/api/v1/organizational-units/${ids['u6']}/history`).set(auth('admin'));
+      expect(vfHistory.body.data).toContainEqual(
+        expect.objectContaining({ field: 'COLOR', oldValue: null, newValue: '#de9927', source: 'MANUAL' }),
+      );
+      const audited = await scalar<string>(
+        dataSource,
+        `SELECT changes->>'color' FROM audit_log WHERE entity_id = $1 AND action = 'ORG_UNIT_UPDATED' AND changes ? 'color'
+         ORDER BY performed_at DESC LIMIT 1`,
+        [ids['u6']],
+      );
+      expect(audited).toBe('#de9927');
+    });
+
+    it('Excel: exporta el Color; vacío conserva, NINGUNO quita, #RRGGBB cambia (con historial); inválido es error de fila', async () => {
+      const file = await exportFile();
+      const exported = new ExcelJS.Workbook();
+      await exported.xlsx.load(file as unknown as ArrayBuffer);
+      const sheet = exported.getWorksheet('Organigrama');
+      if (!sheet) {
+        throw new Error('falta la hoja');
+      }
+      const column = colorColumn(sheet);
+      expect(String(rowByPrefix(sheet, '6').getCell(column).value)).toBe('#de9927');
+      expect(rowByPrefix(sheet, '61').getCell(column).value ?? null).toBeNull();
+
+      const invalid = await preview(
+        await editExport(file, (edited) => {
+          rowByPrefix(edited, '61').getCell(colorColumn(edited)).value = 'azul';
+        }),
+      );
+      expect(invalid.status).toBe(201);
+      expect(invalid.body.data.canConfirm).toBe(false);
+      expect(invalid.body.data.errors).toEqual([
+        expect.objectContaining({ column: 'Color', message: expect.stringContaining('«azul» no es un color') }),
+      ]);
+
+      const changed = await preview(
+        await editExport(file, (edited) => {
+          rowByPrefix(edited, '61').getCell(colorColumn(edited)).value = '#29B1B2';
+          rowByPrefix(edited, '6').getCell(colorColumn(edited)).value = 'NINGUNO';
+        }),
+      );
+      expect(changed.status, JSON.stringify(changed.body)).toBe(201);
+      expectConforms('post', '/api/v1/organizational-units/import/preview', 201, changed.body);
+      expect(changed.body.data.errors).toEqual([]);
+      expect(changed.body.data.summary.units.colorChanged).toBe(2);
+      expect(changed.body.data.changes.map((change: { kind: string; detail: string }) => [change.kind, change.detail])).toEqual(
+        expect.arrayContaining([
+          ['COLOR_CHANGED', 'Color quitado'],
+          ['COLOR_CHANGED', 'Color: (sin color) → #29b1b2'],
+        ]),
+      );
+      const applied = await confirm(changed.body.data.previewId as string);
+      expect(applied.status, JSON.stringify(applied.body)).toBe(201);
+      expect(await colorOf(ids['u6'])).toBeNull();
+      expect(await colorOf(ids['u61'])).toBe('#29b1b2');
+      const history = await http().get(`/api/v1/organizational-units/${ids['u61']}/history`).set(auth('admin'));
+      expect(history.body.data).toContainEqual(
+        expect.objectContaining({ field: 'COLOR', oldValue: null, newValue: '#29b1b2', source: 'IMPORT' }),
+      );
+
+      // Ida y vuelta: el archivo exportado ahora trae el color y no cambia nada.
+      const again = await preview(await exportFile());
+      expect(again.body.data.summary.totalChanges).toBe(0);
+
+      // Archivo viejo sin la columna Color (y sello sin su huella): no toca colores ni da conflicto.
+      const old = await editExport(await exportFile(), (edited) => {
+        edited.spliceColumns(colorColumn(edited), 1);
+        rowByPrefix(edited, '61').getCell(2).value = 'Departamento Excel sin columna Color';
+      });
+      const oldWorkbook = new ExcelJS.Workbook();
+      await oldWorkbook.xlsx.load(old as unknown as ArrayBuffer);
+      oldWorkbook.getWorksheet('_sello')?.getColumn(9).eachCell((cell) => {
+        cell.value = null;
+      });
+      const oldPreview = await preview(Buffer.from(await oldWorkbook.xlsx.writeBuffer()));
+      expect(oldPreview.status, JSON.stringify(oldPreview.body)).toBe(201);
+      expect(oldPreview.body.data.errors).toEqual([]);
+      expect(oldPreview.body.data.conflicts).toEqual([]);
+      expect(oldPreview.body.data.changes.map((change: { kind: string }) => change.kind)).toEqual(['RENAMED']);
+      expect(oldPreview.body.data.warnings.map((warning: { message: string }) => warning.message).join(' ')).not.toContain('sello');
+      const oldApplied = await confirm(oldPreview.body.data.previewId as string);
+      expect(oldApplied.status).toBe(201);
+      expect(await colorOf(ids['u61'])).toBe('#29b1b2');
+    });
+  });
 });
