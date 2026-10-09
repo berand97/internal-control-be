@@ -3,8 +3,15 @@
  * motivo.
  */
 export interface FeaturesConfig {
-  /** Errores internos (5xx) que abren el circuito de un módulo (FEATURE_CIRCUIT_THRESHOLD). */
+  /** Errores internos (5xx) dentro de la ventana que abren el circuito de un módulo (FEATURE_CIRCUIT_THRESHOLD). */
   readonly circuitThreshold: number;
+  /** Ventana deslizante en la que se cuentan esos errores (FEATURE_CIRCUIT_WINDOW_SECONDS). */
+  readonly circuitWindowMs: number;
+  /**
+   * Espera con el circuito abierto antes de dejar pasar una petición de prueba (FEATURE_CIRCUIT_COOLDOWN_SECONDS). Si
+   * la prueba sale bien el módulo se reactiva; si falla, la espera vuelve a empezar.
+   */
+  readonly circuitCooldownMs: number;
   /**
    * Cada cuánto la caché de módulos se relee completa desde la BD, además del NOTIFY (FEATURE_FLAGS_RELOAD_SECONDS;
    * 0 = solo NOTIFY). Solo en el proceso HTTP.
@@ -15,25 +22,20 @@ export interface FeaturesConfig {
 }
 
 export const DEFAULT_FEATURE_CIRCUIT_THRESHOLD = 5;
+export const DEFAULT_FEATURE_CIRCUIT_WINDOW_SECONDS = 120;
+export const DEFAULT_FEATURE_CIRCUIT_COOLDOWN_SECONDS = 300;
 export const DEFAULT_FEATURE_FLAGS_RELOAD_SECONDS = 30;
 
 const FEATURE_ENV_PREFIX = 'FEATURE_';
 /** Variables FEATURE_* que son ajustes y no kill-switch de un módulo. */
-const RESERVED_FEATURE_ENV = new Set(['FEATURE_CIRCUIT_THRESHOLD', 'FEATURE_FLAGS_RELOAD_SECONDS']);
+const RESERVED_FEATURE_ENV = new Set([
+  'FEATURE_CIRCUIT_THRESHOLD',
+  'FEATURE_CIRCUIT_WINDOW_SECONDS',
+  'FEATURE_CIRCUIT_COOLDOWN_SECONDS',
+  'FEATURE_FLAGS_RELOAD_SECONDS',
+]);
 
 type Env = Readonly<Record<string, string | undefined>>;
-
-const readNumber = (env: Env, key: string, fallback: number): number => {
-  const raw = env[key];
-  if (raw === undefined || raw === '') {
-    return fallback;
-  }
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    throw new Error(`Variable de entorno no numérica: ${key}`);
-  }
-  return parsed;
-};
 
 const readIntegerInRange = (env: Env, key: string, fallback: number, min: number, max: number): number => {
   const raw = env[key]?.trim();
@@ -63,7 +65,12 @@ const readFeatureOverrides = (env: Env): Readonly<Record<string, boolean>> => {
 };
 
 export const resolveFeaturesConfig = (env: Env): FeaturesConfig => ({
-  circuitThreshold: readNumber(env, 'FEATURE_CIRCUIT_THRESHOLD', DEFAULT_FEATURE_CIRCUIT_THRESHOLD),
+  circuitThreshold: readIntegerInRange(env, 'FEATURE_CIRCUIT_THRESHOLD', DEFAULT_FEATURE_CIRCUIT_THRESHOLD, 1, 1000),
+  circuitWindowMs:
+    readIntegerInRange(env, 'FEATURE_CIRCUIT_WINDOW_SECONDS', DEFAULT_FEATURE_CIRCUIT_WINDOW_SECONDS, 1, 86_400) * 1000,
+  circuitCooldownMs:
+    readIntegerInRange(env, 'FEATURE_CIRCUIT_COOLDOWN_SECONDS', DEFAULT_FEATURE_CIRCUIT_COOLDOWN_SECONDS, 1, 86_400) *
+    1000,
   reloadIntervalMs:
     readIntegerInRange(env, 'FEATURE_FLAGS_RELOAD_SECONDS', DEFAULT_FEATURE_FLAGS_RELOAD_SECONDS, 0, 3600) * 1000,
   overrides: readFeatureOverrides(env),

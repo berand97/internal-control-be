@@ -19,6 +19,8 @@ export interface FeatureSnapshot {
   readonly enabled: boolean;
   readonly core: boolean;
   readonly reason: FeatureDisabledReason | null;
+  /** Solo con reason CIRCUIT: desde cuándo se deja pasar una petición de prueba para reactivarlo solo. */
+  readonly retryAt: Date | null;
   readonly resourceTypes: ReadonlyArray<string>;
 }
 

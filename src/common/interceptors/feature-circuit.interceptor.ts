@@ -27,11 +27,17 @@ export class FeatureCircuitInterceptor implements NestInterceptor {
       return next.handle();
     }
 
+    // Las promesas no se esperan (no frenan la respuesta) y no rechazan: el servicio registra sus propios errores.
     return next.handle().pipe(
-      tap(() => this.featureFlags.recordSuccess(code)),
+      tap(() => {
+        void this.featureFlags.recordSuccess(code);
+      }),
       catchError((error: unknown) => {
         if (isCircuitFailure(error)) {
           void this.featureFlags.recordFailure(code);
+        } else {
+          // 4xx: no dice nada de la salud del módulo; si era la petición de prueba, otra probará.
+          this.featureFlags.releaseProbe(code);
         }
         return throwError(() => error);
       }),

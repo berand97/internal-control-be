@@ -4,12 +4,12 @@ import { FEATURE_CODE_KEY } from '../decorators/feature.decorator.js';
 import { FeatureGuard } from './feature.guard.js';
 
 describe('FeatureGuard', () => {
-  const featureFlags = { isEnabled: vi.fn() };
+  const featureFlags = { admit: vi.fn() };
   const reflector = { getAllAndOverride: vi.fn() };
   let guard: FeatureGuard;
 
   beforeEach(() => {
-    featureFlags.isEnabled.mockReset().mockReturnValue(true);
+    featureFlags.admit.mockReset().mockReturnValue(true);
     reflector.getAllAndOverride.mockReset();
     guard = new FeatureGuard(reflector as never, featureFlags as never);
   });
@@ -30,7 +30,7 @@ describe('FeatureGuard', () => {
 
   it('bloquea con MODULE_UNAVAILABLE si el módulo está apagado', () => {
     reflector.getAllAndOverride.mockReturnValue('loans');
-    featureFlags.isEnabled.mockImplementation((code: string) => code !== 'loans');
+    featureFlags.admit.mockImplementation((code: string) => code !== 'loans');
     try {
       guard.canActivate(contextFor('/api/v1/loans'));
       expect.unreachable();
@@ -41,7 +41,7 @@ describe('FeatureGuard', () => {
 
   it('usa el prefijo de ruta cuando no hay decorator', () => {
     reflector.getAllAndOverride.mockReturnValue(undefined);
-    featureFlags.isEnabled.mockImplementation((code: string) => code !== 'loans');
+    featureFlags.admit.mockImplementation((code: string) => code !== 'loans');
     try {
       guard.canActivate(contextFor('/api/v1/loans/1'));
       expect.unreachable();
@@ -57,7 +57,7 @@ describe('FeatureGuard', () => {
       expect.anything(),
       expect.anything(),
     ]);
-    expect(featureFlags.isEnabled).toHaveBeenCalledWith('qr-tokens');
-    expect(featureFlags.isEnabled).toHaveBeenCalledWith('assets');
+    expect(featureFlags.admit).toHaveBeenCalledWith('qr-tokens');
+    expect(featureFlags.admit).toHaveBeenCalledWith('assets');
   });
 });

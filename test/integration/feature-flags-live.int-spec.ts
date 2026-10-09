@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import type { TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { FeatureFlagsService } from '../../src/modules/features/services/feature-flags.service.js';
@@ -5,12 +6,18 @@ import { bootModules } from './helpers.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Evalúa la condición una vez por vuelta (admit tiene efecto: toma el turno de prueba). */
 const waitUntil = async (condition: () => boolean, timeoutMs = 3000): Promise<boolean> => {
   const deadline = Date.now() + timeoutMs;
-  while (!condition() && Date.now() < deadline) {
+  for (;;) {
+    if (condition()) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
     await sleep(20);
   }
-  return condition();
 };
 
 /** La BD es la fuente de verdad de los módulos: dos "instancias" (dos contenedores Nest) y SQL a mano. */
@@ -32,7 +39,7 @@ describe('Módulos: caché viva por NOTIFY', () => {
   });
 
   afterEach(async () => {
-    await dataSource.query(`DELETE FROM feature_flag WHERE code IN ('campus', 'locations')`);
+    await dataSource.query(`DELETE FROM feature_flag WHERE code IN ('campus', 'locations', 'categories')`);
     await waitUntil(() => flagsA.isEnabled('campus') && flagsB.isEnabled('campus'));
   });
 
@@ -88,5 +95,35 @@ describe('Módulos: caché viva por NOTIFY', () => {
       }
     });
     expect(await waitUntil(() => flagsA.isEnabled('campus') && flagsB.isEnabled('campus'))).toBe(true);
+  });
+
+  it('circuito: la apertura se guarda, la ve la otra instancia y la prueba exitosa lo reactiva para todas', async () => {
+    const threshold = a.get(ConfigService).getOrThrow<number>('features.circuitThreshold');
+    for (let i = 0; i < threshold; i += 1) {
+      await flagsA.recordFailure('categories');
+    }
+    expect(flagsA.isEnabled('categories')).toBe(false);
+    expect(await waitUntil(() => !flagsB.isEnabled('categories'))).toBe(true);
+    const [row] = (await dataSource.query(
+      `SELECT disabled_reason, disabled_at FROM feature_flag WHERE code = 'categories'`,
+    )) as Array<{ disabled_reason: string; disabled_at: Date | null }>;
+    expect(row?.disabled_reason).toBe('CIRCUIT');
+    expect(row?.disabled_at).not.toBeNull();
+    const opened = (await dataSource.query(
+      `SELECT entity_type, performed_by, changes FROM audit_log WHERE action = 'FEATURE_CIRCUIT_OPEN' ORDER BY id DESC LIMIT 1`,
+    )) as Array<{ entity_type: string; performed_by: string | null; changes: Record<string, unknown> }>;
+    expect(opened[0]).toMatchObject({ entity_type: 'FEATURE', performed_by: null, changes: { code: 'categories' } });
+
+    // La espera venció (se simula moviendo disabled_at en la BD, como lo vería cualquier instancia).
+    await dataSource.query(`UPDATE feature_flag SET disabled_at = now() - interval '1 day' WHERE code = 'categories'`);
+    expect(await waitUntil(() => flagsB.admit('categories'))).toBe(true);
+    expect(flagsB.isEnabled('categories')).toBe(false);
+    await flagsB.recordSuccess('categories');
+    expect(flagsB.isEnabled('categories')).toBe(true);
+    expect(await waitUntil(() => flagsA.isEnabled('categories'))).toBe(true);
+    const recovered = await dataSource.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE action = 'FEATURE_RECOVERED' AND changes->>'code' = 'categories'`,
+    );
+    expect(recovered[0].n).toBeGreaterThanOrEqual(1);
   });
 });

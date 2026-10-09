@@ -107,4 +107,8 @@ export enum AuditAction {
   PriceZeroReasonSet = 'PRICE_ZERO_REASON',
   AccountingCutCreated = 'ACC_CUT_CREATED',
   DepreciationCalculated = 'DEPR_CALCULATED',
+  /** Circuito de un módulo abierto por errores internos (sin actor; changes: código, conteo, ventana, espera). */
+  FeatureCircuitOpened = 'FEATURE_CIRCUIT_OPEN',
+  /** Módulo reactivado solo tras una petición de prueba exitosa (sin actor; changes: código, minutos caído). */
+  FeatureCircuitRecovered = 'FEATURE_RECOVERED',
 }
