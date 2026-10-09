@@ -165,6 +165,8 @@ const INSTRUCTIONS: ReadonlyArray<string> = [
   '   con un solo número (ej.: 5) queda bajo la Rectoría. Si no llena «Centro propio», el cuadro 5 toma el centro 5010 si existe,',
   '   y un cuadro escrito con el código de un centro existente (1510) toma ese centro.',
   '   La revisión le muestra cada valor que el sistema completó.',
+  '   Si bajo el mismo jefe ya hay un cuadro con el mismo nombre, una fila nueva sin números se rechaza: si es el mismo,',
+  '   copie su Código interno en la fila; si es otro, escríbale sus números o un nombre distinto.',
   '9. Color: el color base de la rama en el organigrama, en formato #RRGGBB (ej.: #DE9927). Sus dependencias toman tonos',
   '   más suaves del mismo color. Vacío: deja el que tenga; NINGUNO: lo quita y el cuadro hereda el color de su jefe.',
 ];

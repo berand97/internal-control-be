@@ -555,6 +555,38 @@ describe('plan del Excel del organigrama', () => {
       expect(messages).toContain('13: 1310 tiene el mismo nombre que su jefe 1300; ¿es su Centro propio?');
     });
 
+    it('unidad nueva con el nombre de otra activa bajo el mismo jefe (sin tildes ni mayúsculas): solo advertencia', () => {
+      const snapshot: OrgChartSnapshot = {
+        units: [
+          unit('u1', 'U1', 'Rectoría', '1', null, OrgUnitType.Rectorate),
+          unit('u102', 'U102', 'Calidad', '102', 'u1'),
+          { ...unit('u105', 'U105', 'Calidad', '105', 'u1'), isActive: false },
+        ],
+        centers: [],
+        removal: new Map(),
+      };
+      const plan = planOrgChart(
+        snapshot,
+        only({
+          units: [
+            unitRow(2, { prefix: '103', name: 'CALIDAD', type: 'Oficina', parent: '1' }),
+            unitRow(3, { prefix: '104', name: 'Planeación', type: 'Oficina', parent: '1' }),
+            unitRow(4, { prefix: '106', name: 'Planeacion', type: 'Oficina', parent: '1' }),
+            // Bajo otro jefe no es repetida.
+            unitRow(5, { prefix: '1021', name: 'Calidad', type: 'Oficina', parent: '102' }),
+          ],
+        }),
+      );
+      expect(plan.errors).toEqual([]);
+      expect(plan.changes.map((change) => change.kind)).toEqual(['CREATED', 'CREATED', 'CREATED', 'CREATED']);
+      const names = plan.warnings.filter((warning) => warning.column === 'Nombre').map((warning) => `${warning.rowNumber}: ${warning.message}`);
+      expect(names).toEqual([
+        '5: 1021 tiene el mismo nombre que su jefe 102; ¿es su Centro propio?',
+        '2: Ya existe «Calidad» bajo Rectoría (prefijo 102). ¿Es otra unidad? Si es así, use un nombre que las distinga.',
+        '4: La fila 3 también crea «Planeación» bajo Rectoría. ¿Es otra unidad? Si es así, use un nombre que las distinga.',
+      ]);
+    });
+
     it('el prefijo 1000 o 1 sin código interno encuentra la Rectoría existente con prefijo 1', () => {
       const snapshot: OrgChartSnapshot = {
         units: [unit('u1', 'U1', 'RECTORÍA', '1', null, OrgUnitType.Rectorate)],

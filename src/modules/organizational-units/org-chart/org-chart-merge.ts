@@ -1,4 +1,5 @@
 import { normalizeUnitPrefix } from '../../cost-centers/domain/org-chart-rules.js';
+import { existingSiblingText, unitPlace } from '../domain/unit-name.js';
 import type { OrgHistoryField } from '../../cost-centers/services/org-structure-history.service.js';
 import { orgChartExportRows } from './org-chart-export.js';
 import type { RowIssue } from './org-chart-plan.js';
@@ -43,8 +44,12 @@ import {
  * Con o sin sello:
  * - Código interno que ya no existe (unidad eliminada) → advertencia y no se crea.
  * - Archivada que el archivo dice Activo: sin sello solo se reactiva si se archivó ANTES de la fecha del archivo.
- * - Fila nueva (sin Código interno) igual a una unidad activa (mismo prefijo, o sin prefijo: mismo nombre bajo el mismo
- *   jefe) → se toma como esa unidad, con advertencia.
+ * - Fila nueva (sin Código interno) con el prefijo de una unidad activa → se toma como esa unidad, con advertencia.
+ * - Fila nueva sin prefijo con el nombre (sin tildes ni mayúsculas) de una unidad activa bajo el mismo jefe → ERROR de
+ *   fila: los nombres no son únicos (dos «Calidad» con prefijos 102 y 103 son válidas), así que no se adivina si es la
+ *   misma; la persona copia su Código interno o la distingue con prefijo o nombre. No cuenta si el mismo archivo la
+ *   renombra, la mueve, la archiva o la elimina. Dos filas nuevas así en el mismo archivo → error en la segunda. Esto
+ *   también evita el duplicado al subir dos veces un archivo con filas nuevas (sin sello o con él).
  * - La fila de ejemplo de la plantilla vieja (4 Vicerrectoría Financiera, 4010) se ignora.
  */
 
@@ -171,17 +176,24 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
   const currentByCode = new Map(exportRows.filter((row) => row.code).map((row) => [row.code ?? '', exportValues(row)]));
   const stampByCode = new Map<string, StampRow>((stamp?.rows ?? []).map((row) => [row.code, row]));
   const unchangedSinceStamp = stamp !== null && stamp.revision === structureRevision(context.units);
-  const codesInFile = new Set(
-    input.units.flatMap((row) => {
-      const existing = row.code ? findByCode(row.code) : undefined;
-      return existing ? [existing.code] : [];
-    }),
-  );
-
-  const createdNote = (unit: SnapshotUnit): string => {
+  const createdText = (unit: SnapshotUnit): string | null => {
     const origin = context.unitOrigins.get(unit.id);
-    return origin ? ` (creada el ${formatDay(origin.at)}${byWhom(origin)})` : '';
+    return origin ? `creada el ${formatDay(origin.at)}${byWhom(origin)}` : null;
   };
+  const createdNote = (unit: SnapshotUnit): string => {
+    const text = createdText(unit);
+    return text ? ` (${text})` : '';
+  };
+  const unitById = new Map(context.units.map((unit) => [unit.id, unit]));
+  const parentName = (parentId: string | null): string | null => (parentId ? (unitById.get(parentId)?.name ?? null) : null);
+  /** Primera fila de cada unidad existente en el archivo (por Código interno). */
+  const fileRowByCode = new Map<string, UnitRowInput>();
+  for (const row of input.units) {
+    const existing = row.code ? findByCode(row.code) : undefined;
+    if (existing && !fileRowByCode.has(existing.code)) {
+      fileRowByCode.set(existing.code, row);
+    }
+  }
 
   /** «Depende de» de una fila nueva contra el sistema: null raíz; undefined si no se reconoce. */
   const resolveParentId = (text: string | null): string | null | undefined => {
@@ -192,6 +204,30 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
       return (activeByPrefix.get(text) ?? activeByPrefix.get(normalizeUnitPrefix(text)) ?? activeByHead.get(text))?.id;
     }
     return findByCode(text)?.id;
+  };
+
+  /**
+   * ¿El mismo archivo deja libre el lugar de esta unidad (la renombra, la mueve, la archiva o la elimina)? Con sello,
+   * una columna que la persona no tocó conserva lo del sistema y no cuenta.
+   */
+  const leavesPlace = (unit: SnapshotUnit): boolean => {
+    const row = fileRowByCode.get(unit.code);
+    if (!row) {
+      return false;
+    }
+    const original = stampByCode.get(unit.code);
+    const touched = (column: StampColumn): boolean =>
+      !original || fingerprint(column, row[column]) !== (original.columns[column] ?? '');
+    if (row.action) {
+      return true;
+    }
+    if (row.status && touched('status') && parseStatus(row.status) === false) {
+      return true;
+    }
+    if (row.name && touched('name') && normalizeText(row.name) !== normalizeText(unit.name)) {
+      return true;
+    }
+    return Boolean(row.parent) && touched('parent') && resolveParentId(row.parent) !== unit.parentId;
   };
 
   /** Archivada que el archivo dice Activo (sin huella que diga que la persona la reactivó): ¿se reactiva? */
@@ -274,6 +310,8 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
 
   const units: UnitRowInput[] = [];
   let stamplessCodes = 0;
+  /** Filas nuevas sin prefijo ya vistas, por jefe y nombre normalizado. */
+  const newRowBySibling = new Map<string, number>();
   for (const row of input.units) {
     if (isTemplateExample(row)) {
       warn(row.rowNumber, null, 'Es la fila de ejemplo de la plantilla: se ignora');
@@ -321,20 +359,37 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
     if (row.name && row.prefix === null && row.action === null) {
       const parentId = resolveParentId(row.parent);
       const name = normalizeText(row.name);
+      // Jefe que el sistema no conoce (nuevo en el archivo): se compara por lo escrito en «Depende de».
+      const siblingKey = `${parentId === undefined ? `text:${normalizeText(row.parent ?? '')}` : `id:${parentId ?? ''}`}|${name}`;
+      const earlier = newRowBySibling.get(siblingKey);
+      if (earlier !== undefined) {
+        const place = unitPlace(parentId === undefined ? row.parent : parentName(parentId));
+        fail(
+          row.rowNumber,
+          UNIT_HEADERS.name,
+          `La fila ${earlier} ya crea «${row.name}» ${place}. Si es la misma unidad, borre esta fila; si es otra, escriba su prefijo o un nombre distinto.`,
+        );
+        continue;
+      }
       const existing =
         parentId === undefined
           ? undefined
-          : activeUnits.find((unit) => unit.parentId === parentId && normalizeText(unit.name) === name);
-      if (existing && !codesInFile.has(existing.code)) {
-        codesInFile.add(existing.code);
-        warn(
+          : activeUnits.find((unit) => unit.parentId === parentId && normalizeText(unit.name) === name && !leavesPlace(unit));
+      if (existing) {
+        const created = createdText(existing);
+        const origin = context.unitOrigins.get(existing.id);
+        // Creada después de la fecha del archivo: lo más probable es que este mismo archivo ya se haya subido.
+        const afterFile = origin && fileDate && Date.parse(origin.at) >= Date.parse(fileDate);
+        fail(
           row.rowNumber,
           UNIT_HEADERS.name,
-          `«${existing.name}» ya existe bajo el mismo jefe${createdNote(existing)}: la fila se toma como esa unidad. Si es otra, use un nombre distinto`,
+          `${existingSiblingText(existing, parentName(existing.parentId), created ? [created] : [])}. ` +
+            `Si es la misma, copie su Código interno (${existing.code}) en la fila; si es otra, escriba su prefijo o un nombre distinto.` +
+            (afterFile ? ' Se creó después de que se hizo este archivo: si ya lo subió antes, esta fila ya está aplicada.' : ''),
         );
-        units.push({ ...row, code: existing.code });
         continue;
       }
+      newRowBySibling.set(siblingKey, row.rowNumber);
     }
     units.push(row);
   }

@@ -8,6 +8,7 @@ import {
   resolveCenterUnit,
 } from '../../cost-centers/domain/org-chart-rules.js';
 import { parseUnitColor } from '../domain/unit-color.js';
+import { duplicateSiblingWarning, sameUnitName, unitPlace } from '../domain/unit-name.js';
 import {
   ORG_RELATION_TYPE_LABELS,
   ORG_UNIT_TYPE_LABELS,
@@ -782,6 +783,39 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     const own = unit.rawPrefix ?? unit.codePrefix ?? unit.code;
     const head = parent.rawPrefix ?? parent.codePrefix ?? parent.code;
     unitWarning(unit.rowNumber, UNIT_HEADERS.name, `${own} tiene el mismo nombre que su jefe ${head}; ¿es su Centro propio?`);
+  }
+
+  // Unidad nueva con el nombre de otra activa bajo el mismo jefe: solo advertencia (los nombres no son únicos). Las
+  // filas sin prefijo que repiten una existente ya son error en mergeOrgChartInput y no llegan aquí.
+  const newSeen: FinalUnit[] = [];
+  for (const unit of units.values()) {
+    if (unit.rowNumber === null || unit.existingId !== null || !isLiveUnit(unit)) {
+      continue;
+    }
+    // «Depende de» que no se reconoció (ya es error): no se sabe quiénes son sus hermanas.
+    if (unit.parentText && !isRootText(unit.parentText) && unit.parentKey === null) {
+      continue;
+    }
+    const parentName = unit.parentKey ? (units.get(unit.parentKey)?.name ?? null) : null;
+    const sibling = [...units.values()].find(
+      (other) =>
+        other.existingId !== null &&
+        other.key !== unit.key &&
+        isLiveUnit(other) &&
+        other.parentKey === unit.parentKey &&
+        sameUnitName(other.name, unit.name),
+    );
+    const earlier = newSeen.find((other) => other.parentKey === unit.parentKey && sameUnitName(other.name, unit.name));
+    newSeen.push(unit);
+    if (sibling) {
+      unitWarning(unit.rowNumber, UNIT_HEADERS.name, duplicateSiblingWarning(sibling, parentName));
+    } else if (earlier) {
+      unitWarning(
+        unit.rowNumber,
+        UNIT_HEADERS.name,
+        `La fila ${earlier.rowNumber ?? ''} también crea «${earlier.name}» ${unitPlace(parentName)}. ¿Es otra unidad? Si es así, use un nombre que las distinga.`,
+      );
+    }
   }
 
   // Ciclos.
