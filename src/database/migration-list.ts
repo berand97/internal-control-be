@@ -76,6 +76,7 @@ import { UnitHeadCostCenterCode1767226030000 } from './migrations/1767226030000-
 import { CostCenterPlacementMode1767226040000 } from './migrations/1767226040000-cost-center-placement-mode.js';
 import { OrgChartImportConfirmedBy1767226050000 } from './migrations/1767226050000-org-chart-import-confirmed-by.js';
 import { FeatureFlagNotify1767226060000 } from './migrations/1767226060000-feature-flag-notify.js';
+import { OrgUnitColor1767226070000 } from './migrations/1767226070000-org-unit-color.js';
 
 type MigrationClass = new () => MigrationInterface;
 
@@ -161,4 +162,5 @@ export const MIGRATIONS: ReadonlyArray<MigrationClass> = [
   CostCenterPlacementMode1767226040000,
   OrgChartImportConfirmedBy1767226050000,
   FeatureFlagNotify1767226060000,
+  OrgUnitColor1767226070000,
 ];
