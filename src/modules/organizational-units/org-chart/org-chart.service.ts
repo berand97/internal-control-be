@@ -77,6 +77,7 @@ const toSummary = (plan: OrgChartPlan): OrgChartSummaryDto => ({
     prefixChanged: plan.unitCounts.PREFIX_CHANGED,
     relationChanged: plan.unitCounts.RELATION_CHANGED,
     headChanged: plan.unitCounts.HEAD_CHANGED,
+    colorChanged: plan.unitCounts.COLOR_CHANGED,
     reactivated: plan.unitCounts.REACTIVATED,
     archived: plan.unitCounts.ARCHIVED,
     deleted: plan.unitCounts.DELETED,
@@ -274,7 +275,7 @@ export class OrgChartService {
     const units = (await manager.query(
       `SELECT id, code, name, unit_type AS "unitType", parent_id AS "parentId", relation_type AS "relationType",
               head_cost_center_id AS "headCostCenterId",
-              head_cost_center_code AS "headCostCenterCode", code_prefix AS "codePrefix", is_active AS "isActive"
+              head_cost_center_code AS "headCostCenterCode", code_prefix AS "codePrefix", is_active AS "isActive", color
        FROM organizational_unit ORDER BY code`,
     )) as SnapshotUnit[];
     const centers = (await manager.query(
@@ -432,9 +433,9 @@ export class OrgChartService {
     for (const op of plan.units.filter((item) => !item.existingId)) {
       const [row] = (await manager.query(
         `INSERT INTO organizational_unit (code, name, unit_type, relation_type, code_prefix, parent_id, hierarchy_level,
-           hierarchy_path, is_active)
-         VALUES ($1, $2, $3, $4, $5, NULL, 0, $6, TRUE) RETURNING id`,
-        [op.code, op.name, op.unitType, op.relationType, op.codePrefix, `/${unitPath(op.code)}`],
+           hierarchy_path, is_active, color)
+         VALUES ($1, $2, $3, $4, $5, NULL, 0, $6, TRUE, $7) RETURNING id`,
+        [op.code, op.name, op.unitType, op.relationType, op.codePrefix, `/${unitPath(op.code)}`, op.color],
       )) as Array<{ id: string }>;
       unitIds.set(op.key, row?.id ?? '');
     }
@@ -451,9 +452,10 @@ export class OrgChartService {
       }
       await manager.query(
         `UPDATE organizational_unit
-         SET name = $2, unit_type = $3, relation_type = $4, code_prefix = $5, parent_id = $6, is_active = $7, updated_at = NOW()
+         SET name = $2, unit_type = $3, relation_type = $4, code_prefix = $5, parent_id = $6, is_active = $7, color = $8,
+             updated_at = NOW()
          WHERE id = $1`,
-        [id, op.name, op.unitType, op.relationType, op.codePrefix, unitId(op.parentKey), op.isActive],
+        [id, op.name, op.unitType, op.relationType, op.codePrefix, unitId(op.parentKey), op.isActive, op.color],
       );
     }
     await this.rewriteHierarchy(manager);
@@ -571,6 +573,8 @@ export class OrgChartService {
           oldValue: previous.isActive ? 'ACTIVE' : 'ARCHIVED',
           newValue: op.isActive ? 'ACTIVE' : 'ARCHIVED',
         },
+        // null en newValue: color quitado (hereda el de su jefe).
+        { entityType: 'ORG_UNIT', entityId: id, field: 'COLOR', oldValue: previous.color ?? null, newValue: op.color },
       );
     }
     await this.history.record(manager, historyEntries, { actorId: actor.id, source: 'IMPORT', reason: IMPORT_REASON });

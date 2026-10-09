@@ -53,6 +53,8 @@ export interface ExportUnitRow {
   readonly parent: string | null;
   readonly relationLabel: string;
   readonly headCenter: string | null;
+  /** Color base propio (#rrggbb) o null. */
+  readonly color: string | null;
   readonly isActive: boolean;
   readonly code: string | null;
 }
@@ -113,6 +115,12 @@ const UNIT_COLUMNS: ReadonlyArray<ColumnSpec> = [
     note: 'El código del centro de costo que corresponde al cuadro mismo (la oficina del jefe). Debe ser un centro activo que ya exista en el sistema (los centros se administran en la pantalla Centros de costo). Ej.: Vicerrectoría Financiera → 4010; Facultad de Administración → 2510 (Decanatura). Puede no tener (Servicios Administrativos). Vacío: una fila que ya existía conserva el que tenía; una nueva cuyo Prefijo se escribió con el código de 4 dígitos de un centro toma ese centro (1510 → 1510); una nueva de un solo número toma el de ese número seguido de 010 si existe (5 → 5010). Para quitarlo escriba NINGUNO.',
   },
   {
+    header: UNIT_HEADERS.color,
+    width: 12,
+    readOnly: false,
+    note: 'Color base de la rama en el organigrama, en formato #RRGGBB (ej.: #DE9927). Sus dependencias toman tonos más suaves del mismo color. Vacío: deja el que tenga. NINGUNO: lo quita y hereda el de su jefe.',
+  },
+  {
     header: UNIT_HEADERS.status,
     width: 12,
     readOnly: false,
@@ -157,6 +165,8 @@ const INSTRUCTIONS: ReadonlyArray<string> = [
   '   con un solo número (ej.: 5) queda bajo la Rectoría. Si no llena «Centro propio», el cuadro 5 toma el centro 5010 si existe,',
   '   y un cuadro escrito con el código de un centro existente (1510) toma ese centro.',
   '   La revisión le muestra cada valor que el sistema completó.',
+  '9. Color: el color base de la rama en el organigrama, en formato #RRGGBB (ej.: #DE9927). Sus dependencias toman tonos',
+  '   más suaves del mismo color. Vacío: deja el que tenga; NINGUNO: lo quita y el cuadro hereda el color de su jefe.',
 ];
 
 const columnLetter = (index: number): string => String.fromCharCode(65 + index);
@@ -242,6 +252,7 @@ export const exportValues = (unit: ExportUnitRow): StampValues => ({
   relation: unit.relationLabel,
   headCenter: unit.headCenter,
   status: statusText(unit.isActive),
+  color: unit.color,
 });
 
 /** Fila de ejemplo (va en Instrucciones, nunca en la hoja Organigrama: subida tal cual cambiaría la unidad 4). */
@@ -253,12 +264,13 @@ export const TEMPLATE_EXAMPLE: StampValues = {
   relation: ORG_RELATION_TYPE_LABELS[OrgRelationType.Authority],
   headCenter: '4010',
   status: STATUS_ACTIVE,
+  color: null,
 };
 
 const EXAMPLE_LINES: ReadonlyArray<string> = [
   '',
   'Ejemplo de una fila (escríbala en la hoja Organigrama solo si de verdad quiere crear o cambiar ese cuadro):',
-  `   Prefijo ${TEMPLATE_EXAMPLE.prefix ?? ''} · Nombre ${TEMPLATE_EXAMPLE.name ?? ''} · Tipo ${TEMPLATE_EXAMPLE.type ?? ''} · Depende de (vacío) · Línea ${TEMPLATE_EXAMPLE.relation ?? ''} · Centro propio ${TEMPLATE_EXAMPLE.headCenter ?? ''} · Estado ${TEMPLATE_EXAMPLE.status ?? ''} · Código interno (vacío)`,
+  `   Prefijo ${TEMPLATE_EXAMPLE.prefix ?? ''} · Nombre ${TEMPLATE_EXAMPLE.name ?? ''} · Tipo ${TEMPLATE_EXAMPLE.type ?? ''} · Depende de (vacío) · Línea ${TEMPLATE_EXAMPLE.relation ?? ''} · Centro propio ${TEMPLATE_EXAMPLE.headCenter ?? ''} · Color (vacío) · Estado ${TEMPLATE_EXAMPLE.status ?? ''} · Código interno (vacío)`,
 ];
 
 export interface OrgChartWorkbookOptions {
@@ -297,6 +309,7 @@ export const buildOrgChartWorkbook = async (
           values.parent,
           values.relation,
           values.headCenter,
+          values.color,
           values.status,
           null,
           unit.code,
@@ -396,6 +409,7 @@ export const parseOrgChartWorkbook = async (content: Buffer): Promise<OrgChartIn
           parent: read(row.cells, 'parent'),
           relation: read(row.cells, 'relation'),
           headCenter: read(row.cells, 'headCenter'),
+          color: read(row.cells, 'color'),
           status: read(row.cells, 'status'),
           action: read(row.cells, 'action'),
           code: read(row.cells, 'code'),

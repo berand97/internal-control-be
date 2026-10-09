@@ -47,6 +47,7 @@ export const orgChartExportRows = (
           (unit.headCostCenterId ? centerById.get(unit.headCostCenterId)?.externalCode : undefined) ??
           unit.headCostCenterCode ??
           null,
+        color: unit.color ?? null,
         isActive: unit.isActive,
         code: unit.code,
       });

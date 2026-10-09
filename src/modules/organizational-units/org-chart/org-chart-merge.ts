@@ -4,6 +4,7 @@ import { orgChartExportRows } from './org-chart-export.js';
 import type { RowIssue } from './org-chart-plan.js';
 import {
   fingerprint,
+  LATER_STAMP_COLUMNS,
   rowValues,
   sameValue,
   STAMP_COLUMN_HEADERS,
@@ -36,6 +37,8 @@ import {
  * - tocada y base = original → se aplica;
  * - tocada, base ≠ original y archivo ≠ base → CONFLICTO (error de fila: hay que descargar de nuevo).
  * Una fila sin columnas que aplicar y sin Acción se descarta (0 cambios).
+ * Color: vacío (o un archivo sin la columna) nunca cambia nada ni choca; un sello anterior a la columna no trae su
+ * huella y el Color se aplica si dice algo distinto del sistema.
  *
  * Con o sin sello:
  * - Código interno que ya no existe (unidad eliminada) → advertencia y no se crea.
@@ -99,6 +102,7 @@ const HISTORY_FIELD: Readonly<Record<StampColumn, OrgHistoryField>> = {
   relation: 'RELATION',
   headCenter: 'HEAD_COST_CENTER',
   status: 'STATUS',
+  color: 'COLOR',
 };
 
 const WHEN = new Intl.DateTimeFormat('es-CO', {
@@ -218,9 +222,22 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
     const merged: Partial<Record<StampColumn, string | null>> = {};
     let applies = false;
     for (const column of STAMP_COLUMNS) {
-      const touched = fingerprint(column, file[column]) !== original.columns[column];
+      const originalPrint = original.columns[column] ?? '';
+      if (column === 'color' && file.color === null) {
+        merged.color = null;
+        continue;
+      }
+      if (LATER_STAMP_COLUMNS.has(column) && originalPrint === '') {
+        if (sameValue(column, file[column], current[column])) {
+          merged[column] = keepValue(column, unit);
+        } else {
+          applies = true;
+        }
+        continue;
+      }
+      const touched = fingerprint(column, file[column]) !== originalPrint;
       const equalsBase = sameValue(column, file[column], current[column]);
-      const baseChanged = !unchangedSinceStamp && fingerprint(column, current[column]) !== original.columns[column];
+      const baseChanged = !unchangedSinceStamp && fingerprint(column, current[column]) !== originalPrint;
       if (!touched || equalsBase) {
         merged[column] = keepValue(column, unit);
         continue;

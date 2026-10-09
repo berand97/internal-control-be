@@ -21,6 +21,8 @@ export interface SnapshotUnit {
   readonly headCostCenterCode: string | null;
   readonly codePrefix: string | null;
   readonly isActive: boolean;
+  /** Color base propio de la rama (#rrggbb); null si hereda el de su jefe. */
+  readonly color: string | null;
 }
 
 export interface SnapshotCenter {
@@ -59,6 +61,11 @@ export interface UnitRowInput {
   readonly parent: string | null;
   readonly relation: string | null;
   readonly headCenter: string | null;
+  /**
+   * Columna Color (opcional). Ausente (archivos sin la columna, previsualizaciones guardadas antes de ella) o vacía:
+   * no cambia el color.
+   */
+  readonly color?: string | null;
   readonly status: string | null;
   readonly action: string | null;
   readonly code: string | null;
@@ -124,6 +131,7 @@ export const UNIT_HEADERS = {
   parent: 'Depende de',
   relation: 'Línea',
   headCenter: 'Centro propio',
+  color: 'Color',
   status: 'Estado',
   action: 'Acción',
   code: 'Código interno',

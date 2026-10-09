@@ -24,6 +24,7 @@ const unit = (id: string, code: string, name: string, prefix: string | null, par
   headCostCenterCode: null,
   codePrefix: prefix,
   isActive: true,
+  color: null,
 });
 
 const center = (id: string, code: string, unitId: string | null, parentId: string | null, activeAssets = 0): SnapshotCenter => ({
@@ -696,6 +697,76 @@ describe('plan del Excel del organigrama', () => {
     });
   });
 
+  describe('columna Color', () => {
+    const colored = (): OrgChartSnapshot => {
+      const snapshot = baseSnapshot();
+      return { ...snapshot, units: snapshot.units.map((item) => (item.id === 'u4' ? { ...item, color: '#de9927' } : item)) };
+    };
+    const vf = { code: 'U4', name: 'Vicerrectoría Financiera' };
+
+    it('exporta el color y la ida y vuelta no cambia nada', async () => {
+      const input = await roundTrip(colored());
+      expect(input.units.find((row) => row.code === 'U4')?.color).toBe('#de9927');
+      expect(input.units.find((row) => row.code === 'U41')?.color).toBeNull();
+      const plan = planOrgChart(colored(), input);
+      expect(plan.errors).toEqual([]);
+      expect(plan.changes).toEqual([]);
+    });
+
+    it('vacío conserva; NINGUNO quita; #RRGGBB (o sin #) cambia y se guarda en minúsculas', () => {
+      const keep = planOrgChart(colored(), only({ units: [unitRow(2, { ...vf, color: null })] }));
+      expect(keep.changes).toEqual([]);
+      const absent = planOrgChart(colored(), only({ units: [unitRow(2, { ...vf })] }));
+      expect(absent.changes).toEqual([]);
+
+      const cleared = planOrgChart(colored(), only({ units: [unitRow(2, { ...vf, color: 'ninguno' })] }));
+      expect(cleared.errors).toEqual([]);
+      expect(cleared.changes.map((change) => [change.kind, change.detail])).toEqual([['COLOR_CHANGED', 'Color quitado']]);
+      expect(cleared.units[0]).toMatchObject({ color: null, kinds: ['COLOR_CHANGED'] });
+      expect(cleared.unitCounts.COLOR_CHANGED).toBe(1);
+
+      const changed = planOrgChart(colored(), only({ units: [unitRow(2, { ...vf, color: '29B1B2' })] }));
+      expect(changed.changes.map((change) => change.detail)).toEqual(['Color: #de9927 → #29b1b2']);
+      expect(changed.units[0]?.color).toBe('#29b1b2');
+
+      const first = planOrgChart(baseSnapshot(), only({ units: [unitRow(2, { code: 'U41', name: 'Departamento Financiero', color: '#ABCDEF' })] }));
+      expect(first.changes.map((change) => change.detail)).toEqual(['Color: (sin color) → #abcdef']);
+
+      const same = planOrgChart(colored(), only({ units: [unitRow(2, { ...vf, color: '#DE9927' })] }));
+      expect(same.changes).toEqual([]);
+    });
+
+    it('un color inválido es un error de la fila', () => {
+      const plan = planOrgChart(colored(), only({ units: [unitRow(5, { ...vf, color: 'naranja' })] }));
+      expect(plan.errors).toEqual([
+        {
+          sheet: 'Organigrama',
+          rowNumber: 5,
+          column: 'Color',
+          message: '«naranja» no es un color: use el formato #RRGGBB, por ejemplo #DE9927 (o NINGUNO para quitarlo)',
+        },
+      ]);
+      expect(plan.units).toEqual([]);
+    });
+
+    it('una unidad nueva con color lo trae; sin color queda en null', () => {
+      const plan = planOrgChart(
+        baseSnapshot(),
+        only({
+          units: [
+            unitRow(2, { prefix: '44', name: 'Tesorería', type: 'Departamento', color: '#29b1b2' }),
+            unitRow(3, { prefix: '45', name: 'Compras', type: 'Departamento' }),
+          ],
+        }),
+      );
+      expect(plan.errors).toEqual([]);
+      expect(plan.units.map((op) => [op.name, op.color])).toEqual([
+        ['Tesorería', '#29b1b2'],
+        ['Compras', null],
+      ]);
+    });
+  });
+
   it('cada encabezado de la hoja Organigrama tiene un comentario que lo explica', async () => {
     const units = orgChartExportRows(baseSnapshot().units, baseSnapshot().centers);
     const workbook = new ExcelJS.Workbook();
@@ -706,7 +777,7 @@ describe('plan del Excel del organigrama', () => {
       const header = workbook.getWorksheet(name)?.getRow(1);
       const cells: Array<[string, string]> = [];
       header?.eachCell((cell) => cells.push([String(cell.value), noteText(cell.note).trim()]));
-      expect(cells).toHaveLength(9);
+      expect(cells).toHaveLength(10);
       for (const [title, note] of cells) {
         expect(note.length, `${name} · ${title}`).toBeGreaterThan(20);
       }

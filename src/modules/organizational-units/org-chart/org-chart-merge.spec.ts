@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import type { OrgHistoryField } from '../../cost-centers/services/org-structure-history.service.js';
 import { OrgRelationType, OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { orgChartExportRows } from './org-chart-export.js';
@@ -25,6 +26,7 @@ const unit = (
   headCostCenterCode: null,
   codePrefix: prefix,
   isActive: true,
+  color: null,
 });
 
 const center = (id: string, code: string, unitId: string): SnapshotCenter => ({
@@ -60,6 +62,35 @@ const download = async (units: ReadonlyArray<SnapshotUnit>, at = DOWNLOADED_AT):
       revision: structureRevision(units),
     }),
   );
+
+/**
+ * Descarga de antes de la columna Color: se le quita la columna a la hoja Organigrama y la huella del Color al sello
+ * (última columna de la hoja «_sello»), como eran los archivos viejos.
+ */
+const downloadWithoutColor = async (units: ReadonlyArray<SnapshotUnit>): Promise<OrgChartInput> => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(
+    (await buildOrgChartWorkbook(orgChartExportRows(units, centers), {
+      kind: 'EXPORT',
+      generatedAt: DOWNLOADED_AT,
+      revision: structureRevision(units),
+    })) as unknown as ArrayBuffer,
+  );
+  const sheet = workbook.getWorksheet('Organigrama');
+  const header = sheet?.getRow(1);
+  let colorColumn = 0;
+  header?.eachCell((cell, column) => {
+    if (cell.value === 'Color') {
+      colorColumn = column;
+    }
+  });
+  sheet?.spliceColumns(colorColumn, 1);
+  const stampSheet = workbook.getWorksheet('_sello');
+  stampSheet?.getColumn(9).eachCell((cell) => {
+    cell.value = null;
+  });
+  return parseOrgChartWorkbook(Buffer.from(await workbook.xlsx.writeBuffer()));
+};
 
 const edit = (input: OrgChartInput, code: string, values: Partial<UnitRowInput>): OrgChartInput => ({
   ...input,
@@ -309,6 +340,81 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     const { merge, warnings } = run(baseUnits(), input, { now: new Date('2026-10-08T13:00:00.000Z') });
     expect(merge.fileAgeDays).toBe(18);
     expect(warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('Este archivo se descargó hace 18 días'));
+  });
+
+  describe('columna Color', () => {
+    const coloredUnits = (): SnapshotUnit[] => withUnit(baseUnits(), 'u4', { color: '#de9927' });
+
+    it('dos personas cambian el Color de la misma unidad: conflicto en la columna Color', async () => {
+      const units = coloredUnits();
+      const second = edit(await download(units), 'U4', { color: '#111111' });
+      const now = withUnit(units, 'u4', { color: '#29b1b2' });
+      const lastChanges = changes([['u4', 'COLOR', { at: AFTER, byName: 'Ana Pérez' }]]);
+      const { merge, plan, errors } = run(now, second, { lastChanges });
+      expect(merge.conflicts).toEqual([
+        {
+          rowNumber: expect.any(Number),
+          unitName: 'Vicerrectoría Financiera',
+          column: 'Color',
+          fileValue: '#111111',
+          currentValue: '#29b1b2',
+          changedAt: AFTER,
+          changedBy: 'Ana Pérez',
+        },
+      ]);
+      expect(errors[0]?.column).toBe('Color');
+      expect(plan.changes).toEqual([]);
+    });
+
+    it('Color cambiado por la persona sin cambio ajeno: se aplica; si otro cambió el color, el archivo sin tocar lo conserva', async () => {
+      const units = coloredUnits();
+      const input = edit(await download(units), 'U4', { color: '#29B1B2' });
+      expect(run(units, input).plan.changes.map((change) => change.detail)).toEqual(['Color: #de9927 → #29b1b2']);
+      const untouched = await download(units);
+      const now = withUnit(units, 'u4', { color: '#123456' });
+      const { plan, merge } = run(now, untouched);
+      expect(plan.changes).toEqual([]);
+      expect(merge.conflicts).toEqual([]);
+    });
+
+    it('Color vaciado en el archivo: no cambia ni choca aunque otro haya cambiado el color', async () => {
+      const units = coloredUnits();
+      const input = edit(await download(units), 'U4', { color: null });
+      const now = withUnit(units, 'u4', { color: '#29b1b2' });
+      const { plan, merge, errors } = run(now, input);
+      expect(errors).toEqual([]);
+      expect(merge.conflicts).toEqual([]);
+      expect(plan.changes).toEqual([]);
+    });
+
+    it('archivo viejo sin la columna Color: el sello sigue valiendo, nada cambia de color ni hay conflicto', async () => {
+      const units = coloredUnits();
+      const input = await downloadWithoutColor(units);
+      expect(input.invalidStamp).toBe(false);
+      expect(input.stamp?.rows[0]?.columns.color).toBe('');
+      expect(input.units.every((row) => row.color === null)).toBe(true);
+      const now = withUnit(units, 'u41', { color: '#29b1b2' });
+      const renamed = edit(input, 'U4', { name: 'Vicerrectoría Administrativa y Financiera' });
+      const { plan, merge, errors } = run(now, renamed);
+      expect(errors).toEqual([]);
+      expect(merge.conflicts).toEqual([]);
+      expect(plan.changes.map((change) => change.kind)).toEqual(['RENAMED']);
+      expect(plan.units[0]?.color).toBe('#de9927');
+      // Previsualización guardada antes de la columna: filas sin la propiedad color.
+      const stored: OrgChartInput = {
+        ...renamed,
+        units: renamed.units.map(({ color: _color, ...row }) => row),
+      };
+      expect(run(now, stored).plan.changes.map((change) => change.kind)).toEqual(['RENAMED']);
+    });
+
+    it('sello viejo (sin huella de Color) con un Color escrito a mano: se aplica si difiere del sistema', async () => {
+      const units = coloredUnits();
+      const input = edit(await downloadWithoutColor(units), 'U41', { color: '#29b1b2' });
+      const { plan, errors } = run(units, input);
+      expect(errors).toEqual([]);
+      expect(plan.changes.map((change) => [change.name, change.detail])).toEqual([['Contabilidad', 'Color: (sin color) → #29b1b2']]);
+    });
   });
 
   it('una acción ELIMINAR en una fila sin otros cambios sí se planea', async () => {

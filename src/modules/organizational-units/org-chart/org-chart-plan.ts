@@ -7,6 +7,7 @@ import {
   resolveCenterParent,
   resolveCenterUnit,
 } from '../../cost-centers/domain/org-chart-rules.js';
+import { parseUnitColor } from '../domain/unit-color.js';
 import {
   ORG_RELATION_TYPE_LABELS,
   ORG_UNIT_TYPE_LABELS,
@@ -43,8 +44,8 @@ import {
  *   por «Código»; si no, es nuevo.
  * - Prefijo con el código de Contabilidad: 4 dígitos con ceros al final se toman sin ellos (1200 → 12); «Depende de»
  *   acepta además el código del centro propio del jefe (4010 → la Vicerrectoría Financiera).
- * - Columnas vacías de una unidad: la existente conserva su valor (Prefijo, Depende de, Línea, Centro propio, Estado);
- *   para quitarlo a propósito se escribe «RAÍZ» o «NINGUNO». La nueva deduce lo que puede: el padre por el prefijo
+ * - Columnas vacías de una unidad: la existente conserva su valor (Prefijo, Depende de, Línea, Centro propio, Color,
+ *   Estado); para quitarlo a propósito se escribe «RAÍZ» o «NINGUNO» (sin Color, la unidad hereda el de su jefe). La nueva deduce lo que puede: el padre por el prefijo
  *   (43 → 4) o la Rectoría (prefijo de un dígito, si hay una sola; una Rectoría nunca se ubica sola), Línea Autoridad
  *   y el centro propio: el Prefijo de 4 dígitos si es un centro (1510) o, con prefijo X, X010 si existe.
  * - Centros: el Excel del organigrama no los trae (unitsOnly): Centro propio y Depende de se validan y deducen contra
@@ -63,6 +64,7 @@ export type UnitChangeKind =
   | 'PREFIX_CHANGED'
   | 'RELATION_CHANGED'
   | 'HEAD_CHANGED'
+  | 'COLOR_CHANGED'
   | 'REACTIVATED'
   | 'ARCHIVED'
   | 'DELETED';
@@ -85,6 +87,7 @@ export const UNIT_CHANGE_KINDS: ReadonlyArray<UnitChangeKind> = [
   'PREFIX_CHANGED',
   'RELATION_CHANGED',
   'HEAD_CHANGED',
+  'COLOR_CHANGED',
   'REACTIVATED',
   'ARCHIVED',
   'DELETED',
@@ -122,6 +125,8 @@ export interface UnitOp {
   readonly headCenterKey: string | null;
   /** Código del centro propio (amarrado o pendiente: headCenterKey null). */
   readonly headCenterCode: string | null;
+  /** Color base propio (#rrggbb) con el que queda; null sin color. */
+  readonly color: string | null;
   readonly isActive: boolean;
   readonly removal: 'DELETE' | 'ARCHIVE' | null;
   readonly kinds: ReadonlyArray<UnitChangeKind>;
@@ -188,6 +193,7 @@ interface FinalUnit {
   parentKey: string | null;
   headCenterKey: string | null;
   headCenterCode: string | null;
+  color: string | null;
   isActive: boolean;
   removal: 'DELETE' | 'ARCHIVE' | null;
   parentText: string | null;
@@ -210,14 +216,14 @@ interface FinalCenter {
 }
 
 const isBlankUnitRow = (row: UnitRowInput): boolean =>
-  [row.prefix, row.name, row.type, row.parent, row.relation, row.headCenter, row.status, row.action, row.code].every(
+  [row.prefix, row.name, row.type, row.parent, row.relation, row.headCenter, row.color ?? null, row.status, row.action, row.code].every(
     (value) => value === null,
   );
 
 /** «RAÍZ» en Depende de: la unidad queda en la raíz a propósito. */
 const isRootText = (text: string): boolean => normalizeText(text) === 'raiz';
 
-/** «NINGUNO» en Centro propio: se le quita a propósito. */
+/** «NINGUNO» en Prefijo, Centro propio o Color: se le quita a propósito. */
 const isNoneText = (text: string): boolean => ['ninguno', 'ninguna'].includes(normalizeText(text));
 
 const isBlankCenterRow = (row: CenterRowInput): boolean =>
@@ -286,6 +292,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         parentKey: unit.parentId,
         headCenterKey: unit.headCostCenterId,
         headCenterCode: unit.headCostCenterCode,
+        color: unit.color ?? null,
         isActive: unit.isActive,
         removal: null,
         parentText: null,
@@ -349,6 +356,18 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       const relation = row.relation ? parseRelation(row.relation) : undefined;
       if (row.relation && !relation) {
         unitError(at, UNIT_HEADERS.relation, `Línea desconocida «${row.relation ?? ''}»: Autoridad, Asesoría o Coordinación`);
+        valid = false;
+      }
+      // Vacío (o sin la columna): conserva el color; NINGUNO lo quita (hereda el de su jefe).
+      const colorText = row.color ?? null;
+      const colorRemoved = colorText !== null && isNoneText(colorText);
+      const color = colorText && !colorRemoved ? parseUnitColor(colorText) : undefined;
+      if (colorText && !colorRemoved && !color) {
+        unitError(
+          at,
+          UNIT_HEADERS.color,
+          `«${colorText}» no es un color: use el formato #RRGGBB, por ejemplo #DE9927 (o NINGUNO para quitarlo)`,
+        );
         valid = false;
       }
       const status = row.status ? parseStatus(row.status) : undefined;
@@ -431,6 +450,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         parentKey: current?.parentKey ?? null,
         headCenterKey: current?.headCenterKey ?? null,
         headCenterCode: current?.headCenterCode ?? null,
+        color: colorRemoved ? null : (color ?? current?.color ?? null),
         isActive: action === 'ARCHIVE' ? false : (status ?? current?.isActive ?? true),
         removal: action ?? null,
         parentText: row.parent,
@@ -1001,6 +1021,10 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
           `Centro propio: ${headLabel(before.headCostCenterId, before.headCostCenterCode)} → ${headLabel(unit.headCenterKey, unit.headCenterCode)}`,
         );
       }
+      if ((before.color ?? null) !== unit.color) {
+        kinds.push('COLOR_CHANGED');
+        details.push(unit.color ? `Color: ${before.color ?? '(sin color)'} → ${unit.color}` : 'Color quitado');
+      }
       if (!before.isActive && unit.isActive) {
         kinds.push('REACTIVATED');
         details.push('Se reactiva');
@@ -1028,6 +1052,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       parentKey: unit.parentKey,
       headCenterKey: unit.headCenterKey,
       headCenterCode: unit.headCenterCode,
+      color: unit.color,
       isActive: unit.isActive,
       removal: unit.removal,
       kinds,

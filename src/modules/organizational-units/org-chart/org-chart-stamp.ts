@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type ExcelJS from 'exceljs';
 import type { RawSheet } from '../../staging/excel/read-workbook.js';
+import { parseUnitColor } from '../domain/unit-color.js';
 import {
   cellText,
   normalizeText,
@@ -25,15 +26,27 @@ export const STAMP_FORMAT_VERSION = 1;
 
 export type StampKind = 'EXPORT' | 'TEMPLATE';
 
-/** Columnas editables con huella (Acción no: siempre sale vacía). */
-export const STAMP_COLUMNS = ['prefix', 'name', 'type', 'parent', 'relation', 'headCenter', 'status'] as const;
+/**
+ * Columnas editables con huella (Acción no: siempre sale vacía). Van en este orden en la hoja «_sello»: una columna
+ * nueva se agrega al final.
+ */
+export const STAMP_COLUMNS = ['prefix', 'name', 'type', 'parent', 'relation', 'headCenter', 'status', 'color'] as const;
 export type StampColumn = (typeof STAMP_COLUMNS)[number];
+
+/**
+ * Columnas que los sellos viejos no traen (se agregaron después): sin huella ('') la columna se trata como en un archivo
+ * sin sello (se aplica si dice algo distinto del sistema; vacía no cambia nada).
+ */
+export const LATER_STAMP_COLUMNS: ReadonlySet<StampColumn> = new Set<StampColumn>(['color']);
 
 export type StampValues = Readonly<Record<StampColumn, string | null>>;
 
 export interface StampRow {
   readonly code: string;
-  /** Huella de cada columna con el valor que traía el archivo al descargarlo. */
+  /**
+   * Huella de cada columna con el valor que traía el archivo al descargarlo. '' (o ausente, en previsualizaciones
+   * guardadas antes) en una columna de LATER_STAMP_COLUMNS: el sello es anterior a esa columna.
+   */
   readonly columns: Readonly<Record<StampColumn, string>>;
 }
 
@@ -55,11 +68,13 @@ export const STAMP_COLUMN_HEADERS: Readonly<Record<StampColumn, string>> = {
   relation: UNIT_HEADERS.relation,
   headCenter: UNIT_HEADERS.headCenter,
   status: UNIT_HEADERS.status,
+  color: UNIT_HEADERS.color,
 };
 
 /**
  * Valor comparable de una celda: el Nombre sin espacios al borde (distingue mayúsculas: renombrar «contabilidad» a
- * «Contabilidad» es un cambio); el resto sin tildes, minúsculas y con espacios compactados (como se interpretan).
+ * «Contabilidad» es un cambio); el Color como se guarda (#DE9927, DE9927 y #de9927 son el mismo); el resto sin tildes,
+ * minúsculas y con espacios compactados (como se interpretan).
  */
 export const comparableValue = (column: StampColumn, text: string | null | undefined): string => {
   if (text === null || text === undefined) {
@@ -69,6 +84,9 @@ export const comparableValue = (column: StampColumn, text: string | null | undef
     return String(text).trim();
   }
   const compact = cellText(text);
+  if (column === 'color' && compact) {
+    return parseUnitColor(compact) ?? normalizeText(compact);
+  }
   return compact ? normalizeText(compact) : '';
 };
 
@@ -86,6 +104,7 @@ export const rowValues = (row: UnitRowInput): StampValues => ({
   relation: row.relation,
   headCenter: row.headCenter,
   status: row.status,
+  color: row.color ?? null,
 });
 
 export const statusText = (isActive: boolean): string => (isActive ? STATUS_ACTIVE : STATUS_ARCHIVED);
@@ -116,6 +135,7 @@ export const structureRevision = (units: ReadonlyArray<SnapshotUnit>): string =>
             unit.headCostCenterCode,
             unit.codePrefix,
             unit.isActive,
+            unit.color ?? null,
           ]),
       ),
     )
@@ -202,7 +222,12 @@ export const readStampSheet = (sheets: ReadonlyArray<RawSheet>): StampReading =>
     const columns = Object.fromEntries(
       STAMP_COLUMNS.map((column, index) => [column, text(row.cells[letter(index + 1)]) ?? '']),
     ) as Record<StampColumn, string>;
-    if (STAMP_COLUMNS.some((column) => !/^[0-9a-f]{16}$/.test(columns[column]))) {
+    if (
+      STAMP_COLUMNS.some(
+        (column) =>
+          !/^[0-9a-f]{16}$/.test(columns[column]) && !(LATER_STAMP_COLUMNS.has(column) && columns[column] === ''),
+      )
+    ) {
       return { status: 'INVALID' };
     }
     rows.push({ code, columns });

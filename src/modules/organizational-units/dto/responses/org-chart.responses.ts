@@ -10,6 +10,7 @@ export const ORG_CHART_UNIT_CHANGE_KINDS = [
   'PREFIX_CHANGED',
   'RELATION_CHANGED',
   'HEAD_CHANGED',
+  'COLOR_CHANGED',
   'REACTIVATED',
   'ARCHIVED',
   'DELETED',
@@ -41,6 +42,8 @@ export class OrgChartUnitCountsDto {
   readonly relationChanged!: number;
   @ApiProperty({ description: 'Unidades que cambian de centro propio' })
   readonly headChanged!: number;
+  @ApiProperty({ description: 'Unidades que cambian o pierden su color base (columna Color)' })
+  readonly colorChanged!: number;
   @ApiProperty({ description: 'Unidades reactivadas' })
   readonly reactivated!: number;
   @ApiProperty({ description: 'Unidades a archivar (incluye las marcadas ELIMINAR que tienen historia)' })
@@ -127,7 +130,7 @@ export class OrgChartConflictDto {
   @ApiProperty({ description: 'Nombre actual de la unidad' })
   readonly unitName!: string;
 
-  @ApiProperty({ description: 'Encabezado de la columna (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Estado)' })
+  @ApiProperty({ description: 'Encabezado de la columna (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Color, Estado)' })
   readonly column!: string;
 
   @ApiProperty({ type: 'string', nullable: true, description: 'Lo que dice el archivo' })
