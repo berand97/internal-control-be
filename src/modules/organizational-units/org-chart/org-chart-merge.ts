@@ -311,7 +311,7 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
   const units: UnitRowInput[] = [];
   let stamplessCodes = 0;
   /** Filas nuevas sin prefijo ya vistas, por jefe y nombre normalizado. */
-  const newRowBySibling = new Map<string, number>();
+  const newRowBySibling = new Map<string, { readonly rowNumber: number; readonly name: string }>();
   for (const row of input.units) {
     if (isTemplateExample(row)) {
       warn(row.rowNumber, null, 'Es la fila de ejemplo de la plantilla: se ignora');
@@ -367,7 +367,7 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
         fail(
           row.rowNumber,
           UNIT_HEADERS.name,
-          `La fila ${earlier} ya crea «${row.name}» ${place}. Si es la misma unidad, borre esta fila; si es otra, escriba su prefijo o un nombre distinto.`,
+          `La fila ${earlier.rowNumber} ya crea «${earlier.name}» ${place}. Si es la misma unidad, borre esta fila; si es otra, escriba su prefijo o un nombre distinto.`,
         );
         continue;
       }
@@ -389,7 +389,7 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
         );
         continue;
       }
-      newRowBySibling.set(siblingKey, row.rowNumber);
+      newRowBySibling.set(siblingKey, { rowNumber: row.rowNumber, name: row.name });
     }
     units.push(row);
   }

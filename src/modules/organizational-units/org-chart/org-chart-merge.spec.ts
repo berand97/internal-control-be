@@ -366,7 +366,7 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
         sheet: 'Organigrama',
         rowNumber: 3,
         column: 'Nombre',
-        message: 'La fila 2 ya crea «calidad» bajo Vicerrectoría Financiera. Si es la misma unidad, borre esta fila; si es otra, escriba su prefijo o un nombre distinto.',
+        message: 'La fila 2 ya crea «Calidad» bajo Vicerrectoría Financiera. Si es la misma unidad, borre esta fila; si es otra, escriba su prefijo o un nombre distinto.',
       },
     ]);
     expect(twice.plan.changes.map((change) => change.kind)).toEqual(['CREATED', 'CREATED']);
