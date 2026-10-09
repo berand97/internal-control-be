@@ -704,4 +704,125 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expect(await colorOf(ids['u61'])).toBe('#29b1b2');
     });
   });
+
+  describe('unidades con el mismo nombre', () => {
+    const SAME = '¿Es otra unidad? Si es así, use un nombre que las distinga.';
+    const create = (body: Record<string, unknown>) => http().post('/api/v1/organizational-units').set(auth('admin')).send(body);
+
+    /** Archivo sin sello: solo el encabezado de un archivo exportado y las filas dadas. */
+    const stamplessFile = async (rows: ReadonlyArray<ReadonlyArray<string | null>>): Promise<Buffer> => {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load((await exportFile()) as unknown as ArrayBuffer);
+      const stamp = workbook.getWorksheet('_sello');
+      if (stamp) {
+        workbook.removeWorksheet(stamp.id);
+      }
+      const sheet = workbook.getWorksheet('Organigrama');
+      if (!sheet) {
+        throw new Error('falta la hoja');
+      }
+      sheet.spliceRows(2, sheet.rowCount - 1);
+      rows.forEach((values, index) => {
+        sheet.getRow(index + 2).values = [...values];
+      });
+      return Buffer.from(await workbook.xlsx.writeBuffer());
+    };
+
+    it('POST/PATCH: el nombre de una hermana activa (sin tildes ni mayúsculas) es solo una advertencia', async () => {
+      // Jefe sin prefijo (en el Excel se nombra por su Código interno) y prefijos 97x: no tocan centros de otras pruebas.
+      const rectorate = await create({ code: 'IT_OC_DIR', name: 'Dirección Excel', type: 'DEPARTMENT' });
+      expect(rectorate.status, JSON.stringify(rectorate.body)).toBe(201);
+      ids['dir'] = rectorate.body.data.id as string;
+      const first = await create({ code: 'IT_OC_CAL_971', name: 'Calidad', type: 'OFFICE', parentId: ids['dir'], codePrefix: '971' });
+      expect(first.status, JSON.stringify(first.body)).toBe(201);
+      expect(first.body.data.warnings).toEqual([]);
+
+      const second = await create({ code: 'IT_OC_CAL_972', name: '  CALIDÁD ', type: 'OFFICE', parentId: ids['dir'], codePrefix: '972' });
+      expect(second.status, JSON.stringify(second.body)).toBe(201);
+      expectConforms('post', '/api/v1/organizational-units', 201, second.body);
+      expect(second.body.data.warnings).toEqual([`Ya existe «Calidad» bajo Dirección Excel (prefijo 971). ${SAME}`]);
+      ids['u33'] = second.body.data.id as string;
+      expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM organizational_unit WHERE parent_id = $1', [ids['dir']])).toBe(2);
+
+      // Editar otra cosa no repite el aviso; renombrar a donde hay otra igual, sí.
+      const recolored = await http().patch(`/api/v1/organizational-units/${ids['u33']}`).set(auth('admin')).send({ color: '#29B1B2' });
+      expect(recolored.status).toBe(200);
+      expect(recolored.body.data.warnings).toEqual([]);
+      const planning = await create({ code: 'IT_OC_PLA_973', name: 'Planeación', type: 'OFFICE', parentId: ids['dir'], codePrefix: '973' });
+      expect(planning.body.data.warnings).toEqual([]);
+      const planningId = planning.body.data.id as string;
+      const renamed = await http().patch(`/api/v1/organizational-units/${planningId}`).set(auth('admin')).send({ name: 'calidad' });
+      expect(renamed.status).toBe(200);
+      expectConforms('patch', '/api/v1/organizational-units/{id}', 200, renamed.body);
+      expect(renamed.body.data.warnings).toEqual([`Ya existe «Calidad» bajo Dirección Excel (prefijo 971). ${SAME}`]);
+      const back = await http().patch(`/api/v1/organizational-units/${planningId}`).set(auth('admin')).send({ name: 'Planeación' });
+      expect(back.body.data.warnings).toEqual([]);
+    });
+
+    it('Excel: fila nueva sin prefijo con el nombre de una hermana es error de fila; con prefijo nuevo, advertencia', async () => {
+      const file = await editExport(await exportFile(), (sheet) => {
+        sheet.getRow(sheet.rowCount + 1).values = ['', 'calidad', 'Oficina', 'IT_OC_DIR'];
+        sheet.getRow(sheet.rowCount + 1).values = ['974', 'Calidad', 'Oficina', 'IT_OC_DIR'];
+      });
+      const previewed = await preview(file);
+      expect(previewed.status, JSON.stringify(previewed.body)).toBe(201);
+      expectConforms('post', '/api/v1/organizational-units/import/preview', 201, previewed.body);
+      const data = previewed.body.data;
+      expect(data.canConfirm).toBe(false);
+      expect(data.errors).toEqual([
+        expect.objectContaining({
+          column: 'Nombre',
+          message: expect.stringMatching(
+            /^Ya existe «Calidad» bajo Dirección Excel \(prefijo 971, creada el \d{2}\/\d{2}\/\d{4}[^)]*\)\. Si es la misma, copie su Código interno \(IT_OC_CAL_971\) en la fila; si es otra, escriba su prefijo o un nombre distinto\./,
+          ),
+        }),
+      ]);
+      expect(data.warnings).toContainEqual(
+        expect.objectContaining({ column: 'Nombre', message: `Ya existe «Calidad» bajo Dirección Excel (prefijo 971). ${SAME}` }),
+      );
+      expect(data.changes).toEqual([expect.objectContaining({ kind: 'CREATED', code: '974' })]);
+      expect((await confirm(data.previewId as string)).status).toBe(422);
+    });
+
+    it('Excel sin sello subido dos veces con una fila nueva sin prefijo: la segunda vez es error, no duplica', async () => {
+      const file = await stamplessFile([[null, 'Oficina Gemela', 'Oficina', 'IT_OC_DIR']]);
+      const first = await preview(file);
+      expect(first.status, JSON.stringify(first.body)).toBe(201);
+      expect(first.body.data.errors).toEqual([]);
+      expect(first.body.data.summary.units.created).toBe(1);
+      expect((await confirm(first.body.data.previewId as string)).status).toBe(201);
+
+      const again = await preview(file);
+      expect(again.status).toBe(201);
+      expectConforms('post', '/api/v1/organizational-units/import/preview', 201, again.body);
+      expect(again.body.data).toMatchObject({ canConfirm: false, fileAppliedBefore: { at: expect.any(String) } });
+      expect(again.body.data.warnings[0]).toMatchObject({ rowNumber: 1, message: expect.stringMatching(/^Este archivo ya se aplicó el /) });
+      expect(again.body.data.errors).toEqual([
+        expect.objectContaining({
+          rowNumber: 2,
+          column: 'Nombre',
+          message: expect.stringContaining('Ya existe «Oficina Gemela» bajo Dirección Excel (creada el '),
+        }),
+      ]);
+      expect(again.body.data.summary.totalChanges).toBe(0);
+      expect(await scalar<number>(dataSource, "SELECT count(*)::int FROM organizational_unit WHERE name = 'Oficina Gemela'")).toBe(1);
+
+      // Dos filas nuevas iguales en el mismo archivo: error en la segunda.
+      const doubled = await preview(
+        await stamplessFile([
+          [null, 'Oficina Nueva Doble', 'Oficina', 'IT_OC_DIR'],
+          [null, 'OFICINA NUEVA DOBLE', 'Oficina', 'IT_OC_DIR'],
+        ]),
+      );
+      expect(doubled.body.data.errors).toEqual([
+        {
+          sheet: 'Organigrama',
+          rowNumber: 3,
+          column: 'Nombre',
+          message:
+            'La fila 2 ya crea «Oficina Nueva Doble» bajo Dirección Excel. Si es la misma unidad, borre esta fila; si es otra, escriba su prefijo o un nombre distinto.',
+        },
+      ]);
+    });
+  });
 });
