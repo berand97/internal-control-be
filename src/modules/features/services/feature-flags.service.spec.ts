@@ -89,7 +89,7 @@ const createService = (
   };
   const auditLogs = { record: vi.fn().mockResolvedValue(undefined) };
   const service = new FeatureFlagsService(table as never, config as never, listener as never, auditLogs as never);
-  return { service, save: table.save, table, listener, handlers, unlisten, auditLogs };
+  return { service, table, listener, handlers, unlisten, auditLogs };
 };
 
 const flush = async (): Promise<void> => {
@@ -100,12 +100,10 @@ const flush = async (): Promise<void> => {
 
 describe('FeatureFlagsService', () => {
   let service: FeatureFlagsService;
-  let save: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     const created = createService();
     service = created.service;
-    save = created.save;
     await service.onModuleInit();
   });
 
