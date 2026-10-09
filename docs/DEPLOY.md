@@ -101,7 +101,10 @@ cada una; es preferible que el despliegue falle de inmediato y se vea en Dokploy
 | `DATABASE_LOGGING` | No | `false` | `false` | `true` registra el SQL (ruidoso; puede incluir datos personales). |
 | `DOCUMENT_NUMBERING_POLICY` | No | `continue` | `continue` | `continue` \| `restart`; otro valor impide arrancar. |
 | `SIGNATURE_PROVIDER` | No | `internal` | `internal` | `internal` \| `stub`. **Nunca `stub` en producción** (solo desarrollo). |
-| `FEATURE_CIRCUIT_THRESHOLD` | No | `5` | `5` | |
+| `FEATURE_CIRCUIT_THRESHOLD` | No | `5` | `5` | Errores internos (5xx) de un módulo dentro de la ventana que lo apagan (motivo `CIRCUIT`). Entero 1–1000. Ver §12. |
+| `FEATURE_CIRCUIT_WINDOW_SECONDS` | No | `120` | `120` | Ventana deslizante en la que se cuentan esos errores. Entero 1–86400. |
+| `FEATURE_CIRCUIT_COOLDOWN_SECONDS` | No | `300` | `300` | Espera con el circuito abierto antes de dejar pasar una petición de prueba. Entero 1–86400. |
+| `FEATURE_FLAGS_RELOAD_SECONDS` | No | `30` | `30` | Relectura completa de `feature_flag` además del NOTIFY del trigger. `0` = solo NOTIFY. Entero 0–3600. |
 | `FEATURE_<CODIGO>` | No | — | `FEATURE_LOANS=false` | Apaga un módulo (guiones → guiones bajos). Los módulos core no se apagan. |
 | `STORAGE_S3_*`, `STORAGE_GOOGLE_*`, `STORAGE_ONEDRIVE_*` | No | vacíos | | Valores iniciales si se usa otro driver; ver nota de almacenamiento. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | vacío | `https://observe.ejemplo/api/default` | Sin endpoint **y** `OTEL_EXPORTER_OTLP_AUTH` no se exporta telemetría. |
@@ -148,7 +151,9 @@ Los secretos de almacenamiento (`s3_secret_key`, `google_client_secret`, `google
   `node ./node_modules/typeorm/cli.js migration:run -d ./dist/database/data-source.js` y
   luego la aplicación. Las migraciones ya aplicadas no se repiten.
 - `false`: no migra. Úselo si prefiere aplicar migraciones a mano (mismo comando con
-  `docker exec` en el contenedor) o si necesita arrancar una versión sin tocar el esquema.
+  `docker exec` en el contenedor). Ojo: con `NODE_ENV=production` el backend **se niega a
+  arrancar** si a la base le faltan migraciones del código (lista los nombres en el log);
+  fuera de producción solo avisa (`Faltan N migraciones: corra pnpm db:migrate`).
 - Las migraciones corren **antes** de validar el resto de la configuración de la app: si
   falta, por ejemplo, `SIGNATURE_VERIFY_URL` fuera de compose, las migraciones se aplican y
   luego la app se niega a arrancar. Con compose esto no ocurre porque `docker compose` falla
@@ -700,3 +705,22 @@ límite de peticiones; `POST /events/ticket` sí, por usuario (`THROTTLE_USER_LI
 un ticket nuevo y su `Last-Event-ID`: lo creado durante el reinicio se repone (hasta 100 por usuario).
 La migración `1767225950000` agrega `notification.event_seq` (id de evento) y la tabla
 `event_stream_ticket`; debe estar aplicada antes de abrir streams.
+
+## 12. Módulos (feature flags) y circuito
+
+- **La base es la fuente de verdad.** `feature_flag` guarda el estado de cada módulo; cada instancia lo tiene en
+  memoria como caché viva. Un trigger (`feature_flag_notify`, migración `1767226060000`) hace
+  `pg_notify('feature_flags', <código>)` en cada INSERT/UPDATE/DELETE y el proceso HTTP lo escucha por la misma
+  conexión LISTEN de los eventos (`application_name = control-interno-events`). Además relee toda la tabla cada
+  `FEATURE_FLAGS_RELOAD_SECONDS`. Un cambio hecho a mano por SQL se ve en todas las instancias sin reiniciar.
+- **Circuito que se recupera solo.** `FEATURE_CIRCUIT_THRESHOLD` errores internos dentro de
+  `FEATURE_CIRCUIT_WINDOW_SECONDS` apagan el módulo con `disabled_reason = 'CIRCUIT'` y `disabled_at`. Pasada la espera
+  (`FEATURE_CIRCUIT_COOLDOWN_SECONDS` desde `disabled_at`, sobrevive reinicios) el módulo vuelve a mostrarse y se deja
+  pasar **una** petición de prueba: si responde bien se reactiva (auditoría `FEATURE_RECOVERED`); si falla, la
+  espera vuelve a empezar. La apertura se audita como `FEATURE_CIRCUIT_OPEN` (`entity_type = 'FEATURE'`, sin
+  actor). `GET /features` informa `retryAt` mientras espera.
+- **Solo `CIRCUIT` se recupera solo.** Un módulo apagado a mano (`MANUAL`, `PATCH /features/:code`) o por entorno
+  (`FEATURE_<CODIGO>=false`) sigue apagado hasta que alguien lo encienda.
+- **Reactivar a mano por SQL** (p. ej. tras corregir la causa antes de que venza la espera):
+  `UPDATE feature_flag SET enabled = true, disabled_reason = NULL, disabled_at = NULL, updated_at = now() WHERE code = '<código>';`
+  — se aplica al instante en todas las instancias.

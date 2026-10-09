@@ -28,7 +28,10 @@ export class FeaturesController {
   @ApiOperation({
     summary: 'Listar módulos y su estado',
     description:
-      'Cualquier usuario autenticado. El frontend oculta navegación y botones de los módulos con enabled=false. No mostrar toast si llega MODULE_UNAVAILABLE.',
+      'Cualquier usuario autenticado. El frontend oculta navegación y botones de los módulos con enabled=false. ' +
+      'No mostrar toast si llega MODULE_UNAVAILABLE. Un módulo apagado por el circuito (reason=CIRCUIT) informa ' +
+      'retryAt: desde ese momento vuelve a enabled=true y la primera petición hace de prueba (si responde bien queda ' +
+      'activo; si falla se apaga de nuevo con un retryAt nuevo). Conviene volver a pedir la lista después de retryAt.',
   })
   list(): ReadonlyArray<FeatureResponseDto> {
     return this.featureFlags.list().map(FeatureResponseDto.from);
