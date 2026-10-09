@@ -318,7 +318,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Crear unidad organizacional',
     description:
-      'headCostCenterCode con un código que aún no existe se guarda como centro propio pendiente (warnings) y se amarra solo cuando el centro se crea. Un prefijo que no empieza por el del jefe es solo una advertencia (warnings); el mismo prefijo del jefe: 400 ORG_UNIT_PREFIX_OUT_OF_PARENT; el de otra unidad activa: 409 ORG_UNIT_CODE_PREFIX_EXISTS. En la misma transacción concilia los centros del prefijo (unidad por prefijo más largo). color (#RRGGBB, opcional) es el color base de la rama en el organigrama; sin él la unidad hereda el de su jefe.',
+      'headCostCenterCode con un código que aún no existe se guarda como centro propio pendiente (warnings) y se amarra solo cuando el centro se crea. Un prefijo que no empieza por el del jefe es solo una advertencia (warnings); el mismo prefijo del jefe: 400 ORG_UNIT_PREFIX_OUT_OF_PARENT; el de otra unidad activa: 409 ORG_UNIT_CODE_PREFIX_EXISTS. Otra unidad activa con el mismo nombre (sin tildes ni mayúsculas) bajo el mismo jefe es solo una advertencia (warnings): los nombres no son únicos. En la misma transacción concilia los centros del prefijo (unidad por prefijo más largo). color (#RRGGBB, opcional) es el color base de la rama en el organigrama; sin él la unidad hereda el de su jefe.',
   })
   @ApiResponse({
     status: 201,
@@ -336,7 +336,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Actualizar o mover una unidad organizacional',
     description:
-      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio. headCostCenterCode con un código que aún no existe queda pendiente (warnings). Un prefijo que no empieza por el del jefe (unidad movida a otro jefe) es solo una advertencia y la unidad conserva sus centros. Si cambian el prefijo, el padre o el estado, concilia los centros del prefijo viejo y del nuevo en la misma transacción. color: #RRGGBB lo cambia, null lo quita (hereda el de su jefe), omitido no lo toca; el cambio queda en el historial (campo COLOR).',
+      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio. headCostCenterCode con un código que aún no existe queda pendiente (warnings). Un prefijo que no empieza por el del jefe (unidad movida a otro jefe) es solo una advertencia y la unidad conserva sus centros. Si cambia el nombre o el jefe y otra unidad activa con el mismo nombre (sin tildes ni mayúsculas) queda bajo el mismo jefe: advertencia (warnings), no error. Si cambian el prefijo, el padre o el estado, concilia los centros del prefijo viejo y del nuevo en la misma transacción. color: #RRGGBB lo cambia, null lo quita (hereda el de su jefe), omitido no lo toca; el cambio queda en el historial (campo COLOR).',
   })
   @ApiResponse({
     status: 200,

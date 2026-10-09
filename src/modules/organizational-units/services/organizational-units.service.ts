@@ -21,6 +21,7 @@ import { StructureReconcilerService } from '../../cost-centers/services/structur
 import { partialScope } from '../../cost-centers/domain/structure-reconcile.js';
 import { OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { effectiveUnitColor } from '../domain/unit-color.js';
+import { duplicateSiblingWarning, sameUnitName } from '../domain/unit-name.js';
 import { CreateOrganizationalUnitDto } from '../dto/create-organizational-unit.dto.js';
 import { QueryOrganizationalUnitsDto } from '../dto/query-organizational-units.dto.js';
 import { OrganizationalUnitTreeResponseDto } from '../dto/responses/organizational-unit-tree.response.dto.js';
@@ -142,8 +143,9 @@ export class OrganizationalUnitsService {
     if (dto.codePrefix && (dto.isActive ?? true)) {
       await this.assertPrefixFree(dto.codePrefix, null);
     }
+    const nameWarning = (dto.isActive ?? true) ? await this.duplicateNameWarning(dto.name, parent, null) : null;
     const head = await this.chooseHeadCenter(dto);
-    const warnings = [prefixWarning, head?.warning ?? null].filter((item): item is string => item !== null);
+    const warnings = [prefixWarning, nameWarning, head?.warning ?? null].filter((item): item is string => item !== null);
     try {
       const unit = await this.dataSource.transaction(async (manager) => {
         const created = await this.unitsRepository.insert(
@@ -231,9 +233,15 @@ export class OrganizationalUnitsService {
       await this.assertPrefixFree(nextPrefix, unit.id);
     }
     const previousParent = unit.parentId ? await this.unitsRepository.findById(unit.parentId) : null;
+    // Solo si cambia el nombre o el jefe: una duplicada de antes no se vuelve a avisar en cada edición.
+    const nextName = dto.name ?? unit.name;
+    const nameWarning =
+      (dto.isActive ?? unit.isActive) && (!sameUnitName(nextName, unit.name) || parentId !== unit.parentId)
+        ? await this.duplicateNameWarning(nextName, parent, unit.id)
+        : null;
 
     const head = await this.chooseHeadCenter(dto);
-    const warnings = [prefixWarning, head?.warning ?? null].filter((item): item is string => item !== null);
+    const warnings = [prefixWarning, nameWarning, head?.warning ?? null].filter((item): item is string => item !== null);
 
     const nextCode = dto.code ?? unit.code;
     const nextPath = childPath(parent?.hierarchyPath ?? null, nextCode);
@@ -395,6 +403,22 @@ export class OrganizationalUnitsService {
       ]);
     }
     return check.level === 'WARNING' ? check.message : null;
+  }
+
+  /**
+   * Otra unidad activa con el mismo nombre (sin tildes ni mayúsculas) bajo el mismo jefe: advertencia, nunca error (los
+   * nombres no son únicos: dos «Calidad» con prefijos distintos son válidas).
+   */
+  private async duplicateNameWarning(
+    name: string,
+    parent: OrganizationalUnit | null,
+    unitId: string | null,
+  ): Promise<string | null> {
+    const parentId = parent?.id ?? null;
+    const sibling = (await this.unitsRepository.findAll(true)).find(
+      (other) => other.id !== unitId && other.isActive && other.parentId === parentId && sameUnitName(other.name, name),
+    );
+    return sibling ? duplicateSiblingWarning(sibling, parent?.name ?? null) : null;
   }
 
   /**

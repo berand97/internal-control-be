@@ -47,7 +47,7 @@ describe('OrganizationalUnitsService', () => {
 
   beforeEach(() => {
     unitsRepository = {
-      findAll: vi.fn(),
+      findAll: vi.fn().mockResolvedValue([]),
       findById: vi.fn(),
       findActiveById: vi.fn(),
       findByCode: vi.fn(),
@@ -351,6 +351,71 @@ describe('OrganizationalUnitsService', () => {
     await expect(
       service.create({ code: 'VA', name: 'Vicerrectoría Académica', type: OrgUnitType.Vicerectorate }, actor),
     ).resolves.toMatchObject({ color: null });
+  });
+
+  it('mismo nombre que una hermana activa (sin tildes ni mayúsculas): advertencia, nunca error', async () => {
+    const rec = unit('1', 'REC', null, 0);
+    rec.name = 'Rectoría';
+    const calidad = unit('2', 'CAL', '1', 1);
+    calidad.name = 'Calidad';
+    calidad.codePrefix = '102';
+    const archivada = unit('3', 'CAL_OLD', null, 0);
+    archivada.name = 'Calidad';
+    archivada.isActive = false;
+    vi.mocked(unitsRepository.findById).mockResolvedValue(rec);
+    vi.mocked(unitsRepository.findAll).mockResolvedValue([rec, calidad, archivada]);
+    vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
+    await expect(
+      service.create({ code: 'CAL2', name: '  CALIDÁD ', type: OrgUnitType.Department, parentId: '1' }, actor),
+    ).resolves.toMatchObject({
+      warnings: ['Ya existe «Calidad» bajo Rectoría (prefijo 102). ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
+    });
+    // Sin prefijo la otra: sin «(prefijo …)».
+    calidad.codePrefix = null;
+    await expect(
+      service.create({ code: 'CAL3', name: 'Calidad', type: OrgUnitType.Department, parentId: '1' }, actor),
+    ).resolves.toMatchObject({
+      warnings: ['Ya existe «Calidad» bajo Rectoría. ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
+    });
+    // En la raíz solo cuenta la archivada: nada que avisar; bajo otro jefe tampoco.
+    await expect(service.create({ code: 'CAL4', name: 'Calidad', type: OrgUnitType.Department }, actor)).resolves.toMatchObject({
+      warnings: [],
+    });
+    archivada.isActive = true;
+    await expect(service.create({ code: 'CAL5', name: 'Calidad', type: OrgUnitType.Department }, actor)).resolves.toMatchObject({
+      warnings: ['Ya existe «Calidad» en el primer nivel. ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
+    });
+  });
+
+  it('editar: avisa el nombre repetido solo si cambia el nombre o el jefe', async () => {
+    const rec = unit('1', 'REC', null, 0);
+    rec.name = 'Rectoría';
+    rec.hierarchyPath = '/rec';
+    const calidad = unit('2', 'CAL', '1', 1);
+    calidad.name = 'Calidad';
+    calidad.codePrefix = '102';
+    const otra = unit('3', 'CAL2', '1', 1);
+    otra.name = 'Calidad';
+    otra.hierarchyPath = '/rec/cal2';
+    const vf = unit('4', 'VF', '1', 1);
+    vf.name = 'Vicerrectoría Financiera';
+    const gestion = unit('5', 'GES', '4', 2);
+    gestion.name = 'Calidad';
+    const byId = new Map([rec, calidad, otra, vf, gestion].map((item) => [item.id, item]));
+    vi.mocked(unitsRepository.findById).mockImplementation(async (id) => byId.get(id) ?? null);
+    vi.mocked(unitsRepository.findAll).mockResolvedValue([rec, calidad, otra, vf, gestion]);
+    // Ya estaba repetida: cambiar otra cosa no avisa; el mismo nombre con otras mayúsculas tampoco.
+    await expect(service.update('3', { color: '#de9927' }, actor)).resolves.toMatchObject({ warnings: [] });
+    await expect(service.update('3', { name: 'CALIDAD' }, actor)).resolves.toMatchObject({ warnings: [] });
+    // Mover bajo la Vicerrectoría Financiera, donde ya hay otra «Calidad».
+    await expect(service.update('3', { parentId: '4' }, actor)).resolves.toMatchObject({
+      warnings: ['Ya existe «Calidad» bajo Vicerrectoría Financiera. ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
+    });
+    // Renombrar la Vicerrectoría Financiera (bajo la Rectoría) a «Calidad»: avisa con la primera hermana que encuentra.
+    await expect(service.update('4', { name: 'Calidad' }, actor)).resolves.toMatchObject({
+      warnings: ['Ya existe «Calidad» bajo Rectoría (prefijo 102). ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
+    });
+    await expect(service.update('5', { name: 'Calidad y Mejora' }, actor)).resolves.toMatchObject({ warnings: [] });
   });
 
   it('un consejo no lleva prefijo', async () => {
