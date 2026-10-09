@@ -117,6 +117,7 @@ import { OrgChartStructure1767226020000 } from './migrations/1767226020000-org-c
 import { UnitHeadCostCenterCode1767226030000 } from './migrations/1767226030000-unit-head-cost-center-code.js';
 import { CostCenterPlacementMode1767226040000 } from './migrations/1767226040000-cost-center-placement-mode.js';
 import { OrgChartImportConfirmedBy1767226050000 } from './migrations/1767226050000-org-chart-import-confirmed-by.js';
+import { FeatureFlagNotify1767226060000 } from './migrations/1767226060000-feature-flag-notify.js';
 import { NavigationItemEntity } from '../modules/navigation/entities/navigation-item.entity.js';
 import { PhysicalInventory } from '../modules/inventories/entities/physical-inventory.entity.js';
 import { PhysicalInventoryItem } from '../modules/inventories/entities/physical-inventory-item.entity.js';
@@ -268,6 +269,7 @@ const dataSource = new DataSource({
     UnitHeadCostCenterCode1767226030000,
     CostCenterPlacementMode1767226040000,
     OrgChartImportConfirmedBy1767226050000,
+    FeatureFlagNotify1767226060000,
   ],
 });
 

@@ -16,6 +16,7 @@ import {
   OPENAPI_JSON_PATH,
 } from './common/swagger/openapi-document.js';
 import type { AppConfig } from './config/configuration.js';
+import { FeatureFlagsService } from './modules/features/services/feature-flags.service.js';
 
 function publishApiDocs(app: INestApplication): void {
   const document = createOpenApiDocument(app);
@@ -61,6 +62,9 @@ async function bootstrap(): Promise<void> {
   if (config.getOrThrow('apiDocsEnabled', { infer: true })) {
     publishApiDocs(app);
   }
+
+  // Solo el proceso HTTP mantiene la caché de módulos al día con la BD (NOTIFY + relectura periódica).
+  await app.get(FeatureFlagsService).startLiveSync();
 
   await app.listen(config.getOrThrow('port', { infer: true }));
 }

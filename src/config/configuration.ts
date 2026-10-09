@@ -8,6 +8,7 @@ import { DEFAULT_THROTTLE_USER_LIMIT } from '../common/throttling/throttle-limit
 import { guardDatabaseUrl } from './database-host-guard.js';
 import { dedicatedSecretWarnings, resolveDedicatedSecrets } from './dedicated-secrets.js';
 import { type EventsConfig, resolveEventsConfig } from './events-config.js';
+import { type FeaturesConfig, resolveFeaturesConfig } from './features-config.js';
 import { resolveGotenbergUrl } from './gotenberg-url.js';
 import { resolveSignatureVerifyUrl } from './signature-verify-url.js';
 import { normalizePublicAssetsBaseUrl, normalizePublicAssetsBucket } from '../shared/storage/public-assets.js';
@@ -84,11 +85,6 @@ export interface StorageConfig {
     readonly refreshToken: string | null;
     readonly folderId: string | null;
   };
-}
-
-export interface FeaturesConfig {
-  readonly circuitThreshold: number;
-  readonly overrides: Readonly<Record<string, boolean>>;
 }
 
 export interface AppConfig {
@@ -217,27 +213,6 @@ const readBoolean = (key: string, fallback: boolean): boolean => {
     return fallback;
   }
   return raw === 'true' || raw === '1';
-};
-
-const FEATURE_ENV_PREFIX = 'FEATURE_';
-const RESERVED_FEATURE_ENV = new Set(['FEATURE_CIRCUIT_THRESHOLD']);
-
-const readFeatureOverrides = (): Readonly<Record<string, boolean>> => {
-  const overrides: Record<string, boolean> = {};
-  for (const [key, raw] of Object.entries(process.env)) {
-    if (!key.startsWith(FEATURE_ENV_PREFIX) || RESERVED_FEATURE_ENV.has(key)) {
-      continue;
-    }
-    if (raw === undefined || raw === '') {
-      continue;
-    }
-    const code = key
-      .slice(FEATURE_ENV_PREFIX.length)
-      .toLowerCase()
-      .replace(/_/g, '-');
-    overrides[code] = raw === 'true' || raw === '1';
-  }
-  return overrides;
 };
 
 const readStorageDriver = (): StorageDriver => {
@@ -409,10 +384,7 @@ const configuration = (): AppConfig => {
       ),
       allowedHosts: readList('OUTBOUND_ALLOWED_HOSTS'),
     },
-    features: {
-      circuitThreshold: readNumber('FEATURE_CIRCUIT_THRESHOLD', 5),
-      overrides: readFeatureOverrides(),
-    },
+    features: resolveFeaturesConfig(process.env),
     documents: {
       signatureVerifyUrl,
       gotenbergUrl,
