@@ -108,12 +108,6 @@ const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: s
   }
 };
 
-/**
- * Desalineaciones previas a este trabajo, fuera de su zona (FeatureResponseDto.reason no declara 'DEFAULT'). Se
- * listan para que el test no las oculte en silencio ni falle por ellas; cualquier otra hace fallar.
- */
-const KNOWN_FOREIGN_MISMATCH = /^GET \/api\/v1\/auth\/me 200\.data\.features\[\d+\]\.reason: "DEFAULT" no está en el enum/;
-
 /** Rutas nuevas o cambiadas por este trabajo: toda respuesta 2xx observada en ellas se valida contra OpenAPI. */
 const CONTRACT_ROUTES = [
   '/api/v1/auth/me',
@@ -726,9 +720,8 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
       }
       conform(openapi, entry.body, schema, `${entry.method.toUpperCase()} ${entry.route} ${entry.status}`, errors);
     }
-    const foreign = errors.filter((error) => KNOWN_FOREIGN_MISMATCH.test(error));
-    expect(foreign.length).toBeGreaterThan(0);
-    expect([...new Set(errors.filter((error) => !KNOWN_FOREIGN_MISMATCH.test(error)))]).toEqual([]);
+    // FeatureResponseDto.reason ya declara 'DEFAULT' (antes era una desalineación conocida): ninguna se tolera.
+    expect([...new Set(errors)]).toEqual([]);
   });
 
   it('ningún secreto TOTP ni código de recuperación aparece en audit_log', async () => {
