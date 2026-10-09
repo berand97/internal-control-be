@@ -20,6 +20,7 @@ import { decideUnitRemoval, StructureRemovalService } from '../../cost-centers/s
 import { StructureReconcilerService } from '../../cost-centers/services/structure-reconciler.service.js';
 import { partialScope } from '../../cost-centers/domain/structure-reconcile.js';
 import { OrgUnitType } from '../enums/org-unit-type.enum.js';
+import { effectiveUnitColor } from '../domain/unit-color.js';
 import { CreateOrganizationalUnitDto } from '../dto/create-organizational-unit.dto.js';
 import { QueryOrganizationalUnitsDto } from '../dto/query-organizational-units.dto.js';
 import { OrganizationalUnitTreeResponseDto } from '../dto/responses/organizational-unit-tree.response.dto.js';
@@ -51,15 +52,18 @@ interface HeadCenterChoice {
   readonly warning: string | null;
 }
 
+/** inheritedColor: el color efectivo del padre (el de la rama que se está pintando). */
 const buildTree = (
   units: ReadonlyArray<OrganizationalUnit>,
   parentId: string | null,
+  inheritedColor: string | null = null,
 ): ReadonlyArray<OrganizationalUnitTreeResponseDto> =>
   units
     .filter((unit) => unit.parentId === parentId)
-    .map((unit) =>
-      OrganizationalUnitTreeResponseDto.from(unit, buildTree(units, unit.id)),
-    );
+    .map((unit) => {
+      const effectiveColor = unit.color ?? inheritedColor;
+      return OrganizationalUnitTreeResponseDto.from(unit, buildTree(units, unit.id, effectiveColor), effectiveColor);
+    });
 
 @Injectable()
 export class OrganizationalUnitsService {
@@ -108,7 +112,7 @@ export class OrganizationalUnitsService {
   ): Promise<ReadonlyArray<OrganizationalUnitTreeResponseDto>> {
     const unit = await this.requireUnit(id);
     const all = await this.unitsRepository.findAll();
-    return buildTree(all, unit.id);
+    return buildTree(all, unit.id, effectiveUnitColor(unit, new Map(all.map((item) => [item.id, item]))));
   }
 
   async ancestors(
@@ -155,6 +159,7 @@ export class OrganizationalUnitsService {
             ...(dto.relationType ? { relationType: dto.relationType } : {}),
             headCostCenterId: head?.headCostCenterId ?? null,
             headCostCenterCode: head?.headCostCenterCode ?? null,
+            color: dto.color ?? null,
           },
           manager,
         );
@@ -243,6 +248,7 @@ export class OrganizationalUnitsService {
       ...(dto.codePrefix !== undefined ? { codePrefix: dto.codePrefix } : {}),
       ...(dto.parentId !== undefined ? { parentId } : {}),
       ...(dto.relationType !== undefined ? { relationType: dto.relationType } : {}),
+      ...(dto.color !== undefined ? { color: dto.color } : {}),
       ...(head ? { headCostCenterId: head.headCostCenterId, headCostCenterCode: head.headCostCenterCode } : {}),
       ...(pathChanged ? { hierarchyPath: nextPath, hierarchyLevel: nextLevel } : {}),
     };
@@ -296,7 +302,7 @@ export class OrganizationalUnitsService {
     return { ...OrganizationalUnitResponseDto.from(updated), warnings };
   }
 
-  /** Historial de nombre, código, tipo, padre, prefijo, línea, centro propio y estado (org_structure_history). */
+  /** Historial de nombre, código, tipo, padre, prefijo, línea, centro propio, estado y color (org_structure_history). */
   private async recordHistory(
     manager: EntityManager,
     before: OrganizationalUnit,
@@ -340,6 +346,8 @@ export class OrganizationalUnitsService {
         newValue: headChanged ? ((await headLabel(after)) ?? '(ninguno)') : null,
       },
       { entityType: 'ORG_UNIT', entityId: after.id, field: 'STATUS', oldValue: status(before.isActive), newValue: status(after.isActive) },
+      // null en newValue: color quitado (hereda el de su jefe).
+      { entityType: 'ORG_UNIT', entityId: after.id, field: 'COLOR', oldValue: before.color, newValue: after.color },
     ];
     await this.history.record(manager, entries, { actorId: actor.id, source: 'MANUAL' });
   }

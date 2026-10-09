@@ -56,6 +56,14 @@ export class OrganizationalUnitResponseDto {
   })
   readonly headCostCenterPending!: boolean;
 
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    example: '#de9927',
+    description: 'Color base propio de la rama (#rrggbb en minúsculas); null si no tiene (hereda el de su jefe)',
+  })
+  readonly color!: string | null;
+
   @ApiProperty()
   readonly hierarchyLevel!: number;
 
@@ -85,6 +93,7 @@ export class OrganizationalUnitResponseDto {
       headCostCenterId: unit.headCostCenterId,
       headCostCenterCode: unit.headCostCenterCode,
       headCostCenterPending: unit.headCostCenterId === null && unit.headCostCenterCode !== null,
+      color: unit.color,
       hierarchyLevel: unit.hierarchyLevel,
       hierarchyPath: unit.hierarchyPath,
       isActive: unit.isActive,

@@ -109,7 +109,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Exportar el organigrama (unidades organizacionales) a Excel',
     description:
-      'Hojas «Organigrama» (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Estado, Acción, Código interno) e «Instrucciones». Solo unidades: los centros de costo se administran en su propia pantalla (Depende de acepta códigos de centros existentes; Centro propio también uno que aún no exista: queda pendiente y se amarra cuando el centro se crea). Incluye las archivadas. Trae una hoja oculta «_sello» (hora exacta de la descarga, revisión de la estructura y la huella de cada fila) con la que la previsualización sabe qué cambió la persona. Se edita y se sube a POST /organizational-units/import/preview.',
+      'Hojas «Organigrama» (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Color, Estado, Acción, Código interno) e «Instrucciones». Solo unidades: los centros de costo se administran en su propia pantalla (Depende de acepta códigos de centros existentes; Centro propio también uno que aún no exista: queda pendiente y se amarra cuando el centro se crea). Incluye las archivadas. Trae una hoja oculta «_sello» (hora exacta de la descarga, revisión de la estructura y la huella de cada fila) con la que la previsualización sabe qué cambió la persona. Se edita y se sube a POST /organizational-units/import/preview.',
   })
   async export(@Res() response: Response): Promise<void> {
     this.sendXlsx(response, await this.orgChart.export());
@@ -176,7 +176,8 @@ export class OrganizationalUnitsController {
   @RequirePermission('org_unit:read:global')
   @ApiOperation({
     summary: 'Árbol organizacional',
-    description: 'Por defecto solo unidades activas; ?includeArchived=true incluye las archivadas.',
+    description:
+      'Por defecto solo unidades activas; ?includeArchived=true incluye las archivadas. Cada nodo trae color (el propio, #rrggbb o null) y effectiveColor (el propio o el del ancestro más cercano con color: con el que se pinta la rama).',
   })
   @ApiResponse({
     status: 200,
@@ -244,7 +245,7 @@ export class OrganizationalUnitsController {
   @Get(':id/history')
   @RequirePermission('org_unit:read:global')
   @ApiOperation({
-    summary: 'Historial de una unidad: nombre, código, tipo, padre, prefijo, línea, centro propio y estado',
+    summary: 'Historial de una unidad: nombre, código, tipo, padre, prefijo, línea, centro propio, estado y color',
     description: 'Un evento por campo cambiado, del más reciente al más antiguo (cambios manuales y por el Excel del organigrama).',
   })
   @ApiOkResponse({ schema: envelopedArraySchema(OrgStructureHistoryEventDto) })
@@ -258,7 +259,10 @@ export class OrganizationalUnitsController {
 
   @Get(':id/descendants')
   @RequirePermission('org_unit:read:global')
-  @ApiOperation({ summary: 'Subárbol de una unidad' })
+  @ApiOperation({
+    summary: 'Subárbol de una unidad',
+    description: 'effectiveColor de cada nodo considera también los ancestros de la unidad pedida (que no vienen en la respuesta).',
+  })
   @ApiResponse({
     status: 200,
     schema: envelopedSchema(OrganizationalUnitTreeResponseDto),
@@ -314,7 +318,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Crear unidad organizacional',
     description:
-      'headCostCenterCode con un código que aún no existe se guarda como centro propio pendiente (warnings) y se amarra solo cuando el centro se crea. Un prefijo que no empieza por el del jefe es solo una advertencia (warnings); el mismo prefijo del jefe: 400 ORG_UNIT_PREFIX_OUT_OF_PARENT; el de otra unidad activa: 409 ORG_UNIT_CODE_PREFIX_EXISTS. En la misma transacción concilia los centros del prefijo (unidad por prefijo más largo).',
+      'headCostCenterCode con un código que aún no existe se guarda como centro propio pendiente (warnings) y se amarra solo cuando el centro se crea. Un prefijo que no empieza por el del jefe es solo una advertencia (warnings); el mismo prefijo del jefe: 400 ORG_UNIT_PREFIX_OUT_OF_PARENT; el de otra unidad activa: 409 ORG_UNIT_CODE_PREFIX_EXISTS. En la misma transacción concilia los centros del prefijo (unidad por prefijo más largo). color (#RRGGBB, opcional) es el color base de la rama en el organigrama; sin él la unidad hereda el de su jefe.',
   })
   @ApiResponse({
     status: 201,
@@ -332,7 +336,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Actualizar o mover una unidad organizacional',
     description:
-      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio. headCostCenterCode con un código que aún no existe queda pendiente (warnings). Un prefijo que no empieza por el del jefe (unidad movida a otro jefe) es solo una advertencia y la unidad conserva sus centros. Si cambian el prefijo, el padre o el estado, concilia los centros del prefijo viejo y del nuevo en la misma transacción.',
+      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio. headCostCenterCode con un código que aún no existe queda pendiente (warnings). Un prefijo que no empieza por el del jefe (unidad movida a otro jefe) es solo una advertencia y la unidad conserva sus centros. Si cambian el prefijo, el padre o el estado, concilia los centros del prefijo viejo y del nuevo en la misma transacción. color: #RRGGBB lo cambia, null lo quita (hereda el de su jefe), omitido no lo toca; el cambio queda en el historial (campo COLOR).',
   })
   @ApiResponse({
     status: 200,

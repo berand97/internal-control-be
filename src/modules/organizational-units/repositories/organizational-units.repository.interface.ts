@@ -14,6 +14,7 @@ export interface CreateOrgUnitRecord {
   readonly relationType?: OrgRelationType;
   readonly headCostCenterId?: string | null;
   readonly headCostCenterCode?: string | null;
+  readonly color?: string | null;
 }
 
 export interface UpdateOrgUnitRecord {
@@ -28,6 +29,7 @@ export interface UpdateOrgUnitRecord {
   readonly relationType?: OrgRelationType;
   readonly headCostCenterId?: string | null;
   readonly headCostCenterCode?: string | null;
+  readonly color?: string | null;
 }
 
 export interface OrganizationalUnitsRepository {

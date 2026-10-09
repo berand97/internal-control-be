@@ -6,7 +6,7 @@ import {
   type OrgHistorySource,
 } from '../../../cost-centers/services/org-structure-history.service.js';
 
-/** Evento del historial de nombre/código/tipo/padre/prefijo/línea/centro propio/estado (OrgStructureHistoryService). */
+/** Evento del historial de nombre/código/tipo/padre/prefijo/línea/centro propio/estado/color (OrgStructureHistoryService). */
 export class OrgStructureHistoryEventDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
@@ -14,7 +14,8 @@ export class OrgStructureHistoryEventDto {
   @ApiProperty({
     enum: ORG_HISTORY_FIELDS,
     enumName: 'OrgStructureHistoryField',
-    description: 'Campo que cambió. TYPE y RELATION traen los códigos del enum; STATUS: ACTIVE/ARCHIVED',
+    description:
+      'Campo que cambió. TYPE y RELATION traen los códigos del enum; STATUS: ACTIVE/ARCHIVED; COLOR: #rrggbb en minúsculas (oldValue null = no tenía; newValue null = color quitado, hereda el de su jefe)',
   })
   readonly field!: OrgHistoryField;
 

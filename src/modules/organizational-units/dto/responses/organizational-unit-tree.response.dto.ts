@@ -56,6 +56,23 @@ export class OrganizationalUnitTreeResponseDto {
   })
   readonly headCostCenterPending!: boolean;
 
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    example: '#de9927',
+    description: 'Color base propio de la rama (#rrggbb en minúsculas); null si no tiene (hereda el de su jefe)',
+  })
+  readonly color!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    example: '#de9927',
+    description:
+      'Color con el que se pinta la rama: el propio o, si no tiene, el del ancestro más cercano que tenga uno (aunque ese ancestro no venga en la respuesta). null si nadie en la cadena tiene color',
+  })
+  readonly effectiveColor!: string | null;
+
   @ApiProperty()
   readonly hierarchyLevel!: number;
 
@@ -78,6 +95,7 @@ export class OrganizationalUnitTreeResponseDto {
   static from(
     unit: OrganizationalUnit,
     children: ReadonlyArray<OrganizationalUnitTreeResponseDto>,
+    effectiveColor: string | null = unit.color,
   ): OrganizationalUnitTreeResponseDto {
     return {
       id: unit.id,
@@ -91,6 +109,8 @@ export class OrganizationalUnitTreeResponseDto {
       headCostCenterId: unit.headCostCenterId,
       headCostCenterCode: unit.headCostCenterCode,
       headCostCenterPending: unit.headCostCenterId === null && unit.headCostCenterCode !== null,
+      color: unit.color,
+      effectiveColor,
       hierarchyLevel: unit.hierarchyLevel,
       hierarchyPath: unit.hierarchyPath,
       isActive: unit.isActive,

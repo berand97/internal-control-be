@@ -16,6 +16,7 @@ import {
   OrgRelationType,
   OrgUnitType,
 } from '../enums/org-unit-type.enum.js';
+import { normalizeUnitColorInput, UNIT_COLOR_MESSAGE, UNIT_COLOR_PATTERN } from '../domain/unit-color.js';
 
 export class CreateOrganizationalUnitDto {
   @ApiProperty({ example: 'DCI', maxLength: 20 })
@@ -97,4 +98,17 @@ export class CreateOrganizationalUnitDto {
   @IsOptional()
   @Matches(/^[0-9]{1,20}$/, { message: 'El código del centro propio son solo dígitos' })
   readonly headCostCenterCode?: string | null;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    nullable: true,
+    example: '#de9927',
+    pattern: '^#[0-9A-Fa-f]{6}$',
+    description:
+      'Color base de la rama en el organigrama, #RRGGBB (se guarda en minúsculas). Sus dependencias sin color propio toman tonos más suaves de este color. null lo quita (hereda el de su jefe).',
+  })
+  @Transform(({ value }: { value: unknown }) => normalizeUnitColorInput(value))
+  @IsOptional()
+  @Matches(UNIT_COLOR_PATTERN, { message: UNIT_COLOR_MESSAGE })
+  readonly color?: string | null;
 }

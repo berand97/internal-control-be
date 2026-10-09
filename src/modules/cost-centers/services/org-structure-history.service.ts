@@ -3,7 +3,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import { userDisplayNameSubquery } from '../../persons/services/cost-center-heads.service.js';
 
 /**
- * Historial de NOMBRE y CÓDIGO de centros y de NOMBRE/TIPO/PADRE/PREFIJO/LÍNEA/CENTRO PROPIO/ESTADO de unidades
+ * Historial de NOMBRE y CÓDIGO de centros y de NOMBRE/TIPO/PADRE/PREFIJO/LÍNEA/CENTRO PROPIO/ESTADO/COLOR de unidades
  * (tabla org_structure_history, un evento por campo cambiado). La ubicación de los centros sigue en
  * cost_center_placement. Valores legibles (códigos y nombres de la estructura), nunca datos personales.
  */
@@ -20,6 +20,7 @@ export const ORG_HISTORY_FIELDS = [
   'RELATION',
   'HEAD_COST_CENTER',
   'STATUS',
+  'COLOR',
 ] as const;
 export type OrgHistoryField = (typeof ORG_HISTORY_FIELDS)[number];
 

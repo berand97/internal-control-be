@@ -43,6 +43,10 @@ export class OrganizationalUnit {
   @Column({ name: 'head_cost_center_code', type: 'varchar', length: 20, nullable: true })
   headCostCenterCode!: string | null;
 
+  /** Color base de la rama en el organigrama (#rrggbb, minúsculas); null = hereda el de su jefe. */
+  @Column({ name: 'color', type: 'varchar', length: 7, nullable: true })
+  color!: string | null;
+
   @Column({ name: 'is_active', type: 'boolean' })
   isActive!: boolean;
 

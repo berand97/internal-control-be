@@ -43,6 +43,7 @@ describe('OrganizationalUnitsService', () => {
   let removal: { inspectUnit: ReturnType<typeof vi.fn>; deleteUnit: ReturnType<typeof vi.fn> };
   let manager: { query: ReturnType<typeof vi.fn> };
   let reconciler: { reconcileWithin: ReturnType<typeof vi.fn> };
+  let historyRecord: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     unitsRepository = {
@@ -73,7 +74,8 @@ describe('OrganizationalUnitsService', () => {
     } as unknown as DataSource;
     const noReferences: UnitRemovalCheck = { activeChildren: 0, activeCenters: 0, references: [] };
     removal = { inspectUnit: vi.fn().mockResolvedValue(noReferences), deleteUnit: vi.fn() };
-    const history = { record: vi.fn().mockResolvedValue(0) } as unknown as OrgStructureHistoryService;
+    historyRecord = vi.fn().mockResolvedValue(0);
+    const history = { record: historyRecord } as unknown as OrgStructureHistoryService;
     reconciler = { reconcileWithin: vi.fn().mockResolvedValue({}) };
     service = new OrganizationalUnitsService(
       unitsRepository,
@@ -278,6 +280,77 @@ describe('OrganizationalUnitsService', () => {
     await expect(
       service.create({ code: 'LOG', name: 'Logística', type: OrgUnitType.Department, parentId: '1', codePrefix: '4115' }, actor),
     ).resolves.toMatchObject({ codePrefix: '4115', parentId: '1' });
+  });
+
+  it('árbol: color propio y effectiveColor heredado del ancestro más cercano con color', async () => {
+    const rec = unit('1', 'REC', null, 0);
+    const vf = unit('2', 'VF', '1', 1);
+    vf.color = '#de9927';
+    const cont = unit('3', 'CONT', '2', 2);
+    const caja = unit('4', 'CAJA', '3', 3);
+    caja.color = '#29b1b2';
+    const tes = unit('5', 'TES', '4', 4);
+    for (const item of [rec, cont, tes]) {
+      item.color = null;
+    }
+    vi.mocked(unitsRepository.findAll).mockResolvedValue([rec, vf, cont, caja, tes]);
+    const [root] = await service.tree(true);
+    const vfNode = root?.children[0];
+    const contNode = vfNode?.children[0];
+    const cajaNode = contNode?.children[0];
+    expect(root).toMatchObject({ color: null, effectiveColor: null });
+    expect(vfNode).toMatchObject({ color: '#de9927', effectiveColor: '#de9927' });
+    expect(contNode).toMatchObject({ color: null, effectiveColor: '#de9927' });
+    expect(cajaNode).toMatchObject({ color: '#29b1b2', effectiveColor: '#29b1b2' });
+    expect(cajaNode?.children[0]).toMatchObject({ color: null, effectiveColor: '#29b1b2' });
+    expect(unitsRepository.findAll).toHaveBeenCalledWith(undefined);
+  });
+
+  it('subárbol: effectiveColor toma el color de ancestros que no vienen en la respuesta', async () => {
+    const vf = unit('2', 'VF', null, 0);
+    vf.color = '#de9927';
+    const cont = unit('3', 'CONT', '2', 1);
+    cont.color = null;
+    const caja = unit('4', 'CAJA', '3', 2);
+    caja.color = null;
+    vi.mocked(unitsRepository.findById).mockResolvedValue(cont);
+    vi.mocked(unitsRepository.findAll).mockResolvedValue([vf, cont, caja]);
+    const nodes = await service.descendants('3');
+    expect(nodes[0]).toMatchObject({ code: 'CAJA', color: null, effectiveColor: '#de9927' });
+  });
+
+  it('cambiar o quitar el color lo guarda y lo deja en el historial (COLOR)', async () => {
+    const vf = unit('2', 'VF', null, 0);
+    vf.hierarchyPath = '/vf';
+    vf.color = '#de9927';
+    vi.mocked(unitsRepository.findById).mockResolvedValue(vf);
+    await service.update('2', { color: '#29b1b2' }, actor);
+    expect(unitsRepository.update).toHaveBeenCalledWith('2', expect.objectContaining({ color: '#29b1b2' }), expect.anything());
+    expect(historyRecord).toHaveBeenLastCalledWith(
+      manager,
+      expect.arrayContaining([{ entityType: 'ORG_UNIT', entityId: '2', field: 'COLOR', oldValue: '#de9927', newValue: '#29b1b2' }]),
+      { actorId: 'admin-1', source: 'MANUAL' },
+    );
+    await service.update('2', { color: null }, actor);
+    expect(unitsRepository.update).toHaveBeenLastCalledWith('2', expect.objectContaining({ color: null }), expect.anything());
+    expect(historyRecord).toHaveBeenLastCalledWith(
+      manager,
+      expect.arrayContaining([{ entityType: 'ORG_UNIT', entityId: '2', field: 'COLOR', oldValue: '#de9927', newValue: null }]),
+      expect.anything(),
+    );
+    // Omitido: no se toca.
+    await service.update('2', { name: 'Vicerrectoría Financiera' }, actor);
+    expect(unitsRepository.update).toHaveBeenLastCalledWith('2', expect.not.objectContaining({ color: expect.anything() }), expect.anything());
+  });
+
+  it('crea con color (o sin color: null)', async () => {
+    vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
+    await expect(
+      service.create({ code: 'VF', name: 'Vicerrectoría Financiera', type: OrgUnitType.Vicerectorate, color: '#de9927' }, actor),
+    ).resolves.toMatchObject({ color: '#de9927' });
+    await expect(
+      service.create({ code: 'VA', name: 'Vicerrectoría Académica', type: OrgUnitType.Vicerectorate }, actor),
+    ).resolves.toMatchObject({ color: null });
   });
 
   it('un consejo no lleva prefijo', async () => {
