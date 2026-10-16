@@ -248,7 +248,7 @@ describe('plan del Excel del organigrama', () => {
       }),
     );
     expect(plan.errors.map((issue) => issue.message)).toEqual([
-      'Un consejo o comité no lleva prefijo: no recibe centros de costo',
+      'Un cuerpo colegiado (consejo) no lleva prefijo: no recibe centros de costo',
       'Tiene 2 centros de costo activos: muévalos o márquelos también',
     ]);
   });
@@ -796,6 +796,122 @@ describe('plan del Excel del organigrama', () => {
         ['Tesorería', '#29b1b2'],
         ['Compras', null],
       ]);
+    });
+  });
+
+  describe('tipos de la Estructura Orgánica (Acuerdo 008/2021)', () => {
+    it('Comité y Comisión se comportan como Consejo: sin prefijo ni centro propio, y sin centro deducido', () => {
+      const plan = planOrgChart(
+        baseSnapshot(),
+        only({
+          units: [
+            unitRow(2, { prefix: '6', name: 'Comité de Inventarios', type: 'Comité' }),
+            unitRow(3, { name: 'Comisión de Personal', type: 'comision', headCenter: '4010' }),
+            unitRow(4, { name: 'Comité Curricular', type: 'COMITÉ' }),
+            unitRow(5, { name: 'Comisión Electoral', type: 'Comisión', parent: '4' }),
+          ],
+        }),
+      );
+      expect(plan.errors.map((issue) => [issue.rowNumber, issue.message])).toEqual([
+        [2, 'Un cuerpo colegiado (comité) no lleva prefijo: no recibe centros de costo'],
+        [3, 'Un cuerpo colegiado (comisión) no tiene centro de costo propio'],
+      ]);
+      const ok = planOrgChart(
+        baseSnapshot(),
+        only({
+          units: [
+            unitRow(2, { name: 'Comité Curricular', type: 'COMITÉ' }),
+            unitRow(3, { name: 'Comisión Electoral', type: 'Comisión', parent: '4' }),
+          ],
+        }),
+      );
+      expect(ok.errors).toEqual([]);
+      expect(ok.units.map((op) => [op.name, op.unitType, op.codePrefix, op.headCenterKey])).toEqual([
+        ['Comité Curricular', OrgUnitType.Committee, null, null],
+        ['Comisión Electoral', OrgUnitType.Commission, null, null],
+      ]);
+    });
+
+    it('etiquetas viejas como alias; desconocido: error con las opciones válidas', () => {
+      const plan = planOrgChart(
+        baseSnapshot(),
+        only({
+          units: [
+            unitRow(2, { prefix: '44', name: 'Tesorería', type: 'Área', parent: '4' }),
+            unitRow(3, { prefix: '45', name: 'Compras', type: 'Otro', parent: '4' }),
+            unitRow(4, { prefix: '31', name: 'Contaduría', type: 'Programa', parent: '3' }),
+            unitRow(5, { name: 'Consejo Académico', type: 'Consejo o comité' }),
+            unitRow(6, { prefix: '46', name: 'Nómina', type: 'División', parent: '4' }),
+          ],
+        }),
+      );
+      expect(plan.errors.map((issue) => [issue.rowNumber, issue.message])).toEqual([
+        [
+          6,
+          'Tipo desconocido «División»: elija uno de la lista (Dependencia, Rectoría, Vicerrectoría, Dirección, Facultad, Departamento, Coordinación de programa, Oficina, Centro, Consejo, Comité, Comisión)',
+        ],
+      ]);
+      const valid = planOrgChart(
+        baseSnapshot(),
+        only({
+          units: [
+            unitRow(2, { prefix: '44', name: 'Tesorería', type: 'Área', parent: '4' }),
+            unitRow(3, { prefix: '45', name: 'Compras', type: 'Otro', parent: '4' }),
+            unitRow(4, { prefix: '31', name: 'Contaduría', type: 'Programa', parent: '3' }),
+            unitRow(5, { name: 'Consejo Académico', type: 'Consejo o comité' }),
+          ],
+        }),
+      );
+      expect(valid.errors).toEqual([]);
+      expect(valid.units.map((op) => [op.name, op.unitType])).toEqual([
+        ['Tesorería', OrgUnitType.Dependency],
+        ['Compras', OrgUnitType.Dependency],
+        ['Contaduría', OrgUnitType.Program],
+        ['Consejo Académico', OrgUnitType.Council],
+      ]);
+    });
+
+    it('el libro lista los tipos nuevos en la validación de la columna Tipo, su comentario y las instrucciones', async () => {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(
+        (await buildOrgChartWorkbook(orgChartExportRows(baseSnapshot().units, baseSnapshot().centers), {
+          kind: 'EXPORT',
+          revision: 'r',
+          generatedAt: new Date(),
+        })) as unknown as ArrayBuffer,
+      );
+      const sheet = workbook.getWorksheet('Organigrama');
+      const header = sheet?.getRow(1);
+      let typeColumn = 0;
+      header?.eachCell((cell, column) => {
+        if (cell.value === 'Tipo') {
+          typeColumn = column;
+        }
+      });
+      expect(typeColumn).toBeGreaterThan(0);
+      const typeCell = sheet?.getRow(2).getCell(typeColumn);
+      const validation = typeCell?.dataValidation;
+      expect(validation?.type).toBe('list');
+      expect(validation?.formulae).toEqual([
+        '"Dependencia,Rectoría,Vicerrectoría,Dirección,Facultad,Departamento,Coordinación de programa,Oficina,Centro,Consejo,Comité,Comisión"',
+      ]);
+      const note = header?.getCell(typeColumn).note;
+      const noteText = typeof note === 'string' ? note : (note?.texts ?? []).map((part) => part.text).join('');
+      expect(noteText).toContain('Coordinación de programa');
+      expect(noteText).toContain('Consejo, Comité y Comisión son cuerpos colegiados');
+      expect(noteText).not.toContain('Consejo o comité');
+      const lines: string[] = [];
+      workbook.getWorksheet('Instrucciones')?.eachRow((row) => lines.push(String(row.getCell(1).value ?? '')));
+      expect(lines.join(' ')).toContain('Tipo (Estructura Orgánica, Acuerdo 008/2021): Dependencia, Rectoría');
+      // El Consejo exportado se escribe con la etiqueta nueva.
+      const values: string[] = [];
+      sheet?.eachRow((row, rowNumber) => {
+        if (rowNumber > 1) {
+          values.push(String(row.getCell(typeColumn).value ?? ''));
+        }
+      });
+      expect(values).toContain('Consejo');
+      expect(values).not.toContain('Consejo o comité');
     });
   });
 

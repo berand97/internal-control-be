@@ -19,7 +19,7 @@ import {
 import { decideUnitRemoval, StructureRemovalService } from '../../cost-centers/services/structure-removal.service.js';
 import { StructureReconcilerService } from '../../cost-centers/services/structure-reconciler.service.js';
 import { partialScope } from '../../cost-centers/domain/structure-reconcile.js';
-import { OrgUnitType } from '../enums/org-unit-type.enum.js';
+import { isCollegiateBody, ORG_UNIT_TYPE_LABELS, OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { effectiveUnitColor } from '../domain/unit-color.js';
 import { duplicateSiblingWarning, sameUnitName } from '../domain/unit-name.js';
 import { CreateOrganizationalUnitDto } from '../dto/create-organizational-unit.dto.js';
@@ -138,7 +138,7 @@ export class OrganizationalUnitsService {
     const parent = dto.parentId
       ? await this.requireUnit(dto.parentId)
       : null;
-    this.assertCouncilWithoutPrefix(dto.type, dto.codePrefix ?? null);
+    this.assertCollegiateBodyRules(dto.type, dto.codePrefix ?? null, dto);
     const prefixWarning = dto.codePrefix ? await this.assertPrefixInParent(dto.codePrefix, dto.name, parent, null) : null;
     if (dto.codePrefix && (dto.isActive ?? true)) {
       await this.assertPrefixFree(dto.codePrefix, null);
@@ -224,7 +224,7 @@ export class OrganizationalUnitsService {
     }
 
     const nextPrefix = dto.codePrefix !== undefined ? dto.codePrefix : unit.codePrefix;
-    this.assertCouncilWithoutPrefix(dto.type ?? unit.unitType, nextPrefix);
+    this.assertCollegiateBodyRules(dto.type ?? unit.unitType, nextPrefix, dto);
     const prefixWarning =
       nextPrefix && (nextPrefix !== unit.codePrefix || parentId !== unit.parentId)
         ? await this.assertPrefixInParent(nextPrefix, dto.name ?? unit.name, parent, unit.id)
@@ -360,11 +360,38 @@ export class OrganizationalUnitsService {
     await this.history.record(manager, entries, { actorId: actor.id, source: 'MANUAL' });
   }
 
-  private assertCouncilWithoutPrefix(type: OrgUnitType, codePrefix: string | null): void {
-    if (type === OrgUnitType.Council && codePrefix) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'Un consejo o comité no lleva prefijo: no recibe centros de costo', [
-        { field: 'codePrefix', message: 'Sin prefijo para un consejo o comité' },
-      ]);
+  /**
+   * Consejo, Comité y Comisión (cuerpos colegiados): sin prefijo (no reciben centros de costo) y sin centro propio
+   * pedido en la misma operación.
+   */
+  private assertCollegiateBodyRules(
+    type: OrgUnitType,
+    codePrefix: string | null,
+    dto: { readonly headCostCenterId?: string | null; readonly headCostCenterCode?: string | null },
+  ): void {
+    if (!isCollegiateBody(type)) {
+      return;
+    }
+    const label = ORG_UNIT_TYPE_LABELS[type].toLowerCase();
+    if (codePrefix) {
+      throw new ApiException(
+        ErrorCode.ValidationFailed,
+        `Un cuerpo colegiado (${label}) no lleva prefijo: no recibe centros de costo`,
+        [{ field: 'codePrefix', message: 'Sin prefijo para un consejo, comité o comisión' }],
+      );
+    }
+    const head = dto.headCostCenterCode ?? dto.headCostCenterId;
+    if (head) {
+      throw new ApiException(
+        ErrorCode.ValidationFailed,
+        `Un cuerpo colegiado (${label}) no tiene centro de costo propio`,
+        [
+          {
+            field: dto.headCostCenterCode ? 'headCostCenterCode' : 'headCostCenterId',
+            message: 'Sin centro propio para un consejo, comité o comisión',
+          },
+        ],
+      );
     }
   }
 

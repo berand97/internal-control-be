@@ -2,7 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import type { OrganizationalUnit } from '../../entities/organizational-unit.entity.js';
 import {
   ORG_RELATION_TYPE_LABELS,
+  ORG_UNIT_TYPE_DESCRIPTION,
   ORG_UNIT_TYPE_LABELS,
+  ORG_UNIT_TYPES,
   OrgRelationType,
   OrgUnitType,
 } from '../../enums/org-unit-type.enum.js';
@@ -20,10 +22,10 @@ export class OrganizationalUnitResponseDto {
   @ApiProperty()
   readonly name!: string;
 
-  @ApiProperty({ enum: OrgUnitType, enumName: 'OrgUnitType' })
+  @ApiProperty({ enum: ORG_UNIT_TYPES, enumName: 'OrgUnitType', description: ORG_UNIT_TYPE_DESCRIPTION })
   readonly type!: OrgUnitType;
 
-  @ApiProperty({ description: 'Tipo en español (Rectoría, Vicerrectoría, Facultad, …)' })
+  @ApiProperty({ description: `Tipo en español: ${ORG_UNIT_TYPES.map((type) => ORG_UNIT_TYPE_LABELS[type]).join(', ')}` })
   readonly unitTypeLabel!: string;
 
   @ApiProperty({

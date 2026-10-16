@@ -31,6 +31,7 @@ import {
   STATUS_ARCHIVED,
   UNIT_HEADERS,
   UNIT_SHEET,
+  UNIT_TYPE_OPTIONS,
   type UnitRowInput,
 } from './org-chart.types.js';
 
@@ -80,7 +81,7 @@ const UNIT_COLUMNS: ReadonlyArray<ColumnSpec> = [
     header: UNIT_HEADERS.prefix,
     width: 10,
     readOnly: false,
-    note: 'Los números que identifican este cuadro del organigrama. Una dependencia empieza por los números de su jefe y lleva más. Ej.: Vicerrectoría Financiera = 4; Servicios Administrativos (depende de ella) = 43; Logística = 4115. Puede escribir el código de Contabilidad completo: 1200 se toma como 12 y 1210 como 121 (se quitan los ceros del final). Los códigos de sus centros de costo empiezan por estos números (4350 es de la 43). Cada cuadro lleva números distintos. Vacío: una fila que ya existía conserva los suyos; para quitarlos escriba NINGUNO. Consejos y comités van vacíos.',
+    note: 'Los números que identifican este cuadro del organigrama. Una dependencia empieza por los números de su jefe y lleva más. Ej.: Vicerrectoría Financiera = 4; Servicios Administrativos (depende de ella) = 43; Logística = 4115. Puede escribir el código de Contabilidad completo: 1200 se toma como 12 y 1210 como 121 (se quitan los ceros del final). Los códigos de sus centros de costo empiezan por estos números (4350 es de la 43). Cada cuadro lleva números distintos. Vacío: una fila que ya existía conserva los suyos; para quitarlos escriba NINGUNO. Consejos, comités y comisiones van vacíos.',
   },
   {
     header: UNIT_HEADERS.name,
@@ -90,10 +91,10 @@ const UNIT_COLUMNS: ReadonlyArray<ColumnSpec> = [
   },
   {
     header: UNIT_HEADERS.type,
-    width: 20,
+    width: 24,
     readOnly: false,
     list: ORG_UNIT_TYPES.map((type) => ORG_UNIT_TYPE_LABELS[type]),
-    note: 'Qué clase de cuadro es: Rectoría, Vicerrectoría, Facultad, Departamento, Programa, Área, Dirección, Oficina, Centro, Consejo o comité, u Otro. Obligatorio en filas nuevas. Solo describe; un Consejo o comité no lleva prefijo ni centro propio. Ej.: Tesorería = Departamento; Control Interno = Oficina.',
+    note: `Qué clase de cuadro es, según la Estructura Orgánica (Acuerdo 008/2021): ${UNIT_TYPE_OPTIONS}. Obligatorio en filas nuevas. Dependencia sirve para cualquier instancia académica o administrativa que no encaje en otro tipo. Consejo, Comité y Comisión son cuerpos colegiados: no llevan prefijo ni centro propio. Ej.: Tesorería = Departamento; Control Interno = Oficina; Comité de Inventarios = Comité.`,
   },
   {
     header: UNIT_HEADERS.parent,
@@ -154,7 +155,7 @@ const INSTRUCTIONS: ReadonlyArray<string> = [
   '5. Números (prefijo) de cada cuadro: 1 número para la Rectoría y las vicerrectorías (4 = Vicerrectoría Financiera);',
   '   una dependencia empieza por los de su jefe y lleva más (43 = Servicios Administrativos, bajo 4; 4115 = Logística).',
   '   Si un cuadro se mueve a otro jefe conserva sus números (Control Interno 432 bajo la Rectoría): solo es una advertencia.',
-  '   Puede escribir el código de Contabilidad completo: 1200 se toma como 12 y 1210 como 121. Consejos y comités van sin números.',
+  '   Puede escribir el código de Contabilidad completo: 1200 se toma como 12 y 1210 como 121. Consejos, comités y comisiones van sin números.',
   '   En «Depende de» sirven los números del jefe, su código de Contabilidad (1200) o el de su centro propio (4010 = Vicerrectoría Financiera).',
   '6. Los centros de costo no se editan en este archivo: se administran en la pantalla Centros de costo.',
   '   «Depende de» acepta el código de un centro que ya exista. «Centro propio» acepta también uno que aún no exista:',
@@ -169,6 +170,10 @@ const INSTRUCTIONS: ReadonlyArray<string> = [
   '   copie su Código interno en la fila; si es otro, escríbale sus números o un nombre distinto.',
   '9. Color: el color base de la rama en el organigrama, en formato #RRGGBB (ej.: #DE9927). Sus dependencias toman tonos',
   '   más suaves del mismo color. Vacío: deja el que tenga; NINGUNO: lo quita y el cuadro hereda el color de su jefe.',
+  `10. Tipo (Estructura Orgánica, Acuerdo 008/2021): ${UNIT_TYPE_OPTIONS}.`,
+  '   Dependencia es la instancia académica o administrativa genérica. Consejo, Comité y Comisión son cuerpos colegiados:',
+  '   van sin números y sin centro propio. Archivos viejos: «Consejo o comité» se lee como Consejo, «Área» y «Otro» como',
+  '   Dependencia y «Programa» como Coordinación de programa.',
 ];
 
 const columnLetter = (index: number): string => String.fromCharCode(65 + index);

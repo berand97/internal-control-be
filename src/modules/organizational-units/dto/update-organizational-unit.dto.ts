@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import {
   ORG_RELATION_TYPES,
+  ORG_UNIT_TYPE_DESCRIPTION,
   ORG_UNIT_TYPES,
   OrgRelationType,
   OrgUnitType,
@@ -39,7 +40,12 @@ export class UpdateOrganizationalUnitDto {
   @MaxLength(200)
   readonly name?: string;
 
-  @ApiPropertyOptional({ enum: ORG_UNIT_TYPES, example: OrgUnitType.Department })
+  @ApiPropertyOptional({
+    enum: ORG_UNIT_TYPES,
+    enumName: 'OrgUnitType',
+    example: OrgUnitType.Department,
+    description: ORG_UNIT_TYPE_DESCRIPTION,
+  })
   @IsOptional()
   @IsIn(ORG_UNIT_TYPES)
   readonly type?: OrgUnitType;

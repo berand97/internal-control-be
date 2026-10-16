@@ -10,6 +10,7 @@ import {
 import { parseUnitColor } from '../domain/unit-color.js';
 import { duplicateSiblingWarning, sameUnitName, unitPlace } from '../domain/unit-name.js';
 import {
+  isCollegiateBody,
   ORG_RELATION_TYPE_LABELS,
   ORG_UNIT_TYPE_LABELS,
   OrgRelationType,
@@ -30,6 +31,7 @@ import {
   type RowAction,
   UNIT_HEADERS,
   UNIT_SHEET,
+  UNIT_TYPE_OPTIONS,
   type UnitRowInput,
 } from './org-chart.types.js';
 
@@ -350,7 +352,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       }
       const type = row.type ? parseUnitType(row.type) : undefined;
       if (row.type && !type) {
-        unitError(at, UNIT_HEADERS.type, `Tipo desconocido «${row.type}»: elija uno de la lista`);
+        unitError(at, UNIT_HEADERS.type, `Tipo desconocido «${row.type}»: elija uno de la lista (${UNIT_TYPE_OPTIONS})`);
         valid = false;
       }
       // Vacío: la existente conserva su línea; la nueva queda en Autoridad.
@@ -443,7 +445,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         rowNumber: at,
         code: existing?.code ?? code ?? '',
         name: row.name ?? '',
-        unitType: type ?? current?.unitType ?? OrgUnitType.Other,
+        unitType: type ?? current?.unitType ?? OrgUnitType.Dependency,
         relationType: relation ?? current?.relationType ?? OrgRelationType.Authority,
         codePrefix: prefix,
         rawPrefix: filePrefix ?? prefix,
@@ -584,7 +586,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       const before = unit.existingId ? snapshotUnits.get(unit.existingId) : undefined;
       const deducible =
         !before || (!unit.headCenterKey && !unit.headCenterCode && before.codePrefix !== unit.codePrefix);
-      if (deducible && unit.unitType !== OrgUnitType.Council) {
+      if (deducible && !isCollegiateBody(unit.unitType)) {
         const byCode = unit.rawPrefix && isDetailCode(unit.rawPrefix) ? liveCenterByCode.get(unit.rawPrefix) : undefined;
         const byRoot =
           unit.existingId === null && unit.codePrefix?.length === 1 ? liveCenterByCode.get(`${unit.codePrefix}010`) : undefined;
@@ -597,8 +599,12 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       }
       continue;
     }
-    if (unit.unitType === OrgUnitType.Council) {
-      headIssues.push({ error: true, row: unit.rowNumber, message: 'Un consejo o comité no tiene centro de costo propio' });
+    if (isCollegiateBody(unit.unitType)) {
+      headIssues.push({
+        error: true,
+        row: unit.rowNumber,
+        message: `Un cuerpo colegiado (${ORG_UNIT_TYPE_LABELS[unit.unitType].toLowerCase()}) no tiene centro de costo propio`,
+      });
       continue;
     }
     const head = liveCenterByCode.get(unit.headCenterText);
@@ -709,7 +715,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
   }
 
   const prefixOwners = [...finalPrefix.values()]
-    .filter((unit) => unit.unitType !== OrgUnitType.Council)
+    .filter((unit) => !isCollegiateBody(unit.unitType))
     .map((unit) => ({ codePrefix: unit.codePrefix ?? '', unit }));
 
   /**
@@ -835,13 +841,17 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-  // Prefijo jerárquico y consejos.
+  // Prefijo jerárquico y cuerpos colegiados.
   for (const unit of units.values()) {
     if (unit.rowNumber === null || cyclic.has(unit.key) || !isLiveUnit(unit)) {
       continue;
     }
-    if (unit.unitType === OrgUnitType.Council && unit.codePrefix) {
-      unitError(unit.rowNumber, UNIT_HEADERS.prefix, 'Un consejo o comité no lleva prefijo: no recibe centros de costo');
+    if (isCollegiateBody(unit.unitType) && unit.codePrefix) {
+      unitError(
+        unit.rowNumber,
+        UNIT_HEADERS.prefix,
+        `Un cuerpo colegiado (${ORG_UNIT_TYPE_LABELS[unit.unitType].toLowerCase()}) no lleva prefijo: no recibe centros de costo`,
+      );
       continue;
     }
     if (!unit.codePrefix) {
@@ -876,7 +886,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
   }
 
   const prefixedUnits = [...finalPrefix.values()]
-    .filter((unit) => !cyclic.has(unit.key) && unit.unitType !== OrgUnitType.Council)
+    .filter((unit) => !cyclic.has(unit.key) && !isCollegiateBody(unit.unitType))
     .map((unit) => ({ codePrefix: unit.codePrefix ?? '', unit }));
 
   // Unidad y padre derivados, movimiento y archivo de los centros del archivo.

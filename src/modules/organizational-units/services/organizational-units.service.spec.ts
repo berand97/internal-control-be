@@ -423,4 +423,50 @@ describe('OrganizationalUnitsService', () => {
       service.create({ code: 'CS', name: 'Consejo Superior', type: OrgUnitType.Council, codePrefix: '7' }, actor),
     ).rejects.toMatchObject({ code: ErrorCode.ValidationFailed });
   });
+
+  it.each([
+    [OrgUnitType.Council, 'consejo'],
+    [OrgUnitType.Committee, 'comité'],
+    [OrgUnitType.Commission, 'comisión'],
+  ])('%s es cuerpo colegiado: sin prefijo ni centro propio; sin ellos se crea', async (type, label) => {
+    await expect(service.create({ code: 'CC', name: 'Cuerpo', type, codePrefix: '7' }, actor)).rejects.toMatchObject({
+      code: ErrorCode.ValidationFailed,
+      message: `Un cuerpo colegiado (${label}) no lleva prefijo: no recibe centros de costo`,
+      details: [{ field: 'codePrefix' }],
+    });
+    await expect(service.create({ code: 'CC', name: 'Cuerpo', type, headCostCenterCode: '4010' }, actor)).rejects.toMatchObject({
+      code: ErrorCode.ValidationFailed,
+      message: `Un cuerpo colegiado (${label}) no tiene centro de costo propio`,
+      details: [{ field: 'headCostCenterCode' }],
+    });
+    vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
+    await expect(service.create({ code: 'CC', name: 'Cuerpo', type, headCostCenterCode: null }, actor)).resolves.toMatchObject({
+      type,
+      codePrefix: null,
+      headCostCenterCode: null,
+    });
+  });
+
+  it('cambiar a Comité o Comisión una unidad con prefijo se rechaza; quitándolo en la misma operación, no', async () => {
+    const office = unit('1', 'OF', null, 0);
+    office.codePrefix = '6';
+    office.unitType = OrgUnitType.Office;
+    vi.mocked(unitsRepository.findById).mockResolvedValue(office);
+    for (const type of [OrgUnitType.Committee, OrgUnitType.Commission]) {
+      await expect(service.update('1', { type }, actor)).rejects.toMatchObject({
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'codePrefix' }],
+      });
+      await expect(service.update('1', { type, headCostCenterId: '00000000-0000-4000-8000-000000000001', codePrefix: null }, actor)).rejects.toMatchObject({
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'headCostCenterId' }],
+      });
+    }
+    await service.update('1', { type: OrgUnitType.Committee, codePrefix: null }, actor);
+    expect(unitsRepository.update).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({ unitType: OrgUnitType.Committee, codePrefix: null }),
+      expect.anything(),
+    );
+  });
 });

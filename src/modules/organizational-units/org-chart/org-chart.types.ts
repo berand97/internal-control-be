@@ -4,7 +4,7 @@ import {
   ORG_UNIT_TYPE_LABELS,
   ORG_UNIT_TYPES,
   type OrgRelationType,
-  type OrgUnitType,
+  OrgUnitType,
 } from '../enums/org-unit-type.enum.js';
 import type { OrgChartStamp } from './org-chart-stamp.js';
 
@@ -179,8 +179,24 @@ const UNIT_TYPE_BY_TEXT = new Map<string, OrgUnitType>(
     [normalizeText(type), type],
   ]),
 );
-UNIT_TYPE_BY_TEXT.set('consejo', 'COUNCIL' as OrgUnitType);
-UNIT_TYPE_BY_TEXT.set('comite', 'COUNCIL' as OrgUnitType);
+/**
+ * Etiquetas anteriores a la Estructura Orgánica (Acuerdo 008/2021), aceptadas en archivos viejos. «Comité» y
+ * «Comisión» son tipos propios; «Consejo o comité» se lee como Consejo.
+ */
+const LEGACY_UNIT_TYPE_LABELS: ReadonlyArray<readonly [string, OrgUnitType]> = [
+  ['Consejo o comité', OrgUnitType.Council],
+  ['Área', OrgUnitType.Dependency],
+  ['AREA', OrgUnitType.Dependency],
+  ['Otro', OrgUnitType.Dependency],
+  ['OTHER', OrgUnitType.Dependency],
+  ['Programa', OrgUnitType.Program],
+];
+for (const [label, type] of LEGACY_UNIT_TYPE_LABELS) {
+  UNIT_TYPE_BY_TEXT.set(normalizeText(label), type);
+}
+
+/** Las etiquetas válidas, en el orden de la lista: para los mensajes de error. */
+export const UNIT_TYPE_OPTIONS = ORG_UNIT_TYPES.map((type) => ORG_UNIT_TYPE_LABELS[type]).join(', ');
 
 export const parseUnitType = (text: string): OrgUnitType | undefined => UNIT_TYPE_BY_TEXT.get(normalizeText(text));
 
