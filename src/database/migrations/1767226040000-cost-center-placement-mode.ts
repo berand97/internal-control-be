@@ -1,19 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Ubicación manual o automática de los centros de costo, y origen AUTO del conciliador de estructura.
- *
- * - cost_center_placement.mode: AUTO (la unidad y el padre los decide el código: prefijo más largo y XYZ0) o MANUAL
- *   (una persona fijó la unidad o el padre en la pantalla del centro; el conciliador no la toca y la lista como
- *   excepción). La fila vigente manda; las cerradas guardan la marca que tuvieron.
- * - Datos existentes: AUTO, salvo las filas que salieron de un cambio hecho por una persona en POST
- *   /cost-centers/:id/placement. Se reconocen porque son source MANUAL y no son la primera fila de su centro (el alta
- *   manual también es MANUAL, pero es la primera). Las importaciones (IMPORT) y la migración inicial quedan AUTO.
- * - source admite AUTO: placements escritos por el conciliador (sin importación asociada).
- * - org_structure_history.source admite AUTO: amarres del centro propio hechos por el conciliador.
- *
- * down(): se niega si hay filas con origen AUTO (se perdería de dónde salieron); la marca mode se descarta.
- */
 export class CostCenterPlacementMode1767226040000 implements MigrationInterface {
   name = 'CostCenterPlacementMode1767226040000';
 

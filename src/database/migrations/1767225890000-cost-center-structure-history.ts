@@ -1,26 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Estructura de los centros de costo con historial.
- *
- * - cost_center.has_movement: el centro recibe movimientos contables (1) o es un nodo agrupador (0), como la columna
- *   «Movimiento» del plan de centros de Contabilidad. Distinta de accepts_assets, que no se toca aquí.
- * - organizational_unit.code_prefix: dígito(s) inicial(es) del rango de códigos de los centros de la unidad (4 →
- *   4000–4999). Único entre unidades activas. No se siembran unidades: se crean desde la importación o el CRUD.
- * - cost_center_placement: dónde estuvo cada centro (unidad, centro padre, movimiento) y desde/hasta cuándo, con
- *   motivo, quién, IP, agente y origen (MANUAL, IMPORT, MIGRATION). Sin solapes por centro: EXCLUDE con tstzrange
- *   (btree_gist para la igualdad del uuid), así ni un INSERT a mano deja dos ubicaciones vigentes a la vez; el
- *   servicio además bloquea el centro (FOR UPDATE) para que dos cambios simultáneos no choquen contra el EXCLUDE.
- *   cost_center.parent_id / organizational_unit_id / has_movement quedan como caché de la fila vigente.
- * - Cada centro existente recibe su fila vigente con el estado actual (source MIGRATION, desde su created_at: es lo
- *   único que se sabe de su historia).
- * - trg_cost_center_initial_placement (diferido al commit): un centro creado por un camino que no abre su historial
- *   (sincronización CSV, un INSERT a mano) recibe su fila inicial; si el servicio ya la abrió en la misma
- *   transacción, no hace nada.
- *
- * down(): se niega si hay historial que se perdería (filas que no son la inicial de la migración o del alta, centros
- * agrupadores, unidades con prefijo). No borra btree_gist (puede usarlo otra cosa).
- */
 export class CostCenterStructureHistory1767225890000 implements MigrationInterface {
   name = 'CostCenterStructureHistory1767225890000';
 

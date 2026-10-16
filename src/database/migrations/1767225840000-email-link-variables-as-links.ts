@@ -1,32 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Plantillas de correo: las variables de enlace pasan de texto visible a enlace.
- *
- * Las versiones que vienen de las plantillas de texto (1767225800000 → 1767225820000) muestran el URL crudo, p. ej.
- * PASSWORD_RESET: "Use este enlace…:" + salto + `{{auth.resetUrl}}`. Desde ahora eso se rechaza al guardar
- * (src/modules/email-templates/domain/url-variables-as-text.ts).
- *
- * up(): para cada tipo cuya versión ACTIVA tenga una variable de enlace como texto en un párrafo, crea una versión
- * nueva (max(version) + 1, activa, created_by / activated_by NULL como las sembradas por migración, activated_at =
- * now(), body NULL) donde cada `{{variable}}` de enlace escrita como texto pasa a ser un texto con marca
- * link { href: '{{variable}}' } cuyo texto es el sugerido del catálogo ("Restablecer contraseña"). El resto del
- * texto, las marcas, el asunto y las variables usadas no cambian. La versión anterior queda en el historial sin tocar
- * (inactiva); las versiones no activas no se reescriben. Idempotente: una versión ya convertida no genera otra.
- * Solo se convierten párrafos: un título, nota destacada o lista de datos con el URL como texto no tiene dónde poner
- * un enlace y se deja igual (el editor lo marcará al volver a guardar).
- *
- * down(): borra solo las versiones que up() creó y reactiva aquella de la que salieron. Se reconocen sin marcador:
- * created_by, activated_by y body NULL, y sus bloques son exactamente la conversión de otra versión del mismo tipo
- * con el mismo asunto (la conversión cambió algo). Una versión guardada por una persona siempre tiene created_by. Si
- * la versión borrada ya no era la activa (alguien activó otra), no se reactiva nada. mail_outbox.template_version_id
- * de un correo de prueba enviado con ella queda NULL (ON DELETE SET NULL).
- *
- * Variables de enlace y texto sugerido copiados del catálogo (EMAIL_TEMPLATE_VARIABLES, email-template-catalog.ts):
- * una migración no importa código vivo. TypeORM corre cada migración en una transacción (CLI: 'all'; tests: 'each').
- */
-
-/** Variables kind = url por tipo → texto del enlace (linkText). */
 export const LINK_VARIABLES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   USER_INVITATION: { 'auth.loginUrl': 'Iniciar sesión' },
   PASSWORD_RESET: { 'auth.resetUrl': 'Restablecer contraseña' },
@@ -56,7 +29,6 @@ interface StoredBlock {
 
 const TOKEN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
 
-/** Un nodo text → uno o varios: cada variable de enlace es un texto con marca link y el texto sugerido. */
 const convertText = (node: DocNode, links: Readonly<Record<string, string>>): ReadonlyArray<DocNode> => {
   const text = node.text ?? '';
   const marks = node.marks ?? [];
@@ -105,7 +77,6 @@ const convertDoc = (doc: DocNode, links: Readonly<Record<string, string>>): DocN
   ),
 });
 
-/** JSON con las claves ordenadas: jsonb no conserva el orden de las claves. */
 const canonical = (value: unknown): string =>
   JSON.stringify(value, (_key, item: unknown) =>
     item !== null && typeof item === 'object' && !Array.isArray(item)
@@ -113,7 +84,6 @@ const canonical = (value: unknown): string =>
       : item,
   );
 
-/** Bloques de la versión con las variables de enlace del tipo como enlaces; null si no había nada que convertir. */
 export const convertLinkVariables = (
   templateType: string,
   blocks: ReadonlyArray<StoredBlock>,

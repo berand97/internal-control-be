@@ -1,12 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * La migración 1767225870000 otorgó inventory_catalog:manage:global también a SUPER_ADMIN, lo que contradice la regla
- * del sistema «SUPER_ADMIN sin permisos operativos» (1767225613000-restore-role-scoped-navigation). Esa migración
- * puede estar ya aplicada, así que no se edita: aquí se retira el permiso solo de SUPER_ADMIN; INTERNAL_CONTROL_DIRECTOR
- * lo conserva. down() lo vuelve a otorgar (idempotente).
- */
-
 const PERMISSION_CODE = 'inventory_catalog:manage:global';
 
 export class RevokeSuperAdminInventoryCatalog1767225895000 implements MigrationInterface {

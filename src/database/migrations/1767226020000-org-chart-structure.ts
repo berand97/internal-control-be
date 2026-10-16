@@ -1,24 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Organigrama institucional: tipos de cuadro, línea hacia el padre, centro propio, historial de nombres/códigos y
- * previsualizaciones de la importación por Excel.
- *
- * - organizational_unit.unit_type sigue siendo VARCHAR(30) sin CHECK: los tipos nuevos (DIRECTION, OFFICE, CENTER,
- *   COUNCIL, OTHER) solo existen en el enum de la aplicación.
- * - organizational_unit.relation_type: la línea del organigrama hacia su padre (AUTHORITY | ADVISORY | COORDINATION),
- *   por defecto AUTHORITY (todas las existentes).
- * - organizational_unit.head_cost_center_id: centro «propio» del cuadro (la unidad 25 → 2510 Decanatura). Solo se fija
- *   por Excel o PATCH; nunca se deduce. ON DELETE SET NULL: borrar el centro no borra la unidad.
- * - org_structure_history: eventos de cambio de NOMBRE/CÓDIGO de centros y NOMBRE/TIPO/PADRE/PREFIJO/LÍNEA/CENTRO
- *   PROPIO/ESTADO de unidades (la ubicación de los centros sigue en cost_center_placement). Sin FK a la entidad: el
- *   borrado físico borra sus eventos explícitamente; el audit_log conserva el código y el nombre.
- * - org_chart_import: previsualización de un Excel del organigrama (filas leídas y resumen), para confirmarla después
- *   por su id. Solo nombres y códigos de la estructura; ningún dato personal.
- *
- * down(): se niega si hay historial, previsualizaciones, unidades con línea distinta de AUTHORITY, centro propio o
- * tipos nuevos (se perderían).
- */
 export class OrgChartStructure1767226020000 implements MigrationInterface {
   name = 'OrgChartStructure1767226020000';
 

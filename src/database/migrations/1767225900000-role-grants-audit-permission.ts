@@ -1,12 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Permiso de solo lectura para consultar el historial de otorgamientos (GET /roles/grants-history): quién dio o quitó
- * qué permiso a qué rol, qué rol a qué usuario, cuándo, desde dónde y por qué. La Directora de Control Interno y el
- * Auditor lo consultan sin tener administración de roles; SUPER_ADMIN también (ya lee la bitácora con
- * audit:read:global). No otorga ningún permiso operativo ni de administración.
- */
-
 const PERMISSION_CODE = 'role:audit:global';
 
 export class RoleGrantsAuditPermission1767225900000 implements MigrationInterface {

@@ -1,19 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Los roles se definen por permisos, no por nombre (decisión del desarrollador).
- *
- * 1. Permiso act:sign_control:global («Actas» / sign_control): firmar actas por Control Interno. Decide quién puede
- *    firmar el turno CONTROL_INTERNO del traslado (OCI-17-89) y quién puede ser sustituto de un turno de Control
- *    Interno en cualquier acta; antes se decidía por los códigos de rol INTERNAL_CONTROL_DIRECTOR y AUDITOR. Se siembra
- *    solo a INTERNAL_CONTROL_DIRECTOR; el SUPER_ADMIN lo otorga a otros roles desde la interfaz. Está en la lista de
- *    permisos que exigen MFA (src/modules/auth/services/mfa-policy.ts).
- * 2. Revierte dos semillas al AUDITOR que nadie pidió: asset_request:review:global (1767225930000) y role:audit:global
- *    (1767225900000) quedan solo en INTERNAL_CONTROL_DIRECTOR (role:audit:global también en SUPER_ADMIN, que ya lo tenía).
- *
- * down(): quita el permiso nuevo (y sus asignaciones) y devuelve al AUDITOR las dos filas borradas.
- */
-
 const CONTROL_SIGNER_PERMISSION = 'act:sign_control:global';
 const AUDITOR_REVERTED = ['asset_request:review:global', 'role:audit:global'];
 

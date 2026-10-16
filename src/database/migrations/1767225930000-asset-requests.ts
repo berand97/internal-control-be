@@ -1,31 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Solicitud de activos entre centros de costo (BE-2).
- *
- * 1. asset_request: un jefe vigente del centro que solicita (requesting_cost_center_id, el destino) pide activos al
- *    centro dueño (owner_cost_center_id). Estados (src/modules/asset-requests/domain/asset-request-transitions.ts):
- *    REQUESTED → ACCEPTED | CLOSED_BY_OWNER; ACCEPTED → DOCUMENT_GENERATED | RETURNED | EXPIRED; RETURNED → REQUESTED |
- *    ACCEPTED | CANCELLED; REQUESTED → CANCELLED. Código SOL-<año>-NNNN (code_sequence asset_request). note es texto
- *    libre del solicitante que nunca se valida ni se resuelve contra activos. loan_id / transfer_id: el documento que
- *    generó Control Interno (préstamo si es TEMPORARY, traslado si es PERMANENT).
- * 2. asset_request_item: los activos que eligió el jefe dueño. Un activo está a lo sumo en una solicitud abierta
- *    (uq_asset_request_item_open, como los traslados): la aceptación los reserva hasta que se genera el documento, se
- *    cancela, vence o vuelve al dueño.
- * 3. asset_request_event: historial (evento, actor, motivo, payload sin datos personales). actor_user_id NULL = el
- *    job de vencimiento.
- * 4. asset_loan.asset_request_id (NULL) y la FK que faltaba en asset_transfer.asset_request_id (1767225920000).
- * 5. Permiso asset_request:review:global («Solicitudes de activos» / review): revisar las solicitudes aceptadas
- *    (devolver o generar el documento) y leerlas todas. Sembrado a INTERNAL_CONTROL_DIRECTOR y AUDITOR, los roles de
- *    Control Interno (los mismos que firman por Control Interno, CONTROL_SIGNER_ROLE_CODES).
- * 6. Menú: «Solicitudes de activos» (/asset-requests) con loan:request (lo tienen DEPARTMENT_HEAD, CUSTODIAN e
- *    INTERNAL_CONTROL_DIRECTOR) y «Traslados» (/transfers) con transfer:read. El menú pide un solo recurso+acción
- *    (actionSatisfies): para que quien genera traslados (asset:update:global, solo INTERNAL_CONTROL_DIRECTOR) lo vea,
- *    ese rol recibe también transfer:read:global, que no le da nada que no tuviera con asset:read:global.
- *
- * down(): se niega si hay solicitudes; borra por id fijo los ítems del menú y solo lo que sembró.
- */
-
 const REVIEW_PERMISSION = 'asset_request:review:global';
 const TRANSFER_READ_PERMISSION = 'transfer:read:global';
 const REVIEW_ROLES = ['INTERNAL_CONTROL_DIRECTOR', 'AUDITOR'];
@@ -177,7 +151,6 @@ export class AssetRequests1767225930000 implements MigrationInterface {
       throw new Error(`No se puede revertir sin perder datos: hay ${row?.total} solicitudes de activos`);
     }
     await queryRunner.query(`DELETE FROM navigation_item WHERE id IN ('${REQUESTS_NAV_ID}', '${TRANSFERS_NAV_ID}')`);
-    // Lo que sembró up(): transfer:read:global de la Dirección de Control Interno (1767225920000 no se lo daba).
     await queryRunner.query(
       `DELETE FROM role_permission
        WHERE role_id IN (SELECT id FROM role WHERE code = 'INTERNAL_CONTROL_DIRECTOR')

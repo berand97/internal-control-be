@@ -1,30 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Separación de funciones en las actas y proceso de traslado de activos (OCI-17-89).
- *
- * 1. document_signature_reassignment.source: 'REASSIGNED' (reasignación posterior, POST
- *    /documents/:id/signatures/:order/reassign) o 'AT_ISSUE' (sustitución de un turno de Control Interno al emitir el
- *    acta porque el designado ocupaba otra firma). Una sola bitácora de quién terminó en cada turno y por qué; las
- *    filas existentes quedan 'REASSIGNED'. AT_ISSUE no reemite PDF: previous_pdf_hash queda NULL.
- * 2. asset_transfer_reason: catálogo administrable de motivos del traslado. Semilla: solo el motivo que trae el
- *    formato institucional (docs/acta de traslado de activos fijos mdf.xlsx, columna «Razon», celdas Q14:Q26 =
- *    «Reubicacion»); el Excel no tiene lista de validación para esa columna, el resto lo define Control Interno.
- * 3. asset_transfer / asset_transfer_item: el traslado (DRAFT → PENDING_SIGNATURES → COMPLETED | REJECTED |
- *    CANCELLED). Un activo está a lo sumo en un traslado abierto (uq_asset_transfer_item_open). asset_request_id
- *    queda sin FK hasta que exista la solicitud de activos (BE-2).
- * 4. Permisos:
- *    - transfer_catalog:manage:global («Motivos de traslado»): administrar el catálogo; solo INTERNAL_CONTROL_DIRECTOR
- *      (mismo criterio que inventory_catalog:manage:global y 1767225895000: el SUPER_ADMIN no opera catálogos).
- *    - transfer:sign_accounting:global («Firmar actas de traslado por Contabilidad»): quién puede firmar el turno
- *      CONTABILIDAD del OCI-17-89 (la persona se toma de los usuarios activos con este permiso vigente).
- *    - transfer:read:global («Ver traslados y sus actas»): lectura de todos los traslados sin permisos de activos.
- * 5. Rol CONTABILIDAD («Contabilidad», sistema, asignable, sin usuarios): solo transfer:sign_accounting:global y
- *    transfer:read:global; nada de asset:*, inventory:* ni loan:*. Nivel 2 con superior INTERNAL_CONTROL_DIRECTOR,
- *    igual que AUDITOR y DEPARTMENT_HEAD (roles de segundo nivel bajo la directora, 1767225616000/1767225617000);
- *    sin rol padre (no hereda permisos). El SUPER_ADMIN lo otorga a los usuarios de Contabilidad.
- */
-
 const REASON_CATALOG_PERMISSION = 'transfer_catalog:manage:global';
 const ACCOUNTING_PERMISSION = 'transfer:sign_accounting:global';
 const TRANSFER_READ_PERMISSION = 'transfer:read:global';

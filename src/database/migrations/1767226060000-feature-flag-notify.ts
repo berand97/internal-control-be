@@ -1,15 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * La BD es la fuente de verdad de los módulos (feature_flag); la memoria de cada instancia es una caché viva.
- *
- * - feature_flag_notify(): `pg_notify('feature_flags', code)` tras INSERT, UPDATE o DELETE de una fila (con UPDATE que
- *   cambia el código se avisan ambos), y `'*'` tras TRUNCATE. Cada instancia escucha el canal (PgListener) y relee la
- *   fila (o todo con '*'). Así un UPDATE a mano por SQL se ve sin reiniciar y todas las instancias coinciden.
- * - El NOTIFY sale solo si la transacción hace COMMIT. El payload es el código del módulo: nada personal.
- *
- * down(): quita los triggers y la función (la tabla y sus datos no cambian).
- */
 export class FeatureFlagNotify1767226060000 implements MigrationInterface {
   name = 'FeatureFlagNotify1767226060000';
 

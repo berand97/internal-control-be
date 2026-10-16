@@ -1,25 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Programación de tomas físicas (calendario, reprogramación, cancelación y recordatorios).
- *
- * - physical_inventory: reschedule_count / rescheduled_at ("reprogramada" es derivado: reschedule_count > 0, no un
- *   estado), reminder_offsets_days (días antes del inicio en que se recuerda; '{}' en las tomas existentes: ninguna
- *   recibe recordatorios retroactivos), cancel_reason / cancelled_at / cancelled_by.
- * - inventory_reminder: un recordatorio por (toma, días de anticipación, revisión de fechas). schedule_rev es el
- *   reschedule_count vigente al crearlo; reprogramar deja los PENDING anteriores SUPERSEDED y crea los de la nueva
- *   revisión. due_at = 07:00 America/Bogota del día (inicio - offset_days). El worker reclama PENDING vencidos con
- *   FOR UPDATE SKIP LOCKED y en la misma transacción encola correo + notificación y marca el estado final: un
- *   reinicio no reenvía.
- * - mail_outbox.recipient_person_id: los jefes de centro de costo pueden no tener usuario. recipient_user_id pasa a
- *   ser opcional y un CHECK exige exactamente uno de los dos. El correo se resuelve al enviar (person.email).
- * - Menú: "Calendario de tomas" (/inventories/calendar, physical_inventory:read, ícono existente `clipboard-check`),
- *   id fijo y ON CONFLICT (path) DO NOTHING; down() borra por ese id.
- *
- * down(): se niega si ya hay datos que se perderían (recordatorios, correos a personas sin usuario, tomas
- * reprogramadas o canceladas con motivo). No borra ni convierte datos por su cuenta.
- */
-
 const NAV_ID = '6f1d2c3a-7b4e-4a1f-9c2d-000000018601';
 
 export class InventorySchedule1767225860000 implements MigrationInterface {

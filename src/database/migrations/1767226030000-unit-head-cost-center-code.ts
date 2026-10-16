@@ -1,16 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Centro propio de una unidad por código.
- *
- * - organizational_unit.head_cost_center_code: el código que escribió el usuario (Excel del organigrama, POST/PATCH).
- *   head_cost_center_id sigue siendo el amarre real: null mientras el centro no exista (pendiente). El conciliador de
- *   estructura lo amarra cuando el centro se crea y lo vuelve a dejar pendiente si el centro se archiva o se borra.
- * - Se rellena desde el centro amarrado hoy.
- * - chk_org_unit_head_code: un amarre siempre lleva su código.
- *
- * down(): se niega si hay centros propios pendientes (se perderían).
- */
 export class UnitHeadCostCenterCode1767226030000 implements MigrationInterface {
   name = 'UnitHeadCostCenterCode1767226030000';
 

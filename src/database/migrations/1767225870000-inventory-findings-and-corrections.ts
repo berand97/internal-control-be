@@ -1,26 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Hallazgos, causas de faltante y correcciones de la toma física.
- *
- * - inventory_finding_category: catálogo configurable de categorías de hallazgo (código corto como PK). La sugerencia
- *   sale de los datos (suggest_results / suggest_conditions), nunca de los códigos. Siembra AU, ANE, AOD y ANI; ANI
- *   queda inactiva y pending_definition = TRUE porque nadie ha definido qué significa.
- * - inventory_missing_cause: catálogo de causas de faltante, vacío (Control Interno lo llena a partir de los textos de
- *   "Otra").
- * - physical_inventory_item: finding_category_code, missing_cause_id / missing_cause_other (CHECK: un MISSING lleva
- *   exactamente uno; los demás resultados, ninguno), expected_code_temporary (el activo tenía la marca BARCODE_TEMP al
- *   congelar la foto; NULL en fotos anteriores), was_lost (sobrante de un activo que estaba LOST), voided_at (sobrante
- *   anulado por error).
- *   El CHECK se crea NOT VALID (las filas MISSING anteriores no tienen causa) y se valida en la misma migración solo si
- *   ninguna fila lo viola.
- * - inventory_item_correction: historial de correcciones y anulaciones (antes/después en JSONB, motivo, quién, cuándo).
- * - Permiso inventory_catalog:manage:global ("Catálogos de toma física") para INTERNAL_CONTROL_DIRECTOR y SUPER_ADMIN.
- *
- * down(): se niega si hay datos que se perderían (causas, correcciones, categorías asignadas, causas en ítems,
- * sobrantes anulados o de activos perdidos, ítems NOT_VERIFIED). No borra ni convierte datos por su cuenta.
- */
-
 const PERMISSION_CODE = 'inventory_catalog:manage:global';
 
 export class InventoryFindingsAndCorrections1767225870000 implements MigrationInterface {

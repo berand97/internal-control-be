@@ -52,8 +52,6 @@ import { InventoryMissingCause } from '../modules/inventories/entities/inventory
 import { InventoryItemCorrection } from '../modules/inventories/entities/inventory-item-correction.entity.js';
 import { AssetDepreciation } from '../modules/depreciation/entities/asset-depreciation.entity.js';
 
-// El CLI de migraciones (y el de staging) no pasa por ConfigModule: misma guarda que la app.
-// Fuera de producción se niega a conectarse a un host no local salvo ALLOW_REMOTE_DATABASE=true.
 const databaseUrl = guardDatabaseUrl(
   process.env['DATABASE_URL'] ??
     'postgres://asset_admin:secret@localhost:5432/asset_management',

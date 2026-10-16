@@ -1,25 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Corte contable, sobrantes que se vuelven activo y acta OCI-21-37 de la toma física.
- *
- * - accounting_cut: un corte contable (fecha y fuente) contra el que se concilia una toma. source_kind MANUAL (se
- *   registra la fecha y la fuente) o IMPORT (con staging_import_id; el destino del importador aún no existe: las
- *   columnas del reporte de Contabilidad no están definidas).
- * - accounting_cut_line: una fila del corte (identificador del activo tal como vino, activo resuelto, valor en libros,
- *   precio de compra, centro de costo, fila cruda). Un activo aparece a lo sumo una vez por corte.
- * - physical_inventory: accounting_cut_id (corte asociado), snapshot_taken_at (instante de la foto al iniciar; NULL
- *   en tomas iniciadas antes), act_request_id / act_document_id (solicitud y acta OCI-21-37) y act_blocked_* (por
- *   qué el acta no se encoló al aprobar la conciliación).
- * - physical_inventory_item: resolución del sobrante sin activo (CREATE_ASSET con resolved_asset_id, o
- *   LEAVE_UNRESOLVED con su motivo), quién y cuándo.
- *
- * - Menú: "Catálogos de toma física" (/inventories/catalogs, physical_inventory:read, ícono existente `tags`, orden
- *   77 junto al calendario), id fijo y ON CONFLICT (path) DO NOTHING; down() borra por ese id.
- *
- * down(): se niega si hay datos que se perderían (cortes, tomas con corte o acta, sobrantes resueltos).
- */
-
 const CATALOGS_NAV_ID = '6f1d2c3a-7b4e-4a1f-9c2d-000000018801';
 
 export class InventoryValuationSurplusAndAct1767225880000 implements MigrationInterface {

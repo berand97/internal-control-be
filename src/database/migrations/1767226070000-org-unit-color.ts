@@ -1,15 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Color base de cada rama del organigrama.
- *
- * - organizational_unit.color: #rrggbb en minúsculas (chk_org_unit_color); null = hereda el de su jefe. El frontend
- *   pinta las dependencias con tonos más suaves del mismo color.
- * - org_structure_history admite el campo COLOR (cambios de color desde la pantalla o el Excel).
- * - No se siembra ningún color.
- *
- * down(): se niega si hay unidades con color o historial de color (se perderían).
- */
 export class OrgUnitColor1767226070000 implements MigrationInterface {
   name = 'OrgUnitColor1767226070000';
 

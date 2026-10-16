@@ -1,43 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * 1. Retiro del rol CUSTODIAN («Custodio de Activos»). Las dos figuras reales siguen: el jefe de la dependencia (rol
- *    DEPARTMENT_HEAD y jefatura vigente) y el responsable de un activo (asset.current_responsible_id, quien firmó
- *    «Recibe»). El rol RBAC no lo asigna nadie y ninguna regla del código lo exige; DEPARTMENT_HEAD heredaba de él.
- *    En una transacción (la de la migración):
- *    a. cada rol que hereda de CUSTODIAN (DEPARTMENT_HEAD) recibe como propios los permisos que hoy le llegan por esa
- *       herencia y no tiene ya (con sus condiciones): nadie pierde un permiso;
- *    b. esos roles pasan a heredar del padre de CUSTODIAN (VIEWER), y los que lo tenían como superior pasan al
- *       superior de CUSTODIAN;
- *    c. se borran las reglas de separación de funciones que lo citan (la DYNAMIC CUSTODIAN ↔ DEPARTMENT_HEAD solo se
- *       mostraba; «quien solicita un préstamo no lo aprueba» la exige el código con loan.requestedBy);
- *    d. se borran sus role_permission y el rol.
- *    Si algún usuario tiene o tuvo el rol (user_role, aun revocado) la migración se detiene sin tocar nada.
- *    Lo que había queda en audit_log (ROLE_DELETED, entidad ROLE, sin datos personales): la fila del rol, sus
- *    permisos, sus reglas, sus herederos y subordinados, y los permisos copiados. down() lo restaura tal cual desde
- *    ahí (mismo id) y borra ese registro.
- *
- * 2. Categorías de hallazgo sin «pendiente de definir». pending_definition sale del catálogo: ANI se eliminó
- *    (1767225990000) y ninguna categoría queda sin definición. Se borra la columna para que no quede un dato sin
- *    efecto. Si alguna fila estuviera en TRUE (creada o editada desde el catálogo después de 1767225990000), primero se
- *    desactiva: antes no se sugería ni se asignaba, y así sigue. down() vuelve a crear la columna en FALSE (valor de
- *    todas las filas después de 1767225990000); no puede saber cuáles se desactivaron por estar pendientes, esas
- *    quedan inactivas.
- *
- * 3. Menú «Precio cero» (/assets/price-zero) en Activos, junto a «Activos»: lo publica asset:read (la lista de trabajo
- *    GET /assets/price-zero se acota al alcance de lectura de activos). Id fijo y ON CONFLICT (path) DO NOTHING; down()
- *    borra por ese id y nunca toca una fila creada a mano.
- *
- * 4. Cancelar un préstamo programado (POST /loans/:id/cancel, APPROVED → CANCELLED). asset_loan.cancelled_reason guarda
- *    el motivo (3 a 500). asset_request.status CLOSED_LOAN_CANCELLED: la solicitud TEMPORARY cuyo préstamo programado se
- *    canceló antes de entregarse; como CLOSED_LOAN_REJECTED, conserva loan_id y la aceptación. down() se niega si hay
- *    solicitudes CLOSED_LOAN_CANCELLED o préstamos con motivo de cancelación (no hay dónde guardarlos antes).
- *
- * 5. Centro de un sobrante sin activo (physical_inventory_item.surplus_cost_center_id): en tomas por ubicación, unidad
- *    o global el sobrante no es de ningún centro; se elige (PUT /inventories/:id/items/:itemId/surplus-center o al
- *    dejarlo sin resolver) y va al acta de ese centro. down() se niega si hay alguno elegido (se perdería de qué acta es).
- */
-
 const RETIRED_ROLE = 'CUSTODIAN';
 
 const PRICE_ZERO_NAV_ID = '6f1d2c3a-7b4e-4a1f-9c2d-000000020101';
@@ -151,7 +113,6 @@ export class CustodianRetirementLoanCancelAndSurplusCenter1767226010000 implemen
       [role.id],
     )) as Array<Record<string, unknown>>;
 
-    // a. Lo heredado pasa a ser propio en cada heredero (solo lo que no tenía).
     const copied = (await queryRunner.query(
       `INSERT INTO role_permission (role_id, permission_id, conditions)
        SELECT heir.id, rp.permission_id, rp.conditions
@@ -162,7 +123,6 @@ export class CustodianRetirementLoanCancelAndSurplusCenter1767226010000 implemen
       [role.id],
     )) as Array<{ roleId: string; permissionId: string }>;
 
-    // b. Herencia y jerarquía saltan al padre y al superior del rol retirado.
     await queryRunner.query(
       `UPDATE role heir SET parent_role_id = r.parent_role_id, updated_at = NOW()
        FROM role r WHERE r.id = $1 AND heir.parent_role_id = r.id`,
@@ -174,7 +134,6 @@ export class CustodianRetirementLoanCancelAndSurplusCenter1767226010000 implemen
       [role.id],
     );
 
-    // c y d.
     await queryRunner.query('DELETE FROM role_separation_of_duties WHERE role_a_id = $1 OR role_b_id = $1', [role.id]);
     await queryRunner.query('DELETE FROM role_permission WHERE role_id = $1', [role.id]);
     await queryRunner.query('DELETE FROM role WHERE id = $1', [role.id]);

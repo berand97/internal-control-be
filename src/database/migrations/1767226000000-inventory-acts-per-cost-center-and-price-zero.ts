@@ -1,40 +1,10 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Un acta OCI-21-37 por centro de costo de la toma, y activos con precio de compra cero.
- *
- * 1. physical_inventory_act: una fila por centro de costo presente en los ítems de la toma (esperados por su centro en
- *    la foto; sobrantes por el centro de su activo o del activo creado al resolverlos). La ubicación define el trabajo
- *    de campo, no el acta: al cerrar se resuelve el jefe que firma cada acta como ENCARGADO y al conciliar se encola una
- *    por centro, cada una con su consecutivo. Guarda lo que antes estaba en physical_inventory (signer_head_*,
- *    attended_by_*, act_request_id, act_document_id, act_blocked_*), ahora por acta. «Atendió por el área» pasa a ser
- *    por acta: en una toma por ubicación cada área pudo tener su encargado.
- *    - Datos existentes: cada toma cerrada o conciliada recibe una fila por centro presente en sus ítems (alcance
- *      COST_CENTER: una sola, la de su centro) con lo que tenía la toma. Una toma de otro alcance cuya acta única ya se
- *      encoló (antes de esta regla) conserva esa acta en una fila con cost_center_id NULL: es la única forma de fila sin
- *      centro. El acta y la solicitud del outbox que la generó se reenlazan a la fila (document.entity_type
- *      PHYSICAL_INVENTORY → PHYSICAL_INVENTORY_ACT, entity_id = id de la fila; igual en document_request.payload).
- *    - Las columnas viejas de physical_inventory se eliminan: nada más las usa (el acta y su firmante viven en la fila).
- * 2. asset_price_zero_reason: catálogo administrable de motivos de un precio de compra cero. Nace VACÍO (no se siembra).
- *    asset_price_zero_classification: el motivo registrado para cada activo (uno vigente por activo; quién y cuándo;
- *    los cambios quedan en audit_log). No toca el precio.
- * 3. Marca PRICE_ZERO (data_quality_flags) como la pone la importación de Excel: precio 0 sin PRICE_MISSING. Los activos
- *    existentes con precio 0 sin la marca la reciben (sin tocar precios). Un trigger mantiene la marca al insertar o
- *    cambiar el precio: la pone con precio 0 y la quita cuando el precio deja de ser 0.
- * 4. Permiso asset_price_zero_reason:manage:global («Motivos de precio cero» / manage), sembrado solo a
- *    INTERNAL_CONTROL_DIRECTOR (SUPER_ADMIN sin permisos operativos).
- *
- * down(): se niega si alguna toma tiene más de un acta ya encolada o generada (volver a una por toma perdería el
- * vínculo de las demás) o si hay motivos de precio cero registrados. Devuelve los datos de la única fila de cada toma a
- * physical_inventory y reenlaza sus actas. Las marcas PRICE_ZERO se quedan (el precio sigue siendo 0).
- */
-
 const PERMISSION_CODE = 'asset_price_zero_reason:manage:global';
 const ACT_ENTITY = 'PHYSICAL_INVENTORY_ACT';
 const LEGACY_ENTITY = 'PHYSICAL_INVENTORY';
 const ACT_FORMAT = 'OCI-21-37';
 
-/** Centro al que va cada ítem vigente de la toma (el mismo criterio que InventoryActService). */
 const ITEM_CENTERS = `
   SELECT DISTINCT pi.id AS inventory_id,
     CASE WHEN pi.scope_type = 'COST_CENTER' THEN pi.scope_id
@@ -81,7 +51,6 @@ export class InventoryActsPerCostCenterAndPriceZero1767226000000 implements Migr
     `);
     await queryRunner.query('CREATE INDEX idx_physical_inventory_act_request ON physical_inventory_act (document_request_id)');
 
-    // Tomas de otro alcance cuya acta única ya se encoló: la conservan en una fila sin centro.
     await queryRunner.query(`
       INSERT INTO physical_inventory_act (inventory_id, cost_center_id, signer_head_person_id, signer_head_recorded_at,
         signer_head_recorded_by, attended_by_person_id, attended_by_name, document_request_id, document_id)
@@ -90,7 +59,6 @@ export class InventoryActsPerCostCenterAndPriceZero1767226000000 implements Migr
       FROM physical_inventory
       WHERE scope_type <> 'COST_CENTER' AND act_request_id IS NOT NULL
     `);
-    // Las demás tomas cerradas o conciliadas: una fila por centro presente (COST_CENTER: la de su centro, siempre).
     await queryRunner.query(`
       INSERT INTO physical_inventory_act (inventory_id, cost_center_id, signer_head_person_id, signer_head_recorded_at,
         signer_head_recorded_by, attended_by_person_id, attended_by_name, document_request_id, document_id,
@@ -115,7 +83,6 @@ export class InventoryActsPerCostCenterAndPriceZero1767226000000 implements Migr
       WHERE pi.status IN ('CLOSED', 'RECONCILED')
         AND NOT (pi.scope_type <> 'COST_CENTER' AND pi.act_request_id IS NOT NULL)
     `);
-    // Reenlaza las actas ya encoladas o generadas a su fila.
     await queryRunner.query(
       `
       UPDATE document d SET entity_type = $1, entity_id = a.id
@@ -150,7 +117,6 @@ export class InventoryActsPerCostCenterAndPriceZero1767226000000 implements Migr
         DROP COLUMN act_request_id
     `);
 
-    // ---------- Precio de compra cero ----------
     await queryRunner.query(`
       CREATE TABLE asset_price_zero_reason (
         id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -265,8 +231,6 @@ export class InventoryActsPerCostCenterAndPriceZero1767226000000 implements Migr
           (attended_by_person_id IS NULL OR attended_by_name IS NULL)
           AND (attended_by_name IS NULL OR length(btrim(attended_by_name)) BETWEEN 3 AND 200))
     `);
-    // La fila encolada de cada toma (a lo sumo una) o, si ninguna se encoló, la primera por centro. La firma solo vuelve
-    // en tomas de un centro (antes solo esas tenían jefe que firmara).
     await queryRunner.query(`
       UPDATE physical_inventory pi SET
         act_request_id = a.document_request_id,

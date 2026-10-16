@@ -1,33 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Préstamos programados, lectura de solicitudes, vencimiento de las devueltas y quién atendió la toma física.
- *
- * 1. asset_loan.start_date (DATE, NULL): fecha desde la que se puede entregar un préstamo. La pone la generación desde
- *    una solicitud de activos TEMPORARY (asset_request.start_date); los préstamos existentes y los directos
- *    (POST /loans) quedan NULL y se entregan como antes. Generar ya no entrega: el préstamo nace APPROVED con sus
- *    ítems y la entrega (POST /loans/:id/deliver: activos ON_LOAN, movimiento LOAN y acta OCI-01-65) se hace desde esa
- *    fecha.
- * 2. asset_request.status LOAN_SCHEDULED: la solicitud TEMPORARY generó su préstamo, que espera la entrega. Pasa a
- *    DOCUMENT_GENERATED cuando se entrega (el acta OCI-01-65 se encola ahí). Mismas condiciones que DOCUMENT_GENERATED
- *    (aceptada, loan_id sin transfer_id).
- * 3. RETURNED también vence: expires_at obligatorio en ACCEPTED y RETURNED (mismo plazo de 14 días, contado desde la
- *    devolución). Las RETURNED existentes reciben la fecha de su último evento RETURNED (o decided_at) + 14 días; si ya
- *    pasó, el job las vence en su siguiente corrida. El índice parcial de vencimiento cubre ambos estados.
- * 4. Permisos asset_request:read:global («Solicitudes de activos» / read, GLOBAL: ver todas, sin acciones), sembrado a
- *    AUDITOR (la Dirección de Control Interno ya las lee todas con asset_request:review:global), y
- *    asset_request:read:own (OWN: ver las propias; no da nada que el servicio no diera ya por ser parte), sembrado a los
- *    roles que tienen loan:request:own. El menú «Solicitudes de activos» pasa a asset_request / read: lo ven quien
- *    lee todas, quien revisa (review cuenta como lectura en el menú, action-satisfies.ts) y quien solicita (read:own).
- * 5. physical_inventory.signer_head_person_id (FK person, NULL) + signer_head_recorded_at / _by: el jefe vigente del
- *    centro de la toma que firma el acta OCI-21-37 como ENCARGADO (turno RESPONSABLE), resuelto al cerrar; NULL si el
- *    centro no tenía jefe (el acta no se emite hasta indicarlo). Aparte y solo informativo, quién atendió por el área:
- *    attended_by_person_id (persona del sistema) o attended_by_name (texto libre 3..200), nunca ambos; no firma.
- *
- * down(): se niega si hay solicitudes LOAN_SCHEDULED; deja las RETURNED sin vencimiento, quita lo sembrado y las
- * columnas (la fecha de inicio de un préstamo de solicitud sigue en asset_request.start_date).
- */
-
 const READ_GLOBAL = 'asset_request:read:global';
 const READ_OWN = 'asset_request:read:own';
 const REQUESTS_NAV_ID = '6f1d2c3a-7b4e-4a1f-9c2d-000000019301';
