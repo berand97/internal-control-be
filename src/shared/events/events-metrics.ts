@@ -14,11 +14,6 @@ export interface EventsMetricsSnapshot {
   readonly busReconnects: number;
 }
 
-/**
- * Métricas del canal de eventos: contadores en proceso (snapshot, para pruebas y diagnóstico) y los mismos valores en
- * OpenTelemetry (se exportan si OTEL_EXPORTER_OTLP_* está configurado; si no, el medidor es inerte). Solo cuentan:
- * ningún atributo lleva usuarios, tickets ni contenido.
- */
 @Injectable()
 export class EventsMetrics {
   private readonly meter = metrics.getMeter('control-interno-be.events');

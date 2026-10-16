@@ -135,7 +135,6 @@ export class GoogleDriveStorageAdapter implements StoragePort {
 
   private async findFileId(token: string, key: string): Promise<string> {
     const name = key.replaceAll('/', '_');
-    // Sintaxis de consulta de Drive: se escapan '\' y luego "'" (antes solo "'").
     const literal = name.replaceAll('\\', '\\\\').replaceAll("'", "\\'");
     const query = encodeURIComponent(`name='${literal}' and trashed=false`);
     const response = await fetch(

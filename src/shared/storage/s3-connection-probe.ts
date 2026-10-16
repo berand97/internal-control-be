@@ -9,11 +9,6 @@ import {
 } from '@aws-sdk/client-s3';
 import { isOutboundForbidden } from '../net/outbound-destination.js';
 
-/**
- * Prueba de conexión de un almacenamiento (POST /storage/test). Cada comprobación tiene un nombre fijo y, si
- * falla, un código de STORAGE_TEST_ERROR_CODES; los mensajes son propios (nunca el texto del proveedor, que
- * puede traer el endpoint o la clave de acceso) y ninguno incluye secretos.
- */
 export const STORAGE_CHECK_NAMES = [
   'CONFIGURATION',
   'DESTINATION',
@@ -52,7 +47,6 @@ export type BucketVersioningState = (typeof BUCKET_VERSIONING_STATES)[number];
 export const BUCKET_OBJECT_LOCK_STATES = ['ENABLED', 'DISABLED', 'UNKNOWN'] as const;
 export type BucketObjectLockState = (typeof BUCKET_OBJECT_LOCK_STATES)[number];
 
-/** Prefijo reservado de los objetos de sonda: la política mínima solo concede s3:DeleteObject aquí. */
 export const STORAGE_PROBE_PREFIX = 'health/';
 
 export interface StorageCheck {
@@ -146,7 +140,6 @@ interface ErrorFacts {
   readonly httpStatus: number | null;
 }
 
-/** Código de red (err.code) de la cadena de causas y nombre/estado HTTP del error S3, sin mensajes. */
 const factsOf = (error: unknown): ErrorFacts => {
   let code: string | null = null;
   let current: unknown = error;
@@ -169,16 +162,11 @@ const factsOf = (error: unknown): ErrorFacts => {
 };
 
 export interface ClassifiedError {
-  /** true si ni siquiera hubo respuesta HTTP del servidor. */
   readonly transport: boolean;
   readonly code: StorageTestErrorCode;
   readonly message: string;
 }
 
-/**
- * Traduce un error del cliente S3 a un código de prueba. El mensaje es fijo; como mucho repite el nombre del
- * error S3 (p. ej. `AuthorizationHeaderMalformed`), que no contiene datos.
- */
 export const classifyS3Error = (error: unknown): ClassifiedError => {
   if (isOutboundForbidden(error)) {
     return {
@@ -233,7 +221,6 @@ export const classifyS3Error = (error: unknown): ClassifiedError => {
   };
 };
 
-/** Lo único que la sonda necesita del cliente S3 (en pruebas unitarias, un doble). */
 export type S3Send = (command: object) => Promise<unknown>;
 
 const toBuffer = async (body: unknown): Promise<Buffer | null> => {
@@ -248,12 +235,6 @@ const toBuffer = async (body: unknown): Promise<Buffer | null> => {
 
 const ENDPOINT_OK = 'El endpoint respondió';
 
-/**
- * Comprobaciones reales contra el bucket, en orden: alcance/credenciales/bucket (ListObjectsV2 con el prefijo de
- * sonda, que devuelve códigos de error con cuerpo, a diferencia de HeadBucket), escritura, lectura y borrado de un
- * objeto `health/probe-<uuid>.txt`, versionado y object lock. Una falla de transporte o de credenciales corta el
- * resto (quedan SKIPPED); la falta de s3:ListBucket solo es aviso porque la aplicación no la necesita.
- */
 export const runS3Probe = async (send: S3Send, bucket: string): Promise<S3ProbeResult> => {
   const checks: StorageCheck[] = [];
   const unknownBucket: BucketState = { versioning: 'UNKNOWN', objectLock: 'UNKNOWN' };

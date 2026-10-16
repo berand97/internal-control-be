@@ -13,7 +13,6 @@ const base = {
   text: 'Cuerpo',
 };
 
-// Caso del hallazgo BE-06: destinatario externo, salto de línea y sufijo institucional.
 const INJECTED_TO = 'a@x.com>\nRCPT TO:<b@unac.edu.co';
 
 describe('extractSmtpAddress', () => {
@@ -71,7 +70,6 @@ describe('prepareSmtpMessage', () => {
 
   it('rechaza un remitente con salto de línea', () => {
     rejects({ ...base, from: 'noreply@unac.edu.co\nBcc: x@evil.com' }, 'from');
-    // Con ángulos, lo anterior al salto queda como nombre visible: también se rechaza.
     rejects({ ...base, from: 'noreply@unac.edu.co\nRCPT TO:<x@evil.com>' }, 'fromName');
   });
 

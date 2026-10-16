@@ -6,7 +6,6 @@ export interface PutObjectInput {
   readonly key: string;
   readonly body: Buffer;
   readonly contentType: string;
-  /** Solo S3 (bucket público de imágenes): cabecera Cache-Control del objeto. Los demás drivers la ignoran. */
   readonly cacheControl?: string;
 }
 

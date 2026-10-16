@@ -1,11 +1,5 @@
-// Fuera de producción, la aplicación y el CLI de migraciones solo se conectan a una
-// base de datos local. Un `.env` de desarrollo que apunta al host desplegado hace que
-// un `pnpm start` o un `pnpm db:migrate` escriban sobre los datos reales; esta guarda
-// lo convierte en un error de arranque salvo que se declare ALLOW_REMOTE_DATABASE=true.
-
 export const ALLOW_REMOTE_DATABASE_ENV = 'ALLOW_REMOTE_DATABASE';
 
-// Nombre del servicio de docker-compose.dev.yml (y del contenedor local de desarrollo).
 const LOCAL_CONTAINER_HOSTS = new Set(['postgres']);
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -20,7 +14,6 @@ const stripBrackets = (host: string): string =>
 
 export const isLocalDatabaseHost = (rawHost: string): boolean => {
   const host = stripBrackets(rawHost.trim().toLowerCase());
-  // Sin host (o ruta de socket Unix) libpq/pg usan la máquina local.
   if (host === '' || host.startsWith('/')) {
     return true;
   }
@@ -37,7 +30,6 @@ export const isLocalDatabaseHost = (rawHost: string): boolean => {
   return LOCAL_CONTAINER_HOSTS.has(host);
 };
 
-// Nunca incluye la URL en los mensajes: lleva usuario y contraseña.
 const databaseHosts = (url: string): ReadonlyArray<string> => {
   let parsed: URL;
   try {
@@ -48,7 +40,6 @@ const databaseHosts = (url: string): ReadonlyArray<string> => {
   if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
     throw new Error('DATABASE_URL no es una URL válida: debe empezar por postgres:// o postgresql://');
   }
-  // pg acepta ?host=... (socket o host alterno) y tiene prioridad sobre el de la autoridad.
   const queryHosts = parsed.searchParams.getAll('host');
   return queryHosts.length > 0 ? queryHosts : [parsed.hostname];
 };
@@ -79,7 +70,6 @@ export const checkDatabaseHost = (url: string, env: Env): DatabaseHostDecision =
   );
 };
 
-// Aplica la guarda y devuelve la misma URL. `warn` recibe el aviso del escape (sin credenciales).
 export const guardDatabaseUrl = (url: string, env: Env, warn: (message: string) => void): string => {
   const decision = checkDatabaseHost(url, env);
   if (decision.allowed === 'escape') {

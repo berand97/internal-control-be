@@ -231,7 +231,6 @@ describe('StorageService.testConnection con S3 (sin red)', () => {
   });
 
   it('host autorizado en OUTBOUND_ALLOWED_HOSTS pasa DESTINATION (y la prueba sigue hasta el endpoint)', async () => {
-    // minio.interno.example no resuelve: pasa la guarda y falla al conectar, sin reintentos.
     const { service } = build(s3Row({ s3Endpoint: 'http://minio.interno.example:9000' }), { allowPrivateNetworks: false });
     const result = await service.testConnection();
     expect(result.checks[1]).toMatchObject({ name: 'DESTINATION', status: 'PASSED' });

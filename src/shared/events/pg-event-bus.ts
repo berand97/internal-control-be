@@ -5,17 +5,6 @@ import type { EventBus, EventSubscriber } from './event-bus.js';
 import { EventsMetrics } from './events-metrics.js';
 import { PgListener } from './pg-listener.js';
 
-/**
- * EventBus sobre PostgreSQL LISTEN/NOTIFY.
- * - publish: `SELECT pg_notify('app_events', json)` con el manager del llamador. PostgreSQL entrega el NOTIFY solo si la
- *   transacción hace COMMIT (y en orden de commit); con ROLLBACK se descarta. Así ningún evento sale para una fila que
- *   no existe, sin construir un "after-commit" a mano, y con varias instancias todas reciben lo mismo.
- * - Recepción: `LISTEN app_events` sobre la conexión dedicada compartida del proceso (PgListener, fuera del pool de
- *   TypeORM), pedida al llegar la primera suscripción (los procesos sin streams — CLI, pruebas, exportador de OpenAPI —
- *   no la piden). Si se cae, PgListener la reabre con espera creciente y, al volver, se pide resync a cada suscriptor:
- *   lo que se publicó mientras estaba caída se repone desde la BD.
- * - Reparto local: userId → suscriptores de esta instancia.
- */
 @Injectable()
 export class PgEventBus implements EventBus, OnModuleDestroy {
   private readonly logger = new Logger(PgEventBus.name);
@@ -49,7 +38,6 @@ export class PgEventBus implements EventBus, OnModuleDestroy {
     };
   }
 
-  /** Suscriptores registrados (pruebas: sin fugas al cerrar streams). */
   subscriberCount(): number {
     let total = 0;
     for (const set of this.subscribers.values()) {
@@ -67,7 +55,6 @@ export class PgEventBus implements EventBus, OnModuleDestroy {
     this.subscribers.clear();
   }
 
-  /** El canal se registra una sola vez por proceso; la conexión (y su reconexión) es de PgListener. */
   private async ensureListening(): Promise<void> {
     if (this.stopped) {
       return;
@@ -114,7 +101,6 @@ export class PgEventBus implements EventBus, OnModuleDestroy {
         try {
           subscriber.resync();
         } catch {
-          // El suscriptor maneja sus propios errores; uno roto no detiene a los demás.
         }
       }
     }

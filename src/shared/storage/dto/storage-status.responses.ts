@@ -2,14 +2,6 @@ import { ApiProperty } from '@nestjs/swagger';
 import { STORAGE_DRIVERS } from '../../../modules/documents/dto/document.responses.js';
 import { S3_PROVIDERS } from './update-storage-settings.dto.js';
 
-/**
- * Respuesta de GET /storage, GET /storage/status, PATCH /storage y PATCH /storage/settings. Documenta lo que
- * devuelve StorageService.status: cambiar un shape exige cambiar ambos.
- *
- * Las credenciales nunca salen, ni en claro, ni cifradas, ni parciales. Solo se informa si hay una guardada con los
- * indicadores `*Set` (o `*Connected` para los refresh token OAuth). Contrato de guardado (PATCH): una credencial
- * ausente, null, vacía o con el marcador `****` conserva la guardada; solo un valor nuevo la reemplaza.
- */
 export class StorageStatusDto {
   @ApiProperty({
     enum: STORAGE_DRIVERS,

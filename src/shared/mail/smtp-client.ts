@@ -19,7 +19,6 @@ export interface SmtpAuthOptions {
   readonly secure: boolean;
   readonly username?: string | null;
   readonly password?: string | null;
-  /** Política de destinos salientes (BE-16). Sin ella no se filtra (solo pruebas unitarias del protocolo). */
   readonly outbound?: OutboundPolicy;
 }
 
@@ -28,7 +27,6 @@ export interface SmtpSendOptions extends SmtpAuthOptions {
   readonly to: string;
   readonly subject: string;
   readonly text: string;
-  /** Si viene, el mensaje es multipart/alternative (text/plain + text/html). */
   readonly html?: string;
 }
 
@@ -46,7 +44,6 @@ export async function verifySmtp(options: SmtpAuthOptions): Promise<void> {
 }
 
 export async function sendSmtpMail(options: SmtpSendOptions): Promise<void> {
-  // Se valida antes de conectar: un valor inseguro nunca llega a escribirse en el socket (BE-06).
   const message = prepareSmtpMessage(options);
   const socket = await openSession(options);
   try {
@@ -57,7 +54,6 @@ export async function sendSmtpMail(options: SmtpSendOptions): Promise<void> {
 }
 
 async function openSession(options: SmtpAuthOptions): Promise<SmtpSocket> {
-  // IP literal o nombre interno: se rechaza sin abrir el socket. Los nombres se validan al resolverlos (lookup).
   const lookup = options.outbound ? guardedLookup(options.outbound) : undefined;
   if (options.outbound) {
     assertHostShapeAllowed(options.host, options.outbound);
@@ -91,25 +87,15 @@ export interface SmtpMessage {
   readonly payload: string;
 }
 
-/** Cuerpo en base64 (RFC 2045) en líneas de 76: ninguna línea pasa de 998 octetos, empieza con "." ni trae CR/LF sueltos. */
 export function encodeBase64Body(content: string): string {
   const encoded = Buffer.from(content.replace(/\r\n|\r|\n/g, CRLF), 'utf8').toString('base64');
   return (encoded.match(/.{1,76}/g) ?? ['']).join(CRLF);
 }
 
-/** Límite de parte MIME: aleatorio y con caracteres que base64 no produce al inicio de línea ("--" y "="). */
 export function mimeBoundary(): string {
   return `=_ci_${randomBytes(12).toString('hex')}`;
 }
 
-/**
- * Arma los comandos y el mensaje (BE-06). Lanza UnsafeMailFieldError, sin el valor, si el destinatario o el
- * remitente no son una dirección simple o si el nombre del remitente trae CR, LF, NUL u otro carácter de control.
- * Los datos variables de las cabeceras van validados (direcciones) o codificados RFC 2047 (nombre y asunto). Los
- * cuerpos van en base64 con líneas de 76 caracteres: ni un LF o CR suelto ni un "." inicial pueden cerrar el DATA,
- * y ninguna línea supera el límite de 998 octetos de SMTP. Con `html` el mensaje es multipart/alternative
- * (text/plain primero, text/html después: el cliente muestra la última que entienda).
- */
 export function prepareSmtpMessage(options: SmtpSendOptions, boundary: string = mimeBoundary()): SmtpMessage {
   const to = options.to.trim();
   if (!isValidMailbox(to)) {

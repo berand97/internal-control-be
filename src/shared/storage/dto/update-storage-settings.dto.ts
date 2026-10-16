@@ -20,10 +20,6 @@ export const S3_PROVIDERS = [
   'custom',
 ] as const;
 
-/**
- * Descripción común de los campos de credencial. Contrato con el formulario: el estado solo dice si hay una guardada
- * (`*Set`), así que el campo se deja sin tocar y no se envía; ausente, null, vacío o con `****` conserva la guardada.
- */
 const CREDENTIAL_DESCRIPTION =
   'Credencial. Ausente, null, vacía o con el marcador **** conserva la guardada; solo un valor nuevo la reemplaza. No se borra por esta API';
 
@@ -272,7 +268,6 @@ const firstUnmasked = (
   return undefined;
 };
 
-/** Primera credencial nueva: ignora ausentes, null, vacías y enmascaradas (todas conservan la guardada). */
 const firstNewCredential = (...values: ReadonlyArray<string | null | undefined>): string | undefined => {
   for (const value of values) {
     if (typeof value === 'string' && value.trim().length > 0 && !isMaskedSecret(value)) {

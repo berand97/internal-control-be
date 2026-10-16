@@ -1,12 +1,5 @@
-/**
- * Evento de la aplicación que viaja por el EventBus (hoy PostgreSQL LISTEN/NOTIFY). Solo lleva ids: quien lo recibe
- * lee el detalle de la BD con las reglas de visibilidad del usuario. Nunca contenido (títulos, cuerpos, datos
- * personales) en el payload: NOTIFY lo ve cualquier sesión que escuche el canal y su límite es 8 KB.
- */
 export const APP_EVENT_TYPES = [
-  /** Se creó una notificación para userId (refId = notification.id). */
   'notification',
-  /** Cambió el conteo de no leídas de userId (marcar leída o todas). refId = null. */
   'notification.count',
 ] as const;
 
@@ -18,10 +11,8 @@ export interface AppEvent {
   readonly refId: string | null;
 }
 
-/** Canal de NOTIFY/LISTEN. */
 export const APP_EVENTS_CHANNEL = 'app_events';
 
-/** Límite de NOTIFY en PostgreSQL (8000 bytes por defecto); el payload real mide ~120 bytes. */
 export const MAX_EVENT_PAYLOAD_BYTES = 8000;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -40,7 +31,6 @@ export const serializeAppEvent = (event: AppEvent): string => {
   return payload;
 };
 
-/** null si el payload no es un AppEvent válido (se descarta sin romper la conexión LISTEN). */
 export const parseAppEvent = (payload: string | undefined): AppEvent | null => {
   if (!payload) {
     return null;

@@ -9,12 +9,6 @@ export interface ZipLimits {
   readonly maxUncompressedBytes: number;
 }
 
-/**
- * Topes de descompresión (BE-05). El informe mensual real de activos (3,1 MiB) se descomprime en 23,6 MiB,
- * 17 entradas, y exceljs necesita ~450 MiB de memoria para cargarlo: 64 MiB deja ~2,7x de crecimiento sin
- * permitir que un archivo de pocos MB ocupe gigas. Las plantillas Word reales (≤ 52 KiB) quedan muy por debajo
- * de 50 MiB aun con imágenes.
- */
 export const ZIP_LIMITS = {
   XLSX: { maxEntries: 1000, maxUncompressedBytes: 64 * MIB },
   DOCX: { maxEntries: 1000, maxUncompressedBytes: 50 * MIB },
@@ -45,13 +39,6 @@ const findEndOfCentralDirectory = (content: Buffer): number => {
 const within = (content: Buffer, offset: number, length: number): boolean =>
   offset >= 0 && length >= 0 && offset + length <= content.length;
 
-/**
- * Revisa un .xlsx/.docx (ZIP) ANTES de entregarlo a exceljs o pizzip, que lo descomprimen entero en memoria:
- * - número de entradas y suma de tamaños declarados en el directorio central, contra el tope;
- * - que cada entrada, al descomprimirse, no produzca más bytes de los declarados (un "deflate bomb" que miente
- *   en el directorio central se corta en cuanto supera lo declarado, con maxOutputLength).
- * Un búfer sin directorio central no es ZIP: se deja pasar y la librería lo rechaza como siempre.
- */
 export const assertZipWithinLimits = (content: Buffer, limits: ZipLimits): void => {
   if (content.length < EOCD_MIN) {
     return;
@@ -64,7 +51,6 @@ export const assertZipWithinLimits = (content: Buffer, limits: ZipLimits): void 
   const centralSize = content.readUInt32LE(eocd + 12);
   const centralOffset = content.readUInt32LE(eocd + 16);
   if (entries === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
-    // ZIP64: ningún Office real de este tamaño lo necesita.
     throw tooLarge('formato ZIP64 no admitido');
   }
   if (entries > limits.maxEntries) {

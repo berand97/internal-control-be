@@ -23,7 +23,6 @@ import {
 import { maskEmail, redactEmails, UnsafeMailFieldError } from './mail-address.js';
 import { sendSmtpMail, verifySmtp } from './smtp-client.js';
 
-/** Pila o mensaje de un error de SMTP sin correos de personas (la respuesta del servidor suele repetir el RCPT). */
 const describeError = (error: unknown): string =>
   redactEmails(error instanceof Error ? (error.stack ?? error.message) : String(error));
 
@@ -131,7 +130,6 @@ export class MailService {
         'auth.expiresInHours': '1',
         'app.name': 'Control Interno UNAC',
       },
-      // Ley 1581: el log de respaldo no lleva el correo completo.
       `password-reset to=${maskEmail(email)}`,
     );
   }
@@ -163,10 +161,6 @@ export class MailService {
     );
   }
 
-  /**
-   * Enlace de firma de un acta (plantilla SIGNATURE_LINK). false si el SMTP no está configurado; lanza
-   * MAIL_SEND_FAILED si el servidor rechaza el envío. El contexto trae el enlace: nunca va al log.
-   */
   async sendSigningLink(
     to: string,
     context: {
@@ -201,7 +195,6 @@ export class MailService {
     to: string,
     context: Record<string, string>,
     fallbackLog: string,
-    /** Versión concreta de la plantilla (correo de prueba); sin ella, la activa o el diseño por defecto. */
     templateId?: string | null,
   ): Promise<boolean> {
     const row = await this.loadSettings();
@@ -240,11 +233,9 @@ export class MailService {
       });
     } catch (error) {
       if (error instanceof UnsafeMailFieldError) {
-        // Ni la dirección ni el nombre rechazados van al log: son datos personales y pueden traer CR/LF (BE-06).
         this.logger.warn(`smtp send rejected before connecting: unsafe ${error.field}`);
         throw new ApiException(ErrorCode.MailAddressInvalid);
       }
-      // Ley 1581: ni el destinatario completo ni el asunto (puede llevar nombres) van al log.
       this.logger.error(`smtp send failed to=${maskEmail(to)}`, describeError(error));
       if (isOutboundForbidden(error)) {
         throw new ApiException(ErrorCode.OutboundDestinationForbidden);
@@ -257,7 +248,6 @@ export class MailService {
     return this.config.getOrThrow('outbound', { infer: true });
   }
 
-  /** El host SMTP no puede apuntar a la red interna del despliegue (BE-16). */
   private async assertHostAllowed(host: string): Promise<void> {
     try {
       await assertDestinationAllowed(host, this.outboundPolicy());
@@ -288,7 +278,6 @@ export class MailService {
   private async loadSettings(): Promise<MailSettings> {
     const stored = await this.requireStored();
     const revealed = this.reveal(stored);
-    // En claro (legado) o cifrado con SETTINGS_ENCRYPTION_KEY_PREVIOUS: se vuelve a sellar con la clave actual.
     if (this.needsReseal(stored)) {
       const resealed = this.settings.create({ ...revealed });
       this.seal(resealed);

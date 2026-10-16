@@ -8,8 +8,6 @@ import {
   STORAGE_TEST_ERROR_CODES,
 } from '../s3-connection-probe.js';
 
-/** Respuesta de POST /storage/test. Documenta lo que devuelve StorageService.testConnection. */
-
 export class StorageCheckDto {
   @ApiProperty({
     enum: STORAGE_CHECK_NAMES,

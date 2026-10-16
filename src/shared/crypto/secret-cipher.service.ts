@@ -16,7 +16,6 @@ const deriveKey = (secret: string): Buffer => createHash('sha256').update(secret
 
 const isSealed = (value: string): boolean => value.startsWith(PREFIX);
 
-/** AES-256-GCM con IV aleatorio: `enc.v1.<iv>.<tag>.<datos>` (base64url). La clave es SHA-256 del secreto. */
 export const sealSecret = (plain: string, secret: string): string => {
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv('aes-256-gcm', deriveKey(secret), iv);
@@ -25,10 +24,6 @@ export const sealSecret = (plain: string, secret: string): string => {
   return [PREFIX + iv.toString('base64url'), tag.toString('base64url'), encrypted.toString('base64url')].join('.');
 };
 
-/**
- * Descifra con la primera clave que autentique el dato (la actual y luego las anteriores: rotación, BE-12).
- * Devuelve también el índice de la clave usada. Lanza si ninguna sirve o el dato está corrupto.
- */
 export const openSecret = (
   value: string,
   secrets: ReadonlyArray<string>,
@@ -50,7 +45,6 @@ export const openSecret = (
       decipher.setAuthTag(tag);
       return { plain: Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8'), keyIndex };
     } catch {
-      // Clave equivocada: la etiqueta GCM no autentica. Se prueba la siguiente.
     }
   }
   throw new Error('Ninguna clave de SETTINGS_ENCRYPTION_KEY descifra el dato');
@@ -86,10 +80,6 @@ export class SecretCipherService {
     return openSecret(value, this.keys()).plain;
   }
 
-  /**
-   * true si el valor está en claro o cifrado con una clave anterior: quien lo guarda debe volver a sellarlo
-   * (decrypt + encrypt) para completar la rotación. Un dato que ninguna clave descifra lanza.
-   */
   needsReseal(value: string | null | undefined): boolean {
     if (value === undefined || value === null || value === '') {
       return false;

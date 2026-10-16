@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import type { AppConfig } from '../../config/configuration.js';
 
-/** Lo que se usa del cliente de node-postgres (el mismo módulo `pg` que cargó TypeORM). */
 interface PgNotification {
   readonly channel: string;
   readonly payload?: string;
@@ -27,40 +26,21 @@ interface PgModule {
   }) => PgClient;
 }
 
-/** Quien escucha un canal. */
 export interface PgChannelHandler {
-  /** Llegó un NOTIFY por el canal (payload tal cual; puede faltar). */
   notification(payload: string | undefined): void;
-  /**
-   * La conexión LISTEN se cayó y volvió: lo notificado mientras tanto se perdió y hay que reponerlo desde la BD.
-   * No se llama en la primera apertura.
-   */
   reconnected(): void;
 }
 
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 30_000;
-/** Consulta de salud de la conexión LISTEN: una conexión muerta en silencio se detecta y se reabre. */
 const HEALTH_CHECK_MS = 30_000;
-/** Nombre de la conexión en pg_stat_activity (las pruebas la ubican por él). */
 export const PG_LISTENER_APPLICATION_NAME = 'control-interno-events';
-/** Los nombres de canal se interpolan en LISTEN/UNLISTEN: solo identificadores simples. */
 const CHANNEL_PATTERN = /^[a-z_][a-z0-9_]{0,62}$/;
 
-/**
- * UNA conexión dedicada de PostgreSQL por proceso (fuera del pool de TypeORM) para LISTEN de varios canales: la usan el
- * bus de eventos (`app_events`) y la caché de módulos (`feature_flags`).
- * - Se abre al registrarse el primer canal: los procesos que no escuchan nada (CLI, exportador de OpenAPI, la mayoría
- *   de pruebas) no la abren.
- * - Si se cae se reabre con espera creciente, vuelve a hacer LISTEN de todos los canales y avisa `reconnected()` a cada
- *   manejador para que reponga desde la BD lo que se perdió.
- * - Consulta de salud periódica: una conexión muerta en silencio también se detecta.
- */
 @Injectable()
 export class PgListener implements OnModuleDestroy {
   private readonly logger = new Logger(PgListener.name);
   private readonly channels = new Map<string, Set<PgChannelHandler>>();
-  /** Canales con LISTEN hecho en la conexión actual. */
   private readonly active = new Set<string>();
   private client: PgClient | null = null;
   private listening = false;
@@ -76,10 +56,6 @@ export class PgListener implements OnModuleDestroy {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
-  /**
-   * Registra un manejador para el canal y asegura la conexión. Devuelve la función que lo retira (al quedar el canal
-   * sin manejadores se hace UNLISTEN; la conexión sigue abierta mientras haya otros canales).
-   */
   async listen(channel: string, handler: PgChannelHandler): Promise<() => void> {
     if (!CHANNEL_PATTERN.test(channel)) {
       throw new Error(`Canal LISTEN inválido: ${channel}`);
@@ -127,7 +103,6 @@ export class PgListener implements OnModuleDestroy {
       return Promise.resolve();
     }
     if (this.reconnectTimer) {
-      // Ya hay una reconexión programada: el manejador recibirá reconnected() cuando vuelva.
       return Promise.resolve();
     }
     this.starting ??= this.connect().finally(() => {
@@ -179,14 +154,12 @@ export class PgListener implements OnModuleDestroy {
           try {
             handler.reconnected();
           } catch {
-            // Cada manejador maneja sus propios errores; uno roto no detiene a los demás.
           }
         }
       }
     }
   }
 
-  /** LISTEN de los canales registrados que aún no lo tienen en esta conexión. false si la conexión falló. */
   private async syncChannels(client: PgClient): Promise<boolean> {
     try {
       for (const channel of this.channels.keys()) {
@@ -219,7 +192,6 @@ export class PgListener implements OnModuleDestroy {
     }
   }
 
-  /** La conexión se cayó (o no se pudo abrir): se descarta y se programa otra si hace falta. */
   private lost(client: PgClient, error: Error | null): void {
     if (this.client !== null && this.client !== client) {
       return;
@@ -236,14 +208,12 @@ export class PgListener implements OnModuleDestroy {
       this.healthTimer = null;
     }
     client.removeAllListeners();
-    // Sin manejador de 'error' un error tardío del socket tumbaría el proceso.
     client.on('error', () => undefined);
     void client.end().catch(() => undefined);
     if (this.stopped || this.reconnectTimer) {
       return;
     }
     if (wasListening || error) {
-      // El mensaje del driver no lleva datos de la aplicación (host o código de error).
       this.logger.warn(`Conexión LISTEN perdida (${error?.message ?? 'cerrada'}); reintento en ${this.reconnectDelay} ms`);
     }
     const delay = this.reconnectDelay;
@@ -251,7 +221,6 @@ export class PgListener implements OnModuleDestroy {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.stopped || this.channels.size === 0) {
-        // Sin nadie escuchando no hace falta la conexión: el próximo listen() la abre.
         return;
       }
       void this.ensureListening();

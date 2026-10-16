@@ -25,7 +25,6 @@ export class FeatureGuard implements CanActivate {
       codes.add(decorated);
     }
 
-    // admit: igual que isEnabled, salvo que con el circuito medio abierto deja pasar una petición de prueba.
     for (const code of codes) {
       if (!this.featureFlags.admit(code)) {
         throw new ApiException(ErrorCode.ModuleUnavailable);

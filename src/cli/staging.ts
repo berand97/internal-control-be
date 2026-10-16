@@ -105,7 +105,6 @@ const run = async (): Promise<void> => {
         return;
       }
       const confirmStart = process.hrtime.bigint();
-      // Mismo trabajo que encola POST confirm, pero procesado aquí mismo (la CLI no tiene worker).
       const result = await context.get(ImportJobsService).runNow(preview.importId, user.id);
       console.log(`\nImportación confirmada (${seconds(confirmStart)} s)`);
       console.log(JSON.stringify(result, null, 2));

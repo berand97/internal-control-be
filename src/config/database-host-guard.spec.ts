@@ -30,7 +30,6 @@ describe('guarda de host de base de datos', () => {
     for (const host of ['localhost', '127.0.0.1', '[::1]', 'postgres']) {
       expect(checkDatabaseHost(url(host), dev)).toMatchObject({ allowed: 'local' });
     }
-    // Sin NODE_ENV (tests, scripts sueltos) cuenta como fuera de producción.
     expect(checkDatabaseHost(url('localhost'), {})).toMatchObject({ allowed: 'local' });
   });
 

@@ -52,10 +52,6 @@ const encodeSegments = (value: string): ReadonlyArray<string> =>
     .filter((segment) => segment !== '')
     .map((segment) => encodeURIComponent(segment));
 
-/**
- * Ruta de Graph con cada segmento codificado: sin codificar, un '..' o un '?'/'#' en la clave
- * se normalizaba en la URL y la petición salía de `root:/<carpeta>/` (BE-01).
- */
 export const itemPath = (config: OneDriveAdapterConfig, key: string): string => {
   const safeKey = assertSafeStorageKey(key);
   const folder = config.folderId ? encodeSegments(config.folderId) : [];

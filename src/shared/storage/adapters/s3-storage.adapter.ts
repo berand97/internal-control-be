@@ -35,7 +35,6 @@ export interface S3AdapterConfig {
   readonly forcePathStyle: boolean;
 }
 
-/** Solo para la prueba de conexión: sin reintentos y con plazos cortos, para responder rápido y con la causa. */
 export interface S3ClientTuning {
   readonly maxAttempts?: number;
   readonly connectionTimeoutMs?: number;
@@ -57,10 +56,6 @@ export class S3StorageAdapter implements StoragePort {
   readonly driver: StorageDriver = 's3';
   private readonly client: S3Client;
 
-  /**
-   * Con `outbound` (BE-16) el endpoint no puede apuntar a la red interna: la IP literal o el nombre interno se
-   * rechazan aquí (OutboundDestinationError) y cada conexión resuelve el DNS a través de guardedLookup.
-   */
   constructor(
     private readonly config: S3AdapterConfig,
     outbound?: OutboundPolicy,
@@ -159,7 +154,6 @@ export class S3StorageAdapter implements StoragePort {
     }
   }
 
-  /** Comprobaciones reales contra el bucket (POST /storage/test). */
   probe(): Promise<S3ProbeResult> {
     return runS3Probe((command) => this.client.send(command as never), this.config.bucket);
   }

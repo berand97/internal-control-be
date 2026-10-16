@@ -4,28 +4,20 @@ import type { EmailTemplateType } from '../../modules/email-templates/domain/ema
 import { MAIL_OUTBOX_STATUSES, type MailOutboxStatus } from './mail-outbox-status.js';
 import { MailService } from './mail.service.js';
 
-/** Intentos de envío de un correo del outbox antes de dejarlo FAILED definitivo. */
 export const MAX_OUTBOX_SEND_ATTEMPTS = 3;
-/** Minutos antes de reintentar un envío FAILED (o uno que quedó a medias porque el proceso cayó). */
 export const OUTBOX_RETRY_MINUTES = 5;
 
 export { MAIL_OUTBOX_STATUSES, type MailOutboxStatus };
 
-/**
- * Destinatario: un usuario (correo de su persona) o una persona sin usuario (p. ej. el jefe de un centro de costo).
- * Exactamente uno de los dos; la tabla lo refuerza con chk_mail_outbox_recipient.
- */
 export type MailOutboxRecipient =
   | { readonly recipientUserId: string; readonly recipientPersonId?: never }
   | { readonly recipientPersonId: string; readonly recipientUserId?: never };
 
 export type MailOutboxEntry = MailOutboxRecipient & {
   readonly templateType: EmailTemplateType;
-  /** Valores de la plantilla. Se guardan en BD: nunca tokens, contraseñas ni números de documento. */
   readonly context: Record<string, string>;
   readonly entityType: string | null;
   readonly entityId: string | null;
-  /** Versión de plantilla a usar (correo de prueba de una versión). Sin ella, la activa al momento de enviar. */
   readonly templateVersionId?: string | null;
 };
 
@@ -36,13 +28,6 @@ export interface MailOutboxState {
   readonly sentAt: Date | null;
 }
 
-/**
- * Outbox de correo genérico (mismo patrón que los enlaces de firma): enqueue escribe la fila dentro de la
- * transacción del negocio; dispatchPending envía FUERA de cualquier transacción y registra SENT o FAILED con el error.
- * Sin SMTP configurado el correo queda FAILED con el motivo, visible para quien consulta la entidad.
- * El destinatario se resuelve al enviar (correo de la persona del usuario, o de la persona si se encoló a una persona
- * sin usuario), no se copia al encolar.
- */
 @Injectable()
 export class MailOutboxService {
   private readonly logger = new Logger(MailOutboxService.name);
@@ -70,7 +55,6 @@ export class MailOutboxService {
     return row?.id ?? '';
   }
 
-  /** Estado de una fila concreta del outbox; null si no existe. */
   async stateOf(id: string): Promise<MailOutboxState | null> {
     const [row] = (await this.dataSource.query(
       `SELECT delivery_status, send_attempts, last_send_error, sent_at FROM mail_outbox WHERE id = $1`,
@@ -81,12 +65,10 @@ export class MailOutboxService {
       : null;
   }
 
-  /** Intenta enviar ya una fila recién encolada (fuera de transacción), con el mismo reclamo que el worker. */
   async dispatchNow(id: string): Promise<'SENT' | 'FAILED' | 'SKIPPED'> {
     return this.dispatchOne(id);
   }
 
-  /** Estado del último correo encolado para una entidad; null si no hay. */
   async latestFor(entityType: string, entityId: string): Promise<MailOutboxState | null> {
     const [row] = (await this.dataSource.query(
       `SELECT delivery_status, send_attempts, last_send_error, sent_at FROM mail_outbox

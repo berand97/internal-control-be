@@ -1,5 +1,3 @@
-// En producción la conversión DOCX→PDF es parte de toda acta: un servidor que arranca
-// sin Gotenberg acepta generar documentos y falla cada uno con 502. Mejor no arrancar.
 export const resolveGotenbergUrl = (env: Readonly<Record<string, string | undefined>>): string | null => {
   const raw = env['GOTENBERG_URL']?.trim();
   if (!raw) {

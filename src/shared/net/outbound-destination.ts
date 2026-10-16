@@ -1,20 +1,6 @@
 import { lookup as dnsLookup, type LookupAddress, type LookupAllOptions } from 'node:dns';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
 
-/**
- * Destinos salientes configurables por administradores (host SMTP, endpoint S3) (BE-16).
- *
- * Sin esta guarda, quien tenga mail:manage:global o storage:manage:global podía apuntar el servidor a
- * 127.0.0.1:5432, http://gotenberg:3000 o 169.254.169.254 y usar las pruebas de conexión como oráculo de la red
- * interna. La política:
- * - allowPrivateNetworks (OUTBOUND_ALLOW_PRIVATE_NETWORKS): por defecto true fuera de producción (MailHog/MinIO en
- *   localhost siguen funcionando) y false en producción.
- * - allowedHosts (OUTBOUND_ALLOWED_HOSTS): excepciones explícitas, por nombre de host o IP exacta.
- *
- * Se comprueba al guardar (400) y en cada conexión: la resolución DNS pasa por `guardedLookup`, que valida las
- * direcciones que efectivamente se usan para conectar, así un DNS que cambia después de guardar (rebinding) no
- * salta la guarda.
- */
 export interface OutboundPolicy {
   readonly allowPrivateNetworks: boolean;
   readonly allowedHosts: ReadonlyArray<string>;
@@ -26,7 +12,6 @@ export class OutboundDestinationError extends Error {
   readonly code = OUTBOUND_FORBIDDEN_CODE;
 
   constructor() {
-    // Sin el host ni la IP: el mensaje puede terminar en un log o en la respuesta.
     super('Destino saliente no permitido: red privada, loopback o link-local');
     this.name = 'OutboundDestinationError';
   }
@@ -62,11 +47,9 @@ for (const [network, prefix] of [
 const MAPPED_V4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i;
 const INTERNAL_NAME = /(^localhost$|\.localhost$|\.local$|\.internal$|\.lan$|\.home\.arpa$)/i;
 
-/** Host en minúsculas, sin corchetes IPv6 ni punto final. */
 export const normalizeHost = (host: string): string =>
   host.trim().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '').toLowerCase();
 
-/** true si la IP es de loopback, red privada (RFC 1918/4193), link-local (incl. metadatos de nube) o reservada. */
 export const isPrivateAddress = (address: string): boolean => {
   const normalized = normalizeHost(address);
   const mapped = MAPPED_V4.exec(normalized)?.[1];
@@ -86,10 +69,6 @@ export const isPrivateAddress = (address: string): boolean => {
 const isAllowedHost = (host: string, policy: OutboundPolicy): boolean =>
   policy.allowedHosts.some((allowed) => normalizeHost(allowed) === normalizeHost(host));
 
-/**
- * Comprobación sin DNS: IP literal privada, `localhost`, sufijos internos (.local, .internal…) o nombre de una
- * sola etiqueta (`gotenberg`, `postgres`: nombres de servicios del compose). Lanza OutboundDestinationError.
- */
 export const assertHostShapeAllowed = (host: string, policy: OutboundPolicy): void => {
   if (policy.allowPrivateNetworks || isAllowedHost(host, policy)) {
     return;
@@ -117,7 +96,6 @@ const assertAddressesAllowed = (
   if (policy.allowPrivateNetworks || isAllowedHost(host, policy)) {
     return;
   }
-  // Todas: si una sola es privada, el cliente podría elegirla.
   for (const address of addresses) {
     if (isPrivateAddress(address) && !isAllowedHost(address, policy)) {
       throw new OutboundDestinationError();
@@ -132,10 +110,6 @@ const defaultLookupAll: LookupAll = (hostname, options) =>
     dnsLookup(hostname, options, (error, addresses) => (error ? reject(error) : resolve(addresses)));
   });
 
-/**
- * Validación al guardar la configuración: forma del host y, si el nombre resuelve, sus direcciones.
- * Un nombre que hoy no resuelve se acepta (la conexión vuelve a validar con guardedLookup).
- */
 export const assertDestinationAllowed = async (
   host: string,
   policy: OutboundPolicy,
@@ -154,10 +128,6 @@ export const assertDestinationAllowed = async (
   assertAddressesAllowed(host, addresses.map((item) => item.address), policy);
 };
 
-/**
- * `lookup` para net.connect / tls.connect / http(s).Agent: resuelve, valida cada dirección y entrega al socket
- * exactamente las que validó. Las IP literales no pasan por lookup: validarlas antes con assertHostShapeAllowed.
- */
 export const guardedLookup = (
   policy: OutboundPolicy,
   lookupAll: LookupAll = defaultLookupAll,
@@ -181,7 +151,6 @@ export const guardedLookup = (
       .catch((error: unknown) => callback(error));
   }) as unknown as LookupFunction;
 
-/** true si el error (o su causa) viene de esta guarda. */
 export const isOutboundForbidden = (error: unknown): boolean => {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth += 1) {

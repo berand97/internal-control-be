@@ -542,7 +542,6 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'La imagen no se puede usar: está dañada o supera el tamaño permitido',
   },
-  // 409 y no 503: es falta de configuración que resuelve un administrador, no una caída (no abre el circuito del módulo).
   [ErrorCode.PublicAssetsNotConfigured]: {
     httpStatus: 409,
     action: 'CANCEL',
@@ -1063,7 +1062,6 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     message:
       'El servidor indicado está en una red privada o interna. Use un host público o pida que se habilite al desplegar (OUTBOUND_ALLOWED_HOSTS)',
   },
-  // RETRY y no REAUTH: la sesión puede seguir viva; basta pedir otro ticket con POST /events/ticket.
   [ErrorCode.EventsTicketInvalid]: {
     httpStatus: 401,
     action: 'RETRY',

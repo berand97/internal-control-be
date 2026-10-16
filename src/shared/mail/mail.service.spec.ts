@@ -25,7 +25,6 @@ describe('MailService', () => {
   };
   let service: MailService;
   let cipher: SecretCipherService;
-  // Desarrollo por defecto (redes privadas permitidas); las pruebas de BE-16 lo cambian a producción.
   let policy: { allowPrivateNetworks: boolean; allowedHosts: string[] };
 
   beforeEach(() => {

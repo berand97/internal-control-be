@@ -41,7 +41,6 @@ import { StorageStatusDto } from './dto/storage-status.responses.js';
 import { UpdateStorageSettingsDto, flattenStoragePatch } from './dto/update-storage-settings.dto.js';
 import { OAUTH_STATE_TTL_SECONDS, StorageService, type OauthProvider } from './storage.service.js';
 
-/** Cookie que liga el `state` OAuth al navegador que inició la conexión (BE-15). */
 export const STORAGE_OAUTH_COOKIE = 'storage_oauth_binding';
 
 const STATUS_DESCRIPTION =
@@ -239,17 +238,12 @@ export class StorageController {
   ): Promise<void> {
     const cookies = request.cookies as Record<string, unknown> | undefined;
     const binding = cookies?.[STORAGE_OAUTH_COOKIE];
-    // Un intento, acierte o no: la cookie ya no sirve.
     response.clearCookie(STORAGE_OAUTH_COOKIE, this.oauthCookieOptions());
     await this.storageService.oauthCallback(provider, code, state, binding);
     const app = this.config.getOrThrow('appPublicUrl', { infer: true });
     response.redirect(`${app}/storage?connected=${provider}`);
   }
 
-  /**
-   * HttpOnly y SameSite=Lax: el regreso desde Google o Microsoft es una navegación de primer nivel y debe llevarla.
-   * Ruta: la parte de API_PUBLIC_URL más /api/v1/storage/oauth, para que solo viaje a start y a los callbacks.
-   */
   private oauthCookieOptions(): CookieOptions {
     const base = new URL(this.config.getOrThrow('apiPublicUrl', { infer: true })).pathname.replace(/\/+$/, '');
     return {

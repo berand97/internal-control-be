@@ -8,12 +8,10 @@ import { assertZipWithinLimits, ZIP_LIMITS } from './zip-limits.js';
 interface Entry {
   readonly name: string;
   readonly data: Buffer;
-  /** Tamaño descomprimido que se declara (por defecto, el real). */
   readonly declared?: number;
   readonly store?: boolean;
 }
 
-/** ZIP mínimo (sin CRC: el guardián no lo mira) para fabricar casos que ninguna librería escribiría. */
 const zip = (entries: ReadonlyArray<Entry>): Buffer => {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];

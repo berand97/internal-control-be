@@ -61,10 +61,8 @@ export interface StoredPublicAsset {
   readonly publicUrl: string;
 }
 
-/** Vigencia del `state` OAuth y de la cookie que lo liga al navegador (BE-15). */
 export const OAUTH_STATE_TTL_SECONDS = 600;
 
-/** Credenciales de larga vida que se guardan cifradas con SETTINGS_ENCRYPTION_KEY (BE-11). */
 export const STORAGE_SECRET_FIELDS = [
   's3SecretKey',
   'googleClientSecret',
@@ -73,7 +71,6 @@ export const STORAGE_SECRET_FIELDS = [
   'onedriveRefreshToken',
 ] as const satisfies ReadonlyArray<keyof StorageSettings>;
 
-/** Prueba de conexión S3: un intento, 5 s para conectar y 15 s sin actividad por petición. */
 const S3_TEST_TUNING: S3ClientTuning = { maxAttempts: 1, connectionTimeoutMs: 5000, requestTimeoutMs: 15000 };
 
 export interface StorageTestResult {
@@ -81,7 +78,6 @@ export interface StorageTestResult {
   readonly driver: StorageDriver;
   readonly checkedAt: string;
   readonly checks: ReadonlyArray<StorageCheck>;
-  /** Solo S3 (null con los demás drivers o si no se llegó a consultar el bucket). */
   readonly bucket: BucketState | null;
 }
 
@@ -93,7 +89,6 @@ const sameHash = (left: string, right: string): boolean => {
   return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 };
 
-/** Ruta canónica para comparar carpetas: resuelve symlinks si existe (en Docker /app/storage → /data/storage). */
 const canonicalPath = (value: string): string => {
   const absolute = path.resolve(value);
   try {
@@ -113,7 +108,6 @@ const mask = (value: string | null): string | null => {
   return `${value.slice(0, 2)}****${value.slice(-2)}`;
 };
 
-/** Clave válida fuera de la carpeta pública images/. */
 const assertPrivateKey = (key: string): void => {
   assertSafeStorageKey(key);
   if (isPublicKey(key)) {
@@ -121,7 +115,6 @@ const assertPrivateKey = (key: string): void => {
   }
 };
 
-/** Clave válida dentro de images/email/, lo único que se sube o borra como archivo público. */
 const assertEmailImageKey = (key: string): void => {
   assertSafeStorageKey(key);
   if (!key.startsWith(EMAIL_IMAGE_KEY_PREFIX)) {
@@ -141,9 +134,6 @@ export class StorageService {
     private readonly cipher: SecretCipherService,
   ) {}
 
-  // Toda clave se valida aquí, antes de elegir el driver: ninguna puede salir de su carpeta o prefijo.
-  // Los documentos nunca van bajo images/: esa carpeta puede tener lectura anónima si el bucket de imágenes de correo
-  // es el mismo de documentos (docs/DEPLOY.md §10.7).
   async put(input: PutObjectInput): Promise<StoredObject> {
     assertPrivateKey(input.key);
     return (await this.resolveAdapter()).put(input);
@@ -174,14 +164,6 @@ export class StorageService {
     return (await this.resolveAdapter()).presignGet(key, expiresInSeconds);
   }
 
-  /**
-   * `authorizationUrl` es siempre null: cada `state` OAuth es de un solo uso y va ligado a una cookie del
-   * navegador, así que solo lo emiten los endpoints `oauth/{google,onedrive}/start` (BE-15). Un GET de estado
-   * no debe acuñar credenciales.
-   *
-   * Las credenciales nunca se devuelven (ni cifradas ni parciales): solo si hay una guardada (`*Set`), para que el
-   * formulario muestre el campo como lleno y no la reenvíe (ver StorageStatusDto).
-   */
   async status(): Promise<StorageStatusDto> {
     const resolved = await this.resolvedConfig();
     const needsOauth =
@@ -211,11 +193,6 @@ export class StorageService {
     };
   }
 
-  /**
-   * POST /storage/test. Con S3 hace comprobaciones reales (ver s3-connection-probe.ts) y responde siempre 200 con
-   * el detalle: `ok` es false si alguna comprobación falló. Con los demás drivers escribe, lee y borra un objeto de
-   * sonda; ahí un error se sigue lanzando como antes (el frontend ofrece reconectar OAuth con STORAGE_OAUTH_REQUIRED).
-   */
   async testConnection(): Promise<StorageTestResult> {
     const resolved = await this.resolvedConfig();
     if (resolved.driver === 's3') {
@@ -428,11 +405,6 @@ export class StorageService {
     await this.settings.save(this.seal(row));
   }
 
-  /**
-   * Inicia la conexión OAuth (BE-15). El `state` es un valor aleatorio de un solo uso que solo se guarda como
-   * hash, con el usuario, el proveedor y una caducidad de 10 minutos; `browserBinding` va en una cookie HttpOnly
-   * del navegador que inició el flujo y el callback exige las dos cosas. Ya no se firma con JWT_ACCESS_SECRET (BE-12).
-   */
   async startOauth(
     provider: OauthProvider,
     userId: string,
@@ -451,7 +423,6 @@ export class StorageService {
     const state = randomBytes(32).toString('base64url');
     const browserBinding = randomBytes(32).toString('base64url');
     await this.settings.manager.transaction(async (manager) => {
-      // Limpieza oportunista: los vencidos o usados hace más de un día ya no sirven ni para auditar el intento.
       await manager.query(
         `DELETE FROM storage_oauth_state WHERE expires_at < NOW() - INTERVAL '1 day'`,
       );
@@ -492,11 +463,6 @@ export class StorageService {
     };
   }
 
-  /**
-   * Callback público del proveedor. El `state` se consume en una sola sentencia (un segundo uso, aunque sea
-   * simultáneo, no encuentra fila libre); luego se exige que no haya vencido, que sea del mismo proveedor, que
-   * llegue la cookie del navegador que lo pidió y que el usuario siga activo. Cualquier fallo: STORAGE_OAUTH_FAILED.
-   */
   async oauthCallback(
     provider: OauthProvider,
     code: unknown,
@@ -621,10 +587,6 @@ export class StorageService {
     return payload.refresh_token;
   }
 
-  /**
-   * La carpeta del driver project solo se fija al desplegar (STORAGE_PROJECT_PATH). Por API se acepta
-   * el mismo valor (el formulario lo reenvía tal cual lo recibió en el estado) y nada más (BE-01).
-   */
   private assertProjectPathUnchanged(requested: string | undefined): void {
     if (requested === undefined) {
       return;
@@ -639,10 +601,6 @@ export class StorageService {
     return this.config.getOrThrow('outbound', { infer: true });
   }
 
-  /**
-   * Endpoint S3: URL http(s) sin usuario, parámetros ni fragmento, fuera de redes privadas, loopback y link-local
-   * salvo OUTBOUND_ALLOWED_HOSTS (BE-16). En producción http solo para un host de esa lista.
-   */
   private async assertS3EndpointAllowed(endpoint: string): Promise<void> {
     let url: URL;
     try {
@@ -666,7 +624,6 @@ export class StorageService {
     const listed = policy.allowedHosts.some(
       (allowed) => normalizeHost(allowed) === normalizeHost(url.hostname),
     );
-    // Primero el destino: para http://minio:9000 la causa útil es "host interno no autorizado", no "use https".
     try {
       await assertDestinationAllowed(url.hostname, policy);
     } catch (error) {
@@ -693,12 +650,6 @@ export class StorageService {
     );
   }
 
-  /**
-   * Sube un archivo público (imágenes de correo, solo claves images/email/…) al bucket de imágenes del proveedor S3
-   * activo, con el mismo endpoint y credenciales que el de documentos. Puede ser un bucket aparte o el mismo de
-   * documentos con lectura anónima solo de images/email/* (docs/DEPLOY.md §10.7). Sin driver s3, sin bucket de
-   * imágenes o sin URL base responde PUBLIC_ASSETS_NOT_CONFIGURED: nunca se guarda en otro sitio.
-   */
   async putPublicAsset(input: PublicAssetInput): Promise<StoredPublicAsset> {
     assertEmailImageKey(input.key);
     const resolved = await this.resolvedConfig();
@@ -725,7 +676,6 @@ export class StorageService {
     return { key: input.key, publicUrl: publicAssetUrl(publicAssetsBaseUrl, input.key) };
   }
 
-  /** Borra una imagen de correo (images/email/…) del bucket de imágenes: solo para deshacer una subida que perdió la carrera por el mismo sha256. */
   async deletePublicAsset(key: string): Promise<void> {
     assertEmailImageKey(key);
     const resolved = await this.resolvedConfig();
@@ -735,7 +685,6 @@ export class StorageService {
     await this.s3Adapter({ ...resolved, s3: { ...resolved.s3, bucket: resolved.s3.publicAssetsBucket } }).delete(key);
   }
 
-  /** Lanza StorageNotConfigured si faltan datos y OutboundDestinationError si el host está prohibido (BE-16). */
   private s3Adapter(resolved: StorageConfig, tuning?: S3ClientTuning): S3StorageAdapter {
     if (!resolved.s3.bucket || !resolved.s3.accessKey || !resolved.s3.secretKey) {
       throw new ApiException(ErrorCode.StorageNotConfigured);
@@ -822,14 +771,12 @@ export class StorageService {
       return env;
     }
     const row = this.reveal(stored);
-    // Credenciales en claro (legado) o con SETTINGS_ENCRYPTION_KEY_PREVIOUS: se vuelven a sellar con la clave actual.
     if (STORAGE_SECRET_FIELDS.some((field) => this.cipher.needsReseal(stored[field]))) {
       await this.settings.save(this.seal(this.settings.create({ ...row })));
     }
     this.warnIgnoredProjectPath(row.projectPath, env.projectPath);
     return {
       driver: row.driver || env.driver,
-      // Nunca la de la BD: una fila editada por API podía apuntar la raíz a '/' (BE-01).
       projectPath: env.projectPath,
       s3: {
         provider: row.s3Provider ?? env.s3.provider,
@@ -858,7 +805,6 @@ export class StorageService {
     };
   }
 
-  /** Cifra los campos secretos en claro (los ya cifrados quedan igual). Muta y devuelve la fila. */
   private seal(row: StorageSettings): StorageSettings {
     for (const field of STORAGE_SECRET_FIELDS) {
       row[field] = this.cipher.encrypt(row[field]);
@@ -866,7 +812,6 @@ export class StorageService {
     return row;
   }
 
-  /** Copia de la fila con los secretos descifrados; nunca se guarda tal cual. */
   private reveal(row: StorageSettings): StorageSettings {
     try {
       const copy = this.settings.create({ ...row });
@@ -875,7 +820,6 @@ export class StorageService {
       }
       return copy;
     } catch (error) {
-      // Sin el valor: solo la causa (clave equivocada o dato corrupto).
       this.logger.error(
         'storage settings decrypt failed',
         error instanceof Error ? error.message : String(error),
@@ -884,7 +828,6 @@ export class StorageService {
     }
   }
 
-  /** Fila guardada (secretos cifrados). Si no existe se crea desde el entorno, ya cifrada. */
   private async requireRow(): Promise<StorageSettings> {
     const existing = await this.settings.find({ take: 1 }).then((rows) => rows[0]);
     if (existing) {

@@ -2,19 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { OutboundDestinationError } from '../net/outbound-destination.js';
 import { classifyS3Error, runS3Probe, type S3Send } from './s3-connection-probe.js';
 
-/** Error como los que lanza @aws-sdk/client-s3 ante una respuesta del servidor. */
 const s3Error = (name: string, httpStatusCode: number) =>
   Object.assign(new Error(`${name}: detalle del proveedor con AKIAEXAMPLE y http://10.0.0.5:9000`), {
     name,
     $metadata: { httpStatusCode },
   });
 
-/** Error de red de node (sin respuesta HTTP). */
 const netError = (code: string) => Object.assign(new Error(`${code} 10.0.0.5:9000`), { code });
 
 type Handler = (input: Record<string, unknown>) => unknown;
 
-/** Doble del cliente S3: responde según el nombre del comando; guarda lo escrito para devolverlo al leer. */
 const fakeS3 = (overrides: Partial<Record<string, Handler>> = {}) => {
   const objects = new Map<string, Buffer>();
   const calls: string[] = [];

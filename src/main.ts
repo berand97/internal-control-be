@@ -51,7 +51,6 @@ async function bootstrap(): Promise<void> {
       : {},
   );
 
-  // Antes de los ganchos de arranque: con migraciones pendientes la app arranca a medias (500 y circuitos abiertos).
   try {
     await assertMigrationsApplied(app.get(DataSource), {
       production: process.env['NODE_ENV'] === 'production',
@@ -76,7 +75,6 @@ async function bootstrap(): Promise<void> {
     publishApiDocs(app);
   }
 
-  // Solo el proceso HTTP mantiene la caché de módulos al día con la BD (NOTIFY + relectura periódica).
   await app.get(FeatureFlagsService).startLiveSync();
 
   await app.listen(config.getOrThrow('port', { infer: true }));

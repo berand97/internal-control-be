@@ -30,7 +30,6 @@ import {
 import { TestMailDto, UpdateMailSettingsDto } from './dto/update-mail-settings.dto.js';
 import { MailService } from './mail.service.js';
 
-/** SMTP. Las plantillas de correo se administran en /email-templates (src/modules/email-templates). */
 @ApiTags(OpenApiTag.Mail)
 @ApiBearerAuth()
 @ApiExtraModels(

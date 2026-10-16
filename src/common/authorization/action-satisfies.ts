@@ -8,7 +8,6 @@ const ACTIONS_THAT_SATISFY_READ = new Set([
   'approve',
   'export',
   'sign',
-  // asset_request:review:global revisa y lee todas las solicitudes (migración 1767225930000).
   'review',
 ]);
 
