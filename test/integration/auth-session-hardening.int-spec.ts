@@ -822,7 +822,7 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       }
       return scalar<string>(
         dataSource,
-        `INSERT INTO organizational_unit (code, name, unit_type) VALUES ($1, 'Unidad de prueba', 'AREA') RETURNING id`,
+        `INSERT INTO organizational_unit (code, name, unit_type) VALUES ($1, 'Unidad de prueba', 'DEPENDENCY') RETURNING id`,
         [`S2${randomUUID().slice(0, 6)}`],
       );
     };

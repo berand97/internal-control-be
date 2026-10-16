@@ -643,7 +643,7 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
   it('calendario y cobertura resuelven la unidad del centro a la fecha: inicio de cada toma, hoy y cierre de la última', async () => {
     const tag = randomUUID().slice(0, 5).toUpperCase();
     const unit = (code: string) =>
-      scalar<string>(dataSource, `INSERT INTO organizational_unit (code, name, unit_type) VALUES ($1, $2, 'AREA') RETURNING id`, [
+      scalar<string>(dataSource, `INSERT INTO organizational_unit (code, name, unit_type) VALUES ($1, $2, 'DEPENDENCY') RETURNING id`, [
         code,
         `Unidad ${code}`,
       ]);
