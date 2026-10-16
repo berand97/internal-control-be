@@ -22,8 +22,6 @@ const unescapeXml = (text) =>
 
 const fold = (text) => text.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase();
 
-// Texto visible del párrafo con los runs unidos. Tabulaciones y saltos de línea
-// cuentan como espacio: separan en pantalla lo que está a cada lado.
 const paragraphsOf = (xml) =>
   [...xml.matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)].map((match) => ({
     xml: match[0],
@@ -51,9 +49,6 @@ const invisibleRuns = (xml) =>
       );
     });
 
-// Campos que Word calcula al abrir el documento y que no llevan datos: la
-// numeración de páginas del pie. Cualquier otro campo (SAVEDATE, HYPERLINK,
-// MERGEFIELD, …) se recalcula o enlaza fuera de la plantilla.
 const ALLOWED_FIELDS = /^(PAGE|NUMPAGES)\b/;
 
 const fieldInstructions = (xml) => [
@@ -63,9 +58,6 @@ const fieldInstructions = (xml) => [
     .filter((instr) => instr !== ''),
 ];
 
-// Metadatos del paquete (autor, último editor, …). Solo se revisan si el
-// llamador lo pide; las dos plantillas versionadas (OCI-01-55 y OCI-01-65) se
-// construyen con clearAuthorMetadata y pasan con { metadata: true }.
 const METADATA_PARTS = /^docProps\/(core|app|custom)\.xml$/;
 
 export const findLeftovers = (docx, sample, { metadata = false } = {}) => {

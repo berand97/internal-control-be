@@ -1,7 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
-// Tests de integración contra PostgreSQL real (ver test/integration/).
 export default defineConfig({
   plugins: [tsconfigPaths()],
   test: {

@@ -1,6 +1,3 @@
-// Convierte el formato institucional OCI-01-55 (Word con campos MERGEFIELD y un
-// caso real diligenciado) en una plantilla del motor de documentos, sin datos
-// personales. Uso: node scripts/formats/build-oci-01-55-template.mjs <origen.docx> <destino.docx>
 import {
   cleanPackage,
   clearAuthorMetadata,
@@ -17,7 +14,6 @@ import {
 } from './template-builder.mjs';
 import { OCI_01_55_SAMPLE, removeInvisibleRuns } from './template-leftovers.mjs';
 
-// La muestra vive junto al chequeo porque el test del chequeo la importa de ahí.
 export const SAMPLE = OCI_01_55_SAMPLE;
 
 export const FIELDS = {

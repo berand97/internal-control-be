@@ -1,7 +1,3 @@
-// Piezas compartidas para convertir un formato institucional de Word (con campos
-// MERGEFIELD y un caso real diligenciado) en una plantilla del motor de
-// documentos. Cada formato tiene su script (build-<formato>-template.mjs) con su
-// mapa de campos y la muestra de datos del ejemplo que no puede sobrevivir.
 import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -15,10 +11,6 @@ export const escape = (text) => text.replaceAll('&', '&amp;').replaceAll('<', '&
 
 export const plainText = (xml) => xml.replace(/<[^>]+>/g, '');
 
-// Recorre los campos complejos (fldChar begin … end) de atrás hacia adelante y
-// reemplaza cada uno por un run con el texto que devuelva `resolve(instr, n)`,
-// donde `n` es el número de aparición (0, 1, …) de esa misma instrucción en
-// orden de documento. `undefined` deja el campo; '' lo elimina sin dejar run.
 export const replaceFields = (xml, resolve) => {
   const instructionOf = (segment) =>
     [...segment.matchAll(/<w:instrText(?: [^>]*)?>([^<]*)<\/w:instrText>/g)]
@@ -60,9 +52,6 @@ export const replaceFields = (xml, resolve) => {
   return result;
 };
 
-// `fields` asocia cada MERGEFIELD con su marcador. Si el mismo campo aparece
-// varias veces con significados distintos, el valor es una lista en orden de
-// documento. Un MERGEFIELD sin equivalencia es un error.
 export const replaceMergeFields = (xml, fields) =>
   replaceFields(xml, (instr, occurrence) => {
     const name = instr.match(/^MERGEFIELD\s+([A-Z0-9_]+)/)?.[1];
@@ -110,8 +99,6 @@ const setCellText = (cell, text) => {
   return replaced;
 };
 
-// Deja la tabla de activos con su encabezado y una sola fila con el loop; las
-// demás filas del ejemplo se descartan.
 export const replaceAssetTable = (xml, { headerText, rowTags }) => {
   const tables = topLevel(xml, 'w:tbl', 'w:tbl');
   const table = tables.find(([start, end]) => plainText(xml.slice(start, end)).includes(headerText));
@@ -142,8 +129,6 @@ export const replaceInParagraphs = (xml, predicate, transform) =>
       return predicate(paragraph) ? acc.slice(0, start) + transform(paragraph) + acc.slice(end) : acc;
     }, xml);
 
-// Reemplaza la primera aparición de `from` aunque Word la haya partido en varios
-// runs: el reemplazo queda en el primer run tocado y los demás pierden ese texto.
 export const replaceText = (xml, from, to) => {
   const runs = [...xml.matchAll(/(<w:t(?: [^>]*)?>)([^<]*)(<\/w:t>)/g)];
   const texts = runs.map((run) => run[2]);
@@ -177,8 +162,6 @@ export const replaceText = (xml, from, to) => {
   return result + xml.slice(cursor);
 };
 
-// Como replaceText, pero falla si el texto no está: un formato que cambió no
-// debe producir una plantilla a medias sin avisar.
 export const replaceTextOrFail = (xml, from, to) => {
   const result = replaceText(xml, from, to);
   if (result === xml) {
@@ -187,8 +170,6 @@ export const replaceTextOrFail = (xml, from, to) => {
   return result;
 };
 
-// Encabezado SGC: código, versión (el run que sigue a la etiqueta) y fecha de
-// vigencia (etiqueta + fecha del ejemplo, aunque esté partida en runs).
 export const replaceSgcHeader = (header, { code, versionLabel = 'Versión:', date }) => {
   let result = replaceTextOrFail(header, `Código: ${code}`, 'Código: {{formato.codigo}}');
   const runs = [...result.matchAll(/(<w:t(?: [^>]*)?>)([^<]*)(<\/w:t>)/g)];
@@ -203,8 +184,6 @@ export const replaceSgcHeader = (header, { code, versionLabel = 'Versión:', dat
   return replaceTextOrFail(result, date, `${label} {{formato.fechaVigencia}}`);
 };
 
-// Quita la combinación de correspondencia (y con ella la ruta a la hoja de
-// datos) y las relaciones externas que ya nadie referencia.
 export const cleanPackage = (zip) => {
   const settings = zip.file('word/settings.xml').asText().replace(/<w:mailMerge>.*?<\/w:mailMerge>/s, '');
   zip.file('word/settings.xml', settings);
@@ -214,12 +193,6 @@ export const cleanPackage = (zip) => {
   }
 };
 
-// El formato imprime «C.C» fijo antes de cada número de documento. El tipo es
-// un dato de la persona (tipoDocumento: abreviatura del catálogo, o vacío si se
-// desconoce), así que cada «C.C <marcador del número>» pasa a
-// «<marcador del tipo> <marcador del número>». `parties` son las rutas del
-// firmante (responsable, auditor, firmante.recibe, …). Falla si alguna no está
-// o si queda un «C.C» literal en el cuerpo.
 export const replaceDocumentTypeLabels = (xml, parties) => {
   let result = xml;
   for (const party of parties) {
@@ -231,7 +204,6 @@ export const replaceDocumentTypeLabels = (xml, parties) => {
   return result;
 };
 
-// Autor y último editor del .docx son datos de una persona del ejemplo.
 export const clearAuthorMetadata = (zip) => {
   const core = zip.file('docProps/core.xml');
   if (core) {
@@ -256,7 +228,6 @@ export const templateTags = (zip, parts = ['word/document.xml', 'word/header1.xm
     (match) => match[0],
   );
 
-// Punto de entrada común: `node build-<formato>-template.mjs <origen.docx> <destino.docx>`.
 export const runCli = async (moduleUrl, name, build) => {
   if (!process.argv[1] || moduleUrl !== pathToFileURL(process.argv[1]).href) {
     return;

@@ -1,16 +1,3 @@
-// Construye la plantilla del motor para el formato institucional OCI-21-37 (Acta de toma física de inventario de
-// activos fijos). El formato existe solo como Excel (docs/acta de toma física de inventario de activos fijos mdf.xlsx,
-// diligenciado con una toma real: 1110 OFICINA JURÍDICA, informe 00005) y el motor solo renderiza Word: el cuerpo se
-// arma con los textos leídos de sus celdas sobre el paquete de una plantilla Word ya limpia del repositorio
-// (OCI-01-65-v2.docx: encabezado SGC con logo, estilos, fuentes y pie con número de página), en hoja horizontal.
-//
-// Hoja «Tabla de informacion »: el acta (encabezado, resumen de hallazgos, notas y firmas).
-// Hoja «Total Activos .»: el detalle por activo, que aquí va como anexo. Sus columnas AU/ANE/AOD/ANI (una por
-// categoría) no se copian: la categoría es una columna, y el resumen recorre las categorías que el catálogo tenga
-// activas y definidas (tablas.hallazgos), sin fijar cuántas ni qué significan.
-//
-// Uso:
-//   node scripts/formats/build-oci-21-37-template.mjs templates/formats/OCI-01-65-v2.docx "docs/acta de toma física de inventario de activos fijos mdf.xlsx" templates/formats/OCI-21-37-v2.docx
 import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -23,9 +10,6 @@ const ExcelJS = require('exceljs');
 const ACT_SHEET = 'Tabla de informacion ';
 const ITEMS_SHEET = 'Total Activos .';
 
-// Datos de la toma diligenciada en el Excel (y de las hojas ocultas). Si cualquiera sobrevive en la plantilla, el
-// constructor y el test fallan. Los rótulos de las categorías (Activos en uso, …) no están: son del formato y el
-// catálogo del sistema puede usarlos legítimamente.
 export const SAMPLE = {
   names: ['FABIÁN', 'FABIAN', 'JAIMES', 'FLÓREZ', 'FLOREZ', 'MONICA', 'MÓNICA', 'ELIANA', 'PEÑA', 'MOSQUERA'],
   documents: [],
@@ -94,7 +78,6 @@ export const SAMPLE = {
   ],
 };
 
-// Encabezados del resumen de hallazgos (fila 17 de la hoja del acta).
 const FINDINGS_HEADERS = [
   { cell: 'C17', header: 'Hallazgo' },
   { cell: 'D17', header: '# de bienes' },
@@ -103,10 +86,6 @@ const FINDINGS_HEADERS = [
   { cell: 'J17', header: 'Valor en libros' },
 ];
 
-// Columnas del anexo por activo. `cell` es el encabezado en la hoja «Total Activos .» cuando el formato lo trae; las
-// demás las introduce la plantilla porque el sistema las registra en la verificación (resultado, condición, causa…).
-// Anchos en twips para una hoja carta horizontal con márgenes de 0,5" (14 400 útiles); Id y código caben en una línea
-// con códigos internos de 12 caracteres (A2026-000123) y el # con cuatro dígitos (una toma real tuvo 757 activos).
 export const COLUMNS = [
   { cell: 'A1', header: '#', tag: '{{indice}}', width: 600, align: 'center' },
   { cell: 'B1', header: 'Id', tag: '{{idOrigen}}', width: 1150 },
@@ -161,7 +140,6 @@ const text = (value) => {
   return String(value);
 };
 
-// Lee del Excel los textos fijos del formato; falla si el formato cambió.
 export const readFormat = async (xlsx) => {
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(xlsx);
@@ -208,7 +186,6 @@ const body = (format) => {
   const value = (tag, size = 18) => run(tag, { size });
   const small = 14;
 
-  // Encabezado del acta: número del informe y datos de la toma (filas 8 a 13 del Excel).
   const left = 3600;
   const headerRow = (title, runs) =>
     row([cell(left, [para([label(title)], { after: 0 })], { shade: true }), cell(TOTAL_WIDTH - left, [para(runs, { after: 0 })])]);
@@ -227,7 +204,6 @@ const body = (format) => {
     ],
   );
 
-  // Conteos de la toma: el equivalente del «Total de activos en base de datos» y de la diferencia del Excel.
   const countWidths = [3000, 1800, 3000, 1800, 3000, 1800];
   const count = (title, tag) => [
     cell(countWidths[0], [para([label(title, 16)], { after: 0 })], { shade: true }),
@@ -254,7 +230,6 @@ const body = (format) => {
     ],
   );
 
-  // Resumen de hallazgos (filas 17 a 22): una fila por categoría activa y definida del catálogo, y la fila TOTAL.
   const findingWidths = [5600, 1800, 2600, 1800, 2600];
   const findings = table(findingWidths, [
     row(
@@ -291,7 +266,6 @@ const body = (format) => {
     { after: 120 },
   );
 
-  // Sustituciones de firmante por separación de funciones (no están en el Excel: las exige el motor).
   const substitutions = [
     para([run('{{#tablas.sustituciones}}', { size: small })], { after: 0 }),
     para(
@@ -304,7 +278,6 @@ const body = (format) => {
     para([run('{{/tablas.sustituciones}}', { size: small })], { after: 0 }),
   ];
 
-  // Firmas (filas 37 a 44): primero el encargado (responsable), luego Control Interno.
   const half = TOTAL_WIDTH / 2;
   const signatureBlock = (roleTitle, subtitleRuns, nameTag, cargoTag) => [
     para([label(roleTitle)], { after: 0, keepNext: true }),
@@ -324,7 +297,6 @@ const body = (format) => {
     { borders: false },
   );
 
-  // Anexo 1: detalle por activo (hoja «Total Activos .»).
   const widths = COLUMNS.map((column) => column.width);
   const assets = table(widths, [
     row(
@@ -339,7 +311,6 @@ const body = (format) => {
     ),
   ]);
 
-  // Anexo 2: sobrantes sin activo registrado (no está en el Excel). Solo se imprime si hay alguno.
   const surplusColumns = [
     { header: '#', tag: '{{indice}}', width: 600, align: 'center' },
     { header: 'Descripción', tag: '{{descripcion}}', width: 3800 },
@@ -385,8 +356,6 @@ const body = (format) => {
   ].join('');
 };
 
-// El encabezado de la base es de hoja vertical (10 640 twips): en horizontal se ensancha la columna del título para
-// que ocupe el ancho útil (14 400), y «Versión:» recupera el espacio que el Excel trae («Versión: 2»).
 const landscapeHeader = (xml) => {
   const widths = { 3225: 3225, 4636: TOTAL_WIDTH - 3225 - 2779, 2779: 2779 };
   let result = xml
@@ -408,7 +377,6 @@ export const build = async (base, xlsx) => {
   if (!sectPr) {
     throw new Error('La plantilla base no tiene sectPr');
   }
-  // Hoja carta horizontal, márgenes de 0,5" (720 twips): 14 400 twips útiles para las 12 columnas del anexo.
   const landscape = sectPr
     .replace(/<w:pgSz [^>]*\/>/, '<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>')
     .replace(/<w:pgMar [^>]*\/>/, '<w:pgMar w:top="1080" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/>');
@@ -416,8 +384,6 @@ export const build = async (base, xlsx) => {
   const end = document.indexOf('</w:body>');
   zip.file('word/document.xml', `${document.slice(0, start)}${body(format)}${landscape}${document.slice(end)}`);
 
-  // Encabezado SGC de la base: ya trae {{formato.codigo}}, {{formato.version}} y {{formato.fechaVigencia}};
-  // cambia el título del formato por el del Excel (F6).
   const header = zip.file('word/header1.xml').asText();
   zip.file('word/header1.xml', landscapeHeader(replaceTextOrFail(header, 'ACTA DE PRÉSTAMO TEMPORAL DE ACTIVOS FIJOS', format.title)));
   clearAuthorMetadata(zip);

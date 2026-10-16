@@ -1,13 +1,3 @@
-// Construye la plantilla del motor para el formato institucional OCI-17-89
-// (Traslado de activos). El formato existe solo como Excel
-// (docs/acta de traslado de activos fijos mdf.xlsx, hoja «Solicitud traslado
-// de activos», con un caso real diligenciado) y el motor solo renderiza Word:
-// el cuerpo se arma a partir del contenido del Excel (textos leídos de sus
-// celdas) sobre el paquete de una plantilla Word ya limpia del repositorio
-// (OCI-01-65-v2.docx: encabezado SGC con logo, estilos, fuentes y pie con
-// número de página), en hoja horizontal por las 17 columnas de la tabla.
-// Uso:
-//   node scripts/formats/build-oci-17-89-template.mjs templates/formats/OCI-01-65-v2.docx "docs/acta de traslado de activos fijos mdf.xlsx" templates/formats/OCI-17-89-v1.docx
 import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -19,9 +9,6 @@ const ExcelJS = require('exceljs');
 
 const SHEET = 'Solicitud traslado de activos';
 
-// Datos del caso diligenciado en el Excel. Si cualquiera sobrevive en la
-// plantilla, el constructor y el test fallan. «Reubicacion» (Q14:Q26) no está:
-// es el motivo sembrado en el catálogo y aparece legítimamente en actas reales.
 export const SAMPLE = {
   names: ['SARA', 'ELISA', 'VILLAMIZAR', 'MERCADO', 'VELASQUEZ', 'BERRIO', 'MONICA', 'MÓNICA', 'ELIANA', 'PEÑA', 'MOSQUERA', 'ANNY', 'JISETH', 'JOSEPH', 'TREJOS'],
   documents: ['091430', '092688', '85315', '106659'],
@@ -41,8 +28,6 @@ export const SAMPLE = {
   ],
 };
 
-// Columnas de la tabla (fila 13 del Excel, B13:R13) y su marcador por activo.
-// Anchos en twips para una hoja carta horizontal con márgenes de 0,5".
 export const COLUMNS = [
   { cell: 'B13', header: '#', tag: '{{indice}}', width: 300 },
   { cell: 'C13', header: 'Id', tag: '{{idOrigen}}', width: 650 },
@@ -99,7 +84,6 @@ const text = (value) => {
   return String(value);
 };
 
-// Lee del Excel los textos fijos del formato; falla si el formato cambió.
 export const readFormat = async (xlsx) => {
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(xlsx);
@@ -171,7 +155,6 @@ const body = (format) => {
     ),
   ]);
 
-  // Sustituciones de firmante por separación de funciones (no están en el Excel: las exige el motor).
   const substitutions = [
     para([run('{{#tablas.sustituciones}}', small)], { after: 0 }),
     para(
@@ -227,7 +210,6 @@ export const build = async (base, xlsx) => {
   if (!sectPr) {
     throw new Error('La plantilla base no tiene sectPr');
   }
-  // Hoja carta horizontal, márgenes de 0,5" (720 twips) para las 17 columnas.
   const landscape = sectPr
     .replace(/<w:pgSz [^>]*\/>/, '<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>')
     .replace(/<w:pgMar [^>]*\/>/, '<w:pgMar w:top="1080" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/>');
@@ -235,8 +217,6 @@ export const build = async (base, xlsx) => {
   const end = document.indexOf('</w:body>');
   zip.file('word/document.xml', `${document.slice(0, start)}${body(format)}${landscape}${document.slice(end)}`);
 
-  // Encabezado SGC de la base: ya trae {{formato.codigo}}, {{formato.version}} y {{formato.fechaVigencia}};
-  // cambia el título del formato por el del Excel (H6).
   const header = zip.file('word/header1.xml').asText();
   zip.file('word/header1.xml', replaceTextOrFail(header, 'ACTA DE PRÉSTAMO TEMPORAL DE ACTIVOS FIJOS', format.title));
   clearAuthorMetadata(zip);
