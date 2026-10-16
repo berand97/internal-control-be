@@ -19,11 +19,6 @@ export interface RawSheet {
 
 const { ValueType } = ExcelJS;
 
-/**
- * Topes de lectura (BE-05). La hoja más larga del informe real de activos (Movimientos, julio 2026) tiene 14.806
- * filas y el libro 5 hojas: 100.000 filas por hoja y 50 hojas dejan margen de años. Sin tope, una sola celda en la
- * fila 1.048.576 hacía crear un objeto por cada fila vacía intermedia.
- */
 export const MAX_SHEET_ROWS = 100_000;
 export const MAX_SHEETS = 50;
 
@@ -79,11 +74,9 @@ export const readWorkbook = async (content: Buffer): Promise<ReadonlyArray<RawSh
 
 export interface RawWorkbook {
   readonly sheets: ReadonlyArray<RawSheet>;
-  /** Fecha de creación del libro (propiedades del documento); null si no la trae. */
   readonly createdAt: Date | null;
 }
 
-/** Como readWorkbook, más la fecha de creación del libro (Excel la conserva al guardar). */
 export const readWorkbookWithProperties = async (content: Buffer): Promise<RawWorkbook> => {
   assertZipWithinLimits(content, ZIP_LIMITS.XLSX);
   const workbook = new ExcelJS.Workbook();

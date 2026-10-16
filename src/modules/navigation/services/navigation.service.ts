@@ -80,7 +80,6 @@ export class NavigationService {
         ...(dto.requiredAction !== undefined
           ? { requiredAction: dto.requiredAction }
           : {}),
-        // null borra el ícono propio; omitido lo deja como está.
         ...(dto.icon !== undefined ? { icon: dto.icon } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),

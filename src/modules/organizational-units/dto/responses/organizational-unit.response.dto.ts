@@ -104,7 +104,6 @@ export class OrganizationalUnitResponseDto {
   }
 }
 
-/** Respuesta de POST/PATCH: la unidad guardada y las advertencias (centro propio pendiente, prefijo fuera del jefe, nombre repetido bajo el mismo jefe…). */
 export class OrganizationalUnitSaveResponseDto extends OrganizationalUnitResponseDto {
   @ApiProperty({
     type: [String],

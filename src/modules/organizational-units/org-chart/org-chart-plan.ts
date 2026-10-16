@@ -35,28 +35,6 @@ import {
   type UnitRowInput,
 } from './org-chart.types.js';
 
-/**
- * Plan de la importación del organigrama: compara las filas del Excel con el estado actual y dice qué cambiaría, sin
- * tocar nada. Puro (sin base): el servicio lo calcula en la previsualización y otra vez al confirmar, dentro de la
- * transacción, y solo aplica si el plan es el mismo (hash).
- *
- * - Las filas que no están en el archivo no se tocan; solo la columna Acción borra o archiva.
- * - Unidad: se identifica por «Código interno»; sin él, por el prefijo de una unidad activa; si no, es nueva (el código
- *   interno se genera del prefijo o del nombre).
- * - Centro: por «Código anterior» (recodificación: el mismo centro, con sus activos e historia, pasa al código nuevo) o
- *   por «Código»; si no, es nuevo.
- * - Prefijo con el código de Contabilidad: 4 dígitos con ceros al final se toman sin ellos (1200 → 12); «Depende de»
- *   acepta además el código del centro propio del jefe (4010 → la Vicerrectoría Financiera).
- * - Columnas vacías de una unidad: la existente conserva su valor (Prefijo, Depende de, Línea, Centro propio, Color,
- *   Estado); para quitarlo a propósito se escribe «RAÍZ» o «NINGUNO» (sin Color, la unidad hereda el de su jefe). La nueva deduce lo que puede: el padre por el prefijo
- *   (43 → 4) o la Rectoría (prefijo de un dígito, si hay una sola; una Rectoría nunca se ubica sola), Línea Autoridad
- *   y el centro propio: el Prefijo de 4 dígitos si es un centro (1510) o, con prefijo X, X010 si existe.
- * - Centros: el Excel del organigrama no los trae (unitsOnly): Centro propio y Depende de se validan y deducen contra
- *   los centros que existen en el sistema, y una hoja «Centros de costo» de un archivo viejo solo deja una advertencia.
- *   La parte de centros de este plan (filas de centros con su unidad y padre derivados del código, org-chart-rules.ts)
- *   queda sin uso aquí, para el Excel de la pantalla de centros de costo.
- */
-
 export const IGNORED_CENTER_SHEET_WARNING = 'La hoja Centros de costo se ignoró: los centros se administran en su propia pantalla';
 
 export type UnitChangeKind =
@@ -115,7 +93,6 @@ export interface RowIssue {
 }
 
 export interface UnitOp {
-  /** id de la unidad existente o «new:<código>». */
   readonly key: string;
   readonly existingId: string | null;
   readonly rowNumber: number;
@@ -126,9 +103,7 @@ export interface UnitOp {
   readonly codePrefix: string | null;
   readonly parentKey: string | null;
   readonly headCenterKey: string | null;
-  /** Código del centro propio (amarrado o pendiente: headCenterKey null). */
   readonly headCenterCode: string | null;
-  /** Color base propio (#rrggbb) con el que queda; null sin color. */
   readonly color: string | null;
   readonly isActive: boolean;
   readonly removal: 'DELETE' | 'ARCHIVE' | null;
@@ -136,7 +111,6 @@ export interface UnitOp {
 }
 
 export interface CenterOp {
-  /** id del centro existente o «new:<código>». */
   readonly key: string;
   readonly existingId: string | null;
   readonly rowNumber: number;
@@ -156,7 +130,6 @@ export interface PlanChange {
   readonly rowNumber: number;
   readonly entity: 'ORG_UNIT' | 'COST_CENTER';
   readonly kind: UnitChangeKind | CenterChangeKind;
-  /** Prefijo o código interno de la unidad; código del centro. */
   readonly code: string;
   readonly name: string;
   readonly detail: string;
@@ -191,7 +164,6 @@ interface FinalUnit {
   unitType: OrgUnitType;
   relationType: OrgRelationType;
   codePrefix: string | null;
-  /** Prefijo tal como vino en el archivo (1200), antes de normalizarlo (12). */
   rawPrefix: string | null;
   parentKey: string | null;
   headCenterKey: string | null;
@@ -223,10 +195,8 @@ const isBlankUnitRow = (row: UnitRowInput): boolean =>
     (value) => value === null,
   );
 
-/** «RAÍZ» en Depende de: la unidad queda en la raíz a propósito. */
 const isRootText = (text: string): boolean => normalizeText(text) === 'raiz';
 
-/** «NINGUNO» en Prefijo, Centro propio o Color: se le quita a propósito. */
 const isNoneText = (text: string): boolean => ['ninguno', 'ninguna'].includes(normalizeText(text));
 
 const isBlankCenterRow = (row: CenterRowInput): boolean =>
@@ -240,7 +210,6 @@ const asciiSlug = (name: string): string =>
     .replace(/[^A-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 
-/** Código interno de una unidad nueva: U<prefijo> o el nombre en mayúsculas sin tildes; único. */
 export const generateUnitCode = (prefix: string | null, name: string, used: ReadonlySet<string>): string => {
   const slug = asciiSlug(name);
   const base = prefix ? `U${prefix}` : /^[A-Z]/.test(slug) ? slug : `U_${slug}`;
@@ -276,7 +245,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     warnings.push({ sheet: CENTER_SHEET, rowNumber: 1, column: null, message: IGNORED_CENTER_SHEET_WARNING });
   }
 
-  // ─── Estado actual ────────────────────────────────────────────────────────────────────────────────────────────
   const snapshotUnits = new Map(snapshot.units.map((unit) => [unit.id, unit]));
   const snapshotCenters = new Map(snapshot.centers.map((center) => [center.id, center]));
   const units = new Map<string, FinalUnit>(
@@ -329,7 +297,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
   const centerByCode = new Map(snapshot.centers.map((center) => [center.externalCode, center]));
   const usedUnitCodes = new Set(snapshot.units.map((unit) => unit.code));
 
-  // ─── Hoja Organigrama: identidad y valores de cada fila ─────────────────────────────────────────────────────
   const unitRows = new Map<string, number>();
   if (input.hasUnitSheet) {
     for (const row of input.units) {
@@ -355,13 +322,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         unitError(at, UNIT_HEADERS.type, `Tipo desconocido «${row.type}»: elija uno de la lista (${UNIT_TYPE_OPTIONS})`);
         valid = false;
       }
-      // Vacío: la existente conserva su línea; la nueva queda en Autoridad.
       const relation = row.relation ? parseRelation(row.relation) : undefined;
       if (row.relation && !relation) {
         unitError(at, UNIT_HEADERS.relation, `Línea desconocida «${row.relation ?? ''}»: Autoridad, Asesoría o Coordinación`);
         valid = false;
       }
-      // Vacío (o sin la columna): conserva el color; NINGUNO lo quita (hereda el de su jefe).
       const colorText = row.color ?? null;
       const colorRemoved = colorText !== null && isNoneText(colorText);
       const color = colorText && !colorRemoved ? parseUnitColor(colorText) : undefined;
@@ -384,8 +349,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         valid = false;
       }
 
-      // El código interno distingue mayúsculas en la base (S24c5809 y S24C5809 pueden ser dos unidades): primero el
-      // exacto; en mayúsculas solo si no hay exacto.
       let existing = row.code ? (unitByCode.get(row.code) ?? unitByCode.get(row.code.toUpperCase())) : undefined;
       let code = row.code ? (existing?.code ?? row.code.toUpperCase()) : null;
       if (!existing && code) {
@@ -398,7 +361,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
           valid = false;
         }
       }
-      // Sin código interno: por el prefijo exacto y, si no, por el normalizado (1000 encuentra la Rectoría «1»).
       if (!existing && !code && row.prefix && !prefixRemoved) {
         existing = activeUnitByPrefix.get(row.prefix) ?? activeUnitByPrefix.get(normalizeUnitPrefix(row.prefix));
       }
@@ -413,9 +375,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         unitError(at, UNIT_HEADERS.type, 'El tipo es obligatorio para una unidad nueva');
         continue;
       }
-      // Código de Contabilidad de 4 dígitos con ceros al final → prefijo corto (1200 → 12), salvo que la unidad ya
-      // tenga guardado ese mismo valor.
-      // Vacío: la existente conserva el suyo; NINGUNO lo quita.
       const filePrefix = prefixRemoved ? null : row.prefix;
       const prefix = !filePrefix
         ? prefixRemoved
@@ -449,7 +408,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         relationType: relation ?? current?.relationType ?? OrgRelationType.Authority,
         codePrefix: prefix,
         rawPrefix: filePrefix ?? prefix,
-        // Vacíos en el archivo: la existente conserva padre y centro propio (se resuelven más abajo).
         parentKey: current?.parentKey ?? null,
         headCenterKey: current?.headCenterKey ?? null,
         headCenterCode: current?.headCenterCode ?? null,
@@ -464,7 +422,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
 
   const isLiveUnit = (unit: FinalUnit | undefined): boolean => Boolean(unit && unit.isActive && unit.removal === null);
 
-  // ─── Hoja Centros de costo ─────────────────────────────────────────────────────────────────────────────────────
   const centerRows = new Map<string, number>();
   const codeRows = new Map<string, number>();
   if (input.hasCenterSheet) {
@@ -479,7 +436,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         continue;
       }
       if (!CENTER_CODE_PATTERN.test(row.code)) {
-        // Los centros existentes con códigos viejos (no numéricos) se aceptan tal cual; uno nuevo o un código nuevo, no.
         if (!centerByCode.has(row.code) || row.previousCode) {
           centerError(at, CENTER_HEADERS.code, `«${row.code}» no es un código de centro de costo (solo dígitos)`);
           continue;
@@ -567,8 +523,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     [...centers.values()].filter((center) => isLiveCenter(center)).map((center) => [center.code, center]),
   );
 
-  // Centro propio de las unidades del archivo (antes que los padres: «Depende de» acepta el centro propio del jefe).
-  // Los avisos se emiten más abajo, en su orden de siempre.
   const headIssues: Array<{ error: boolean; row: number; message: string }> = [];
   const explicitHead = new Set<string>();
   for (const unit of units.values()) {
@@ -581,8 +535,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       continue;
     }
     if (!unit.headCenterText) {
-      // Vacío: la existente conserva el suyo. La nueva (o la existente sin centro propio a la que se le cambia el
-      // prefijo) con un Prefijo de 4 dígitos que es un centro (1510) toma ese centro; la nueva de prefijo X, X010.
       const before = unit.existingId ? snapshotUnits.get(unit.existingId) : undefined;
       const deducible =
         !before || (!unit.headCenterKey && !unit.headCenterCode && before.codePrefix !== unit.codePrefix);
@@ -617,7 +569,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         });
         continue;
       }
-      // Pendiente: se guarda el código y el conciliador lo amarra cuando el centro se cree o se reactive.
       const archived = [...centers.values()].some((center) => center.code === unit.headCenterText);
       unit.headCenterKey = null;
       unit.headCenterCode = unit.headCenterText;
@@ -629,7 +580,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     explicitHead.add(unit.key);
   }
 
-  // Unidad de cada centro propio (para «Depende de 4010»).
   const unitByHeadCode = new Map<string, FinalUnit>();
   for (const unit of units.values()) {
     const head = unit.headCenterKey ? centers.get(unit.headCenterKey) : undefined;
@@ -638,8 +588,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-
-  // Prefijos únicos entre unidades activas al final.
   const finalPrefix = new Map<string, FinalUnit>();
   for (const unit of units.values()) {
     if (!isLiveUnit(unit) || !unit.codePrefix) {
@@ -661,15 +609,10 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
   }
   const finalUnitByCode = new Map([...units.values()].map((unit) => [unit.code, unit]));
 
-  /**
-   * «Depende de» vacío en una unidad nueva: con prefijo de 2+ dígitos, la unidad activa con el prefijo propio más largo
-   * (43 → 4; 431 → 43, si no 4); con prefijo de 1 dígito, la Rectoría si hay exactamente una activa; si no, raíz.
-   */
   const deduceParent = (unit: FinalUnit): void => {
     const at = unit.rowNumber ?? 0;
     const prefix = unit.codePrefix;
     let parent: FinalUnit | undefined;
-    // Una Rectoría nunca se ubica sola bajo otra unidad.
     if (unit.unitType === OrgUnitType.Rectorate) {
       unit.parentKey = null;
       return;
@@ -698,7 +641,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     unitWarning(at, UNIT_HEADERS.parent, 'Sin Depende de: queda en la raíz');
   };
 
-  // Más de una Rectoría activa: la deducción «un número → la Rectoría» no aplica; se avisa una vez.
   const liveRectorates = [...units.values()].filter((unit) => unit.unitType === OrgUnitType.Rectorate && isLiveUnit(unit));
   const firstRectorateRow = liveRectorates
     .map((unit) => unit.rowNumber)
@@ -718,10 +660,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     .filter((unit) => !isCollegiateBody(unit.unitType))
     .map((unit) => ({ codePrefix: unit.codePrefix ?? '', unit }));
 
-  /**
-   * «Depende de», en orden: prefijo exacto; prefijo normalizado (1200 → 12); código del centro propio de una unidad
-   * (4010 → la Vicerrectoría Financiera); código interno.
-   */
   const resolveParentText = (text: string): { parent: FinalUnit | undefined; viaHead: boolean } => {
     if (!/^[0-9]+$/.test(text)) {
       return { parent: finalUnitByCode.get(text) ?? finalUnitByCode.get(text.toUpperCase()), viaHead: false };
@@ -741,7 +679,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     return `No hay ninguna unidad activa con prefijo, centro propio o código interno «${text}»`;
   };
 
-  // Padres de las filas del archivo.
   for (const unit of units.values()) {
     if (unit.rowNumber === null) {
       continue;
@@ -780,7 +717,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-  // Misma fila que su jefe con otro código (1310 bajo 1300 con el mismo nombre): probablemente es su centro propio.
   for (const unit of units.values()) {
     const parent = unit.parentKey ? units.get(unit.parentKey) : undefined;
     if (unit.rowNumber === null || !parent || normalizeText(parent.name) !== normalizeText(unit.name)) {
@@ -791,14 +727,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     unitWarning(unit.rowNumber, UNIT_HEADERS.name, `${own} tiene el mismo nombre que su jefe ${head}; ¿es su Centro propio?`);
   }
 
-  // Unidad nueva con el nombre de otra activa bajo el mismo jefe: solo advertencia (los nombres no son únicos). Las
-  // filas sin prefijo que repiten una existente ya son error en mergeOrgChartInput y no llegan aquí.
   const newSeen: FinalUnit[] = [];
   for (const unit of units.values()) {
     if (unit.rowNumber === null || unit.existingId !== null || !isLiveUnit(unit)) {
       continue;
     }
-    // «Depende de» que no se reconoció (ya es error): no se sabe quiénes son sus hermanas.
     if (unit.parentText && !isRootText(unit.parentText) && unit.parentKey === null) {
       continue;
     }
@@ -824,7 +757,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-  // Ciclos.
   const cyclic = new Set<string>();
   for (const unit of units.values()) {
     if (unit.rowNumber === null) {
@@ -841,7 +773,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-  // Prefijo jerárquico y cuerpos colegiados.
   for (const unit of units.values()) {
     if (unit.rowNumber === null || cyclic.has(unit.key) || !isLiveUnit(unit)) {
       continue;
@@ -857,7 +788,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     if (!unit.codePrefix) {
       continue;
     }
-    // Jefe con prefijo más cercano y prefijos de toda la cadena hacia arriba (nunca cuentan como «otra unidad»).
     let ancestor: FinalUnit | undefined;
     const chain = new Set<string>();
     let current = unit.parentKey ? units.get(unit.parentKey) : undefined;
@@ -889,7 +819,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     .filter((unit) => !cyclic.has(unit.key) && !isCollegiateBody(unit.unitType))
     .map((unit) => ({ codePrefix: unit.codePrefix ?? '', unit }));
 
-  // Unidad y padre derivados, movimiento y archivo de los centros del archivo.
   for (const center of centers.values()) {
     if (center.rowNumber === null) {
       continue;
@@ -938,7 +867,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-  // Centros marcados para borrar o archivar: hijos activos que no están en el archivo.
   for (const center of centers.values()) {
     if (center.rowNumber === null || (center.removal === null && center.isActive)) {
       continue;
@@ -964,7 +892,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-  // Avisos del centro propio.
   for (const issue of headIssues) {
     (issue.error ? unitError : unitWarning)(issue.row, UNIT_HEADERS.headCenter, issue.message);
   }
@@ -975,7 +902,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-  // Unidades marcadas para borrar o archivar.
   for (const unit of units.values()) {
     if (unit.rowNumber === null || (unit.removal === null && unit.isActive)) {
       continue;
@@ -1008,7 +934,6 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
   }
 
-  // ─── Diferencias ───────────────────────────────────────────────────────────────────────────────────────────────
   const unitOps: UnitOp[] = [];
   const centerOps: CenterOp[] = [];
   const changes: PlanChange[] = [];

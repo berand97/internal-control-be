@@ -1,6 +1,5 @@
 import { fieldsFor, IMPORT_TARGETS } from './import-fields.js';
 
-/** Un código de error o de marca (EMAIL_NOT_INSTITUTIONAL, NAME_NOT_SPLIT): nunca bajo un campo del formulario. */
 const ERROR_CODE = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/;
 
 const allFields = IMPORT_TARGETS.flatMap((target) =>

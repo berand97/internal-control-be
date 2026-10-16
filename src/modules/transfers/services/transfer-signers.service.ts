@@ -23,17 +23,6 @@ const PERMISSION: Record<TransferSignerKind, string> = {
   ACCOUNTING: TRANSFER_SIGN_ACCOUNTING,
 };
 
-/**
- * Quién puede firmar los turnos del OCI-17-89 que no nombra el traslado (decisión del desarrollador):
- * - CONTABILIDAD: usuario ACTIVE, persona activa, con transfer:sign_accounting:global vigente
- *   (v_user_effective_permissions: asignaciones sin revocar, dentro de su vigencia, con herencia de roles). Lo da el
- *   rol CONTABILIDAD (migración 1767225920000), que el SUPER_ADMIN otorga.
- * - CONTROL_INTERNO: usuario ACTIVE, persona activa, con act:sign_control:global vigente («Firmar actas por Control
- *   Interno», migración 1767225940000; mismo criterio que el sustituto de Control Interno del motor). Lo da de base
- *   INTERNAL_CONTROL_DIRECTOR; el SUPER_ADMIN puede otorgarlo a cualquier rol. Nunca se decide por nombre de rol.
- * Al generar: una sola persona elegible → se toma sola; varias → el cliente dice cuál (debe estar entre ellas);
- * ninguna → TRANSFER_NO_ACCOUNTING_SIGNER / TRANSFER_NO_CONTROL_SIGNER.
- */
 @Injectable()
 export class TransferSignersService {
   constructor(
@@ -41,12 +30,10 @@ export class TransferSignersService {
     private readonly holders: ControlSignersService,
   ) {}
 
-  /** La lista sale de ControlSignersService.holders: la misma que GET /documents/control-signers. */
   candidates(kind: TransferSignerKind, manager: EntityManager = this.dataSource.manager): Promise<TransferSignerCandidateDto[]> {
     return this.holders.holders(PERMISSION[kind], manager);
   }
 
-  /** La persona que firmará el turno, según la regla de arriba. */
   async resolve(kind: TransferSignerKind, requested: string | undefined, manager: EntityManager): Promise<string> {
     const candidates = await this.candidates(kind, manager);
     if (candidates.length === 0) {
@@ -75,7 +62,6 @@ export class TransferSignersService {
     return only.personId;
   }
 
-  /** Avisos para la pantalla (detalle y creación del traslado): sin firmante posible, el acta no se puede generar. */
   async availability(manager: EntityManager = this.dataSource.manager): Promise<{
     readonly controlSignerAvailable: boolean;
     readonly accountingSignerAvailable: boolean;

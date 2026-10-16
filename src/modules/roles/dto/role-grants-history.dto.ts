@@ -2,7 +2,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsDateString, IsIn, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
-/** Tipos de otorgamiento/retiro que muestra el historial (acción de bitácora → nombre de contrato). */
 export const ROLE_GRANT_EVENTS = [
   'ROLE_CREATED',
   'ROLE_UPDATED',

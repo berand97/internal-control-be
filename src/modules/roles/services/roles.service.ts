@@ -41,7 +41,6 @@ const ROLE_ENTITY_TYPE = 'ROLE';
 
 type PermissionRef = { readonly id: string; readonly code: string | null };
 
-/** Permisos agregados y quitados en un otorgamiento, por id y código (sin datos personales). */
 const permissionDiff = (
   added: ReadonlyArray<PermissionRef>,
   removed: ReadonlyArray<PermissionRef>,
@@ -169,8 +168,6 @@ export class RolesService {
     origin: RequestOrigin,
   ): Promise<RoleResponseDto> {
     const role = await this.requireRole(id);
-    // Enviar parentRoleId / superiorRoleId iguales a los actuales (lo hace el formulario al renombrar) no es
-    // reorganizar: no se revalida nada y el cambio de nombre o descripción pasa.
     const parentChanged =
       dto.parentRoleId !== undefined && dto.parentRoleId !== role.parentRoleId;
     const superiorChanged =
@@ -224,7 +221,6 @@ export class RolesService {
       }
     }
 
-    // Titulares alcanzados por el linaje actual: si se quita o cambia la herencia, también cambian sus permisos.
     const affectedBefore =
       await this.rolesRepository.findActiveHolderIdsInheriting(role.id);
     const changes = {
@@ -236,7 +232,6 @@ export class RolesService {
       ...(superiorChanged ? { superiorRoleId, hierarchyLevel } : {}),
     };
     try {
-      // Sin nada que cambiar (p. ej. solo padre y superior iguales a los actuales) no se escribe.
       if (Object.keys(changes).length > 0) {
         await this.rolesRepository.update(role.id, changes);
       }
@@ -279,8 +274,6 @@ export class RolesService {
     if (assignees > 0) {
       throw new ApiException(ErrorCode.RoleHasAssignedUsers);
     }
-    // Un rol del que otros heredan no se borra: sus hijos perderían sus permisos heredados sin que nadie lo
-    // decida. Primero se desenlazan (PATCH parentRoleId: null) o se borran los hijos.
     const children = await this.rolesRepository.countActiveChildren(role.id);
     if (children > 0) {
       throw new ApiException(ErrorCode.RoleHasChildRoles);
@@ -399,7 +392,6 @@ export class RolesService {
     const requested = await this.requirePermissions(dto.permissionIds);
     const current = await this.rolesRepository.findPermissionsForRole(role.id);
     const currentIds = new Set(current.map((permission) => permission.id));
-    // Solo lo que el rol no tenía es un otorgamiento: lo que ya tenía no cambia nada ni se audita como agregado.
     const permissions = requested.filter((permission) => !currentIds.has(permission.id));
     await this.privilege.assertCanGrantPermissions(actor, permissions);
     await this.privilege.assertDoesNotWidenOwn(actor, role.id, permissions);
@@ -560,7 +552,6 @@ export class RolesService {
     return permissions;
   }
 
-  /** Titulares del rol y de los roles que heredan de él: todos ven cambiar sus permisos efectivos. */
   private async invalidateAssignees(roleId: string): Promise<void> {
     const userIds =
       await this.rolesRepository.findActiveHolderIdsInheriting(roleId);

@@ -40,7 +40,6 @@ import type {
 } from '../dto/transfer.responses.js';
 import { TransferSignersService } from './transfer-signers.service.js';
 
-/** Reintentos automáticos del outbox (DocumentEngineService.processPending: attempts < 5). */
 const AUTOMATIC_GENERATION_ATTEMPTS = 5;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -100,15 +99,6 @@ const money = (value: string | null): string =>
     ? ''
     : new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 2 }).format(Number(value));
 
-/**
- * Traslado de activos entre centros de costo con su acta OCI-17-89 (estados en domain/transfer.ts).
- *
- * Guardas (al crear, al editar, al generar y otra vez al aplicar el acta firmada): activos existentes, del mismo centro
- * de origen, no dados de baja ni ON_LOAN, sin toma física abierta (PLANNED/IN_PROGRESS), sin préstamo abierto que los
- * retenga (misma definición que LoansService.create) y fuera de otro traslado abierto. Son las guardas que tenía
- * AssetsService.reassignCostCenter, que ya no está en el API: el centro de costo de un activo solo cambia por un
- * traslado con acta firmada.
- */
 @Injectable()
 export class TransfersService {
   constructor(
@@ -121,12 +111,6 @@ export class TransfersService {
     private readonly auditLogs: AuditLogsRepository,
   ) {}
 
-  // ---------- Lectura ----------
-
-  /**
-   * transfer:read:global (rol Contabilidad) o asset:read:global ven todos; asset:read:org_unit ve los traslados cuyo
-   * centro de ORIGEN o DESTINO está en su alcance (asignaciones COST_CENTER ∪ jefaturas), como los préstamos.
-   */
   async readScope(actor: AuthenticatedUser): Promise<ReadableCostCenterScope> {
     if (await this.permissions.userHasPermission(actor.id, TRANSFER_READ_GLOBAL)) {
       return { kind: 'GLOBAL' };
@@ -175,7 +159,6 @@ export class TransfersService {
     return { items: rows, page: query.page, pageSize: query.pageSize, total, hasNext: query.page * query.pageSize < total };
   }
 
-  /** Detalle con alcance de lectura: fuera de alcance responde 404, igual que inexistente. */
   async getById(id: string, actor: AuthenticatedUser): Promise<TransferDetailDto> {
     const scope = costCenterFilter(await this.readScope(actor));
     const [row] = (await this.dataSource.query(
@@ -188,7 +171,6 @@ export class TransfersService {
     return this.detail(id);
   }
 
-  /** Detalle sin comprobar alcance: respuesta de las acciones, que ya exigieron su propio permiso. */
   async detail(id: string, manager: EntityManager = this.dataSource.manager): Promise<TransferDetailDto> {
     const [row] = (await manager.query(
       `SELECT t.id, t.status, t.document_request_id, t.document_id,
@@ -280,17 +262,11 @@ export class TransfersService {
     };
   }
 
-  // ---------- Crear y editar (DRAFT) ----------
-
   async create(dto: CreateTransferDto, actor: AuthenticatedUser): Promise<TransferDetailDto> {
     const id = await this.dataSource.transaction((manager) => this.createWithin(manager, dto, actor.id));
     return this.detail(id);
   }
 
-  /**
-   * Crea el traslado DRAFT dentro de la transacción del llamador. assetRequestId: la solicitud de activos que lo
-   * origina (BE-2); quien la aprobó ya tiene el permiso de generación del formato.
-   */
   async createWithin(
     manager: EntityManager,
     input: CreateTransferInput,
@@ -326,7 +302,6 @@ export class TransfersService {
     return id;
   }
 
-  /** Reemplaza los activos de un traslado DRAFT (mismo origen que el traslado). */
   async updateItems(id: string, items: ReadonlyArray<TransferItemInputDto>, actor: AuthenticatedUser): Promise<TransferDetailDto> {
     await this.dataSource.transaction(async (manager) => {
       const transfer = await this.lock(manager, id);
@@ -370,7 +345,6 @@ export class TransfersService {
         ],
       );
     } catch (error) {
-      // Dos traslados concurrentes con el mismo activo: el segundo choca con el índice de traslados abiertos.
       if (error instanceof QueryFailedError && (error.driverError as { constraint?: string })?.constraint === 'uq_asset_transfer_item_open') {
         throw new ApiException(ErrorCode.TransferAssetInOpenTransfer);
       }
@@ -378,19 +352,11 @@ export class TransfersService {
     }
   }
 
-  // ---------- Generar el acta ----------
-
-  /**
-   * Encola el acta OCI-17-89 en la misma transacción que pasa el traslado a PENDING_SIGNATURES. Firmantes: ENTREGA =
-   * quien entrega, RECIBE = quien recibe, CONTROL_INTERNO y CONTABILIDAD según TransferSignersService; la separación de
-   * funciones (nadie en dos firmas, salvo sustituto de Control Interno) la exige el motor.
-   */
   async generate(id: string, dto: GenerateTransferActDto, actor: AuthenticatedUser): Promise<TransferDetailDto> {
     await this.dataSource.transaction((manager) => this.generateWithin(manager, id, dto, actor.id));
     return this.detail(id);
   }
 
-  /** Genera el acta dentro de la transacción del llamador (generate o la solicitud de activos). */
   async generateWithin(manager: EntityManager, id: string, dto: GenerateTransferActDto, actorId: string): Promise<void> {
     const actor = { id: actorId };
     {
@@ -408,7 +374,6 @@ export class TransfersService {
       if (items.length === 0) {
         throw new ApiException(ErrorCode.ValidationFailed, 'El traslado no tiene activos');
       }
-      // Lo que se validó al crear sigue valiendo al generar (el activo pudo entrar a un préstamo o a una toma).
       await this.assertItems(manager, items, transfer.source_cost_center_id, id);
       const control = await this.signers.resolve('CONTROL', dto.controlSignerPersonId, manager);
       const accounting = await this.signers.resolve('ACCOUNTING', dto.accountingSignerPersonId, manager);
@@ -471,7 +436,6 @@ export class TransfersService {
       formatKey: TRANSFER_FORMAT_KEY,
       entityType: TRANSFER_ENTITY_TYPE,
       entityId: transfer.id,
-      // centroCosto.* del acta = centro que ENTREGA (con su unidad a la fecha del acta); el destino va en campos.
       costCenterId: transfer.source_cost_center_id,
       responsiblePersonId: transfer.owner_person_id,
       signers: { ENTREGA: transfer.requester_person_id, CONTROL_INTERNO: control, CONTABILIDAD: accounting },
@@ -514,14 +478,6 @@ export class TransfersService {
     };
   }
 
-  // ---------- Cancelar ----------
-
-  /**
-   * DRAFT, o PENDING_SIGNATURES sin ninguna firma: en una transacción la solicitud del acta queda CANCELLED o el acta
-   * VOIDED (voidForEntity), el traslado CANCELLED con motivo y sus activos liberados. Con alguna firma ya puesta no se
-   * cancela (quien firmó ya se comprometió): 406 TRANSFER_INVALID_STATE_TRANSITION. Orden de bloqueos: el acta
-   * (voidForEntity) antes que el traslado, el mismo del job del outbox (fila de la solicitud → onGenerated).
-   */
   async cancel(id: string, reason: string, actor: AuthenticatedUser): Promise<TransferDetailDto> {
     const motive = reason.trim();
     if (motive.length < 5) {
@@ -573,8 +529,6 @@ export class TransfersService {
     return this.detail(id);
   }
 
-  // ---------- Validaciones ----------
-
   async lock(manager: EntityManager, id: string): Promise<TransferRow> {
     const [row] = UUID.test(id)
       ? ((await manager.query(
@@ -616,12 +570,6 @@ export class TransfersService {
     }
   }
 
-  /**
-   * Bloquea los activos (FOR UPDATE, en orden de id) y aplica las guardas. expectedSource: el origen del traslado (al
-   * editar o generar); null al crear, que lo toma de los activos. ownTransfer: el traslado que ya los contiene.
-   * checkReasons false: al aplicar el acta firmada un motivo desactivado después no la frena.
-   * Devuelve el centro de origen.
-   */
   async assertItems(
     manager: EntityManager,
     items: ReadonlyArray<TransferItemInputDto>,

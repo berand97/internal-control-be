@@ -1,7 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-/** Respuestas de la importación del organigrama por Excel (OrgChartService). Cambiar un shape exige cambiar ambos. */
-
 export const ORG_CHART_UNIT_CHANGE_KINDS = [
   'CREATED',
   'RENAMED',

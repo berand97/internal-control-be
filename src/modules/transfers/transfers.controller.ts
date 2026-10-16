@@ -34,7 +34,6 @@ const READ_RULE =
 const GUARDS =
   'Guardas por activo (details trae uno por activo): RESOURCE_NOT_FOUND, TRANSFER_MIXED_SOURCE_COST_CENTER (otro centro de origen), ASSET_ALREADY_WRITTEN_OFF, ASSET_CANNOT_BE_MODIFIED (ON_LOAN), ASSET_UNDER_INVENTORY (toma física abierta), ASSET_HAS_ACTIVE_LOAN (préstamo abierto), TRANSFER_ASSET_IN_OPEN_TRANSFER, TRANSFER_REASON_UNAVAILABLE, VALIDATION_FAILED (activo repetido).';
 
-/** Traslados de activos entre centros de costo con acta OCI-17-89 (generar = asset:update:global, su generatePermission). */
 @ApiTags(OpenApiTag.Assets)
 @ApiBearerAuth()
 @ApiExtraModels(ApiSuccessEnvelope, TransferDetailDto, TransferListResponseDto, TransferReasonDto, TransferReasonDeletedDto, TransferSignerCandidateDto)
@@ -46,8 +45,6 @@ export class TransfersController {
     private readonly reasons: TransferReasonsService,
     private readonly signers: TransferSignersService,
   ) {}
-
-  // ---------- Catálogo y firmantes (antes de :id) ----------
 
   @Get('reasons')
   @RequirePermission(TRANSFER_MANAGE)
@@ -108,8 +105,6 @@ export class TransfersController {
   controlSigners() {
     return this.signers.candidates('CONTROL');
   }
-
-  // ---------- Traslados ----------
 
   @Get()
   @ApiOperation({ summary: 'Traslados, más recientes primero', description: READ_RULE })

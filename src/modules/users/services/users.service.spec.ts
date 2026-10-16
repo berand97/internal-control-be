@@ -563,7 +563,6 @@ describe('UsersService', () => {
       'hashed',
       expect.any(Date),
     );
-    // BE-14: el reenvío renueva el plazo de 72 h.
     const expiresAt = vi.mocked(usersRepository.updateInvitationCredentials).mock
       .calls[0]?.[2] as Date;
     expect(expiresAt.getTime() - Date.now()).toBeGreaterThan(71 * 3_600_000);

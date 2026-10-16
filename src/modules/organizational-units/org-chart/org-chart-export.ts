@@ -2,10 +2,6 @@ import { ORG_RELATION_TYPE_LABELS, ORG_UNIT_TYPE_LABELS } from '../enums/org-uni
 import type { ExportUnitRow } from './org-chart-workbook.js';
 import type { SnapshotCenter, SnapshotUnit } from './org-chart.types.js';
 
-/**
- * Filas de la exportación: unidades en orden de árbol (prefijo, luego nombre) con su profundidad. Los centros solo se
- * usan para escribir el código del Centro propio.
- */
 export const orgChartExportRows = (
   units: ReadonlyArray<SnapshotUnit>,
   centers: ReadonlyArray<SnapshotCenter>,
@@ -42,7 +38,6 @@ export const orgChartExportRows = (
         typeLabel: ORG_UNIT_TYPE_LABELS[unit.unitType] ?? unit.unitType,
         parent: parent ? (parent.codePrefix ?? parent.code) : null,
         relationLabel: ORG_RELATION_TYPE_LABELS[unit.relationType] ?? unit.relationType,
-        // Amarrado: el código vigente del centro; pendiente: el código escrito.
         headCenter:
           (unit.headCostCenterId ? centerById.get(unit.headCostCenterId)?.externalCode : undefined) ??
           unit.headCostCenterCode ??

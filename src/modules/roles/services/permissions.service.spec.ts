@@ -119,7 +119,6 @@ describe('PermissionsService', () => {
       { permissionCode: 'asset:update:org_unit', userScopeType: 'COST_CENTER', userScopeId: 'cc-1' },
     ]);
     await expect(service.userHasPermission('user-1', 'loan:request:own')).resolves.toBe(true);
-    // No abre otros códigos: un permiso acotado sigue exigiendo el alcance de la petición.
     await expect(service.userHasPermission('user-1', 'asset:update:org_unit')).resolves.toBe(false);
     await expect(service.userHasPermission('user-1', 'loan:approve:org_unit')).resolves.toBe(false);
   });

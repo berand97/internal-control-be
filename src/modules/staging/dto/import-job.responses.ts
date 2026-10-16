@@ -6,11 +6,6 @@ import { IMPORT_TARGETS } from '../import/import-fields.js';
 import { IMPORT_JOB_PHASES, IMPORT_JOB_STATUSES } from '../services/import-jobs.service.js';
 import { ImportResultDto } from './import.responses.js';
 
-/**
- * Esquemas de respuesta de los trabajos de importación (POST confirm, /imports/jobs). Solo documentan lo que
- * ImportJobsService ya devuelve (ImportJobView): cambiar un shape exige cambiar ambos.
- */
-
 export class ImportJobProgressDto {
   @ApiProperty({
     type: 'integer',
@@ -136,7 +131,6 @@ export class ImportJobDto {
   readonly finishedAt!: string | null;
 }
 
-/** `data` del envelope como arreglo de `dto` (envelopedSchema solo describe un objeto). */
 export const envelopedJobListSchema = (): SchemaObject => ({
   allOf: [
     { $ref: getSchemaPath(ApiSuccessEnvelope) },

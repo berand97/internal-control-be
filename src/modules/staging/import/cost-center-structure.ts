@@ -6,29 +6,12 @@ import {
   prefixRange,
 } from '../../cost-centers/domain/code-prefix.js';
 
-/**
- * Plan de la importación de centros de costo en modo «actualizar estructura» (structureMode = UPDATE_STRUCTURE).
- * Función pura: la vista previa y la confirmación calculan exactamente lo mismo con los mismos datos.
- *
- * Reglas (ver también TARGET_RULES.COST_CENTERS):
- * - Padre derivado del código (el archivo no trae columna de padre): primer código existente, en el archivo o en la
- *   base, entre XYZ0 (si no es el propio código y es agrupador), XY00, X000 y X. No se usan los nombres.
- * - Un código de un dígito es agrupador y raíz, y crea (o asocia) la unidad VICERECTORATE con code_prefix = ese dígito
- *   y el nombre de la fila. Los demás toman la unidad por prefijo (el más largo) o la de la columna unitCode.
- * - Un prefijo sin fila de un dígito ni unidad con ese prefijo (el 3 de la hoja 2025): no se inventa unidad; esos
- *   centros quedan sin unidad y el plan lo avisa.
- * - Existentes: cambian padre, unidad y movimiento; nunca el código ni el nombre (un nombre distinto se cuenta y se
- *   lista). Un padre o una unidad que no se pueden derivar no borran los que el centro ya tiene (salvo la raíz, que
- *   queda sin padre). Uno con activos no pasa a agrupador (se lista). Los que no vienen en el archivo no se tocan.
- */
-
 export const STRUCTURE_MODES = ['INSERT_ONLY', 'UPDATE_STRUCTURE'] as const;
 export type StructureMode = (typeof STRUCTURE_MODES)[number];
 
 export const isStructureMode = (value: string): value is StructureMode =>
   (STRUCTURE_MODES as ReadonlyArray<string>).includes(value);
 
-/** Código de la unidad que se crea para un prefijo de un dígito (SCREAMING_SNAKE_CASE como exige el CRUD). */
 export const unitCodeForPrefix = (prefix: string): string => `CC_${prefix}`;
 
 export interface FileCenter {
@@ -36,7 +19,6 @@ export interface FileCenter {
   readonly code: string;
   readonly name: string;
   readonly hasMovement: boolean;
-  /** Código de unidad de la columna unitCode (ya validado contra la base). */
   readonly unitCode: string | null;
 }
 
@@ -59,14 +41,12 @@ export interface DbUnit {
   readonly isActive: boolean;
 }
 
-/** Unidad del plan: una existente (id) o la que se crea para un prefijo. */
 export type UnitRef = { readonly id: string } | { readonly prefix: string };
 
 export interface PlannedUnit {
   readonly prefix: string;
   readonly rowNumber: number;
   readonly name: string;
-  /** CREATE: unidad nueva; ASSOCIATE: unidad existente (por código CC_<n>) que recibe el prefijo; EXISTING: ya lo tenía. */
   readonly action: 'CREATE' | 'ASSOCIATE' | 'EXISTING';
   readonly unitId: string | null;
   readonly code: string;
@@ -128,11 +108,9 @@ export const planCostCenterStructure = (
   const issues: PlanIssue[] = [];
   const dbByCode = new Map(db.map((center) => [center.code, center]));
   const dbById = new Map(db.map((center) => [center.id, center]));
-  // Un dígito = agrupador, sin importar lo que diga la fila.
   const rows = file.map((row) => (isRootCode(row.code) ? { ...row, hasMovement: false } : row));
   const fileByCode = new Map(rows.map((row) => [row.code, row]));
 
-  // Unidades de los códigos de un dígito.
   const activeUnits = units.filter((unit) => unit.isActive);
   const plannedUnits: PlannedUnit[] = [];
   for (const row of rows.filter((item) => isRootCode(item.code))) {
@@ -224,7 +202,6 @@ export const planCostCenterStructure = (
         detail: `El centro padre que le corresponde por su código, ${derivedParent}, recibe movimientos (Movimiento 1): no es agrupador`,
       });
     }
-    // Unidad: columna unitCode, o prefijo más largo; null = no se sabe (no borra la que tenga).
     const explicit = row.unitCode ? unitByCode.get(row.unitCode) : undefined;
     const byPrefix = isRootCode(row.code) || isDetailCode(row.code) ? longestPrefix(row.code, prefixed) : undefined;
     const unit: UnitRef | null = explicit ? { id: explicit.id } : (byPrefix?.ref ?? null);
@@ -253,7 +230,6 @@ export const planCostCenterStructure = (
         detail: `En el sistema: «${existing.name}»; en el archivo: «${row.name}». El nombre no se cambia`,
       });
     }
-    // Sin padre derivable, un existente conserva el suyo (la raíz sí queda sin padre).
     const keepParent = existing !== null && derivedParent === null && !isRootCode(row.code);
     const parentCode = keepParent ? (existing.parentId ? (dbById.get(existing.parentId)?.code ?? null) : null) : derivedParent;
     const currentParentCode = existing?.parentId ? (dbById.get(existing.parentId)?.code ?? null) : null;
@@ -272,12 +248,10 @@ export const planCostCenterStructure = (
     });
   }
 
-  // Agrupadores que no quedan con hijos (9205 en la hoja 2025: sus hijos por nombre van a 9200 por código).
   const inFile = new Set(rows.map((row) => row.code));
   const parents = new Set(
     [
       ...centers.map((center) => center.parentCode),
-      // Los centros que no vienen en el archivo conservan su padre.
       ...db
         .filter((center) => !inFile.has(center.code) && center.parentId)
         .map((center) => dbById.get(center.parentId ?? '')?.code ?? null),

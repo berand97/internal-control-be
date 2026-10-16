@@ -65,17 +65,11 @@ import { StagingLoaderService } from './staging-loader.service.js';
 export const PLACEHOLDER_CATEGORY = 'SIN_CLASIFICAR';
 export const PLACEHOLDER_ACQUISITION_TYPE = 'NO_REGISTRADO';
 const CHUNK_SIZE = 2000;
-/**
- * Correo institucional completo (BE-06): dot-atom sin espacios ni caracteres de control y dominio exacto. El
- * anterior '@unac\.edu\.co$' solo miraba el final, así que "x@otro.com<LF>RCPT TO:<y@unac.edu.co" pasaba.
- */
 const INSTITUTIONAL_MAILBOX_SQL = String.raw`'^[A-Za-z0-9_%+-]+(\.[A-Za-z0-9_%+-]+)*@unac\.edu\.co$'`;
-/** Activos por transacción al registrar movimientos: acota bloqueos y da avance visible (movementsDone). */
 const MOVEMENT_CHUNK = 1000;
 
 export interface SampleRow {
   readonly rowNumber: number;
-  /** Letra → valor de la celda como texto (recortado a SAMPLE_CELL_MAX caracteres, con «…» si se recortó). */
   readonly cells: Record<string, string>;
 }
 
@@ -84,7 +78,6 @@ export interface UploadedSheet {
   readonly rows: number;
   readonly detectedHeaderRow: number;
   readonly columns: Record<string, string>;
-  /** Primeras filas con datos bajo el encabezado detectado (sin la fila de ejemplo de la plantilla). */
   readonly sampleRows: ReadonlyArray<SampleRow>;
 }
 
@@ -93,10 +86,6 @@ const sampleCell = (value: RawCellValue): string => {
   return text.length > SAMPLE_CELL_MAX ? `${text.slice(0, SAMPLE_CELL_MAX - 1)}…` : text;
 };
 
-/**
- * Campos que el importador recorta al guardar (left() en el INSERT) y la columna de import_src que los lleva. La
- * vista previa cuenta con esta misma lista lo que el INSERT va a recortar.
- */
 const ASSET_SRC_COLUMN: Partial<Record<AssetImportField, string>> = {
   legacyCode: 'barcode',
   serial: 'serial',
@@ -116,7 +105,6 @@ const assetTruncations: ReadonlyArray<Truncation> = Object.entries(ASSET_SRC_COL
   return limit?.over === 'TRUNCATE' && column ? [{ field, column, length: limit.length }] : [];
 });
 
-/** Largo al que el INSERT recorta un campo de activos (el mismo que cuenta la vista previa). */
 const assetMax = (field: AssetImportField): number => {
   const truncation = assetTruncations.find((item) => item.field === field);
   if (!truncation) {
@@ -130,19 +118,15 @@ const PERSON_NAME_MAX = PERSON_IMPORT_FIELDS.firstName.maxLength.length;
 const PERSON_LAST_NAME_MAX = PERSON_IMPORT_FIELDS.lastName.maxLength.length;
 const PERSON_POSITION_MAX = PERSON_IMPORT_FIELDS.positionTitle.maxLength.length;
 const PERSON_DOCUMENT_MAX = PERSON_IMPORT_FIELDS.documentNumber.maxLength.length;
-/** Permiso para que una importación de centros cambie la estructura de los existentes (UPDATE_STRUCTURE). */
 const STRUCTURE_PERMISSION = 'cost_center:manage:global';
-/** Encabezado de la columna de jefes de la hoja de Contabilidad: no se importa (los jefes tienen su propio flujo). */
 const RESPONSIBLE_HEADER = 'RESPONSABLE';
 const ORG_UNIT_NAME_MAX = 200;
 
-/** Lo que el importador va a transformar sin avisar de otro modo, por campo (summary.transformations). */
 export interface ImportTransformation {
   readonly code: ImportTransformationCode;
   readonly field: string;
   readonly label: string;
   readonly rows: number;
-  /** VALUE_TRUNCATED: caracteres que se guardan. USEFUL_LIFE_DISCARDED: null. */
   readonly limit: number | null;
 }
 
@@ -155,15 +139,12 @@ interface TransformedRow {
   readonly raw: string | null;
 }
 
-/** Columna de la plantilla que el archivo no trae (plantilla de otra versión o columna borrada). */
 export interface MissingTemplateColumn {
   readonly field: string;
   readonly header: string;
-  /** En la plantilla es obligatoria: sin ella cada fila va a cuarentena. */
   readonly required: boolean;
 }
 
-/** Plantilla reconocida al subir el archivo: destino, versión y mapeo automático por encabezados. */
 export interface UploadedTemplate {
   readonly target: string;
   readonly version: string;
@@ -177,7 +158,6 @@ export interface UploadedTemplate {
   readonly missingColumns: ReadonlyArray<MissingTemplateColumn>;
 }
 
-/** Uso de plantilla de una vista previa (null si el archivo no viene de una plantilla). */
 export interface TemplateUsage {
   readonly target: string;
   readonly version: string;
@@ -201,14 +181,9 @@ type StagedHead = Array<{ row_number: number; cells: Record<string, RawCellValue
 const headerColumns = (cells: Record<string, RawCellValue> | undefined): Record<string, string> =>
   Object.fromEntries(Object.entries(cells ?? {}).map(([letter, value]) => [letter, String(value)]));
 
-/** La plantilla detectada aplica a esta hoja y destino. */
 const templateApplies = (detection: TemplateDetection | null, sheet: string, target: ImportTarget): boolean =>
   detection !== null && detection.dataSheet === sheet && detection.target === target;
 
-/**
- * Campos de la plantilla vigente cuyo encabezado no está en el archivo y que no se mapearon: con una plantilla de
- * otra versión (o una columna borrada) se tratan como vacíos; las reglas de cada fila siguen aplicando.
- */
 const missingTemplateColumns = (
   target: ImportTarget,
   columns: Record<string, string>,
@@ -232,13 +207,10 @@ export interface PreviewRequest {
   readonly target: ImportTarget;
   readonly mapping: Record<string, string>;
   readonly unknownCostCenters?: UnknownCostCenterPolicy;
-  /** Solo PERSONS: tipo de documento que el operador declara para todo el lote (el archivo no trae columna). */
   readonly documentType?: IdentityDocumentType;
-  /** Solo COST_CENTERS: INSERT_ONLY (por defecto) o UPDATE_STRUCTURE (requiere cost_center:manage:global). */
   readonly structureMode?: StructureMode;
 }
 
-/** De dónde sale el tipo de documento de las personas de un lote. */
 export type DocumentTypeSource = 'COLUMN' | 'DECLARED_BY_OPERATOR' | 'UNKNOWN';
 
 interface ImportOptions {
@@ -249,13 +221,11 @@ interface ImportOptions {
   readonly declaredBy?: string | null;
 }
 
-/** Lo que la importación de centros hace (vista previa) o hizo (resultado) con la estructura. */
 export interface CostCenterStructureSummary extends StructurePlanCounts {
   readonly mode: StructureMode;
 }
 
 export interface ImportSummary {
-  /** Columnas con encabezado que no quedaron asignadas a ningún campo: se ignoran, no se guardan. */
   readonly unmappedColumns: ReadonlyArray<UnmappedColumn>;
   readonly template: TemplateUsage | null;
   readonly rowsRead: number;
@@ -263,11 +233,9 @@ export interface ImportSummary {
   readonly alreadyPresent: number;
   readonly quarantined: Record<string, number>;
   readonly flagged: Record<string, number>;
-  /** Datos que se importan cambiados (texto recortado, vida útil descartada): cuántas filas, en qué campo. */
   readonly transformations: ReadonlyArray<ImportTransformation>;
   readonly issues: number;
   readonly metrics: ReadonlyArray<Metric>;
-  /** Solo COST_CENTERS en modo UPDATE_STRUCTURE; null en los demás. */
   readonly costCenterStructure: CostCenterStructureSummary | null;
 }
 
@@ -278,28 +246,22 @@ export interface ImportResult {
   readonly costCentersCreated: number;
   readonly registrationMovements: number;
   readonly seconds: { readonly rows: number; readonly movements: number };
-  /** Solo COST_CENTERS en modo UPDATE_STRUCTURE; null en los demás. */
   readonly costCenterStructure: CostCenterStructureSummary | null;
 }
 
-/** Lo que dejó la fase de filas (writeRows). Se guarda en el trabajo para que un reintento no lo recalcule. */
 export interface ImportRowsResult {
   readonly target: ImportTarget;
   readonly inserted: number;
   readonly skippedAlreadyPresent: number;
   readonly quarantined: Record<string, number>;
   readonly costCentersCreated: number;
-  /** ASSETS: activos de esta importación aún sin movimiento REGISTRATION. */
   readonly pendingMovements: number;
   readonly seconds: number;
-  /** Solo COST_CENTERS en modo UPDATE_STRUCTURE (ausente en trabajos anteriores). */
   readonly costCenterStructure?: CostCenterStructureSummary | null;
 }
 
 export interface MovementChunkHooks {
-  /** Primera sentencia de la transacción de cada lote. */
   readonly begin: (manager: EntityManager) => Promise<void>;
-  /** Última sentencia de la transacción de cada lote, con los movimientos escritos en él. */
   readonly done: (manager: EntityManager, written: number) => Promise<void>;
 }
 
@@ -313,9 +275,7 @@ interface ImportRow {
   readonly options: ImportOptions;
   readonly status: 'PREVIEWED' | 'CONFIRMED';
   readonly file_name: string;
-  /** Versión de la plantilla detectada en el archivo; null si no viene de una plantilla. */
   readonly template_version: string | null;
-  /** Filas idénticas a la fila de ejemplo de la plantilla: no se clasifican ni se importan. */
   readonly template_example_rows: number[];
 }
 
@@ -373,10 +333,6 @@ const colType = (mapping: Record<string, string>, field: string): string => {
   return letter ? `r.cell_types ->> '${letter}'` : 'NULL::text';
 };
 
-/**
- * Excluye las filas de ejemplo de la plantilla (enteros leídos de staging_import.template_example_rows, así que se
- * pueden escribir en el SQL). Alias de staging_row: r.
- */
 const notExampleRow = (job: { readonly template_example_rows?: ReadonlyArray<number> | null }): string => {
   const rows = (job.template_example_rows ?? []).filter((row) => Number.isInteger(row));
   return rows.length > 0 ? `AND NOT (r.row_number = ANY('{${rows.join(',')}}'::int[]))` : '';
@@ -385,14 +341,8 @@ const notExampleRow = (job: { readonly template_example_rows?: ReadonlyArray<num
 const countBy = (rows: ReadonlyArray<{ key: string; count: number }>): Record<string, number> =>
   Object.fromEntries(rows.map((row) => [row.key, Number(row.count)]));
 
-/**
- * Reglas del mapeo que dependen del destino. PERSONS: el nombre va en una columna (fullName) o en dos
- * (firstName + lastName); el tipo de documento sale de una columna o lo declara el operador, no de ambas; un
- * centro de costo inexistente siempre va a cuarentena (no se crea).
- */
 const targetRuleErrors = (
   request: PreviewRequest,
-  /** Campos de una plantilla detectada que el archivo no trae: se tratan como vacíos, no invalidan el mapeo. */
   absent: ReadonlySet<string> = new Set(),
 ): Array<{ field: string; message: string }> => {
   const errors: Array<{ field: string; message: string }> = [];
@@ -431,12 +381,10 @@ const targetRuleErrors = (
   return errors;
 };
 
-/** Nombre de la persona: una columna (fullName) o dos (firstName + lastName); targetRuleErrors lo valida junto. */
 const PERSON_NAME_FIELDS: ReadonlySet<string> = new Set(['fullName', 'firstName', 'lastName']);
 
 const sqlText = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
-/** (código, forma plegada) de cada tipo del catálogo: el código y la abreviatura sin puntos. */
 const DOCUMENT_TYPE_ALIASES = IDENTITY_DOCUMENT_TYPE_CODES.flatMap((code) => [
   `(${sqlText(code)}, ${sqlText(code)})`,
   `(${sqlText(code)}, ${sqlText(IDENTITY_DOCUMENT_TYPES[code].abbreviation.replaceAll('.', '').toUpperCase())})`,
@@ -462,7 +410,6 @@ export class ExcelImportService {
     private readonly reconciler: StructureReconcilerService,
   ) {}
 
-  /** UPDATE_STRUCTURE cambia centros existentes: exige el permiso de administración de centros de costo. */
   private async assertStructurePermission(actorId: string | null): Promise<void> {
     if (!actorId || !(await this.permissions.userHasPermission(actorId, STRUCTURE_PERMISSION))) {
       throw new ApiException(
@@ -472,7 +419,6 @@ export class ExcelImportService {
     }
   }
 
-  /** Quien confirma una importación que actualiza la estructura también necesita el permiso. */
   async assertCanConfirm(importId: string, actorId: string): Promise<void> {
     const job = await this.importRow(importId);
     if (job.options.structureMode === 'UPDATE_STRUCTURE') {
@@ -494,7 +440,6 @@ export class ExcelImportService {
     const detection = await detectTemplate(this.dataSource, loaded.batchId);
     const sheets: UploadedSheet[] = [];
     for (const sheet of loaded.sheets) {
-      // Las hojas propias de la plantilla (instrucciones, catálogos, metadatos) no son datos a importar.
       if (detection && TEMPLATE_INTERNAL_SHEETS.has(sheet.name)) {
         continue;
       }
@@ -542,11 +487,6 @@ export class ExcelImportService {
     return { batchId: loaded.batchId, created: loaded.created, sheets, template };
   }
 
-  /**
-   * Muestra de la hoja para ver el mapeo aplicado a datos reales: las primeras SAMPLE_ROWS filas con algún valor
-   * bajo el encabezado, sin la fila de ejemplo de la plantilla, leídas de staging (no se relee el archivo). Solo las
-   * columnas con encabezado y cada celda recortada. Ver SAMPLE_ROWS: no se guarda ni se registra en ningún lado.
-   */
   private async sampleRows(
     batchId: string,
     sheet: string,
@@ -585,8 +525,6 @@ export class ExcelImportService {
     const detection = await detectTemplate(this.dataSource, batchId);
     let request = original;
     let validated = await this.validate(batchId, request, detection);
-    // Centros de costo: la columna RESPONSABLE no se importa. Si el operador la asignó a un campo, se quita del mapeo
-    // (y se vuelve a validar: si era el código o el nombre, el mapeo queda incompleto) y se avisa.
     const responsibleLetters =
       request.target === 'COST_CENTERS'
         ? Object.entries(validated.columns)
@@ -673,7 +611,6 @@ export class ExcelImportService {
       throw new Error('La clasificación no produjo resultado');
     }
     const result: Classified = classified;
-    // Asignado dentro de la transacción: TypeScript no sigue la asignación en el callback.
     const structure = plan as StructurePlan | null;
 
     const diagnosis =
@@ -837,11 +774,6 @@ export class ExcelImportService {
     ) as Promise<ReadonlyArray<Record<string, unknown>>>;
   }
 
-  /**
-   * Fase de filas de una importación confirmada (la corre el worker de ImportJobsService, nunca la petición HTTP).
-   * Va dentro de la transacción de quien llama, que también registra el avance del trabajo: si algo falla no queda
-   * nada a medias. Idempotente: lo que ya existe se omite.
-   */
   async writeRows(manager: EntityManager, importId: string, actorId: string): Promise<ImportRowsResult> {
     const job = await this.importRow(importId);
     const rowsStart = process.hrtime.bigint();
@@ -856,7 +788,6 @@ export class ExcelImportService {
     );
     const centers = job.target === 'COST_CENTERS' ? await this.writeCostCenters(manager, job, actorId) : null;
     if (job.target === 'COST_CENTERS' || costCentersCreated > 0) {
-      // Centros nuevos o reubicados: la estructura se concilia por código en la misma transacción.
       await this.reconciler.reconcileWithin(manager, ALL_SCOPE, {
         actorId,
         reason: `Importación de centros de costo (importación ${job.id})`,
@@ -890,7 +821,6 @@ export class ExcelImportService {
     };
   }
 
-  /** Cierre de la importación: CONFIRMED con su resultado y auditoría, en la transacción de quien llama. */
   async markConfirmed(manager: EntityManager, importId: string, actorId: string, result: ImportResult): Promise<void> {
     const job = await this.importRow(importId);
     await manager.query(
@@ -975,11 +905,6 @@ export class ExcelImportService {
     return rows;
   }
 
-  /**
-   * Valida el mapeo y devuelve la fila de encabezados y sus columnas. Con una plantilla detectada (misma hoja y
-   * destino), un campo obligatorio cuya columna el archivo no trae (plantilla de otra versión) no invalida el mapeo:
-   * se trata como vacío y cada fila sigue su regla (va a cuarentena). En un Excel cualquiera, igual que siempre.
-   */
   private async validate(
     batchId: string,
     request: PreviewRequest,
@@ -1023,9 +948,6 @@ export class ExcelImportService {
     const missing = Object.entries(fields)
       .filter(([field, definition]) => definition.required && !request.mapping[field] && !absent.has(field))
       .map(([field]) => field);
-    // Un campo cuya celda vacía manda la fila a cuarentena, sin columna asignada, deja fuera el 100 % de las filas:
-    // eso no es un aviso sino un error del mapeo. El nombre de las personas se valida como grupo en targetRuleErrors;
-    // una columna que falta en una plantilla detectada sigue la regla de las obligatorias (se trata como vacía).
     const rejectsEveryRow = Object.entries(fields)
       .filter(
         ([field, definition]) =>
@@ -1221,15 +1143,8 @@ export class ExcelImportService {
     );
   }
 
-  /**
-   * Lo que el INSERT va a cambiar de filas que sí se importan, fila por fila: texto recortado (mismos largos que
-   * los left() de insertAssets / insertCostCenters) y vida útil descartada (misma expresión que insertAssets). Corre
-   * sobre import_src ya clasificada, con el mismo filtro de filas que el INSERT. Sin valores de las celdas salvo la
-   * vida útil descartada (un número, útil para corregirlo).
-   */
   private async transformations(manager: EntityManager, job: ImportRow): Promise<TransformedRow[]> {
     if (job.target === 'PERSONS') {
-      // En personas un texto largo no se recorta: la fila va a cuarentena (FIELD_TOO_LONG / DOCUMENT_NUMBER_INVALID).
       return [];
     }
     const truncations: ReadonlyArray<Truncation> =
@@ -1267,10 +1182,6 @@ export class ExcelImportService {
     )) as TransformedRow[];
   }
 
-  /**
-   * Personas. El número de documento nunca sale de aquí: la cuarentena y los problemas se identifican por fila
-   * (legacy_id NULL) y los detalles no lo incluyen.
-   */
   private async classifyPersons(manager: EntityManager, job: ImportRow): Promise<Classified> {
     const m = job.mapping;
     const fullName = Boolean(m['fullName']);
@@ -1353,8 +1264,6 @@ export class ExcelImportService {
           FROM import_src s WHERE s.reason IS NULL AND NOT EXISTS (${PERSON_ALREADY_PRESENT})
         ) f GROUP BY flag`,
     );
-    // Conteos independientes del orden de los motivos: cada fila tiene un solo motivo de cuarentena, pero el
-    // operador necesita saber cuántas no traen correo y cuántas apuntan a un centro inexistente.
     const unknownCenter =
       'center_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = s.center_code)';
     const [counts] = (await manager.query(`
@@ -1559,10 +1468,6 @@ export class ExcelImportService {
     };
   }
 
-  /**
-   * Plan de estructura (solo COST_CENTERS en UPDATE_STRUCTURE) con las filas válidas de import_src (classify) y el
-   * estado de la base dentro de la transacción de quien llama: la vista previa y la confirmación ven lo mismo.
-   */
   private async structurePlan(manager: EntityManager, job: ImportRow): Promise<StructurePlan | null> {
     if (job.target !== 'COST_CENTERS' || job.options.structureMode !== 'UPDATE_STRUCTURE') {
       return null;
@@ -1617,13 +1522,6 @@ export class ExcelImportService {
     return planCostCenterStructure(file, db, units);
   }
 
-  /**
-   * Escribe los centros de costo del lote en la transacción de quien llama. INSERT_ONLY: solo inserta los códigos
-   * nuevos (movimiento y unidad de la columna si vienen). UPDATE_STRUCTURE: además crea/asocia las unidades de los
-   * códigos de un dígito, deriva el padre y aplica padre, unidad y movimiento a los existentes con
-   * CostCenterPlacementService (historial con origen IMPORT). Nunca cambia código ni nombre de un existente ni
-   * desactiva los que no vienen.
-   */
   private async writeCostCenters(
     manager: EntityManager,
     job: ImportRow,
@@ -1651,7 +1549,6 @@ export class ExcelImportService {
       return { inserted: inserted.length, structure: null };
     }
 
-    // 1. Unidades de los códigos de un dígito.
     const unitIdByPrefix = new Map<string, string>();
     for (const unit of plan.units) {
       if (unit.action === 'CREATE') {
@@ -1699,7 +1596,6 @@ export class ExcelImportService {
     const unitId = (unit: UnitRef | null): string | null =>
       unit === null ? null : 'id' in unit ? unit.id : (unitIdByPrefix.get(unit.prefix) ?? null);
 
-    // 2. Centros nuevos: unidad y movimiento al insertar; el padre después (puede ser otro centro nuevo del lote).
     const fresh = plan.centers.filter((center) => center.existingId === null);
     const inserted = (await manager.query(
       `INSERT INTO cost_center (external_code, name, organizational_unit_id, has_movement, accepts_assets, is_active,
@@ -1742,7 +1638,6 @@ export class ExcelImportService {
       this.importPlacementContext(job, actorId, 'Alta por importación de centros de costo'),
     );
 
-    // 3. Existentes: padre, unidad y movimiento por el historial; de la raíz hacia abajo (X, X000, XY00, XYZ0, XYZn).
     const depth = (code: string): number => (code.length === 1 ? 0 : 4 - (/0*$/.exec(code)?.[0].length ?? 0));
     const changes = plan.centers
       .filter((center) => center.existingId && (center.parentChanges || center.unitChanges || center.movementChanges))
@@ -1763,13 +1658,6 @@ export class ExcelImportService {
     return { inserted: inserted.length, structure: { mode: 'UPDATE_STRUCTURE', ...plan.counts } };
   }
 
-  /**
-   * Movimiento REGISTRATION de cada activo importado que aún no tiene movimientos, por conjuntos: en cada lote bloquea
-   * los activos (FOR UPDATE, como AssetStateService.apply), relee su estado ya bloqueado, los firma con
-   * MovementsService.recordInitial (mismo esquema que record) y los inserta por lotes. Cada lote es una transacción;
-   * chunk.begin / chunk.done corren dentro de ella (quien llama verifica su arrendamiento y registra el avance).
-   * Idempotente: un reintento solo registra los activos que siguen sin movimiento.
-   */
   async registerMovements(importId: string, actorId: string, chunk: MovementChunkHooks): Promise<number> {
     const job = await this.importRow(importId);
     let registered = 0;
@@ -1806,7 +1694,6 @@ export class ExcelImportService {
           operational_status: OperationalStatus;
           physical_condition: PhysicalCondition | null;
         }>;
-        // Lo mismo que hacía AssetStateService.apply con patch {}: deja constancia de quién tocó el activo.
         await manager.query('UPDATE asset SET updated_by = $2, updated_at = $3 WHERE id = ANY($1::uuid[])', [
           pending.map((asset) => asset.id),
           actorId,
@@ -1860,7 +1747,6 @@ export class ExcelImportService {
     const header = rows.find((row) => row.row_number === job.header_row);
     const examples = new Set(job.template_example_rows ?? []);
     const centerLetter = job.mapping['costCenterCode'];
-    // Mismas filas y mismos códigos que la clasificación: sin la fila de ejemplo y con el código del desplegable.
     const staged = rows
       .filter((row) => !examples.has(row.row_number))
       .map((row) => {

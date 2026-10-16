@@ -10,7 +10,6 @@ import type {
   RoleGrantsHistoryPageDto,
 } from '../dto/role-grants-history.dto.js';
 
-/** Acción de bitácora → evento del contrato. Solo otorgamientos y retiros de roles y permisos. */
 const EVENT_BY_ACTION: Readonly<Record<string, RoleGrantEvent>> = {
   [AuditAction.RoleCreated]: 'ROLE_CREATED',
   [AuditAction.RoleUpdated]: 'ROLE_UPDATED',
@@ -28,7 +27,6 @@ const ROLE_ACTIONS: ReadonlySet<string> = new Set([
   AuditAction.RoleDeleted,
   AuditAction.RolePermsSet,
 ]);
-/** Campos de PATCH /roles/:id que describen la edición (el resto de changes es contexto). */
 const ROLE_FIELDS = ['name', 'description', 'parentRoleId', 'superiorRoleId'] as const;
 const SCOPE_TYPES = ['GLOBAL', 'ORG_UNIT', 'COST_CENTER'] as const;
 
@@ -57,16 +55,11 @@ const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
-/** Lo que el catálogo de permisos (GET /permissions/catalog, tabla permission) dice de un permiso citado. */
 interface PermissionInfo {
   readonly code: string;
   readonly label: string;
 }
 
-/**
- * Historial de otorgamientos y retiros (permiso a rol, rol a usuario, creación/edición/borrado de rol), leído de
- * audit_log. Nunca devuelve `changes` crudo: solo campos estructurados (sin correos, documentos ni secretos).
- */
 @Injectable()
 export class RoleGrantsHistoryService {
   constructor(private readonly dataSource: DataSource) {}
@@ -130,11 +123,6 @@ export class RoleGrantsHistoryService {
     return paginatedResult(items, query.page, query.pageSize, Number(rows[0]?.total ?? 0)) as RoleGrantsHistoryPageDto;
   }
 
-  /**
-   * Código y nombre legible de los permisos citados por id, de la misma tabla que arma el catálogo de permisos: el
-   * nombre es su descripción en español o, si no tiene, el nombre del recurso (resource_label). El código sirve a los
-   * registros que no lo guardaron (anteriores a este cambio).
-   */
   private async permissionInfo(rows: ReadonlyArray<Row>): Promise<ReadonlyMap<string, PermissionInfo>> {
     const ids = new Set<string>();
     for (const row of rows) {
@@ -172,7 +160,6 @@ export class RoleGrantsHistoryService {
     };
     let added = refs('addedPermissionIds', 'addedPermissionCodes');
     let removed = refs('removedPermissionIds', 'removedPermissionCodes');
-    // Registros anteriores: la creación guardaba permissionIds y el retiro removedPermissionId.
     if (row.action === AuditAction.RoleCreated && added.length === 0) {
       added = strings(changes['permissionIds']).map((id) => permission(id));
     }

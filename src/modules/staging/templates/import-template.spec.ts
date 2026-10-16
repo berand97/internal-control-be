@@ -61,7 +61,6 @@ describe('plantillas de importación generadas desde la definición', () => {
     const fields = templateFields(target);
     const headers = fields.map((_, index) => data?.getRow(1).getCell(index + 1).value);
     expect(headers).toEqual(fields.map(([, field]) => field.header));
-    // Solo encabezados y la fila de ejemplo: ningún bloque de resumen.
     expect(data?.actualRowCount).toBe(2);
     fields.forEach(([, field], index) => {
       const header = data?.getRow(1).getCell(index + 1);

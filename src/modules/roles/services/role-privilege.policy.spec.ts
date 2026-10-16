@@ -25,7 +25,6 @@ const role = (code: string, hierarchyLevel: number): Role => {
 describe('RolePrivilegePolicy', () => {
   let policy: RolePrivilegePolicy;
   let rolesRepository: Pick<RolesRepository, 'findAllActive' | 'findRolesHeldBy'>;
-  /** Roles vigentes en BD por usuario: la política ya no mira actor.roles (BE-09). */
   let held: Record<string, ReadonlyArray<Role>>;
   let permissionsService: Pick<PermissionsService, 'getEffectivePermissions'>;
 
@@ -88,13 +87,11 @@ describe('RolePrivilegePolicy', () => {
   });
 
   it('BE-09: el rango sale de la BD, no del token', async () => {
-    // El token todavía dice SUPER_ADMIN, pero en BD ya no lo tiene: no reorganiza ni administra como tal.
     const stale: AuthenticatedUser = { ...actor, roles: ['SUPER_ADMIN'] };
     await expect(policy.isSuperAdmin(stale)).resolves.toBe(false);
     await expect(policy.assertCanReorganize(stale)).rejects.toMatchObject({
       code: ErrorCode.InsufficientPermissions,
     });
-    // Sin roles vigentes no tiene rango alguno.
     held['director-1'] = [];
     await expect(policy.actorRank(actor)).rejects.toMatchObject({
       code: ErrorCode.InsufficientPermissions,

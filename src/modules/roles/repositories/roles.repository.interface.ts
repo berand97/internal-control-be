@@ -26,10 +26,6 @@ export interface UpdateRoleRecord {
 export interface RolesRepository {
   findAllActive(): Promise<ReadonlyArray<Role>>;
   findActiveById(id: string): Promise<Role | null>;
-  /**
-   * Roles vivos que el usuario tiene HOY por asignación directa (no revocada y dentro de su vigencia). Es la fuente
-   * del rango para las decisiones de privilegio: nunca los roles del JWT, que pueden estar desactualizados (BE-09).
-   */
   findRolesHeldBy(userId: string): Promise<ReadonlyArray<Role>>;
   findActiveByCode(code: string): Promise<Role | null>;
   findChildren(parentRoleId: string): Promise<ReadonlyArray<Role>>;
@@ -75,14 +71,10 @@ export interface RolesRepository {
     readonly constraintType: RoleSeparationOfDuties['constraintType'];
     readonly reason: string;
   }): Promise<RoleSeparationOfDuties>;
-  /** Titulares activos del rol o de cualquier rol vivo que lo herede (parent_role_id, recursivo). */
   findActiveHolderIdsInheriting(roleId: string): Promise<ReadonlyArray<string>>;
-  /** El rol y sus ancestros vivos por parent_role_id: lo que aporta al heredarlo. */
   findLineage(roleId: string): Promise<ReadonlyArray<Role>>;
-  /** Permisos directos de los roles dados, sin repetir. */
   findPermissionsForRoles(roleIds: ReadonlyArray<string>): Promise<ReadonlyArray<Permission>>;
   countActiveChildren(parentRoleId: string): Promise<number>;
-  /** Alcances de las asignaciones no revocadas ni vencidas del usuario (vigentes o futuras) que alcanzan al rol (directa o por herencia). */
   findHolderScopesReachingRole(
     userId: string,
     roleId: string,

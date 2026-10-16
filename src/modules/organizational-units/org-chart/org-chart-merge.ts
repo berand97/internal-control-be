@@ -27,34 +27,7 @@ import {
   type UnitRowInput,
 } from './org-chart.types.js';
 
-/**
- * Archivos viejos del organigrama: se ajustan las filas ANTES del plan (planOrgChart no cambia), con el sello oculto
- * del archivo (org-chart-stamp.ts) y lo que dice el historial.
- *
- * Con sello, merge de tres vías por columna de cada fila con Código interno (original = huella del sello; archivo; base
- * = el sistema hoy):
- * - archivo = original (no la tocó) → se conserva lo del sistema, aunque haya cambiado después de la descarga;
- * - archivo = base → nada que hacer (también si la misma persona ya lo aplicó y lo vuelve a subir);
- * - tocada y base = original → se aplica;
- * - tocada, base ≠ original y archivo ≠ base → CONFLICTO (error de fila: hay que descargar de nuevo).
- * Una fila sin columnas que aplicar y sin Acción se descarta (0 cambios).
- * Color: vacío (o un archivo sin la columna) nunca cambia nada ni choca; un sello anterior a la columna no trae su
- * huella y el Color se aplica si dice algo distinto del sistema.
- *
- * Con o sin sello:
- * - Código interno que ya no existe (unidad eliminada) → advertencia y no se crea.
- * - Archivada que el archivo dice Activo: sin sello solo se reactiva si se archivó ANTES de la fecha del archivo.
- * - Fila nueva (sin Código interno) con el prefijo de una unidad activa → se toma como esa unidad, con advertencia.
- * - Fila nueva sin prefijo con el nombre (sin tildes ni mayúsculas) de una unidad activa bajo el mismo jefe → ERROR de
- *   fila: los nombres no son únicos (dos «Calidad» con prefijos 102 y 103 son válidas), así que no se adivina si es la
- *   misma; la persona copia su Código interno o la distingue con prefijo o nombre. No cuenta si el mismo archivo la
- *   renombra, la mueve, la archiva o la elimina. Dos filas nuevas así en el mismo archivo → error en la segunda. Esto
- *   también evita el duplicado al subir dos veces un archivo con filas nuevas (sin sello o con él).
- * - La fila de ejemplo de la plantilla vieja (4 Vicerrectoría Financiera, 4010) se ignora.
- */
-
 export interface ChangeInfo {
-  /** ISO. */
   readonly at: string;
   readonly byName: string | null;
 }
@@ -66,11 +39,8 @@ export interface DeletedUnitInfo extends ChangeInfo {
 export interface MergeContext {
   readonly units: ReadonlyArray<SnapshotUnit>;
   readonly centers: ReadonlyArray<SnapshotCenter>;
-  /** Último cambio de cada campo de cada unidad (org_structure_history), por id de unidad. */
   readonly lastChanges: ReadonlyMap<string, ReadonlyMap<OrgHistoryField, ChangeInfo>>;
-  /** Unidades eliminadas físicamente, por Código interno. */
   readonly deletedUnits: ReadonlyMap<string, DeletedUnitInfo>;
-  /** Creación de cada unidad, por id. */
   readonly unitOrigins: ReadonlyMap<string, ChangeInfo>;
   readonly now: Date;
 }
@@ -78,11 +48,9 @@ export interface MergeContext {
 export interface OrgChartConflict {
   readonly rowNumber: number;
   readonly unitName: string;
-  /** Encabezado de la columna. */
   readonly column: string;
   readonly fileValue: string | null;
   readonly currentValue: string | null;
-  /** ISO; null si el historial no registra el cambio (p. ej. cambió el prefijo del jefe). */
   readonly changedAt: string | null;
   readonly changedBy: string | null;
 }
@@ -92,7 +60,6 @@ export interface MergeResult {
   readonly errors: ReadonlyArray<RowIssue>;
   readonly warnings: ReadonlyArray<RowIssue>;
   readonly conflicts: ReadonlyArray<OrgChartConflict>;
-  /** Días desde la descarga (según el sello); null sin sello. */
   readonly fileAgeDays: number | null;
 }
 
@@ -128,7 +95,6 @@ const formatDay = (iso: string): string => DAY.format(new Date(iso));
 const byWhom = (info: ChangeInfo): string => (info.byName ? ` por ${info.byName}` : '');
 const shown = (value: string | null): string => (value && value.trim() !== '' ? `«${value}»` : '(vacío)');
 
-/** Valor que deja la columna «como está en el sistema» al planear: vacío conserva; el Nombre es obligatorio. */
 const keepValue = (column: StampColumn, unit: SnapshotUnit): string | null => (column === 'name' ? unit.name : null);
 
 const withValues = (row: UnitRowInput, values: Partial<Record<StampColumn, string | null>>): UnitRowInput => ({
@@ -142,7 +108,6 @@ const isTemplateExample = (row: UnitRowInput): boolean =>
   STAMP_COLUMNS.every(
     (column) =>
       sameValue(column, row[column], TEMPLATE_EXAMPLE[column]) ||
-      // Estado vacío en la fila de ejemplo también es la fila de ejemplo.
       (column === 'status' && row.status === null),
   );
 
@@ -186,7 +151,6 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
   };
   const unitById = new Map(context.units.map((unit) => [unit.id, unit]));
   const parentName = (parentId: string | null): string | null => (parentId ? (unitById.get(parentId)?.name ?? null) : null);
-  /** Primera fila de cada unidad existente en el archivo (por Código interno). */
   const fileRowByCode = new Map<string, UnitRowInput>();
   for (const row of input.units) {
     const existing = row.code ? findByCode(row.code) : undefined;
@@ -195,7 +159,6 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
     }
   }
 
-  /** «Depende de» de una fila nueva contra el sistema: null raíz; undefined si no se reconoce. */
   const resolveParentId = (text: string | null): string | null | undefined => {
     if (!text || normalizeText(text) === 'raiz') {
       return null;
@@ -206,10 +169,6 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
     return findByCode(text)?.id;
   };
 
-  /**
-   * ¿El mismo archivo deja libre el lugar de esta unidad (la renombra, la mueve, la archiva o la elimina)? Con sello,
-   * una columna que la persona no tocó conserva lo del sistema y no cuenta.
-   */
   const leavesPlace = (unit: SnapshotUnit): boolean => {
     const row = fileRowByCode.get(unit.code);
     if (!row) {
@@ -230,7 +189,6 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
     return Boolean(row.parent) && touched('parent') && resolveParentId(row.parent) !== unit.parentId;
   };
 
-  /** Archivada que el archivo dice Activo (sin huella que diga que la persona la reactivó): ¿se reactiva? */
   const archivedGuard = (row: UnitRowInput, unit: SnapshotUnit): UnitRowInput => {
     if (unit.isActive || !row.status || parseStatus(row.status) !== true || row.action) {
       return row;
@@ -251,7 +209,6 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
     return { ...row, status: null };
   };
 
-  /** Merge de tres vías de una fila con sello; null si no queda nada que aplicar. */
   const mergeStamped = (row: UnitRowInput, unit: SnapshotUnit, original: StampRow): UnitRowInput | null => {
     const file = rowValues(row);
     const current: StampValues = currentByCode.get(unit.code) ?? file;
@@ -310,7 +267,6 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
 
   const units: UnitRowInput[] = [];
   let stamplessCodes = 0;
-  /** Filas nuevas sin prefijo ya vistas, por jefe y nombre normalizado. */
   const newRowBySibling = new Map<string, { readonly rowNumber: number; readonly name: string }>();
   for (const row of input.units) {
     if (isTemplateExample(row)) {
@@ -342,7 +298,6 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
       units.push(archivedGuard(row, unit));
       continue;
     }
-    // Fila nueva: ¿ya existe?
     const prefix = row.prefix && /^[0-9]{1,4}$/.test(row.prefix) ? row.prefix : null;
     if (prefix) {
       const existing = activeByPrefix.get(prefix) ?? activeByPrefix.get(normalizeUnitPrefix(prefix));
@@ -359,7 +314,6 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
     if (row.name && row.prefix === null && row.action === null) {
       const parentId = resolveParentId(row.parent);
       const name = normalizeText(row.name);
-      // Jefe que el sistema no conoce (nuevo en el archivo): se compara por lo escrito en «Depende de».
       const siblingKey = `${parentId === undefined ? `text:${normalizeText(row.parent ?? '')}` : `id:${parentId ?? ''}`}|${name}`;
       const earlier = newRowBySibling.get(siblingKey);
       if (earlier !== undefined) {
@@ -378,7 +332,6 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
       if (existing) {
         const created = createdText(existing);
         const origin = context.unitOrigins.get(existing.id);
-        // Creada después de la fecha del archivo: lo más probable es que este mismo archivo ya se haya subido.
         const afterFile = origin && fileDate && Date.parse(origin.at) >= Date.parse(fileDate);
         fail(
           row.rowNumber,

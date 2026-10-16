@@ -6,7 +6,6 @@ import { EVENT_BUS, type EventBus } from '../../../shared/events/event-bus.js';
 
 export interface NewNotification {
   readonly recipientUserId: string;
-  /** Código estable (VARCHAR 50). Hoy: IMPORT_FINISHED, IMPORT_FAILED. */
   readonly type: string;
   readonly title: string;
   readonly body: string | null;
@@ -33,10 +32,6 @@ export interface NotificationPage {
   readonly pageSize: number;
 }
 
-/**
- * Lo que el stream de eventos (GET /events) manda de una notificación: lo mismo que el usuario ya ve en su lista,
- * sin el cuerpo. seq = notification.event_seq (id del evento SSE, BIGINT como texto).
- */
 export interface NotificationEventView {
   readonly seq: string;
   readonly id: string;
@@ -53,7 +48,6 @@ const COLUMNS = `id, notification_type AS type, title, body, entity_type AS "ent
 const EVENT_COLUMNS = `event_seq::text AS seq, id, notification_type AS type, title, entity_type AS "entityType",
   entity_id AS "entityId", created_at AS "createdAt"`;
 
-/** Notificaciones en la app (tabla notification). Cada usuario ve y marca solo las suyas. */
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -61,10 +55,6 @@ export class NotificationsService {
     @Inject(EVENT_BUS) private readonly events: EventBus,
   ) {}
 
-  /**
-   * Siempre dentro de la transacción del hecho que se notifica. Publica el evento `notification` en la misma
-   * transacción: el stream del destinatario lo recibe solo si confirma.
-   */
   async create(manager: EntityManager, notification: NewNotification): Promise<string> {
     const [row] = (await manager.query(
       `INSERT INTO notification (recipient_user_id, notification_type, title, body, entity_type, entity_id)
@@ -108,11 +98,8 @@ export class NotificationsService {
     return row?.count ?? 0;
   }
 
-  /** Idempotente: marcar otra vez una leída conserva su read_at. De otro usuario o inexistente: 404. */
-  /** Publica `notification.count` en la misma transacción (los streams del usuario recuentan tras el COMMIT). */
   async markRead(userId: string, id: string): Promise<NotificationView> {
     return this.dataSource.transaction(async (manager) => {
-      // Con UPDATE el driver de PostgreSQL devuelve [filas de RETURNING, filas afectadas].
       const [rows] = (await manager.query(
         `UPDATE notification SET read_at = coalesce(read_at, NOW())
          WHERE id = $1 AND recipient_user_id = $2 RETURNING ${COLUMNS}`,
@@ -140,7 +127,6 @@ export class NotificationsService {
     });
   }
 
-  /** Una notificación del usuario para el stream; null si no existe o es de otro. */
   async eventView(userId: string, id: string): Promise<NotificationEventView | null> {
     const [row] = (await this.dataSource.query(
       `SELECT ${EVENT_COLUMNS} FROM notification WHERE id = $1 AND recipient_user_id = $2`,
@@ -149,10 +135,6 @@ export class NotificationsService {
     return row ?? null;
   }
 
-  /**
-   * Reposición con Last-Event-ID: las `limit` MÁS RECIENTES del usuario con event_seq > afterSeq, devueltas en orden
-   * ascendente de event_seq.
-   */
   async eventsAfter(userId: string, afterSeq: string, limit: number): Promise<NotificationEventView[]> {
     const rows = (await this.dataSource.query(
       `SELECT ${EVENT_COLUMNS} FROM notification
@@ -162,7 +144,6 @@ export class NotificationsService {
     return rows.reverse();
   }
 
-  /** Último event_seq del usuario ('0' si no tiene): cursor inicial de un stream sin Last-Event-ID. */
   async latestEventSeq(userId: string): Promise<string> {
     const [row] = (await this.dataSource.query(
       'SELECT coalesce(max(event_seq), 0)::text AS seq FROM notification WHERE recipient_user_id = $1',

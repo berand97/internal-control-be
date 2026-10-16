@@ -68,7 +68,6 @@ describe('RolesService', () => {
       findAllActive: vi.fn(),
       findActiveById: vi.fn(),
       findActiveByCode: vi.fn(),
-      // Roles vigentes en BD por usuario (BE-09: la política ya no lee actor.roles del JWT).
       findRolesHeldBy: vi.fn(async (userId: string) => {
         const held: Record<string, ReadonlyArray<string>> = {
           'admin-1': ['SUPER_ADMIN'],
@@ -333,7 +332,6 @@ describe('RolesService', () => {
     const renamed = customRole();
     renamed.parentRoleId = 'parent-1';
     renamed.name = 'Coordinación';
-    // El linaje aporta un permiso que el actor no tiene: si se revalidara, fallaría con PERMISSION_NOT_HELD.
     vi.mocked(rolesRepository.findPermissionsForRoles).mockResolvedValue([
       { id: 'perm-w', code: 'asset:write_off:global' } as never,
     ]);

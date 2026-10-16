@@ -10,28 +10,6 @@ import {
   templateFields,
 } from '../import/import-fields.js';
 
-/**
- * Plantillas Excel de importación, generadas desde la definición del importador (import-fields.ts).
- *
- * VERSIÓN E INVALIDACIÓN
- * - versión = identificador de la definición: los 10 primeros hex del SHA-256 de (formato del generador, destino,
- *   campos de la plantilla con encabezado/tipo/formato/regla de vacío/ejemplo, reglas del destino). Cambia si y solo
- *   si cambia lo que el importador espera. No depende de los catálogos ni de la fecha.
- * - contenido = SHA-256 de (hash de la definición + catálogos que alimentan los desplegables). Los catálogos
- *   cambian más seguido que la definición: un centro nuevo produce otro archivo con la MISMA versión.
- * - El archivo se guarda en el storage del sistema y se sirve desde ahí; se regenera solo cuando cambia el hash de
- *   contenido (nunca por tiempo). Ver ImportTemplateService.
- *
- * DENTRO DEL ARCHIVO
- * - Hoja de datos (primera): encabezados exactos en la fila 1, obligatorios en rojo, fila 2 de ejemplo.
- * - Hoja «Instrucciones»: una fila por columna, derivada de la definición.
- * - Hoja oculta «Catalogos»: una columna por catálogo; los desplegables son validaciones de lista contra ella.
- * - Hoja oculta «_plantilla»: pares clave/valor legibles por máquina (formato, destino, versión, hashes, hoja de
- *   datos, fila de encabezados y la fila de ejemplo tal como se escribió).
- * - Sin fórmulas, sin celdas combinadas, sin bloques de resumen.
- */
-
-/** Sube cuando cambia la forma del archivo generado (hojas, marcas): también cambia la versión. */
 export const TEMPLATE_LAYOUT = 1;
 export const TEMPLATE_MARKER = 'UNAC-CONTROL-INTERNO-PLANTILLA-IMPORTACION';
 export const META_SHEET = '_plantilla';
@@ -39,7 +17,6 @@ export const CATALOG_SHEET = 'Catalogos';
 export const INSTRUCTIONS_SHEET = 'Instrucciones';
 export const HEADER_ROW = 1;
 export const EXAMPLE_ROW = 2;
-/** Filas con desplegable y formato (suficiente para una compra o una carga de personal). */
 export const TEMPLATE_ROWS = 5000;
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -121,7 +98,6 @@ const columnLetter = (index: number): string => {
   return letters;
 };
 
-/** Valor de la fila de ejemplo de un campo; en catálogos, el primero del catálogo. */
 const exampleValue = (field: ImportField, catalogs: TemplateCatalogs): string | number | Date | null => {
   if (field.catalog) {
     const first = catalogs[field.catalog]?.[0];
@@ -136,7 +112,6 @@ const exampleValue = (field: ImportField, catalogs: TemplateCatalogs): string | 
   return field.example;
 };
 
-/** Cómo queda la celda al leerla (readWorkbook): la fila de ejemplo se reconoce comparando con esto. */
 const asRead = (value: string | number | Date): RawCellValue =>
   value instanceof Date ? value.toISOString() : value;
 
@@ -163,7 +138,6 @@ export interface BuiltTemplate {
   readonly body: Buffer;
 }
 
-/** exceljs 4.4 acepta rangos («D2:D5001») en dataValidations.add, pero sus tipos no declaran la propiedad. */
 interface RangeValidations {
   readonly dataValidations: { add(address: string, validation: ExcelJS.DataValidation): void };
 }
@@ -192,7 +166,6 @@ export const buildTemplate = async ({ target, catalogs, generatedAt }: BuildTemp
   const catalogSheet = workbook.addWorksheet(CATALOG_SHEET, { state: 'hidden' });
   const meta = workbook.addWorksheet(META_SHEET, { state: 'hidden' });
 
-  // Catálogos: una columna por catálogo usado, título en la fila 1 y valores desde la fila 2.
   const catalogRange = new Map<TemplateCatalog, string>();
   catalogsUsedBy(target).forEach((catalog, index) => {
     const letter = columnLetter(index);
@@ -250,7 +223,6 @@ export const buildTemplate = async ({ target, catalogs, generatedAt }: BuildTemp
   data.getCell(`A${EXAMPLE_ROW}`).note =
     'FILA DE EJEMPLO: el importador la ignora mientras no se modifique. Puede dejarla, borrarla o reemplazarla por un dato real.';
 
-  // Instrucciones: sin combinar celdas; una fila por columna de la plantilla.
   const obligatoryHeaders = fields.filter(([, field]) => field.whenEmpty.effect === 'QUARANTINE');
   const lines = [
     `Plantilla de importación: ${DATA_SHEET_NAME[target]}`,
@@ -292,7 +264,6 @@ export const buildTemplate = async ({ target, catalogs, generatedAt }: BuildTemp
     column.alignment = { wrapText: true, vertical: 'top' };
   });
 
-  // Metadatos legibles por máquina (todos texto).
   const metaRows: Array<[string, string]> = [
     ['formato', TEMPLATE_MARKER],
     ['destino', target],
@@ -325,10 +296,6 @@ export interface TemplateMarker {
   readonly example: Record<string, RawCellValue>;
 }
 
-/**
- * Lee la hoja «_plantilla» de un archivo subido (sus filas, como quedan en staging_row). null si no es una
- * plantilla de este sistema: un Excel cualquiera no trae esa hoja con la marca, así que no se ve afectado.
- */
 export const readTemplateMarker = (
   rows: ReadonlyArray<{ readonly cells: Record<string, RawCellValue> }>,
 ): TemplateMarker | null => {

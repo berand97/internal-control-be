@@ -32,7 +32,6 @@ export class ReplacePermissionsDto {
   readonly reason!: string;
 }
 
-/** Cuerpo de DELETE /roles/:id/permissions/:permissionId: el retiro también exige motivo. */
 export class RemovePermissionDto {
   @AuditReason('Motivo del retiro del permiso.')
   readonly reason!: string;

@@ -35,17 +35,6 @@ import {
   type UnitRowInput,
 } from './org-chart.types.js';
 
-/**
- * Libro Excel del organigrama (exportación y plantilla) y su lectura (importación).
- *
- * - «Organigrama»: una fila por unidad, en orden de árbol (prefijo y nombre), con sangría por nivel en Nombre.
- * - «Instrucciones».
- * Solo unidades: los centros de costo se administran en su propia pantalla. Centro propio y Depende de aceptan códigos
- * de centro, que se validan contra los centros del sistema; una hoja «Centros de costo» de un archivo viejo se ignora.
- * Encabezados y columnas de solo lectura en gris y protegidos (protección sin contraseña: Revisar → Desproteger hoja);
- * las columnas editables quedan desbloqueadas y con listas desplegables donde aplica.
- */
-
 export interface ExportUnitRow {
   readonly depth: number;
   readonly prefix: string | null;
@@ -54,7 +43,6 @@ export interface ExportUnitRow {
   readonly parent: string | null;
   readonly relationLabel: string;
   readonly headCenter: string | null;
-  /** Color base propio (#rrggbb) o null. */
   readonly color: string | null;
   readonly isActive: boolean;
   readonly code: string | null;
@@ -62,7 +50,6 @@ export interface ExportUnitRow {
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-/** Filas editables (desbloqueadas y con lista) por debajo de las que trae el archivo. */
 const SPARE_ROWS = 500;
 const HEADER_FILL = 'FF1F4E78';
 const READ_ONLY_FILL = 'FFE7E6E6';
@@ -178,7 +165,6 @@ const INSTRUCTIONS: ReadonlyArray<string> = [
 
 const columnLetter = (index: number): string => String.fromCharCode(65 + index);
 
-/** exceljs 4.4 acepta rangos en dataValidations.add, pero sus tipos no declaran la propiedad. */
 interface RangeValidations {
   readonly dataValidations: { add(address: string, validation: ExcelJS.DataValidation): void };
 }
@@ -250,7 +236,6 @@ const fillSheet = async (
   });
 };
 
-/** Valores de las columnas editables tal como se escriben en la hoja (y con los que se calcula la huella del sello). */
 export const exportValues = (unit: ExportUnitRow): StampValues => ({
   prefix: unit.prefix,
   name: unit.name,
@@ -262,7 +247,6 @@ export const exportValues = (unit: ExportUnitRow): StampValues => ({
   color: unit.color,
 });
 
-/** Fila de ejemplo (va en Instrucciones, nunca en la hoja Organigrama: subida tal cual cambiaría la unidad 4). */
 export const TEMPLATE_EXAMPLE: StampValues = {
   prefix: '4',
   name: 'Vicerrectoría Financiera',
@@ -281,10 +265,8 @@ const EXAMPLE_LINES: ReadonlyArray<string> = [
 ];
 
 export interface OrgChartWorkbookOptions {
-  /** EXPORT: el organigrama actual; TEMPLATE: hoja Organigrama vacía (el ejemplo va en Instrucciones). */
   readonly kind: 'EXPORT' | 'TEMPLATE';
   readonly generatedAt: Date;
-  /** Revisión de la estructura (structureRevision) al exportar. */
   readonly revision: string;
 }
 
@@ -359,7 +341,6 @@ const headerMap = (sheet: RawSheet): Map<string, string> => {
 const findSheet = (sheets: ReadonlyArray<RawSheet>, name: string): RawSheet | undefined =>
   sheets.find((sheet) => normalizeText(sheet.name) === normalizeText(name));
 
-/** Texto de una celda: los nombres conservan sus espacios internos; el resto se compacta. */
 const reader = (sheet: RawSheet, headers: Record<string, string>) => {
   const map = headerMap(sheet);
   const letters = Object.fromEntries(
@@ -430,7 +411,6 @@ export const parseOrgChartWorkbook = async (content: Buffer): Promise<OrgChartIn
   if (!hasUnitSheet) {
     throw new ApiException(ErrorCode.OrgChartInvalidFile);
   }
-  // Archivos viejos traen «Centros de costo»: se ignora (el plan lo advierte); los centros tienen su propia pantalla.
   const ignoredCenterSheet = findSheet(sheets, CENTER_SHEET) !== undefined;
   const stamp = readStampSheet(sheets);
   return {

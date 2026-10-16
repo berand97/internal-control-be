@@ -12,11 +12,6 @@ const SELECT = `SELECT r.id, r.code, r.name, r.description, r.is_active AS "isAc
     (SELECT count(*)::int FROM asset_transfer_item i WHERE i.reason_id = r.id) AS "usageCount"
   FROM asset_transfer_reason r`;
 
-/**
- * Catálogo de motivos del traslado (columna «Razón» del OCI-17-89). Nace con el único motivo que trae el formato
- * institucional (REUBICACION); los demás los crea quien tenga transfer_catalog:manage:global (Dirección de Control
- * Interno). Un motivo usado no se borra: se desactiva y deja de ofrecerse.
- */
 @Injectable()
 export class TransferReasonsService {
   constructor(

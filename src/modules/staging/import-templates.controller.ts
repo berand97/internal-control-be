@@ -15,10 +15,6 @@ import { IMPORT_TARGETS, type ImportTarget } from './import/import-fields.js';
 import { XLSX_MIME } from './templates/import-template.js';
 import { type ImportTemplateRecord, ImportTemplateService } from './templates/import-template.service.js';
 
-/**
- * Plantillas Excel de importación, con el mismo permiso que la importación. El archivo sale del storage del sistema
- * y solo se regenera cuando cambia la definición de campos o un catálogo de los desplegables (ver import-template.ts).
- */
 @ApiTags(OpenApiTag.Assets)
 @ApiBearerAuth()
 @ApiExtraModels(ApiSuccessEnvelope, ImportTemplateDto)

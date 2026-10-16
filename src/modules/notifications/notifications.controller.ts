@@ -37,7 +37,6 @@ export class NotificationsQueryDto {
   readonly pageSize: number = 20;
 }
 
-/** Avisos en la app del usuario autenticado (campana). Sin permiso extra: cada quien ve solo los suyos. */
 @ApiTags(OpenApiTag.Auth)
 @ApiBearerAuth()
 @ApiExtraModels(ApiSuccessEnvelope, NotificationDto, NotificationPageDto, NotificationUnreadCountDto, NotificationsMarkedDto)

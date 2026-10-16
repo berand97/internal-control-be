@@ -25,7 +25,6 @@ export const ISSUE_DESCRIPTIONS: Record<string, string> = {
 
 const SEPARATOR = ';';
 
-// Los valores encontrados vienen del Excel importado: se neutralizan como fórmula al abrir el CSV (BE-10).
 const field = (value: string | number | null): string => csvCell(value, SEPARATOR);
 
 export const issuesToCsv = (issues: ReadonlyArray<Issue>): string => {

@@ -1,6 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-/** Prefijo sugerido para una unidad nueva (GET /organizational-units/suggest-prefix). */
 export class UnitPrefixSuggestionDto {
   @ApiProperty({
     description: 'Parte fija: el prefijo del ancestro más cercano con prefijo ("" si no hay ninguno)',

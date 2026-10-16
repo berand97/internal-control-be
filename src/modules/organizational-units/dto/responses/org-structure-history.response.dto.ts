@@ -6,7 +6,6 @@ import {
   type OrgHistorySource,
 } from '../../../cost-centers/services/org-structure-history.service.js';
 
-/** Evento del historial de nombre/código/tipo/padre/prefijo/línea/centro propio/estado/color (OrgStructureHistoryService). */
 export class OrgStructureHistoryEventDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;

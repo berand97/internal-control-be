@@ -9,20 +9,13 @@ import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.rep
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import type { AssignCostCenterHeadDto, CostCenterHeadDto } from '../dto/cost-center-head.dto.js';
 
-/** Permiso existente de administración de centros de costo (cost-centers.controller.ts). */
 export const COST_CENTER_HEAD_PERMISSION = 'cost_center:manage:global';
-/** Consultar jefaturas: el permiso existente de lectura de centros de costo; asignar y terminar siguen con manage. */
 export const COST_CENTER_HEAD_READ_PERMISSION = 'cost_center:read:global';
 
-/**
- * Nombre legible de un app_user (nombres y apellidos de su persona, o su username) como subconsulta escalar sobre la
- * columna dada; null si la columna es null. Mismo criterio que USER_DISPLAY_NAME_SQL de inventarios.
- */
 export const userDisplayNameSubquery = (column: string): string =>
   `(SELECT coalesce(nullif(trim(coalesce(up.first_name, '') || ' ' || coalesce(up.last_name, '')), ''), uu.username)
       FROM app_user uu LEFT JOIN person up ON up.id = uu.person_id WHERE uu.id = ${column})`;
 
-/** Jefatura con persona y centro; lo reutiliza el historial del centro (CostCenterPlacementService). */
 export const HEAD_SELECT = `
   SELECT h.id, h.person_id AS "personId", trim(p.first_name || ' ' || p.last_name) AS "personName",
          p.position_title AS "positionTitle",
@@ -53,12 +46,6 @@ export const toDto = (row: HeadRow): CostCenterHeadDto => ({
   endedAt: row.endedAt?.toISOString() ?? null,
 });
 
-/**
- * Quién dirige cada centro de costo (HU 1.0.14). Relación a nivel de persona, con vigencia. No se impone un solo
- * jefe por centro (regla no definida por Control Interno); sí se impide que la misma persona tenga dos jefaturas
- * del mismo centro que se traslapen. El alcance de lectura que da una jefatura lo resuelve
- * PermissionsService.costCenterScope; asignar o terminar invalida la caché de permisos de los usuarios de la persona.
- */
 @Injectable()
 export class CostCenterHeadsService {
   constructor(
@@ -89,8 +76,6 @@ export class CostCenterHeadsService {
       if (!person) {
         throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la persona o está inactiva');
       }
-      // Una jefatura amplía el alcance de lectura de quien la tiene: nadie se designa jefe a sí mismo (regla de
-      // autoasignación, como los roles); lo hace otro administrador. Se lee de la BD, no del token.
       const [self] = (await manager.query('SELECT 1 FROM app_user WHERE id = $1 AND person_id = $2', [
         actor.id,
         dto.personId,
@@ -142,7 +127,6 @@ export class CostCenterHeadsService {
       if (head.ended_at || head.expired) {
         throw new ApiException(ErrorCode.CostCenterHeadEnded);
       }
-      // Una jefatura que aún no empieza termina en su propio inicio: nunca estuvo vigente.
       await manager.query(
         `UPDATE cost_center_head
          SET valid_until = GREATEST(NOW(), valid_from), ended_at = NOW(), ended_by = $2, end_reason = $3
@@ -201,8 +185,6 @@ export class CostCenterHeadsService {
     origin: RequestOrigin,
     changes: Record<string, unknown>,
   ): Promise<void> {
-    // AuditAction no tiene acciones propias de jefatura (el enum vive en auth/**): se registra como cambio del
-    // centro de costo, con el evento en changes.event y la jefatura como entidad.
     await this.auditLogs.record(
       {
         action: AuditAction.CostCenterUpdated,

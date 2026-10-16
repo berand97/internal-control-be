@@ -5,11 +5,6 @@ import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import type { PersonDirectoryItemDto, PersonDirectoryResponseDto } from '../dto/person-directory.dto.js';
 
-/**
- * Quién puede consultar el directorio: quien genera o administra actas (elige quién recibe, quién firma por
- * Control Interno y a quién reasignar un turno). Son los permisos de generación de los formatos que hoy tienen
- * proceso (OCI-01-55 y OCI-17-89: asset:update:global; OCI-01-65: loan:update:global). No es un permiso nuevo.
- */
 export const PERSON_DIRECTORY_PERMISSIONS = ['asset:update:global', 'loan:update:global'] as const;
 
 const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
@@ -33,10 +28,6 @@ export class PersonDirectoryService {
     );
   }
 
-  /**
-   * Personas activas. La búsqueda por nombre usa la misma expresión que el índice trigram idx_person_name
-   * (first_name || ' ' || last_name); la de documento es por prefijo.
-   */
   async search(query: { readonly search?: string; readonly page: number; readonly pageSize: number }): Promise<PersonDirectoryResponseDto> {
     const term = query.search?.trim() ? query.search.trim() : null;
     const params = [term === null ? null : `%${escapeLike(term)}%`, term === null ? null : `${escapeLike(term)}%`];

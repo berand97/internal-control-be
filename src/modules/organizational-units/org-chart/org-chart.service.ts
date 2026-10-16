@@ -63,7 +63,6 @@ const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 const COST_CENTER_MANAGE = 'cost_center:manage:global';
 const IMPORT_REASON = 'Importación del Excel del organigrama';
 const NEW = 'new:';
-/** Llave del candado de la importación del organigrama (pg_advisory_xact_lock): una confirmación a la vez. */
 const ORG_CHART_LOCK = 43_512_025;
 
 const today = (): string => new Date().toISOString().slice(0, 10);
@@ -97,20 +96,11 @@ const toSummary = (plan: OrgChartPlan): OrgChartSummaryDto => ({
 
 const unitPath = (code: string): string => code.toLowerCase();
 
-/** Plan del archivo: el de planOrgChart más lo que dijo el sello (conflictos, antigüedad, filas descartadas). */
 type FilePlan = OrgChartPlan & {
   readonly conflicts: ReadonlyArray<OrgChartConflict>;
   readonly fileAgeDays: number | null;
 };
 
-/**
- * Excel del organigrama: exportación, plantilla, previsualización y confirmación.
- *
- * Servicio propio y síncrono (no usa staging/import-jobs): son unos cientos de filas, el plan se calcula en memoria y
- * la confirmación aplica todo en una sola transacción. La previsualización guarda las filas leídas
- * (org_chart_import); al confirmar se vuelve a planear sobre el estado de ese momento y solo se aplica si el plan es
- * idéntico (si alguien cambió el organigrama entre medio: 409 ORG_CHART_IMPORT_STALE).
- */
 @Injectable()
 export class OrgChartService {
   constructor(
@@ -134,7 +124,6 @@ export class OrgChartService {
     return { fileName: `organigrama-${today()}.xlsx`, body };
   }
 
-  /** Hoja Organigrama vacía: el ejemplo va en Instrucciones (subido tal cual no cambia nada). */
   async template(): Promise<OrgChartFile> {
     const body = await buildOrgChartWorkbook([], { kind: 'TEMPLATE', generatedAt: new Date(), revision: 'TEMPLATE' });
     return { fileName: 'plantilla-organigrama.xlsx', body };
@@ -159,7 +148,6 @@ export class OrgChartService {
           ...plan.warnings,
         ]
       : plan.warnings;
-    // Siempre false: el Excel del organigrama no toca centros (se mantiene el campo por contrato).
     const requiresCostCenterPermission = plan.centers.length > 0;
     const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS);
     const summary = toSummary(plan);
@@ -230,7 +218,6 @@ export class OrgChartService {
       if (plan.hash !== stored.plan_hash) {
         throw new ApiException(ErrorCode.OrgChartImportStale);
       }
-      // Nunca ocurre (unitsOnly): resguardo de la lógica de centros del plan, que el organigrama no usa.
       if (plan.centers.length > 0 && !(await this.permissions.userHasPermission(actor.id, COST_CENTER_MANAGE))) {
         throw new ApiException(
           ErrorCode.InsufficientPermissions,
@@ -238,7 +225,6 @@ export class OrgChartService {
         );
       }
       await this.apply(manager, plan, actor);
-      // Unidades nuevas, prefijos que cambian, centros propios pendientes: la estructura completa se concilia aquí.
       await this.reconciler.reconcileWithin(manager, ALL_SCOPE, {
         actorId: actor.id,
         reason: IMPORT_REASON,
@@ -267,8 +253,6 @@ export class OrgChartService {
     });
   }
 
-  // ─── Estado y plan ──────────────────────────────────────────────────────────────────────────────────────────────
-
   private async loadState(
     manager: EntityManager,
   ): Promise<{ units: SnapshotUnit[]; centers: SnapshotCenter[] }> {
@@ -291,7 +275,6 @@ export class OrgChartService {
     return { units, centers };
   }
 
-  /** Última confirmación de un archivo idéntico (mismo hash del contenido). */
   private async appliedBefore(fileSha256: string): Promise<OrgChartAppliedBeforeDto | null> {
     const [row] = (await this.dataSource.query(
       `SELECT i.confirmed_at AS at, ${userDisplayNameSubquery('coalesce(i.confirmed_by, i.created_by)')} AS by
@@ -303,7 +286,6 @@ export class OrgChartService {
     return row ? { at: row.at.toISOString(), by: row.by } : null;
   }
 
-  /** Lo que el sello necesita saber del historial: último cambio por campo, eliminadas y creación de cada unidad. */
   private async loadMergeContext(
     manager: EntityManager,
     codes: ReadonlyArray<string>,
@@ -351,11 +333,6 @@ export class OrgChartService {
     };
   }
 
-  /**
-   * Ajusta las filas con el sello (mergeOrgChartInput) y planea dos veces: la primera dice qué filas piden ELIMINAR;
-   * con su historia leída, la segunda es la definitiva. Solo unidades (unitsOnly): también las previsualizaciones
-   * guardadas con filas de centros las descartan.
-   */
   private async plan(manager: EntityManager, rows: OrgChartInput): Promise<FilePlan> {
     const { units, centers } = await this.loadState(manager);
     const known = new Set(units.flatMap((unit) => [unit.code, unit.code.toUpperCase()]));
@@ -397,8 +374,6 @@ export class OrgChartService {
     };
   }
 
-  // ─── Aplicación ─────────────────────────────────────────────────────────────────────────────────────────────────
-
   private async apply(manager: EntityManager, plan: OrgChartPlan, actor: AuthenticatedUser): Promise<void> {
     const before = await this.loadState(manager);
     const unitBefore = new Map(before.units.map((unit) => [unit.id, unit]));
@@ -413,7 +388,6 @@ export class OrgChartService {
       id ? (centerBefore.get(id)?.externalCode ?? plan.centers.find((op) => centerIds.get(op.key) === id)?.code ?? id) : null;
     const placementContext = { reason: IMPORT_REASON, actorId: actor.id, source: 'IMPORT' as const, ip: null, userAgent: null };
 
-    // 1. Libera prefijos que cambian y desactiva las unidades que se van (los centros se mueven después).
     const leaving = plan.units.filter((op) => op.existingId && (op.removal !== null || !op.isActive));
     const prefixMoves = plan.units.filter(
       (op) => op.existingId && unitBefore.get(op.existingId)?.codePrefix !== op.codePrefix,
@@ -429,7 +403,6 @@ export class OrgChartService {
       ]);
     }
 
-    // 2. Unidades nuevas (sin padre todavía) y padres que cambian en dos pasos (sin ciclos intermedios).
     for (const op of plan.units.filter((item) => !item.existingId)) {
       const [row] = (await manager.query(
         `INSERT INTO organizational_unit (code, name, unit_type, relation_type, code_prefix, parent_id, hierarchy_level,
@@ -460,7 +433,6 @@ export class OrgChartService {
     }
     await this.rewriteHierarchy(manager);
 
-    // 3. Centros: recodificación, altas (por código: XYZ0 antes que XYZn) y cambios.
     for (const op of plan.centers.filter((item) => item.existingId && item.kinds.includes('RECODED'))) {
       await manager.query('UPDATE cost_center SET external_code = $2, updated_at = NOW() WHERE id = $1', [op.existingId, op.code]);
     }
@@ -512,7 +484,6 @@ export class OrgChartService {
       }
     }
 
-    // 4. Centro propio de las unidades.
     for (const op of plan.units) {
       const id = unitId(op.key);
       if (!id || op.removal === 'DELETE' || !(op.kinds.includes('HEAD_CHANGED') || op.kinds.includes('CREATED'))) {
@@ -525,7 +496,6 @@ export class OrgChartService {
       );
     }
 
-    // 5. Bajas: centros y después unidades (revisando otra vez dentro de la transacción).
     for (const op of plan.centers.filter((item) => item.existingId && item.removal === 'DELETE')) {
       await this.removeCenter(manager, op, actor);
     }
@@ -533,7 +503,6 @@ export class OrgChartService {
       await this.removeUnit(manager, op, actor);
     }
 
-    // 6. Historial de unidades.
     const label = (id: string | null): string | null => {
       if (!id) {
         return null;
@@ -573,7 +542,6 @@ export class OrgChartService {
           oldValue: previous.isActive ? 'ACTIVE' : 'ARCHIVED',
           newValue: op.isActive ? 'ACTIVE' : 'ARCHIVED',
         },
-        // null en newValue: color quitado (hereda el de su jefe).
         { entityType: 'ORG_UNIT', entityId: id, field: 'COLOR', oldValue: previous.color ?? null, newValue: op.color },
       );
     }
@@ -625,7 +593,6 @@ export class OrgChartService {
     );
   }
 
-  /** Recalcula hierarchy_level y hierarchy_path de todas las unidades desde parent_id (solo escribe las que cambian). */
   private async rewriteHierarchy(manager: EntityManager): Promise<void> {
     const rows = (await manager.query(
       'SELECT id, parent_id, code, hierarchy_level, hierarchy_path FROM organizational_unit',

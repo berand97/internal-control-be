@@ -20,10 +20,6 @@ import {
   XLSX_MIME,
 } from './import-template.js';
 
-/**
- * Etiquetas de la condición física. Mismas que CONDITION_LABELS (DocumentEngineService) y
- * PHYSICAL_CONDITION_LABELS (LoansService): no hay una fuente común en el módulo de activos.
- */
 const PHYSICAL_CONDITION_LABELS: Record<string, string> = {
   NEW: 'Nuevo',
   GOOD: 'Bueno',
@@ -40,19 +36,15 @@ export interface ImportTemplateRecord {
   readonly fileName: string;
   readonly byteSize: number;
   readonly generatedAt: string;
-  /** Primera vez que se generó esta versión (desde cuándo rige esta definición en este entorno). */
   readonly versionSince: string;
   readonly catalogCounts: Record<string, number>;
 }
 
-/** Plantilla reconocida en un archivo subido. */
 export interface TemplateDetection {
   readonly target: string;
   readonly version: string;
-  /** Versión vigente del mismo destino; null si el destino del archivo no existe. */
   readonly currentVersion: string | null;
   readonly outdated: boolean;
-  /** La versión del archivo fue generada por este entorno (está en el historial). */
   readonly knownVersion: boolean;
   readonly versionGeneratedAt: string | null;
   readonly dataSheet: string;
@@ -79,10 +71,6 @@ const ROW_SELECT = `SELECT t.*, (SELECT min(v.generated_at) FROM import_template
 
 const sha256 = (body: Buffer): string => createHash('sha256').update(body).digest('hex');
 
-/**
- * Versión de plantilla que trae un archivo ya cargado en staging (hoja oculta «_plantilla»), o null si el archivo
- * no viene de una plantilla. Función suelta para que ExcelImportService la use sin depender del storage.
- */
 export const detectTemplate = async (
   db: Pick<DataSource, 'query'>,
   batchId: string,
@@ -113,11 +101,6 @@ export const detectTemplate = async (
   };
 };
 
-/**
- * Plantillas de importación en el storage del sistema. Regla de regeneración: se calcula el hash de contenido
- * (definición + catálogos); si ya hay un archivo para ese hash se sirve el guardado; si no, se genera, se guarda y
- * se registra en import_template. Nunca por tiempo. Un bloqueo por destino evita generar dos veces a la vez.
- */
 @Injectable()
 export class ImportTemplateService {
   private readonly logger = new Logger(ImportTemplateService.name);
@@ -148,7 +131,6 @@ export class ImportTemplateService {
     return catalogs;
   }
 
-  /** Versión de plantilla que trae el archivo subido (hoja oculta «_plantilla»), o null. */
   detect(batchId: string): Promise<TemplateDetection | null> {
     return detectTemplate(this.dataSource, batchId);
   }
@@ -225,7 +207,6 @@ export class ImportTemplateService {
   private async catalog(catalog: TemplateCatalog): Promise<ReadonlyArray<CatalogEntry>> {
     switch (catalog) {
       case 'COST_CENTERS':
-        // Todos los centros: la clasificación acepta cualquier centro del catálogo.
         return (await this.dataSource.query(
           'SELECT external_code AS code, name FROM cost_center ORDER BY external_code',
         )) as CatalogEntry[];

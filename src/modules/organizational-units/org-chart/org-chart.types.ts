@@ -8,7 +8,6 @@ import {
 } from '../enums/org-unit-type.enum.js';
 import type { OrgChartStamp } from './org-chart-stamp.js';
 
-/** Estado actual de la estructura (lo que el Excel compara). */
 export interface SnapshotUnit {
   readonly id: string;
   readonly code: string;
@@ -17,11 +16,9 @@ export interface SnapshotUnit {
   readonly parentId: string | null;
   readonly relationType: OrgRelationType;
   readonly headCostCenterId: string | null;
-  /** Código del centro propio (amarrado o pendiente). */
   readonly headCostCenterCode: string | null;
   readonly codePrefix: string | null;
   readonly isActive: boolean;
-  /** Color base propio de la rama (#rrggbb); null si hereda el de su jefe. */
   readonly color: string | null;
 }
 
@@ -33,26 +30,21 @@ export interface SnapshotCenter {
   readonly isActive: boolean;
   readonly unitId: string | null;
   readonly parentId: string | null;
-  /** Activos no dados de baja que hoy están en el centro. */
   readonly activeAssets: number;
 }
 
-/** Resultado de revisar una fila marcada ELIMINAR (referencias históricas leídas de la base). */
 export interface RemovalReferences {
-  /** Descripción de la historia que obliga a archivar; null si no hay ninguna. */
   readonly history: string | null;
 }
 
 export interface OrgChartSnapshot {
   readonly units: ReadonlyArray<SnapshotUnit>;
   readonly centers: ReadonlyArray<SnapshotCenter>;
-  /** Por id de unidad o centro marcado ELIMINAR. */
   readonly removal: ReadonlyMap<string, RemovalReferences>;
 }
 
 export type RawValue = string | number | boolean | null;
 
-/** Fila de la hoja «Organigrama» tal como se leyó (texto sin interpretar). */
 export interface UnitRowInput {
   readonly rowNumber: number;
   readonly prefix: string | null;
@@ -61,17 +53,12 @@ export interface UnitRowInput {
   readonly parent: string | null;
   readonly relation: string | null;
   readonly headCenter: string | null;
-  /**
-   * Columna Color (opcional). Ausente (archivos sin la columna, previsualizaciones guardadas antes de ella) o vacía:
-   * no cambia el color.
-   */
   readonly color?: string | null;
   readonly status: string | null;
   readonly action: string | null;
   readonly code: string | null;
 }
 
-/** Fila de la hoja «Centros de costo» tal como se leyó. */
 export interface CenterRowInput {
   readonly rowNumber: number;
   readonly code: string | null;
@@ -84,31 +71,15 @@ export interface CenterRowInput {
 
 export interface OrgChartInput {
   readonly units: ReadonlyArray<UnitRowInput>;
-  /**
-   * Filas de centros para el plan. El Excel del organigrama nunca las trae (vacío y hasCenterSheet false): los centros
-   * se administran en su propia pantalla. El plan conserva su lógica para reusarla allí.
-   */
   readonly centers: ReadonlyArray<CenterRowInput>;
-  /** Hojas que trae el archivo: una hoja ausente no toca nada de lo suyo. */
   readonly hasUnitSheet: boolean;
   readonly hasCenterSheet: boolean;
-  /** El archivo traía la hoja «Centros de costo» (archivos viejos) y se ignoró: el plan lo advierte. */
   readonly ignoredCenterSheet?: boolean;
-  /**
-   * Sello oculto del archivo (org-chart-stamp.ts): null si no trae (archivo viejo o hecho a mano); undefined en
-   * previsualizaciones guardadas antes del sello (se tratan como sin sello).
-   */
   readonly stamp?: OrgChartStamp | null;
-  /** El archivo traía una hoja «_sello» dañada o de otro formato: se trata como sin sello y se advierte. */
   readonly invalidStamp?: boolean;
-  /** Fecha de creación del libro (propiedades del documento, ISO); null si no la trae. */
   readonly fileCreatedAt?: string | null;
 }
 
-/**
- * Lo que el Excel del organigrama planea: solo unidades. Descarta las filas de centros (también las de previsualizaciones
- * guardadas antes de quitar la hoja) y marca la hoja como ignorada.
- */
 export const unitsOnly = (input: OrgChartInput): OrgChartInput => ({
   units: input.units,
   centers: [],
@@ -156,7 +127,6 @@ export const ACTION_ARCHIVE = 'ARCHIVAR';
 
 export type RowAction = 'DELETE' | 'ARCHIVE' | null;
 
-/** Sin tildes, minúsculas y sin espacios repetidos: para comparar encabezados y valores de listas. */
 export const normalizeText = (value: string): string =>
   value
     .normalize('NFD')
@@ -179,10 +149,6 @@ const UNIT_TYPE_BY_TEXT = new Map<string, OrgUnitType>(
     [normalizeText(type), type],
   ]),
 );
-/**
- * Etiquetas anteriores a la Estructura Orgánica (Acuerdo 008/2021), aceptadas en archivos viejos. «Comité» y
- * «Comisión» son tipos propios; «Consejo o comité» se lee como Consejo.
- */
 const LEGACY_UNIT_TYPE_LABELS: ReadonlyArray<readonly [string, OrgUnitType]> = [
   ['Consejo o comité', OrgUnitType.Council],
   ['Área', OrgUnitType.Dependency],
@@ -195,7 +161,6 @@ for (const [label, type] of LEGACY_UNIT_TYPE_LABELS) {
   UNIT_TYPE_BY_TEXT.set(normalizeText(label), type);
 }
 
-/** Las etiquetas válidas, en el orden de la lista: para los mensajes de error. */
 export const UNIT_TYPE_OPTIONS = ORG_UNIT_TYPES.map((type) => ORG_UNIT_TYPE_LABELS[type]).join(', ');
 
 export const parseUnitType = (text: string): OrgUnitType | undefined => UNIT_TYPE_BY_TEXT.get(normalizeText(text));
@@ -209,7 +174,6 @@ const RELATION_BY_TEXT = new Map<string, OrgRelationType>(
 
 export const parseRelation = (text: string): OrgRelationType | undefined => RELATION_BY_TEXT.get(normalizeText(text));
 
-/** Estado: true activo, false archivado, undefined si no se entiende. */
 export const parseStatus = (text: string): boolean | undefined => {
   const normalized = normalizeText(text);
   if (['activo', 'activa', 'active'].includes(normalized)) {
@@ -232,7 +196,6 @@ export const parseAction = (text: string): RowAction | undefined => {
   return undefined;
 };
 
-/** Movimiento: 1/0, Sí/No. */
 export const parseMovement = (text: string): boolean | undefined => {
   const normalized = normalizeText(text);
   if (['1', 'si', 'true', 'verdadero'].includes(normalized)) {

@@ -21,8 +21,6 @@ import { PHYSICAL_CONDITIONS, type PhysicalCondition } from '../../assets/enums/
 import { ApiSignerSubstitutions, type SignerSubstitutionsInput } from '../../documents/dto/signer-substitution.dto.js';
 import { MAX_TRANSFER_ASSETS, TRANSFER_STATUSES, type TransferStatus } from '../domain/transfer.js';
 
-// ---------- Traslados ----------
-
 export class TransferItemInputDto {
   @ApiProperty({ format: 'uuid' })
   @IsUUID('all')
@@ -170,8 +168,6 @@ export class QueryTransfersDto {
   @IsUUID('all')
   readonly targetCostCenterId?: string;
 }
-
-// ---------- Catálogo de motivos ----------
 
 export class CreateTransferReasonDto {
   @ApiProperty({ description: 'Código estable en mayúsculas (A-Z, 0-9, _)', example: 'REUBICACION', maxLength: 40 })

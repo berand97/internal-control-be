@@ -14,18 +14,6 @@ import {
 import { TRANSFER_ENTITY_TYPE, TRANSFER_FORMAT_KEY, TRANSFER_SIGNER_SOURCES } from '../domain/transfer.js';
 import { type TransferRow, TransfersService } from './transfers.service.js';
 
-/**
- * El traslado se entera de su acta OCI-17-89 por el gancho del motor (entity_type TRANSFER). Todo corre en la
- * transacción del motor con el EntityManager que recibe; si lanza, el motor revierte y reintenta (lifecycle_error).
- * - onGenerated: enlaza el acta (asset_transfer.document_id).
- * - onSigned (acta totalmente firmada): cada activo pasa al centro de destino con AssetStateService.apply y un
- *   movimiento TRANSFER (documentReference = número del acta, metadata.transferId/documentId); el ítem y
- *   document_asset quedan enlazados a ese movimiento; el traslado queda COMPLETED. Las guardas se vuelven a
- *   comprobar: si algo cambió (préstamo, toma, baja), no se aplica nada y el error queda visible en el acta.
- *   Idempotente: un reintento sobre un traslado ya COMPLETED con esta acta no hace nada; un activo cuyo ítem ya tiene
- *   movimiento no se vuelve a mover.
- * - onRejected: REJECTED, activos liberados sin moverse.
- */
 @Injectable()
 export class TransferActLifecycle implements OnModuleInit {
   constructor(
@@ -73,7 +61,6 @@ export class TransferActLifecycle implements OnModuleInit {
     if (transfer.status !== 'PENDING_SIGNATURES') {
       throw new Error(`El traslado ${transfer.id} está ${transfer.status}, no pendiente de firmas`);
     }
-    // Quien autoriza el movimiento: quien firmó por Control Interno (si tiene usuario); si no, quien creó el traslado.
     const controlPerson = event.signersByRole['CONTROL_INTERNO'] ?? null;
     const [controlUser] = controlPerson
       ? ((await manager.query(
@@ -88,7 +75,6 @@ export class TransferActLifecycle implements OnModuleInit {
       [transfer.id],
     )) as Array<{ assetId: string; reasonId: string; movement_id: string | null }>;
     const pending = items.filter((item) => item.movement_id === null);
-    // Mismas guardas que al crear (préstamo abierto, toma abierta, baja, mismo origen), con los activos bloqueados.
     await this.transfers.assertItems(manager, pending, transfer.source_cost_center_id, transfer.id, { checkReasons: false });
     for (const { assetId } of pending) {
       await this.assetState.apply(

@@ -119,7 +119,6 @@ export class QrTokensController {
     return this.qrTokensService.history(assetId);
   }
 
-  // Sin @RequirePermission: el alcance (global o centro actual del activo) lo decide el servicio.
   @Get('qr/verify')
   @ApiBearerAuth()
   @Throttle(QR_VERIFY_THROTTLE)

@@ -16,13 +16,7 @@ export type ImportJobStatus = (typeof IMPORT_JOB_STATUSES)[number];
 export const IMPORT_JOB_PHASES = ['QUEUED', 'ROWS', 'MOVEMENTS', 'FINALIZING', 'DONE'] as const;
 export type ImportJobPhase = (typeof IMPORT_JOB_PHASES)[number];
 
-/**
- * Un trabajo RUNNING sin latido en este tiempo se considera abandonado (el proceso cayó) y otra instancia lo retoma.
- * El latido se renueva al terminar la fase de filas y en cada lote de movimientos (1.000 activos, ~0,1–0,5 s): 10
- * minutos deja margen amplio para una fase de filas grande sin que dos instancias trabajen a la vez.
- */
 export const IMPORT_JOB_STALE_MINUTES = 10;
-/** Tomas de un trabajo abandonado antes de darlo por FAILED (evita un ciclo si el trabajo tumba el proceso). */
 export const IMPORT_JOB_MAX_ATTEMPTS = 3;
 
 export const IMPORT_JOB_ENTITY = 'STAGING_IMPORT_JOB';
@@ -93,10 +87,8 @@ export interface ImportJobView {
 
 export type ImportJobOutcome = 'SUCCEEDED' | 'FAILED' | 'LEASE_LOST';
 
-/** El arrendamiento del trabajo pasó a otra instancia (o el trabajo ya no está RUNNING): se abandona sin escribir. */
 class LeaseLost extends Error {}
 
-/** Texto del error que se guarda y se muestra: nunca valores de filas (pueden ser datos personales). */
 const describeError = (error: unknown): string => {
   if (error instanceof QueryFailedError) {
     const driver = error.driverError as { code?: string; constraint?: string } | undefined;
@@ -128,19 +120,6 @@ const quarantineLines = (quarantined: Record<string, number>): string[] =>
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([code, count]) => `  - ${count} · ${ISSUE_DESCRIPTIONS[code] ? `${ISSUE_DESCRIPTIONS[code]} ` : ''}[${code}]`);
 
-/**
- * Importación asíncrona sobre el patrón outbox del motor de documentos (document_request + job):
- * - enqueue (POST confirm) solo escribe staging_import_job y responde; nunca hace el trabajo en la petición.
- * - El worker (ImportJobsJob) toma trabajos con FOR UPDATE SKIP LOCKED y un arrendamiento (lease_id); cada
- *   transacción de trabajo empieza bloqueando la fila del trabajo con su lease, así otra instancia no puede tomarlo
- *   mientras tanto y una instancia que perdió el lease no escribe nada.
- * - Fases: ROWS (una transacción: cuarentena + inserción + rows_result del trabajo), MOVEMENTS (lotes de 1.000, cada
- *   uno su transacción con el avance), FINALIZING (una transacción: importación CONFIRMED, auditoría, trabajo
- *   SUCCEEDED, notificación en la app y correo encolado).
- * - Un fallo deja FAILED con la fase donde se detuvo; retry lo vuelve a la cola. Si la fase de filas ya se había
- *   confirmado no se repite (sus conteos quedaron en rows_result) y los movimientos solo se escriben para los activos
- *   que siguen sin ellos: reintentar no duplica activos ni movimientos.
- */
 @Injectable()
 export class ImportJobsService {
   private readonly logger = new Logger(ImportJobsService.name);
@@ -153,7 +132,6 @@ export class ImportJobsService {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
-  /** Confirmar: encola (idempotente, un trabajo por importación) y devuelve el trabajo sin procesarlo. */
   async enqueue(importId: string, actorId: string): Promise<ImportJobView> {
     const [imported] = (await this.dataSource.query('SELECT id, target FROM staging_import WHERE id = $1', [
       importId,
@@ -196,7 +174,6 @@ export class ImportJobsService {
     return Promise.all(rows.map((row) => this.view(row)));
   }
 
-  /** Vuelve a la cola un trabajo FAILED. No repite lo que ya quedó escrito (ver la clase). */
   async retry(jobId: string): Promise<ImportJobView> {
     const [rows] = (await this.dataSource.query(
       `UPDATE staging_import_job SET status = 'QUEUED', phase = 'QUEUED', last_error = NULL, finished_at = NULL,
@@ -211,7 +188,6 @@ export class ImportJobsService {
     return this.find(jobId);
   }
 
-  /** Worker: toma y procesa hasta `limit` trabajos, uno tras otro. */
   async processPending(limit = 5): Promise<number> {
     await this.failAbandoned();
     let processed = 0;
@@ -225,19 +201,16 @@ export class ImportJobsService {
     return processed;
   }
 
-  /** Toma el trabajo más antiguo disponible (o uno abandonado) y lo procesa. null si no hay nada que tomar. */
   async processNext(): Promise<ImportJobOutcome | null> {
     const claim = await this.claim(null);
     return claim ? this.run(claim) : null;
   }
 
-  /** Procesa un trabajo concreto si está en cola (CLI y pruebas). null si otra instancia lo tiene o no está QUEUED. */
   async processJob(jobId: string): Promise<ImportJobOutcome | null> {
     const claim = await this.claim(jobId);
     return claim ? this.run(claim) : null;
   }
 
-  /** Síncrono, para la CLI: encola, procesa y devuelve el resultado (o lanza con el error del trabajo). */
   async runNow(importId: string, actorId: string): Promise<ImportResult> {
     const job = await this.enqueue(importId, actorId);
     if (job.status === 'QUEUED') {
@@ -285,7 +258,6 @@ export class ImportJobsService {
       : null;
   }
 
-  /** Primera sentencia de cada transacción de trabajo: bloquea la fila del trabajo si el lease sigue siendo nuestro. */
   private async hold(manager: EntityManager, claim: Claim): Promise<void> {
     const [row] = (await manager.query(
       `SELECT id FROM staging_import_job WHERE id = $1 AND lease_id = $2 AND status = 'RUNNING' FOR UPDATE`,
@@ -387,7 +359,6 @@ export class ImportJobsService {
     });
   }
 
-  /** Trabajos RUNNING abandonados que agotaron sus tomas: FAILED con aviso, para que se vean y se reintenten a mano. */
   private async failAbandoned(): Promise<void> {
     const abandoned = (await this.dataSource.query(
       `SELECT id, import_id, target, requested_by, lease_id FROM staging_import_job
@@ -402,7 +373,6 @@ export class ImportJobsService {
     }
   }
 
-  /** Aviso en la app y correo encolado, en la transacción que deja el trabajo terminado o fallido. */
   private async notify(
     manager: EntityManager,
     claim: Claim,

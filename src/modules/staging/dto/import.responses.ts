@@ -9,11 +9,6 @@ import {
   TEMPLATE_CATALOGS,
 } from '../import/import-fields.js';
 
-/**
- * Esquemas de respuesta de /imports. Solo documentan lo que ExcelImportService ya devuelve: cambiar un shape exige
- * cambiar ambos.
- */
-
 export class ImportFieldDto {
   @ApiProperty({ description: 'Campo destino (clave del mapeo)' })
   readonly field!: string;
@@ -337,8 +332,6 @@ export class ImportQuarantineRowDto {
   readonly detail!: string | null;
 }
 
-// ---------- POST /imports ----------
-
 export class ImportSampleRowDto {
   @ApiProperty({ type: 'integer', description: 'Fila en la hoja (1 = primera fila de Excel)' })
   readonly rowNumber!: number;
@@ -430,8 +423,6 @@ export class ImportUploadResponseDto {
   })
   readonly template!: ImportUploadedTemplateDto | null;
 }
-
-// ---------- GET /imports/templates ----------
 
 export class ImportTemplateDto {
   @ApiProperty({ enum: IMPORT_TARGETS, enumName: 'ImportTarget' })

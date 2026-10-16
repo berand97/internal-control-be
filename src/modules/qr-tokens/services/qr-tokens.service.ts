@@ -181,13 +181,6 @@ export class QrTokensService {
     }));
   }
 
-  /**
-   * Verificación con sesión Y alcance (decisión del desarrollador: la etiqueta no expone activos de otro centro).
-   * Con asset:read:global, o asset:read:org_unit con el centro de costo ACTUAL del activo entre los del usuario
-   * (asignaciones COST_CENTER ∪ jefaturas), devuelve los datos. Token alterado, activo inexistente, activo de otro
-   * centro o usuario sin alcance: 400 QR_TOKEN_INVALID, la misma respuesta en todos los casos (no distingue «existe
-   * pero no es tuyo»). QR_VERSION_MISMATCH solo se informa sobre activos del alcance.
-   */
   async verify(
     token: string,
     actor: AuthenticatedUser,
@@ -229,7 +222,6 @@ export class QrTokensService {
     };
   }
 
-  /** verify con movimientos recientes y préstamos activos: mismo alcance y mismas respuestas. */
   async verifyAuthenticated(token: string, actor: AuthenticatedUser): Promise<QrVerifyAuthResponseDto> {
     const verified = await this.verify(token, actor, false, 300);
     const assetId = this.decode(token).assetId;
@@ -249,10 +241,6 @@ export class QrTokensService {
     };
   }
 
-  /**
-   * Id del activo de un token vigente (firma válida, activo existente y misma versión que la impresa); null en
-   * cualquier otro caso. Sin alcance: quien lo usa (la solicitud de activos) decide qué puede ver el usuario.
-   */
   async assetIdFromToken(token: string): Promise<string | null> {
     let payload: QrPayload;
     try {
@@ -264,7 +252,6 @@ export class QrTokensService {
     return asset && asset.qrToken && asset.qrTokenVersion === payload.tokenVersion ? asset.id : null;
   }
 
-  /** El activo del token si el usuario lo alcanza; si no (o no existe), QR_TOKEN_INVALID como un token alterado. */
   private async assetInScope(token: string, actor: AuthenticatedUser) {
     const payload = this.decode(token);
     const asset = await this.assetsRepository.findById(payload.assetId);

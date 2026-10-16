@@ -1,10 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-/**
- * Esquemas de respuesta de /notifications. Solo documentan lo que NotificationsService ya devuelve: cambiar un shape
- * exige cambiar ambos.
- */
-
 export const NOTIFICATION_TYPES = ['IMPORT_FINISHED', 'IMPORT_FAILED'] as const;
 
 export class NotificationDto {

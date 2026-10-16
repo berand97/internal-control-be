@@ -233,7 +233,6 @@ export class ImportsController {
     @Param('importId', ParseUUIDPipe) importId: string,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    // Una importación de centros que actualiza la estructura exige cost_center:manage:global también a quien confirma.
     await this.imports.assertCanConfirm(importId, actor.id);
     return this.jobs.enqueue(importId, actor.id);
   }
@@ -251,8 +250,6 @@ export class ImportsController {
   quarantine(@Param('importId', ParseUUIDPipe) importId: string) {
     return this.imports.quarantine(importId);
   }
-
-  // ---------- Importación asíncrona: trabajos (bej-async-import) ----------
 
   @Get('jobs')
   @RequirePermission('asset:create:global')

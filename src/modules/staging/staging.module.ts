@@ -17,8 +17,6 @@ import { StagingLoaderService } from './services/staging-loader.service.js';
 import { ImportTemplateService } from './templates/import-template.service.js';
 
 @Module({
-  // StorageModule es global en la aplicación; se importa explícito para que el CLI de staging y los tests que
-  // montan solo este módulo también tengan StorageService (las plantillas se guardan en el storage).
   imports: [
     AuthModule,
     AssetsModule,

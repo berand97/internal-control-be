@@ -38,7 +38,6 @@ const center = (id: string, code: string, unitId: string | null, parentId: strin
   activeAssets,
 });
 
-/** Organigrama coherente con las reglas: 4 → 41, 43; 3 → 30; consejo sin prefijo. */
 const baseSnapshot = (): OrgChartSnapshot => ({
   units: [
     unit('u4', 'U4', 'Vicerrectoría Financiera', '4', null, OrgUnitType.Vicerectorate),
@@ -142,7 +141,6 @@ describe('plan del Excel del organigrama', () => {
         lines.push(typeof note === 'string' ? note : (note?.texts ?? []).map((part) => part.text).join(''));
       });
       const text = lines.join('\n');
-      // «centros de costo activos» (estado) sí; activos como bienes, no.
       expect(text.replace(/centros de costo activos?/gi, '').replace(/centro activo/gi, '')).not.toMatch(/activos/i);
       expect(text).not.toMatch(/hoja «?Centros de costo/i);
       expect(text).not.toContain('Código anterior');
@@ -232,7 +230,6 @@ describe('plan del Excel del organigrama', () => {
         column: 'Prefijo',
         message: expect.stringMatching(/^Oficina X \(33\) depende de .* \(4\) pero conserva los códigos 33… de Vicerrectoría Académica$/),
       }),
-      // Ninguna unidad tiene el «5».
       expect.objectContaining({ rowNumber: 3, message: expect.stringContaining('pero sus códigos 53… no empiezan por 4') }),
     ]);
   });
@@ -253,7 +250,6 @@ describe('plan del Excel del organigrama', () => {
     ]);
   });
 
-  /** Lógica de centros del plan: el Excel del organigrama no la usa (unitsOnly); se conserva para el de centros. */
   describe('lógica de centros del plan (sin uso en el Excel del organigrama)', () => {
     it('renombrar un centro y una unidad', () => {
       const plan = planOrgChart(
@@ -479,7 +475,6 @@ describe('plan del Excel del organigrama', () => {
   });
 
   describe('códigos de 4 dígitos de Contabilidad en la hoja Organigrama (como la llena Control Interno)', () => {
-    /** Hoja real de Control Interno: Prefijo con el código de Contabilidad y Depende de con el del jefe. */
     const MONICA_ROWS: ReadonlyArray<[string, string, string, string, string]> = [
       ['1', 'RECTORÍA', 'Rectoría', '', 'Autoridad'],
       ['2', 'VICERRECTORÍA ACADÉMICA', 'Vicerrectoría', '1', 'Autoridad'],
@@ -507,7 +502,6 @@ describe('plan del Excel del organigrama', () => {
           unitRow(index + 2, { prefix, name, type, parent: parent || null, relation }),
         ),
       });
-    /** Sin unidades; los centros ya existen en el sistema (se administran en su pantalla). */
     const empty = (): OrgChartSnapshot => ({
       units: [],
       centers: MONICA_CENTERS.map((code) => center(`c${code}`, code, null, null)),
@@ -546,7 +540,6 @@ describe('plan del Excel del organigrama', () => {
         '2: Hay 2 cuadros de tipo Rectoría (1 RECTORÍA; 11 Rectoría): las filas nuevas de un número sin «Depende de» quedan en la raíz',
       );
       expect(messages.some((message) => message.includes('ciclo'))).toBe(false);
-      // Centro propio deducido del Prefijo de 4 dígitos que es un centro del sistema (y 1 → 1010).
       expect(plan.centers).toEqual([]);
       expect(plan.units.map((op) => (op.headCenterKey ? op.headCenterKey.slice(1) : null))).toEqual([
         '1010', null, null, null, null, null, '1110', null, '1210', '1220', null, '1310', null, '1410', null, '1510', '1520', '1530',
@@ -572,7 +565,6 @@ describe('plan del Excel del organigrama', () => {
             unitRow(2, { prefix: '103', name: 'CALIDAD', type: 'Oficina', parent: '1' }),
             unitRow(3, { prefix: '104', name: 'Planeación', type: 'Oficina', parent: '1' }),
             unitRow(4, { prefix: '106', name: 'Planeacion', type: 'Oficina', parent: '1' }),
-            // Bajo otro jefe no es repetida.
             unitRow(5, { prefix: '1021', name: 'Calidad', type: 'Oficina', parent: '102' }),
           ],
         }),
@@ -600,7 +592,6 @@ describe('plan del Excel del organigrama', () => {
       }
     });
 
-    /** Vicerrectoría Financiera «4» con Centro propio 4010 y sus centros 4110…4165 (de 5 en 5). */
     const FINANCE_CODES = ['4110', '4115', '4120', '4125', '4130', '4135', '4140', '4145', '4150', '4155', '4160', '4165'];
     const financeSnapshot = (): OrgChartSnapshot => ({
       units: [
@@ -711,11 +702,9 @@ describe('plan del Excel del organigrama', () => {
       expect(plan.warnings.find((issue) => issue.rowNumber === 2 && issue.column === 'Prefijo')?.message).toMatch(
         /^OFICINA X \(53\) depende de .+ \(4\) pero conserva los códigos 53… de VICERRECTORÍA BIENESTAR$/,
       );
-      // 111 bajo 4: los números 1… son de la Rectoría, ancestro de 4; advertencia sin citarla.
       expect(plan.warnings.find((issue) => issue.rowNumber === 3 && issue.message.startsWith('OFICINA JURÍDICA (111)'))?.message).toMatch(
         /pero sus códigos 111… no empiezan por 4$/,
       );
-      // 111 bajo la Rectoría 1100 (11), que cuelga de la 1: la 1 es ancestro, no «otra unidad».
       const nested = planOrgChart(
         financeSnapshot(),
         only({
@@ -903,7 +892,6 @@ describe('plan del Excel del organigrama', () => {
       const lines: string[] = [];
       workbook.getWorksheet('Instrucciones')?.eachRow((row) => lines.push(String(row.getCell(1).value ?? '')));
       expect(lines.join(' ')).toContain('Tipo (Estructura Orgánica, Acuerdo 008/2021): Dependencia, Rectoría');
-      // El Consejo exportado se escribe con la etiqueta nueva.
       const values: string[] = [];
       sheet?.eachRow((row, rowNumber) => {
         if (rowNumber > 1) {

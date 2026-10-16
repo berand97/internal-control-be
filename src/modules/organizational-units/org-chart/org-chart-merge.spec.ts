@@ -53,7 +53,6 @@ const DOWNLOADED_AT = new Date('2026-10-08T13:00:00.000Z');
 const AFTER = '2026-10-08T15:30:00.000Z';
 const BEFORE = '2026-10-01T10:00:00.000Z';
 
-/** Descarga: el Excel exportado con su sello, leído como lo leería la previsualización. */
 const download = async (units: ReadonlyArray<SnapshotUnit>, at = DOWNLOADED_AT): Promise<OrgChartInput> =>
   parseOrgChartWorkbook(
     await buildOrgChartWorkbook(orgChartExportRows(units, centers), {
@@ -63,10 +62,6 @@ const download = async (units: ReadonlyArray<SnapshotUnit>, at = DOWNLOADED_AT):
     }),
   );
 
-/**
- * Descarga de antes de la columna Color: se le quita la columna a la hoja Organigrama y la huella del Color al sello
- * (última columna de la hoja «_sello»), como eran los archivos viejos.
- */
 const downloadWithoutColor = async (units: ReadonlyArray<SnapshotUnit>): Promise<OrgChartInput> => {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(
@@ -163,7 +158,6 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     const first = edit(await download(units), 'U41', { name: 'Contabilidad A' });
     const second = edit(await download(units), 'U41', { name: 'Contabilidad B' });
     expect(run(units, first).plan.changes.map((change) => change.kind)).toEqual(['RENAMED']);
-    // La primera se aplicó.
     const now = withUnit(units, 'u41', { name: 'Contabilidad A' });
     const lastChanges = changes([['u41', 'NAME', { at: AFTER, byName: 'Ana Pérez' }]]);
     const { merge, plan, errors } = run(now, second, { lastChanges });
@@ -226,7 +220,6 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     expect(warnings.map((warning) => warning.message)).toContainEqual(
       expect.stringMatching(/«Servicios Administrativos» se eliminó el 08\/10\/2026.*Ana Pérez: no se vuelve a crear\. Para crearla de nuevo borre su Código interno/),
     );
-    // Sin rastro de la eliminación también se niega (antes se creaba con ese código).
     const unknown = run(now, input);
     expect(unknown.plan.changes).toEqual([]);
     expect(unknown.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('No hay ninguna unidad con Código interno U43'));
@@ -301,12 +294,9 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
           'Ya existe «Oficina de Calidad» bajo Vicerrectoría Financiera (creada el 08/10/2026 por Ana Pérez). Si es la misma, copie su Código interno (OFICINA_DE_CALIDAD) en la fila; si es otra, escriba su prefijo o un nombre distinto.',
       },
     ]);
-    // Archivo hecho antes de crearla: lo más probable es que ya se haya subido.
     const dated = run(now, { ...input, fileCreatedAt: DOWNLOADED_AT.toISOString() }, { unitOrigins });
     expect(dated.errors[0]?.message).toMatch(/Se creó después de que se hizo este archivo: si ya lo subió antes, esta fila ya está aplicada\.$/);
-    // Con su Código interno copiado: es la misma, 0 cambios.
     expect(run(now, { ...input, units: [{ ...input.units[0]!, code: 'OFICINA_DE_CALIDAD' }] }).plan.changes).toEqual([]);
-    // Mismo nombre sin tildes ni mayúsculas, bajo otro jefe: es otra unidad.
     const elsewhere = run(now, { ...input, units: [{ ...input.units[0]!, name: 'OFICINA DE CALIDAD', parent: '3' }] });
     expect(elsewhere.errors).toEqual([]);
     expect(elsewhere.plan.changes.map((change) => change.kind)).toEqual(['CREATED']);
@@ -322,7 +312,6 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     expect(noPrefix.errors.map((error) => error.message)).toEqual([
       'Ya existe «Calidad» bajo Rectoría (prefijo 102). Si es la misma, copie su Código interno (U102) en la fila; si es otra, escriba su prefijo o un nombre distinto.',
     ]);
-    // Con un prefijo libre crea la tercera y solo advierte el nombre repetido.
     const withPrefix = run(now, { ...input, units: [{ ...row, prefix: '104' }] });
     expect(withPrefix.errors).toEqual([]);
     expect(withPrefix.plan.changes.map((change) => change.kind)).toEqual(['CREATED']);
@@ -332,7 +321,6 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
       column: 'Nombre',
       message: 'Ya existe «Calidad» bajo Rectoría (prefijo 102). ¿Es otra unidad? Si es así, use un nombre que las distinga.',
     });
-    // Con el prefijo de una de ellas: se toma como esa unidad (advertencia), sin error.
     const sameUnit = run(now, { ...input, units: [{ ...row, prefix: '103', name: 'Calidad', type: 'Departamento' }] });
     expect(sameUnit.errors).toEqual([]);
     expect(sameUnit.plan.changes).toEqual([]);
@@ -346,16 +334,13 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     expect(run(now, input([row])).errors.map((error) => error.message)).toEqual([
       'Ya existe «Calidad» en el primer nivel. Si es la misma, copie su Código interno (CALIDAD) en la fila; si es otra, escriba su prefijo o un nombre distinto.',
     ]);
-    // La existente se renombra (o se mueve, o se archiva) en el mismo archivo: la nueva ocupa su lugar.
     const existingRow: UnitRowInput = { ...row, rowNumber: 3, name: 'Calidad Académica', code: 'CALIDAD', type: null };
     const renamed = run(now, input([row, existingRow]));
     expect(renamed.errors).toEqual([]);
     expect(renamed.plan.changes.map((change) => change.kind).sort()).toEqual(['CREATED', 'RENAMED']);
     expect(run(now, input([row, { ...existingRow, name: 'Calidad', status: 'Archivado' }])).errors).toEqual([]);
     expect(run(now, input([row, { ...existingRow, name: 'Calidad', parent: '4' }])).errors).toEqual([]);
-    // La existente en el archivo sin cambios: sigue siendo un duplicado.
     expect(run(now, input([row, { ...existingRow, name: 'CALIDAD' }])).errors.map((error) => error.rowNumber)).toEqual([2]);
-    // Dos filas nuevas con el mismo nombre bajo el mismo jefe (sin prefijo): error en la segunda.
     const twice = run(baseUnits(), input([
       { ...row, parent: '4' },
       { ...row, rowNumber: 3, name: 'calidad', parent: '4000' },
@@ -472,7 +457,6 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
       expect(merge.conflicts).toEqual([]);
       expect(plan.changes.map((change) => change.kind)).toEqual(['RENAMED']);
       expect(plan.units[0]?.color).toBe('#de9927');
-      // Previsualización guardada antes de la columna: filas sin la propiedad color.
       const stored: OrgChartInput = {
         ...renamed,
         units: renamed.units.map(({ color: _color, ...row }) => row),

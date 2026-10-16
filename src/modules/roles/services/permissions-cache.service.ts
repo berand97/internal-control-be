@@ -6,10 +6,6 @@ interface CacheEntry<T> {
   readonly expiresAt: number;
 }
 
-/**
- * Caché por usuario de sus permisos efectivos y de los centros de costo que dirige (cost_center_head). Invalidar
- * a un usuario borra ambas cosas: asignar o terminar una jefatura se ve de inmediato.
- */
 @Injectable()
 export class PermissionsCache {
   private readonly entries = new Map<string, CacheEntry<ReadonlyArray<EffectivePermission>>>();

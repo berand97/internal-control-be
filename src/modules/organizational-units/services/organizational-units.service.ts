@@ -38,7 +38,6 @@ import type {
 
 const ORG_UNIT_ENTITY_TYPE = 'ORG_UNIT';
 
-/** «43 · Contabilidad», o el nombre si no tiene prefijo (motivos del historial: solo códigos y nombres de la estructura). */
 const unitLabel = (unit: { readonly codePrefix: string | null; readonly name: string }): string =>
   unit.codePrefix ? `${unit.codePrefix} · ${unit.name}` : unit.name;
 
@@ -53,7 +52,6 @@ interface HeadCenterChoice {
   readonly warning: string | null;
 }
 
-/** inheritedColor: el color efectivo del padre (el de la rama que se está pintando). */
 const buildTree = (
   units: ReadonlyArray<OrganizationalUnit>,
   parentId: string | null,
@@ -86,13 +84,11 @@ export class OrganizationalUnitsService {
     return items.map(OrganizationalUnitResponseDto.from);
   }
 
-  /** Por defecto solo las activas (una archivada no aparece ni con sus hijas); includeArchived=true las muestra. */
   async tree(includeArchived = false): Promise<ReadonlyArray<OrganizationalUnitTreeResponseDto>> {
     const items = await this.unitsRepository.findAll(includeArchived ? undefined : true);
     return buildTree(items, null);
   }
 
-  /** Prefijo para una unidad nueva bajo parentId: el del ancestro más cercano con prefijo + un dígito libre. */
   async suggestPrefix(parentId: string | undefined): Promise<UnitPrefixSuggestionDto> {
     let ancestor = parentId ? await this.requireUnit(parentId) : null;
     for (let depth = 0; ancestor && !ancestor.codePrefix && depth < 64; depth += 1) {
@@ -233,7 +229,6 @@ export class OrganizationalUnitsService {
       await this.assertPrefixFree(nextPrefix, unit.id);
     }
     const previousParent = unit.parentId ? await this.unitsRepository.findById(unit.parentId) : null;
-    // Solo si cambia el nombre o el jefe: una duplicada de antes no se vuelve a avisar en cada edición.
     const nextName = dto.name ?? unit.name;
     const nameWarning =
       (dto.isActive ?? unit.isActive) && (!sameUnitName(nextName, unit.name) || parentId !== unit.parentId)
@@ -286,7 +281,6 @@ export class OrganizationalUnitsService {
           manager,
         );
         await this.recordHistory(manager, unit, after, previousParent, parent, actor);
-        // Prefijo, padre o estado: los centros del prefijo viejo y del nuevo y los que hoy están en la unidad.
         if (unit.codePrefix !== after.codePrefix || unit.parentId !== after.parentId || unit.isActive !== after.isActive) {
           await this.reconciler.reconcileWithin(
             manager,
@@ -310,7 +304,6 @@ export class OrganizationalUnitsService {
     return { ...OrganizationalUnitResponseDto.from(updated), warnings };
   }
 
-  /** Historial de nombre, código, tipo, padre, prefijo, línea, centro propio, estado y color (org_structure_history). */
   private async recordHistory(
     manager: EntityManager,
     before: OrganizationalUnit,
@@ -354,16 +347,11 @@ export class OrganizationalUnitsService {
         newValue: headChanged ? ((await headLabel(after)) ?? '(ninguno)') : null,
       },
       { entityType: 'ORG_UNIT', entityId: after.id, field: 'STATUS', oldValue: status(before.isActive), newValue: status(after.isActive) },
-      // null en newValue: color quitado (hereda el de su jefe).
       { entityType: 'ORG_UNIT', entityId: after.id, field: 'COLOR', oldValue: before.color, newValue: after.color },
     ];
     await this.history.record(manager, entries, { actorId: actor.id, source: 'MANUAL' });
   }
 
-  /**
-   * Consejo, Comité y Comisión (cuerpos colegiados): sin prefijo (no reciben centros de costo) y sin centro propio
-   * pedido en la misma operación.
-   */
   private assertCollegiateBodyRules(
     type: OrgUnitType,
     codePrefix: string | null,
@@ -395,18 +383,12 @@ export class OrganizationalUnitsService {
     }
   }
 
-  /**
-   * Prefijo frente al del jefe (checkUnitPrefix). No empezar por el del jefe es solo una advertencia (se devuelve):
-   * «Control Interno (432) depende de Rectoría (1) pero conserva los códigos 432… de Contabilidad». 400
-   * ORG_UNIT_PREFIX_OUT_OF_PARENT si es el mismo prefijo del jefe.
-   */
   private async assertPrefixInParent(
     codePrefix: string,
     unitName: string,
     parent: OrganizationalUnit | null,
     unitId: string | null,
   ): Promise<string | null> {
-    // Jefe con prefijo más cercano y prefijos de toda la cadena hacia arriba (nunca cuentan como «otra unidad»).
     let ancestor: OrganizationalUnit | null = null;
     const chain = new Set<string>();
     let current = parent;
@@ -432,10 +414,6 @@ export class OrganizationalUnitsService {
     return check.level === 'WARNING' ? check.message : null;
   }
 
-  /**
-   * Otra unidad activa con el mismo nombre (sin tildes ni mayúsculas) bajo el mismo jefe: advertencia, nunca error (los
-   * nombres no son únicos: dos «Calidad» con prefijos distintos son válidas).
-   */
   private async duplicateNameWarning(
     name: string,
     parent: OrganizationalUnit | null,
@@ -448,10 +426,6 @@ export class OrganizationalUnitsService {
     return sibling ? duplicateSiblingWarning(sibling, parent?.name ?? null) : null;
   }
 
-  /**
-   * Sin hijas activas ni centros activos: se borra de verdad, o se archiva (is_active=false) si algo la referencia
-   * (hijas o centros inactivos, historial de ubicación de algún centro…). Ver StructureRemovalService.
-   */
   async remove(id: string, actor: AuthenticatedUser): Promise<StructureRemovalResultDto> {
     const unit = await this.requireUnit(id);
     const children = await this.unitsRepository.countActiveChildren(unit.id);
@@ -525,7 +499,6 @@ export class OrganizationalUnitsService {
     });
   }
 
-  /** El prefijo de código de centros es único entre unidades activas (uq_org_unit_code_prefix_active). */
   private async assertPrefixFree(codePrefix: string, unitId: string | null): Promise<void> {
     const holder = await this.unitsRepository.findActiveByCodePrefix(codePrefix);
     if (holder && holder.id !== unitId) {
@@ -537,11 +510,6 @@ export class OrganizationalUnitsService {
     }
   }
 
-  /**
-   * Centro propio pedido en POST/PATCH; undefined si no se toca. Por código (prioridad): amarrado si existe activo; si
-   * no, pendiente con advertencia (el conciliador lo amarra cuando el centro se cree o se reactive). Por id: debe
-   * existir (404) y se guarda también su código.
-   */
   private async chooseHeadCenter(dto: {
     readonly headCostCenterId?: string | null;
     readonly headCostCenterCode?: string | null;

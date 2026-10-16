@@ -338,7 +338,6 @@ describe('OrganizationalUnitsService', () => {
       expect.arrayContaining([{ entityType: 'ORG_UNIT', entityId: '2', field: 'COLOR', oldValue: '#de9927', newValue: null }]),
       expect.anything(),
     );
-    // Omitido: no se toca.
     await service.update('2', { name: 'Vicerrectoría Financiera' }, actor);
     expect(unitsRepository.update).toHaveBeenLastCalledWith('2', expect.not.objectContaining({ color: expect.anything() }), expect.anything());
   });
@@ -370,14 +369,12 @@ describe('OrganizationalUnitsService', () => {
     ).resolves.toMatchObject({
       warnings: ['Ya existe «Calidad» bajo Rectoría (prefijo 102). ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
     });
-    // Sin prefijo la otra: sin «(prefijo …)».
     calidad.codePrefix = null;
     await expect(
       service.create({ code: 'CAL3', name: 'Calidad', type: OrgUnitType.Department, parentId: '1' }, actor),
     ).resolves.toMatchObject({
       warnings: ['Ya existe «Calidad» bajo Rectoría. ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
     });
-    // En la raíz solo cuenta la archivada: nada que avisar; bajo otro jefe tampoco.
     await expect(service.create({ code: 'CAL4', name: 'Calidad', type: OrgUnitType.Department }, actor)).resolves.toMatchObject({
       warnings: [],
     });
@@ -404,14 +401,11 @@ describe('OrganizationalUnitsService', () => {
     const byId = new Map([rec, calidad, otra, vf, gestion].map((item) => [item.id, item]));
     vi.mocked(unitsRepository.findById).mockImplementation(async (id) => byId.get(id) ?? null);
     vi.mocked(unitsRepository.findAll).mockResolvedValue([rec, calidad, otra, vf, gestion]);
-    // Ya estaba repetida: cambiar otra cosa no avisa; el mismo nombre con otras mayúsculas tampoco.
     await expect(service.update('3', { color: '#de9927' }, actor)).resolves.toMatchObject({ warnings: [] });
     await expect(service.update('3', { name: 'CALIDAD' }, actor)).resolves.toMatchObject({ warnings: [] });
-    // Mover bajo la Vicerrectoría Financiera, donde ya hay otra «Calidad».
     await expect(service.update('3', { parentId: '4' }, actor)).resolves.toMatchObject({
       warnings: ['Ya existe «Calidad» bajo Vicerrectoría Financiera. ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
     });
-    // Renombrar la Vicerrectoría Financiera (bajo la Rectoría) a «Calidad»: avisa con la primera hermana que encuentra.
     await expect(service.update('4', { name: 'Calidad' }, actor)).resolves.toMatchObject({
       warnings: ['Ya existe «Calidad» bajo Rectoría (prefijo 102). ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
     });

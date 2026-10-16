@@ -21,7 +21,6 @@ const existing = (code: string, extra: Partial<DbCenter> = {}): DbCenter => ({
   ...extra,
 });
 
-// Forma de la hoja 2025: raíces de un dígito, sin «3», subgrupo 3050 por código y 9205 solo por nombre.
 const FILE: FileCenter[] = [
   row(5, '1', false, 'RECTORÍA'),
   row(6, '1000', false),
@@ -119,7 +118,6 @@ describe('plan de estructura de centros de costo', () => {
 describe('textos del diagnóstico de estructura', () => {
   const detailOf = (plan: ReturnType<typeof planCostCenterStructure>, code: string, rawValue: string) =>
     plan.issues.find((issue) => issue.code === code && issue.rawValue === rawValue)?.detail ?? '';
-  // Lo lee quien importa: sin tipos de unidad ni códigos internos (CC_<n>, VICERECTORATE).
   const noInternals = (detail: string) => {
     expect(detail).not.toMatch(/CC_\d|VICERECTORATE|\(VICE|prefijo/u);
   };

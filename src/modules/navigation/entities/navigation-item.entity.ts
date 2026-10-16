@@ -24,7 +24,6 @@ export class NavigationItemEntity {
   @Column({ name: 'required_action', type: 'varchar', length: 30 })
   requiredAction!: string;
 
-  /** Clave del catálogo NAVIGATION_ICONS (CHECK ck_navigation_item_icon); null deja el ícono por defecto. */
   @Column({ name: 'icon', type: 'varchar', length: 40, nullable: true })
   icon!: NavigationIcon | null;
 

@@ -12,50 +12,27 @@ import {
   type UnitRowInput,
 } from './org-chart.types.js';
 
-/**
- * Sello del Excel del organigrama: hoja «_sello» oculta (veryHidden: no aparece en Mostrar hojas) y protegida.
- *
- * Guarda la versión del formato, el tipo de libro (exportación o plantilla), la hora exacta de la exportación, la
- * revisión de la estructura (hash del estado de todas las unidades) y, por cada fila exportada, su Código interno con
- * la huella (hash) de cada columna editable tal como se escribió. Con eso, al subir el archivo se sabe qué columnas
- * cambió la persona (merge de tres vías: org-chart-merge.ts). La huella no es una firma: solo protege de errores.
- */
-
 export const STAMP_SHEET = '_sello';
 export const STAMP_FORMAT_VERSION = 1;
 
 export type StampKind = 'EXPORT' | 'TEMPLATE';
 
-/**
- * Columnas editables con huella (Acción no: siempre sale vacía). Van en este orden en la hoja «_sello»: una columna
- * nueva se agrega al final.
- */
 export const STAMP_COLUMNS = ['prefix', 'name', 'type', 'parent', 'relation', 'headCenter', 'status', 'color'] as const;
 export type StampColumn = (typeof STAMP_COLUMNS)[number];
 
-/**
- * Columnas que los sellos viejos no traen (se agregaron después): sin huella ('') la columna se trata como en un archivo
- * sin sello (se aplica si dice algo distinto del sistema; vacía no cambia nada).
- */
 export const LATER_STAMP_COLUMNS: ReadonlySet<StampColumn> = new Set<StampColumn>(['color']);
 
 export type StampValues = Readonly<Record<StampColumn, string | null>>;
 
 export interface StampRow {
   readonly code: string;
-  /**
-   * Huella de cada columna con el valor que traía el archivo al descargarlo. '' (o ausente, en previsualizaciones
-   * guardadas antes) en una columna de LATER_STAMP_COLUMNS: el sello es anterior a esa columna.
-   */
   readonly columns: Readonly<Record<StampColumn, string>>;
 }
 
 export interface OrgChartStamp {
   readonly formatVersion: number;
   readonly kind: StampKind;
-  /** Hora exacta de la exportación (ISO, con milisegundos). */
   readonly exportedAt: string;
-  /** Revisión de la estructura al exportar (structureRevision). */
   readonly revision: string;
   readonly rows: ReadonlyArray<StampRow>;
 }
@@ -71,11 +48,6 @@ export const STAMP_COLUMN_HEADERS: Readonly<Record<StampColumn, string>> = {
   color: UNIT_HEADERS.color,
 };
 
-/**
- * Valor comparable de una celda: el Nombre sin espacios al borde (distingue mayúsculas: renombrar «contabilidad» a
- * «Contabilidad» es un cambio); el Color como se guarda (#DE9927, DE9927 y #de9927 son el mismo); el resto sin tildes,
- * minúsculas y con espacios compactados (como se interpretan).
- */
 export const comparableValue = (column: StampColumn, text: string | null | undefined): string => {
   if (text === null || text === undefined) {
     return '';
@@ -117,7 +89,6 @@ export const stampRow = (code: string, values: StampValues): StampRow => ({
   >,
 });
 
-/** Revisión exacta de la estructura: hash de todos los campos de todas las unidades (orden estable por id). */
 export const structureRevision = (units: ReadonlyArray<SnapshotUnit>): string =>
   createHash('sha256')
     .update(
@@ -140,8 +111,6 @@ export const structureRevision = (units: ReadonlyArray<SnapshotUnit>): string =>
       ),
     )
     .digest('hex');
-
-// ─── Hoja «_sello» ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 const META_ROWS = 4;
 const TABLE_HEADER_ROW = 6;
@@ -182,7 +151,6 @@ export type StampReading =
 const text = (value: string | number | boolean | undefined): string | null =>
   value === undefined ? null : String(value).trim() || null;
 
-/** Lee la hoja «_sello»; INVALID si está dañada o es de un formato que no se conoce. */
 export const readStampSheet = (sheets: ReadonlyArray<RawSheet>): StampReading => {
   const sheet = sheets.find((candidate) => candidate.name === STAMP_SHEET);
   if (!sheet) {

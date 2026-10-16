@@ -212,7 +212,6 @@ export class TypeOrmUsersRepository implements UsersRepository {
          RETURNING id, user_id`,
         [id, at, revokedBy, reason],
       )) as [Array<{ id: string; user_id: string }>, number];
-      // Cada vuelta revoca las delegaciones hechas desde las asignaciones recién revocadas (cadenas incluidas).
       while (frontier[0].length > 0) {
         for (const row of frontier[0]) {
           affected.add(row.user_id);

@@ -349,11 +349,6 @@ export class UsersService {
     return null;
   }
 
-  /**
-   * Solo devuelve a ACTIVE una cuenta INACTIVE o SUSPENDED, y solo si el actor puede administrar al usuario (BE-07).
-   * Una cuenta ACTIVE o pendiente de activación no se "reactiva": en la pendiente, saltarse la activación dejaría
-   * viva una contraseña temporal como si fuera definitiva.
-   */
   async reactivate(id: string, actor: AuthenticatedUser): Promise<null> {
     const user = await this.requireUser(id);
     await this.privilege.assertCanAdministerUser(actor, user.id);
@@ -378,7 +373,6 @@ export class UsersService {
     return null;
   }
 
-  /** Restablecer el MFA de otro usuario: además de las reglas de MfaAccountService, exige poder administrarlo. */
   async resetMfa(
     id: string,
     reason: string,
@@ -395,7 +389,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     origin: RequestOrigin,
   ): Promise<UserRoleResponseDto> {
-    // Nadie se autoasigna roles, tampoco SUPER_ADMIN: siempre lo hace otro administrador.
     if (userId === actor.id) {
       throw new ApiException(ErrorCode.RoleSelfAssignmentForbidden);
     }
@@ -495,9 +488,7 @@ export class UsersService {
     if (assignment.revokedAt) {
       throw new ApiException(ErrorCode.InvalidState);
     }
-    // BE-07: quitarle un rol a otro exige poder administrarlo (revocarse uno propio solo reduce privilegios).
     await this.privilege.assertCanAdministerUser(actor, userId);
-    // BE-08: las delegaciones hechas desde esta asignación caen con ella, en la misma transacción.
     const affected = await this.usersRepository.revokeUserRoleCascade(
       assignment.id,
       actor.id,
@@ -531,7 +522,6 @@ export class UsersService {
     actor: AuthenticatedUser,
     origin: RequestOrigin,
   ): Promise<UserRoleResponseDto> {
-    // Delegarse a uno mismo el rol de otro es autoasignación. Delegar el propio rol a otra persona sí se permite.
     if (dto.toUserId === actor.id) {
       throw new ApiException(ErrorCode.RoleSelfAssignmentForbidden);
     }
@@ -558,12 +548,10 @@ export class UsersService {
     if (validUntil <= now) {
       throw new ApiException(ErrorCode.DelegationRequiresExpiry);
     }
-    // BE-08: la delegación nunca sobrevive a la asignación de la que sale; al vencer el origen vence ella también.
     if (assignment.validUntil && validUntil > assignment.validUntil) {
       throw new ApiException(ErrorCode.DelegationExceedsSourceValidity);
     }
 
-    // BE-08: delegar es otorgar: mismas reglas que asignar (isAssignable, rango y cupo max_concurrent_users).
     const role = await this.requireAssignableRole(assignment.roleId, actor);
 
     try {
