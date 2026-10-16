@@ -11,10 +11,6 @@ import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { scalar, openTestSession, withGrantReason } from './helpers.js';
 
-/**
- * BE-02 (herencia evade assertCanGrant y SoD) y BE-03 (permisos de roles borrados siguen vigentes), por HTTP real
- * contra PostgreSQL real. También cubre que la administración en cascada legítima siga funcionando.
- */
 describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -86,7 +82,6 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
     return rows.map((row) => row.permission_code);
   };
 
-  /** Crea un rol por SQL (fuera de la API), como lo dejaría un dato heredado o un script. */
   const insertRole = async (code: string, level: number, parentCode: string | null): Promise<string> => {
     return scalar<string>(
       dataSource,
@@ -141,8 +136,6 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
   });
 
   describe('BE-02: la herencia pasa por las mismas reglas que otorgar permisos', () => {
-    // Decisión del desarrollador: asignar herencia sigue la regla de otorgar permisos. SUPER_ADMIN (administración pura)
-    // puede hacerlo sin tener los permisos del padre; la BD sigue impidiendo que un SUPER_ADMIN termine con ese rol.
     it('SUPER_ADMIN puede crear un rol que herede del Director, como puede otorgarle sus permisos', async () => {
       const admin = await createUser(['SUPER_ADMIN']);
       const response = await call('post', '/roles', admin.token).send({
@@ -258,13 +251,10 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
         const assigned = await call('post', `/users/${holder.id}/roles`, admin.token).send({ roleId: id, scopeType: 'GLOBAL' });
         expect(assigned.status).toBe(201);
       }
-      // C hereda de B: el titular de A quedaría con A y B (efectivo). La política deja pasar (el actor tiene
-      // role:read:global); la regla la hace cumplir la BD y la API responde 406.
       const reparent = await call('patch', `/roles/${roleC}`, admin.token).send({ parentRoleId: roleB });
       expect(reparent.status).toBe(406);
       expect(reparent.body.error.code).toBe('SOD_VIOLATION');
 
-      // Y al revés: con C → B ya vigente para otro usuario, asignarle A también viola la regla por herencia.
       const other = await createUser([]);
       const roleD = await createRole(null);
       const linked = await call('patch', `/roles/${roleD}`, admin.token).send({ parentRoleId: roleB });
@@ -277,7 +267,6 @@ describe('Herencia de roles: privilegios, SoD y borrado (HTTP real + PostgreSQL 
 
     describe('cascada legítima: el Director crea un rol "asistente"', () => {
       beforeAll(async () => {
-        // En la semilla solo SUPER_ADMIN crea roles; se concede al Director para probar la cascada y se retira después.
         await dataSource.query(
           `INSERT INTO role_permission (role_id, permission_id)
            SELECT r.id, p.id FROM role r, permission p

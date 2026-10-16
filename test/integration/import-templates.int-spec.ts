@@ -1,6 +1,3 @@
-// Plantillas Excel de importación (PostgreSQL real + storage del proyecto): generadas desde la definición, guardadas
-// en el storage y regeneradas solo si cambia la definición o un catálogo; reconocidas al subir (versión, mapeo,
-// fila de ejemplo ignorada); plantillas viejas y columnas extra no rompen nada; un Excel cualquiera sigue igual.
 import type { TestingModule } from '@nestjs/testing';
 import ExcelJS from 'exceljs';
 import { randomUUID } from 'node:crypto';
@@ -31,7 +28,6 @@ const load = async (body: Buffer): Promise<ExcelJS.Workbook> => {
 
 const save = async (workbook: ExcelJS.Workbook): Promise<Buffer> => Buffer.from(await workbook.xlsx.writeBuffer());
 
-/** Llena la hoja de datos de una plantilla desde la fila 3 (la 2 es el ejemplo), por encabezado. */
 const fill = (sheet: ExcelJS.Worksheet, rows: ReadonlyArray<Record<string, Cell>>): void => {
   const letters = new Map<string, number>();
   sheet.getRow(1).eachCell((cell, column) => letters.set(String(cell.value), column));
@@ -59,10 +55,6 @@ const setMeta = (workbook: ExcelJS.Workbook, key: string, value: string): void =
   });
 };
 
-/**
- * Simula una plantilla de una versión anterior a partir de la vigente con una columna menos: otra versión y la fila
- * de ejemplo registrada tal como quedó (una plantilla vieja real trae su propio ejemplo coherente con sus columnas).
- */
 const asOlderVersion = async (workbook: ExcelJS.Workbook, target: ImportTarget): Promise<void> => {
   setMeta(workbook, 'version', '0000000old');
   const sheets = await readWorkbook(await save(workbook));
@@ -125,7 +117,6 @@ describe('Plantillas Excel de importación (PostgreSQL real)', () => {
     expect(row).toMatchObject({ storage_driver: 'project', file_name: a.fileName });
     expect(row?.storage_key).toMatch(new RegExp(`^templates/imports/PERSONS/${templateVersion('PERSONS')}/`));
 
-    // Un centro nuevo cambia el catálogo: otro archivo, misma versión. COST_CENTERS no usa ese catálogo: no cambia.
     await dataSource.query(`INSERT INTO cost_center (external_code, name) VALUES ($1, 'Centro nuevo')`, [`V${tag().slice(0, 5)}`]);
     const after = await templates.list(actor.id);
     expect(await count('SELECT count(*) FROM import_template')).toBe(generated + 2);
@@ -236,7 +227,6 @@ describe('Plantillas Excel de importación (PostgreSQL real)', () => {
     const mapping = upload.template?.mapping ?? {};
     expect(mapping['email']).toBeUndefined();
     const preview = await imports.preview(upload.batchId, { sheet: DATA_SHEET_NAME.PERSONS, target: 'PERSONS', mapping }, actor.id);
-    // No se rechaza, y la validación no se relaja: sin correo, a cuarentena.
     expect(preview.summary).toMatchObject({
       rowsRead: 1,
       toInsert: 0,
@@ -277,7 +267,6 @@ describe('Plantillas Excel de importación (PostgreSQL real)', () => {
     const preview = await imports.preview(upload.batchId, { sheet: DATA_SHEET_NAME.ASSETS, target: 'ASSETS', mapping }, actor.id);
     expect(preview.summary).toMatchObject({ rowsRead: 1, toInsert: 0, quarantined: { REQUIRED_FIELD_MISSING: 1 } });
     expect(preview.summary.template?.missingColumns).toEqual([{ field: 'description', header: 'Descripción', required: true }]);
-    // Un Excel cualquiera sin esa columna sigue rechazando el mapeo, como siempre.
   });
 
   it('activos: columna extra reportada, 01979 preservado, catálogos resueltos, valores fuera de catálogo a cuarentena', async () => {
@@ -321,7 +310,6 @@ describe('Plantillas Excel de importación (PostgreSQL real)', () => {
       unmappedColumns: [{ column: String.fromCharCode(64 + lastColumn), header: 'Sede' }],
       template: { exampleRowsIgnored: [2] },
     });
-    // El diagnóstico no confunde el valor del desplegable con un centro inexistente.
     const issues = await imports.issues(preview.importId, 1, 100);
     expect(issues.items.filter((item) => item.code === 'COST_CENTER_UNKNOWN')).toEqual([]);
     expect(issues.items).toEqual(
@@ -384,7 +372,6 @@ describe('Plantillas Excel de importación (PostgreSQL real)', () => {
     ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
-  // Opcional: el informe real de activos (REAL_ASSET_REPORT=<ruta>). No se versiona (datos institucionales).
   const realReport = process.env['REAL_ASSET_REPORT'];
   it.skipIf(!realReport || !existsSync(realReport))('el informe real de activos se sube y previsualiza como antes', async () => {
     const upload = await imports.upload(await readFile(realReport as string), 'informe-real.xlsx', actor.id);

@@ -1,7 +1,3 @@
-// Hallazgos de la auditoría de seguridad BE-01, BE-05 y BE-06 con HTTP real y PostgreSQL real:
-// - BE-01: la carpeta del almacenamiento local no se cambia por API, la fila de BD se ignora y ninguna clave sale de ella.
-// - BE-05: cada carga multipart tiene tope de tamaño y de archivos; un Excel "bomba" se rechaza antes de inflarse.
-// - BE-06: un correo con salto de línea no entra por la importación ni por la base, y fromName no admite CR/LF.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import ExcelJS from 'exceljs';
@@ -95,7 +91,6 @@ describe('Endurecimiento BE-01 / BE-05 / BE-06 (HTTP real + PostgreSQL real)', (
         .buffer(true)
         .expect(200);
       expect(Buffer.from(found.body as Buffer).toString()).toBe('contenido del volumen');
-      // Con la raíz en "/" esta clave habría leído el archivo del sistema; ahora apunta dentro del volumen.
       await http().get('/api/v1/storage/objects').query({ key: 'etc/hostname' }).set(auth('admin')).expect(404);
     });
   });

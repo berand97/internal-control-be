@@ -16,11 +16,6 @@ import { EventsMetrics } from '../../src/shared/events/events-metrics.js';
 import { PgEventBus } from '../../src/shared/events/pg-event-bus.js';
 import { openTestSession, scalar } from './helpers.js';
 
-/**
- * Canal de eventos (SSE) con HTTP real y PostgreSQL real: ticket de un solo uso, entrega tras COMMIT vía
- * LISTEN/NOTIFY (también entre dos aplicaciones), Last-Event-ID, revocación de sesión en el latido, límites y
- * throttler. Latido corto por entorno (EVENTS_HEARTBEAT_MS) y límites chicos para poder probarlos.
- */
 process.env['EVENTS_HEARTBEAT_MS'] = '300';
 process.env['EVENTS_MAX_STREAMS'] = '4';
 process.env['THROTTLE_USER_LIMIT'] = '20';
@@ -35,11 +30,8 @@ interface SseClient {
   readonly status: number;
   readonly headers: IncomingHttpHeaders;
   readonly messages: SseMessage[];
-  /** Cuerpo JSON si la respuesta no fue un stream (errores). */
   readonly body: () => string;
-  /** Latidos: eventos `ping` con data {} y sin id (no entran en messages). */
   pings: () => number;
-  /** Comentarios SSE recibidos (el latido ya no es un comentario: EventSource no los entrega a JavaScript). */
   comments: () => number;
   isEnded: () => boolean;
   waitFor: (predicate: (message: SseMessage) => boolean, timeoutMs?: number) => Promise<SseMessage>;
@@ -82,7 +74,6 @@ const openSse = (port: number, path: string, headers: Record<string, string> = {
             }
           }
           if (event === 'ping') {
-            // Latido visible para EventSource: data {} y nunca id (no mueve Last-Event-ID).
             if (id !== undefined || data !== '{}') {
               throw new Error(`Latido inesperado: id=${id} data=${data}`);
             }
@@ -286,7 +277,6 @@ describe('Canal de eventos SSE (HTTP real + PostgreSQL LISTEN/NOTIFY)', () => {
       await second.waitEnded();
       expect(second.status).toBe(401);
       expect(JSON.parse(second.body())).toMatchObject({ error: { code: 'EVENTS_TICKET_INVALID' }, action: 'RETRY' });
-      // Tampoco en la otra instancia: el ticket vive en la BD, no en memoria.
       const third = await openSse(portB, `/api/v1/events?ticket=${ticket}`);
       await third.waitEnded();
       expect(third.status).toBe(401);
@@ -341,7 +331,6 @@ describe('Canal de eventos SSE (HTTP real + PostgreSQL LISTEN/NOTIFY)', () => {
         user.id,
       ]);
       expect(ready.id).toBe(latest);
-      // Sin Last-Event-ID no repone nada: la lista se lee por GET /notifications.
       await sleep(700);
       expect(stream.messages.filter((m) => m.event === 'notification')).toHaveLength(0);
       expect(stream.pings()).toBeGreaterThanOrEqual(1);
@@ -451,11 +440,9 @@ describe('Canal de eventos SSE (HTTP real + PostgreSQL LISTEN/NOTIFY)', () => {
       const ids = replayed.map((m) => BigInt(m.id as string));
       expect(ids.every((id, index) => index === 0 || id > (ids[index - 1] as bigint))).toBe(true);
       expect(ids[0]).toBeGreaterThan(BigInt(ready.id as string));
-      // Sigue en vivo después de reponer.
       const live = await notify(user.id, 'en vivo');
       await resumed.waitFor((m) => m.event === 'notification' && m.data['id'] === live);
 
-      // Reconexión con ticket nuevo: lastEventId en la query.
       const viaQuery = await connect(user, { queryLastEventId: replayed[0]?.id as string });
       await viaQuery.waitFor((m) => m.event === 'notification' && m.data['id'] === live);
       expect(viaQuery.messages.filter((m) => m.event === 'notification').map((m) => m.data['id'])).toEqual([
@@ -543,11 +530,9 @@ describe('Canal de eventos SSE (HTTP real + PostgreSQL LISTEN/NOTIFY)', () => {
       await rejected.waitEnded();
       expect(rejected.status).toBe(503);
       expect(JSON.parse(rejected.body())).toMatchObject({ error: { code: 'EVENTS_CAPACITY_REACHED' }, action: 'RETRY' });
-      // Reemplazar uno propio no suma: se admite aunque la instancia esté llena.
       const replacing = await connect(heavy);
       expect(replacing.status).toBe(200);
       expect(appA.get(EventStreamsService).openTotal()).toBe(4);
-      // La otra instancia tiene su propio cupo.
       const elsewhere = await connect(light, { port: portB, app: appB });
       expect(elsewhere.status).toBe(200);
     });
@@ -556,7 +541,6 @@ describe('Canal de eventos SSE (HTTP real + PostgreSQL LISTEN/NOTIFY)', () => {
       const user = await createUser();
       const stream = await connect(user);
       await stream.waitFor((m) => m.event === 'ready');
-      // 19 tickets más (20 con el del stream): el 21.º excede THROTTLE_USER_LIMIT=20.
       for (let index = 0; index < 19; index += 1) {
         await ticketFor(user);
       }
@@ -564,16 +548,13 @@ describe('Canal de eventos SSE (HTTP real + PostgreSQL LISTEN/NOTIFY)', () => {
         .post('/api/v1/events/ticket')
         .set('Authorization', `Bearer ${user.token}`);
       expect(blocked.status).toBe(429);
-      // Otro usuario desde la misma IP conserva su cupo.
       await ticketFor(await createUser());
-      // GET /events no cuenta: más aperturas que el límite por IP (100) y ninguna es 429.
       const statuses = new Set<number>();
       for (let index = 0; index < 110; index += 1) {
         const response = await request(appA.getHttpServer()).get(`/api/v1/events?ticket=${'B'.repeat(43)}`);
         statuses.add(response.status);
       }
       expect([...statuses]).toEqual([401]);
-      // Y el stream abierto sigue vivo, con latidos.
       const before = stream.pings();
       await sleep(700);
       expect(stream.isEnded()).toBe(false);
@@ -609,7 +590,6 @@ describe('Canal de eventos SSE (HTTP real + PostgreSQL LISTEN/NOTIFY)', () => {
       while (bus.isListening() && Date.now() < deadline) {
         await sleep(10);
       }
-      // Publicada mientras nadie escucha (A y B cayeron a la vez).
       const missed = await notify(user.id, 'durante la caída');
       await stream.waitFor((m) => m.event === 'notification' && m.data['id'] === missed, 5000);
       expect(bus.isListening()).toBe(true);

@@ -1,10 +1,3 @@
-// Plantilla OCI-17-89 (Traslado de activos).
-//
-// El formato institucional solo existe en Excel (docs/acta de traslado de activos fijos mdf.xlsx); la plantilla Word
-// se arma con sus textos sobre el paquete limpio de OCI-01-65-v2.docx:
-//   node scripts/formats/build-oci-17-89-template.mjs templates/formats/OCI-01-65-v2.docx "docs/acta de traslado de activos fijos mdf.xlsx" templates/formats/OCI-17-89-v1.docx
-// y se carga al motor como plantilla del formato (POST /documents/formats/OCI-17-89/templates, sgcVersion=1).
-// No usa Gotenberg: renderiza el DOCX con el renderizador real del repo.
 import { existsSync, readFileSync } from 'node:fs';
 import PizZip from 'pizzip';
 import { readDocxPlaceholders, renderDocx } from '../../src/modules/document-templates/domain/docx-template.js';

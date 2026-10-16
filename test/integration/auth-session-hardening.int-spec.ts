@@ -31,11 +31,6 @@ interface TestUser {
   readonly email: string;
 }
 
-/**
- * Segunda pasada de seguridad sobre autenticación y administración de usuarios (BE-07, BE-08, BE-09, BE-11, BE-13,
- * BE-14 y el código de bloqueo por cuenta), por HTTP real contra PostgreSQL real. Cada prueba reproduce el escenario
- * del hallazgo y comprueba que el flujo legítimo sigue funcionando.
- */
 describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -95,7 +90,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
     return { id, personId, username: `sec2.${tag}`, email };
   };
 
-  /** Token con sesión real (familia ACTIVE). mfa: sesión verificada con segundo factor (para el reset de MFA). */
   const tokenFor = async (
     user: TestUser,
     roles: ReadonlyArray<string>,
@@ -118,7 +112,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
     return { user, token: await tokenFor(user, ['SUPER_ADMIN'], true) };
   };
 
-  /** Rol administrable propio (nivel 1, bajo SUPER_ADMIN) con los permisos dados. */
   const createRole = async (
     permissions: ReadonlyArray<string>,
     options: {
@@ -176,7 +169,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
     );
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
-    // La misma configuración de CORS que main.ts.
     app.enableCors(buildCorsOptions([FRONTEND_ORIGIN]));
     await app.init();
     dataSource = app.get(DataSource);
@@ -209,7 +201,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       const victim = await createUser(['VIEWER']);
       const token = (await login(victim.username, PASSWORD)).body.data
         .accessToken as string;
-      // Primera petición: el estado queda en caché.
       expect((await call('get', '/auth/me', token)).status).toBe(200);
 
       expect(
@@ -279,7 +270,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
 
     it('las decisiones de privilegio usan los roles vigentes en BD, no los del token', async () => {
       const admin = await superAdmin();
-      // Actor con SUPER_ADMIN y un rol propio que da role:manage:global (así el guard de permisos no lo frena).
       const manager = await createRole([
         'role:manage:global',
         'role:read:global',
@@ -294,8 +284,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
 
       const otherSuperior = await createRole([]);
 
-      // Control: con SUPER_ADMIN vigente reorganiza (mueve el rol a otro superior). Re-apuntar al mismo superior ya
-      // no es reorganizar (no se revalida nada), así que el control cambia de superior de verdad.
       const before = await call(
         'patch',
         `/roles/${target.id}`,
@@ -310,7 +298,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       );
       expect(revoked.status).toBe(200);
 
-      // El token todavía dice SUPER_ADMIN; la BD ya no.
       const after = await call('patch', `/roles/${target.id}`, actorToken).send(
         { superiorRoleId: manager.id },
       );
@@ -352,7 +339,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
     let helpdeskRole: { id: string; code: string };
 
     beforeAll(async () => {
-      // "Mesa de ayuda": nivel 1 (igual que el Director), con user:manage:global y role:assign:global.
       helpdeskRole = await createRole([
         'user:manage:global',
         'user:read:global',
@@ -398,7 +384,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
         await assignmentOf(director.id, 'INTERNAL_CONTROL_DIRECTOR'),
       ).toBeTruthy();
 
-      // Suspendido: tampoco puede reactivarlo.
       await dataSource.query(
         `UPDATE app_user SET status = 'SUSPENDED' WHERE id = $1`,
         [director.id],
@@ -681,7 +666,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
     it('el mismo código TOTP no sirve dos veces dentro de su ventana', async () => {
       const user = await createUser(['VIEWER']);
       const { secret } = await enroll(user);
-      // El código de la confirmación ya quedó usado: simula el paso de 30 s siguiente para el primer login.
       await dataSource.query(
         'UPDATE app_user SET mfa_last_totp_step = NULL WHERE id = $1',
         [user.id],
@@ -717,7 +701,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       expect(Number(step)).toBe(Math.floor(Date.now() / 1000 / 30));
       const challenge = (await login(user.username, PASSWORD)).body.data
         .mfaChallengeToken as string;
-      // Solo si seguimos en el mismo paso de 30 s el código es el mismo que se usó al confirmar.
       if (Math.floor(Date.now() / 1000 / 30) === Number(step)) {
         const reuse = await call('post', '/auth/mfa/verify', challenge).send({
           code: await freshTotp(secret),
@@ -788,7 +771,6 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       );
       expect(Math.abs(median(known) - median(unknown))).toBeLessThan(50);
       expect(Math.max(...known)).toBeLessThan(1_500);
-      // El correo sí sale (en segundo plano) y deja token y auditoría.
       await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(5));
       await Promise.all(deliveries);
       await vi.waitFor(async () =>
@@ -858,18 +840,15 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       expect(await expiresIn()).toBeGreaterThan(71.9 * HOUR);
       expect(await expiresIn()).toBeLessThanOrEqual(72 * HOUR);
 
-      // Vigente: entra y debe cambiar la contraseña.
       const fresh = await login(email, passwords[0] ?? '');
       expect(fresh.status).toBe(200);
       expect(fresh.body.data.user.mustChangePassword).toBe(true);
-      // El login trae, además de los códigos, el nombre editable de cada rol (el de la BD).
       expect(fresh.body.data.user.roles).toEqual(['VIEWER']);
       expect(fresh.body.data.user.roleDetails).toEqual([
         { code: 'VIEWER', name: await scalar<string>(dataSource, `SELECT name FROM role WHERE code = 'VIEWER'`) },
       ]);
       const pendingToken = fresh.body.data.accessToken as string;
 
-      // Vencida: ni login ni la sesión que abrió.
       await dataSource.query(
         `UPDATE app_user SET invitation_expires_at = NOW() - interval '1 second' WHERE id = $1`,
         [userId],
@@ -878,10 +857,8 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       expect(expired.status).toBe(403);
       expect(expired.body.error.code).toBe('INVITATION_EXPIRED');
       expect((await call('get', '/auth/me', pendingToken)).status).toBe(401);
-      // Con contraseña errónea sigue siendo 401 (no se revela el estado de la invitación).
       expect((await login(email, WRONG_PASSWORD)).status).toBe(401);
 
-      // El reenvío genera otra contraseña y renueva el plazo.
       expect(
         (await call('post', `/users/${userId}/resend-invitation`, admin.token))
           .status,

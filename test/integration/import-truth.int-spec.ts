@@ -1,7 +1,3 @@
-// La importación dice lo que va a hacer antes de escribir (HTTP real + PostgreSQL real): muestra de filas al subir
-// (acotada y sin rastro en audit_log ni en staging_import), resumen llano por campo, bloqueo cuando un campo sin
-// columna rechazaría el 100 % de las filas, y la vista previa cuenta cada recorte, vida útil descartada y
-// categoría/condición vacías que el INSERT aplica: lo contado es exactamente lo que queda en el modelo.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import ExcelJS from 'exceljs';
@@ -123,7 +119,6 @@ describe('La importación dice la verdad antes de escribir (HTTP real + PostgreS
     };
     expect(sheet.detectedHeaderRow).toBe(2);
     expect(sheet.sampleRows).toHaveLength(SAMPLE_ROWS);
-    // La fila 4 no existe (vacía): la muestra son las primeras con datos.
     expect(sheet.sampleRows.map((row) => row.rowNumber)).toEqual([3, 5, 6]);
     const first = sheet.sampleRows[0]?.cells ?? {};
     expect(Object.keys(first).sort()).toEqual(['A', 'B', 'C']);
@@ -132,7 +127,6 @@ describe('La importación dice la verdad antes de escribir (HTTP real + PostgreS
     expect(first['B']?.endsWith('…')).toBe(true);
     expect(first['B']?.startsWith(secret)).toBe(true);
 
-    // Nada de la muestra se guarda ni se audita: subir no escribe audit_log ni una importación.
     expect(await count('SELECT count(*) FROM audit_log')).toBe(auditBefore);
     expect(await count('SELECT count(*) FROM staging_import')).toBe(importsBefore);
     expect(await count('SELECT count(*) FROM audit_log WHERE changes::text LIKE $1', [`%${secret}%`])).toBe(0);
@@ -197,7 +191,6 @@ describe('La importación dice la verdad antes de escribir (HTTP real + PostgreS
       3: [id(2), 'X-2', 'Silla', center, null, null, 'F'.repeat(101), 5.5, null, null],
       4: [id(3), 'X-3', 'Mesa', center, null, null, null, 'cinco', 'TRUTH_CAT', null],
       5: [id(4), 'X-4', 'Archivador', center, null, null, null, 7, null, 'FAIR'],
-      // Centro inexistente: va a cuarentena, no se importa, así que su recorte y su vida útil no se cuentan.
       6: [id(5), 'X-5', 'D'.repeat(700), 'NO-EXISTE-TR', null, null, null, 'nunca', null, null],
     });
     const upload = await imports.upload(file, 'activos-verdad.xlsx', actor.id);
@@ -253,7 +246,6 @@ describe('La importación dice la verdad antes de escribir (HTTP real + PostgreS
     const model = async (condition: string) =>
       count(`SELECT count(*) FROM (${imported}) a WHERE ${condition}`, [preview.importId]);
     expect(await model('true')).toBe(4);
-    // Lo que la vista previa contó es lo que quedó en el modelo.
     expect(await model('length(a.barcode) = 50')).toBe(1);
     expect(await model('length(a.description) = 500')).toBe(1);
     expect(await model('length(a.model) = 150')).toBe(1);

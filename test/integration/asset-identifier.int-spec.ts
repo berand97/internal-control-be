@@ -129,9 +129,6 @@ describe('Identificadores de activo (PostgreSQL real)', () => {
       await runner.query('DELETE FROM asset_identifier');
       await migration.down(runner);
 
-      // Mismo formato que el generador (A<año>-<n>) para que el backfill lo marque GENERATED,
-      // pero con año 0000 —que nextInternalCode nunca produce— y sufijo aleatorio, para no
-      // chocar con los códigos que otros archivos de la suite ya generaron en la BD compartida.
       const generatedLike = `A0000-${randomInt(1_000_000, 10_000_000)}`;
       const importedLike = `EXCEL-${randomUUID().slice(0, 8)}`;
       const [withBarcode] = await insertRaw(runner, generatedLike, 'TEMP');

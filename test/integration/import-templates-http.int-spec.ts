@@ -1,5 +1,3 @@
-// Endpoints de plantillas de importación por HTTP real: permiso de la importación, descarga xlsx con su nombre y
-// metadatos envueltos; subir la plantilla devuelve la versión y el mapeo reconocido.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import ExcelJS from 'exceljs';

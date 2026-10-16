@@ -1,6 +1,3 @@
-// centroCosto.unidad en el acta: la unidad del centro VIGENTE A LA FECHA DEL ACTA, guardada en el snapshot
-// document.data. Si el centro cambia de unidad después, leer el acta o re-renderizarla (reasignar un firmante) sigue
-// mostrando la unidad de la emisión. Formato libre de prueba con una plantilla mínima armada en el test.
 import type { Type } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -81,7 +78,6 @@ describe('Unidad del centro de costo en el acta, a la fecha de emisión (Postgre
     })
       .overrideProvider(SIGNATURE_PROVIDER)
       .useFactory({
-        // El stub con reemisión (como el proveedor interno): reasignar un firmante re-renderiza el acta.
         factory: (stub: StubSignatureProvider) => Object.assign(Object.create(stub) as StubSignatureProvider, { reissue: () => Promise.resolve() }),
         inject: [StubSignatureProvider],
       })
@@ -158,7 +154,6 @@ describe('Unidad del centro de costo en el acta, a la fecha de emisión (Postgre
     const firstKey = await scalar<string>(dataSource, 'SELECT docx_key FROM document WHERE id = $1', [document.id]);
     expect(docxText(await readFile(join(storageDir, firstKey)))).toContain(`UNIDAD|IT_ANTES_${tag}|Unidad antes del cambio|`);
 
-    // El centro se mueve de unidad después de emitida el acta.
     await dataSource.transaction((manager) =>
       moduleRef.get(CostCenterPlacementService).change(
         manager,
@@ -170,7 +165,6 @@ describe('Unidad del centro de costo en el acta, a la fecha de emisión (Postgre
     expect(await scalar<string>(dataSource, 'SELECT organizational_unit_id FROM cost_center WHERE id = $1', [centerId])).toBe(after);
     expect(await unitInData()).toEqual({ codigo: `IT_ANTES_${tag}`, nombre: 'Unidad antes del cambio' });
 
-    // Re-render real (reasignar el turno del responsable vuelve a armar el DOCX desde document.data).
     await engine.reassignSigner(document.id, 1, replacement, 'Cambio de responsable de prueba', director, {
       ipAddress: null,
       userAgent: null,
@@ -183,7 +177,6 @@ describe('Unidad del centro de costo en el acta, a la fecha de emisión (Postgre
     expect(rerendered).not.toContain('Unidad después del cambio');
     expect(await unitInData()).toEqual({ codigo: `IT_ANTES_${tag}`, nombre: 'Unidad antes del cambio' });
 
-    // Un acta nueva del mismo centro ya lleva la unidad nueva.
     const next = await engine.generate(
       { formatKey: FORMAT, costCenterId: centerId, responsiblePersonId: responsible, signers: { AUDITA: director.personId } },
       director.id,

@@ -17,7 +17,6 @@ import { MailService } from '../../src/shared/mail/mail.service.js';
 import { DocumentFormatCatalogService } from '../../src/modules/documents/services/document-format-catalog.service.js';
 import { createFreeTestFormat, dropTestFormat, scalar, useSharedStorage } from './helpers.js';
 
-/** Formato libre de prueba (RESPONSABLE + AUDITA, sin proceso): los institucionales pertenecen a sus procesos. */
 const FORMAT = 'IT-OPENAPI-ACTA';
 
 class BlankPdfConverter implements PdfConverter {
@@ -39,10 +38,6 @@ interface Schema {
   readonly items?: Schema;
 }
 
-/**
- * Compara una respuesta real contra el esquema publicado en OpenAPI: sobran o faltan propiedades, null no declarado,
- * tipo o enum distinto. Es lo que detecta que el frontend (que genera sus tipos del OpenAPI) quedó desalineado.
- */
 const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: string, errors: string[]): void => {
   const components = (openapi.components?.schemas ?? {}) as Record<string, Schema>;
   const resolve = (item: Schema): Schema => {
@@ -51,7 +46,6 @@ const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: s
     }
     const { allOf, ...own } = item;
     if (allOf) {
-      // allOf: el envelope + { data } o un $ref con nullable/description al lado. Las partes posteriores ganan.
       const parts = [...allOf.map(resolve), own];
       return parts.reduce<Schema>(
         (merged, part) => ({
@@ -183,7 +177,6 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }
@@ -199,7 +192,6 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
   });
 
   afterAll(async () => {
-    // Deja la BD compartida sin el formato de prueba ni sus actas.
     const ids = (
       (await dataSource.query('SELECT id FROM document WHERE template_version_id = $1', [templateId || null])) as Array<{ id: string }>
     ).map((item) => item.id);
@@ -260,7 +252,6 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
     expect(detail.body.data.currentTurn).not.toBeNull();
     expect(detail.body.data.verification).not.toBeNull();
     expectConforms('get', '/api/v1/documents/{id}', 200, detail.body);
-    // El comparador sí detecta drift: una propiedad no declarada y un null no declarado.
     const drift: string[] = [];
     const detailSchema = (openapi.paths['/api/v1/documents/{id}'] as { get: { responses: Record<string, { content: Record<string, { schema: Schema }> }> } })
       .get.responses['200']?.content['application/json']?.schema;
@@ -322,7 +313,6 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
     expect(retried.body.data.status).toBe('PENDING_GENERATION');
     expectConforms('post', '/api/v1/documents/requests/{requestId}/retry', 200, retried.body);
 
-    // Firma por enlace: reenvío, páginas públicas y detalle con el enlace; luego anulación.
     const mail = app.get(MailService);
     const urls: string[] = [];
     const spy = vi.spyOn(mail, 'sendSigningLink').mockImplementation((_to, context) => {
@@ -437,7 +427,6 @@ describe('Contrato OpenAPI de documentos: las respuestas reales cumplen el esque
       const history = await http().get(`/api/v1/documents/formats/${key}/versions`).set(auth).expect(200);
       expect(history.body.data).toHaveLength(2);
       expectConforms('get', '/api/v1/documents/formats/{formatKey}/versions', 200, history.body);
-      // La versión inicial sembrada (effectiveFrom y createdBy null) también cumple.
       const seeded = await http().get('/api/v1/documents/formats/LOAN_RETURN/versions').set(auth).expect(200);
       expect(seeded.body.data.at(-1)).toMatchObject({ versionNumber: 1, effectiveFrom: null, createdBy: null, sgcCode: null });
       expectConforms('get', '/api/v1/documents/formats/{formatKey}/versions', 200, seeded.body);

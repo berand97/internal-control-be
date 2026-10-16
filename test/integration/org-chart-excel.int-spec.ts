@@ -1,6 +1,3 @@
-// Excel del organigrama: exportar → importar (previsualizar y confirmar) con HTTP real + PostgreSQL real.
-// Solo unidades: ida y vuelta sin cambios = 0 cambios; una hoja vieja «Centros de costo» se ignora con advertencia y
-// la confirmación no exige permisos sobre centros. Además, el DELETE de centros y unidades.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
@@ -70,7 +67,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
   const confirm = (previewId: string, who = 'admin') =>
     http().post(`/api/v1/organizational-units/import/${previewId}/confirm`).set(auth(who));
 
-  /** Edita un archivo exportado (conserva el sello) y lo devuelve como se subiría. */
   const editExport = async (file: Buffer, mutate: (sheet: ExcelJS.Worksheet) => void): Promise<Buffer> => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(file as unknown as ArrayBuffer);
@@ -141,7 +137,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     await center('6111', { parentId: ids['6110'] });
     await center('6115');
     await center('6130');
-    // Centro de la vicerrectoría que será el Centro propio de la oficina 62 creada desde el Excel.
     await center('6210', { organizationalUnitId: ids['u6'] });
     await dataSource.query(`INSERT INTO asset_category (code, name) VALUES ($1, 'Organigrama')`, [`OC-${randomUUID().slice(0, 6)}`]);
   });
@@ -167,7 +162,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
   });
 
   it('ida y vuelta: tras normalizar, el mismo archivo exportado da 0 cambios', async () => {
-    // Otros archivos de prueba pueden dejar unidades que la primera importación normaliza.
     const first = await preview(await exportFile());
     expect(first.status, JSON.stringify(first.body)).toBe(201);
     expectConforms('post', '/api/v1/organizational-units/import/preview', 201, first.body);
@@ -184,7 +178,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
   });
 
   it('solo unidades: la hoja vieja «Centros de costo» se ignora con advertencia y se confirma sin permiso de centros', async () => {
-    // Usuario que administra unidades pero no centros de costo.
     const roleCode = `IT_OC_UNIDADES_${randomUUID().slice(0, 6).toUpperCase()}`;
     await dataSource.query(`INSERT INTO role (code, name) VALUES ($1, 'Solo unidades')`, [roleCode]);
     await dataSource.query(
@@ -213,7 +206,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     }
     department.getCell(2).value = 'Departamento Excel renombrado';
     units.getRow(units.rowCount + 1).values = ['62', 'Oficina Excel', 'Oficina', '6', 'Autoridad', '6210'];
-    // Hoja de un archivo viejo: renombrar, eliminar y crear centros. Nada de esto se aplica.
     const old = workbook.addWorksheet('Centros de costo');
     old.addRow(['Código', 'Nombre', 'Movimiento', 'Unidad', 'Padre', 'Activos', 'Estado', 'Acción', 'Código anterior']);
     old.addRow(['6111', 'CENTRO 6111 RENOMBRADO', 1, null, null, 0, 'Activo', null, null]);
@@ -256,18 +248,15 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(applied.status, JSON.stringify(applied.body)).toBe(201);
     expectConforms('post', '/api/v1/organizational-units/import/{previewId}/confirm', 201, applied.body);
 
-    // Los centros quedan como estaban.
     expect(await centerByCode('6111')).toMatchObject({ name: 'CENTRO 6111', parent_id: ids['6110'], is_active: true });
     expect(await centerByCode('6130')).toMatchObject({ id: ids['6130'], is_active: true });
     expect(await centerByCode('6115')).toMatchObject({ id: ids['6115'] });
     expect(await centerByCode('6125')).toBeUndefined();
     expect(await centerByCode('6299')).toBeUndefined();
-    // Las unidades sí cambian: la 62 nueva toma como Centro propio el 6210 que ya existía.
     const office = (await dataSource.query(
       `SELECT id, parent_id, head_cost_center_id, hierarchy_level FROM organizational_unit WHERE code_prefix = '62' AND is_active`,
     )) as Array<{ id: string; parent_id: string; head_cost_center_id: string; hierarchy_level: number }>;
     expect(office[0]).toMatchObject({ parent_id: ids['u6'], head_cost_center_id: ids['6210'], hierarchy_level: 1 });
-    // El conciliador (misma transacción) lleva el 6210 a la unidad 62: el código manda (prefijo más largo).
     expect(await centerByCode('6210')).toMatchObject({ organizational_unit_id: office[0]?.id });
     expect(await scalar<string>(dataSource, 'SELECT name FROM organizational_unit WHERE id = $1', [ids['u61']])).toBe(
       'Departamento Excel renombrado',
@@ -292,7 +281,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     if (!units) {
       throw new Error('falta la hoja');
     }
-    // 641 bajo 61 no empieza por el de su jefe: solo advertencia. Dos filas con el mismo prefijo 64: error.
     units.getRow(units.rowCount + 1).values = ['64', 'Otra oficina', 'Oficina', '6'];
     units.getRow(units.rowCount + 1).values = ['641', 'Fuera de rango', 'Oficina', '61'];
     units.getRow(units.rowCount + 1).values = ['64', 'Repetida', 'Oficina', '6'];
@@ -368,7 +356,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       .set(auth('admin'))
       .send({ code: 'IT_OC_BORRABLE', name: 'Unidad borrable', type: 'OFFICE', parentId: ids['u6'], codePrefix: '69' });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
-    // 691 bajo 61 no empieza por 61 y los números 69… son de la unidad recién creada: se acepta con advertencia.
     const outOfParent = await http()
       .post('/api/v1/organizational-units')
       .set(auth('admin'))
@@ -377,7 +364,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(outOfParent.body.data.warnings).toEqual([
       'Mal prefijo (691) depende de Departamento Excel renombrado (61) pero conserva los códigos 691… de Unidad borrable',
     ]);
-    // El mismo prefijo de su jefe sí es error.
     const samePrefix = await http()
       .post('/api/v1/organizational-units')
       .set(auth('admin'))
@@ -491,7 +477,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expect(rejected.status).toBe(409);
       expect(rejected.body.error.code).toBe('ORG_CHART_IMPORT_CONFLICT');
 
-      // Otra columna de la misma unidad, del mismo archivo base: se aplica y conserva el nombre de la primera.
       const third = await preview(otherColumn);
       expect(third.body.data.errors).toEqual([]);
       expect(third.body.data.changes).toEqual([expect.objectContaining({ kind: 'RELATION_CHANGED' })]);
@@ -679,11 +664,9 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
         expect.objectContaining({ field: 'COLOR', oldValue: null, newValue: '#29b1b2', source: 'IMPORT' }),
       );
 
-      // Ida y vuelta: el archivo exportado ahora trae el color y no cambia nada.
       const again = await preview(await exportFile());
       expect(again.body.data.summary.totalChanges).toBe(0);
 
-      // Archivo viejo sin la columna Color (y sello sin su huella): no toca colores ni da conflicto.
       const old = await editExport(await exportFile(), (edited) => {
         edited.spliceColumns(colorColumn(edited), 1);
         rowByPrefix(edited, '61').getCell(2).value = 'Departamento Excel sin columna Color';
@@ -709,7 +692,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     const SAME = '¿Es otra unidad? Si es así, use un nombre que las distinga.';
     const create = (body: Record<string, unknown>) => http().post('/api/v1/organizational-units').set(auth('admin')).send(body);
 
-    /** Archivo sin sello: solo el encabezado de un archivo exportado y las filas dadas. */
     const stamplessFile = async (rows: ReadonlyArray<ReadonlyArray<string | null>>): Promise<Buffer> => {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load((await exportFile()) as unknown as ArrayBuffer);
@@ -729,7 +711,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     };
 
     it('POST/PATCH: el nombre de una hermana activa (sin tildes ni mayúsculas) es solo una advertencia', async () => {
-      // Jefe sin prefijo (en el Excel se nombra por su Código interno) y prefijos 97x: no tocan centros de otras pruebas.
       const rectorate = await create({ code: 'IT_OC_DIR', name: 'Dirección Excel', type: 'DEPARTMENT' });
       expect(rectorate.status, JSON.stringify(rectorate.body)).toBe(201);
       ids['dir'] = rectorate.body.data.id as string;
@@ -744,7 +725,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       ids['u33'] = second.body.data.id as string;
       expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM organizational_unit WHERE parent_id = $1', [ids['dir']])).toBe(2);
 
-      // Editar otra cosa no repite el aviso; renombrar a donde hay otra igual, sí.
       const recolored = await http().patch(`/api/v1/organizational-units/${ids['u33']}`).set(auth('admin')).send({ color: '#29B1B2' });
       expect(recolored.status).toBe(200);
       expect(recolored.body.data.warnings).toEqual([]);
@@ -807,7 +787,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expect(again.body.data.summary.totalChanges).toBe(0);
       expect(await scalar<number>(dataSource, "SELECT count(*)::int FROM organizational_unit WHERE name = 'Oficina Gemela'")).toBe(1);
 
-      // Dos filas nuevas iguales en el mismo archivo: error en la segunda.
       const doubled = await preview(
         await stamplessFile([
           [null, 'Oficina Nueva Doble', 'Oficina', 'IT_OC_DIR'],

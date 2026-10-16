@@ -29,7 +29,6 @@ interface Schema {
   readonly items?: Schema;
 }
 
-/** Misma comparación respuesta-real contra esquema publicado que document-openapi.int-spec.ts. */
 const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: string, errors: string[]): void => {
   const components = (openapi.components?.schemas ?? {}) as Record<string, Schema>;
   const resolve = (item: Schema): Schema => {
@@ -108,7 +107,6 @@ const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: s
   }
 };
 
-/** Rutas nuevas o cambiadas por este trabajo: toda respuesta 2xx observada en ellas se valida contra OpenAPI. */
 const CONTRACT_ROUTES = [
   '/api/v1/auth/me',
   '/api/v1/auth/me/mfa/enrollment',
@@ -146,13 +144,11 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
   let hashes: HashService;
   let cipher: SecretCipherService;
   let ipCounter = 0;
-  /** Todo secreto o código que vio el test: al final ninguno puede aparecer en audit_log. */
   const secretsSeen = new Set<string>();
   const observed: Observed[] = [];
   const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
   const observe = (method: string, path: string) => (response: request.Response) => {
     const route = `/api/v1${path.replace(UUID, '{id}')}`;
-    // Solo 2xx: errorEnvelopeSchema() declara error como unknown en todo el API (ver reporte).
     if (CONTRACT_ROUTES.includes(route) && response.status < 300) {
       observed.push({ method, route, status: response.status, body: response.body as unknown });
     }
@@ -160,7 +156,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
   };
 
   const http = () => request(app.getHttpServer());
-  /** IP distinta por llamada: el throttler de MFA (3 por 5 min por IP y ruta) no debe interferir salvo donde se prueba. */
   const nextIp = (): string => {
     ipCounter += 1;
     return `198.51.${Math.floor(ipCounter / 250)}.${(ipCounter % 250) + 1}`;
@@ -179,11 +174,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
       .set('Authorization', `Bearer ${token}`)
       .then(observe('get', path));
 
-  /**
-   * Código TOTP como si ya hubiera llegado el siguiente paso de 30 s: desde BE-11 un código (su paso de tiempo) sirve
-   * una sola vez por usuario, y este archivo encadena varias pruebas del factor en segundos. Olvidar el último paso
-   * usado equivale a esperar al código siguiente. La no reutilización se prueba en auth-session-hardening.
-   */
   const totp = async (secret: string): Promise<string> => {
     await dataSource.query('UPDATE app_user SET mfa_last_totp_step = NULL WHERE mfa_last_totp_step IS NOT NULL');
     return freshTotp(secret);
@@ -225,7 +215,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
 
   const login = (user: TestUser) => post('/auth/login').send({ username: user.username, password: PASSWORD });
 
-  /** Login con contraseña de un usuario sin MFA: sesión NO verificada con segundo factor. */
   const passwordSession = async (user: TestUser): Promise<Session> => {
     const response = await login(user);
     expect(response.status).toBe(200);
@@ -243,7 +232,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     return sessionFrom(verified);
   };
 
-  /** Sesión solo-contraseña de un usuario con MFA (p. ej. abierta antes de esta versión): mfa_verified_at NULL. */
   const legacySession = async (user: TestUser): Promise<Session> => {
     const sessionId = randomUUID();
     await dataSource.query(
@@ -273,7 +261,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     }
   };
 
-  /** Enrola desde una sesión sin MFA y devuelve el secreto vigente y los códigos. */
   const enrollFromSession = async (session: Session): Promise<{ secret: string; codes: string[] }> => {
     const started = await post('/auth/me/mfa/enrollment', session.accessToken).send({});
     expect(started.status).toBe(200);
@@ -306,7 +293,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     if (!row) {
       throw new Error('usuario inexistente');
     }
-    // BE-11: en BD las semillas van cifradas; se comparan en claro tras comprobar que no están legibles.
     for (const stored of [row.mfa_secret, row.mfa_pending_secret]) {
       if (stored !== null) {
         expect(stored.startsWith('enc.v1.')).toBe(true);
@@ -416,7 +402,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     remember(pending);
     expect(pending).not.toBe(first.secret);
 
-    // Sin confirmar: el vigente sigue siendo el único válido para iniciar sesión.
     const pendingRow = await dbUser(user.id);
     expect(pendingRow).toMatchObject({ mfa_secret: first.secret, mfa_pending_secret: pending, unused: 10 });
     const challenge = await login(user);
@@ -424,7 +409,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
       code: await totp(pending),
     });
     if (withPending.status === 200) {
-      // Colisión de 1 en 10^6 entre los dos TOTP del mismo paso: el test no concluye nada en ese caso.
       expect(await totp(pending)).toBe(await totp(first.secret));
     } else {
       expect(withPending.status).toBe(401);
@@ -443,7 +427,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
       otherSession.sessionId,
     ])) as string;
     expect(otherStatus).toBe('REVOKED');
-    // Los códigos del juego anterior ya no sirven.
     const oldCode = await recoveryLogin(user, first.codes[0] ?? '');
     expect(oldCode.status).toBe(401);
 
@@ -493,7 +476,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     expect(again.status).toBe(401);
     expect(again.body.error.code).toBe('MFA_CODE_INVALID');
 
-    // Se acepta en minúsculas y con espacios en vez de guiones.
     const relaxed = await recoveryLogin(user, (codes[1] ?? '').toLowerCase().replace(/-/g, ' '));
     expect(relaxed.status).toBe(200);
     expect(relaxed.body.data.recoveryCodesRemaining).toBe(8);
@@ -565,7 +547,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     expect(disabled.body.data).toEqual({ revokedSessions: 0, recoveryCodesDeleted: 10 });
     expect(await dbUser(viewer.id)).toMatchObject({ mfa_enabled: false, mfa_secret: null, total: 0 });
 
-    // Director de Control Interno: enrolamiento obligatorio por el flujo de setup, que ahora también entrega códigos.
     const director = await createUser('INTERNAL_CONTROL_DIRECTOR');
     const loginResponse = await login(director);
     expect(loginResponse.body.data).toMatchObject({ requiresMfaSetup: true });
@@ -604,7 +585,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     const me = await get('/auth/me', session.accessToken);
     expect(me.body.data).toMatchObject({ mfaEnabled: false, mfaRequiredByRole: false });
 
-    // Otorgarle después al rol un permiso sensible lo vuelve obligatorio en /auth/me, sin cambiar el nombre del rol.
     await dataSource.query(
       `INSERT INTO role_permission (role_id, permission_id)
        SELECT r.id, p.id FROM role r, permission p WHERE r.code = $1 AND p.code = 'inventory:reconcile:global'`,
@@ -669,14 +649,12 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
       active_sessions: 0,
     });
 
-    // La sesión del afectado ya no se puede renovar.
     const refresh = await http()
       .post('/api/v1/auth/refresh')
       .set('X-Forwarded-For', nextIp())
       .set('Cookie', targetSession.refreshCookie);
     expect(refresh.status).toBe(401);
 
-    // Siguiente login: enrolamiento obligatorio aunque VIEWER no lo exija; al completarlo se limpia la marca.
     const relogin = await login(target);
     expect(relogin.body.data).toMatchObject({ requiresMfaSetup: true });
     const setupToken = relogin.body.data.mfaSetupToken as string;
@@ -720,7 +698,6 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
       }
       conform(openapi, entry.body, schema, `${entry.method.toUpperCase()} ${entry.route} ${entry.status}`, errors);
     }
-    // FeatureResponseDto.reason ya declara 'DEFAULT' (antes era una desalineación conocida): ninguna se tolera.
     expect([...new Set(errors)]).toEqual([]);
   });
 

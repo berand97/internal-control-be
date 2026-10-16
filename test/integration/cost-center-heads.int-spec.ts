@@ -1,5 +1,3 @@
-// Jefatura de centro de costo (HU 1.0.14) y permisos :own con asignación COST_CENTER, por HTTP real contra
-// PostgreSQL real.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
@@ -79,7 +77,6 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
     await insertAsset(`HEAD-B-${tag}-1`, centerB);
 
     await userWith('admin', [{ role: 'INTERNAL_CONTROL_DIRECTOR', scopeType: 'GLOBAL' }]);
-    // Rol con asset:read:org_unit asignado GLOBAL: hoy no alcanza ningún centro (SCOPE_NO_COST_CENTER).
     await userWith('jefe', [{ role: 'DEPARTMENT_HEAD', scopeType: 'GLOBAL' }]);
     await userWith('consulta', [{ role: 'VIEWER', scopeType: 'COST_CENTER', scopeId: centerA }]);
     await userWith('sinRol', []);
@@ -98,7 +95,6 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
       .send({ personId, costCenterId: centerA, reason: 'Resolución de rectoría 045', ...extra });
 
   it('un jefe por relación ve los activos de su centro y deja de verlos al terminar la jefatura (sin esperar la caché)', async () => {
-    // Antes: sin asignación COST_CENTER ni jefatura. La consulta llena la caché de permisos.
     const before = await listAssets('jefe');
     expect(before.status).toBe(403);
     expect(before.body.error.code).toBe('SCOPE_NO_COST_CENTER');
@@ -127,7 +123,6 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
     const headships = await http().get(`/api/v1/persons/${users['jefe']?.personId}/cost-center-headships`).set(auth('admin'));
     expect((headships.body.data as Array<{ costCenterId: string }>).map((item) => item.costCenterId)).toEqual([centerA]);
 
-    // Misma persona, mismo centro, período traslapado: 409.
     const overlap = await assign(users['jefe']?.personId ?? '');
     expect(overlap.status).toBe(409);
     expect(overlap.body.error.code).toBe('COST_CENTER_HEAD_OVERLAP');
@@ -288,7 +283,6 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
     expect(onBehalf.status).toBe(403);
     expect(onBehalf.body.error.code).toBe('OUT_OF_SCOPE');
 
-    // Quien no tiene el permiso :own sigue sin poder pedir.
     const viewer = await http().post('/api/v1/loans').set(auth('consulta')).send({ ...loan, assets: [assetsA[2]] });
     expect(viewer.status).toBe(403);
     expect(viewer.body.error.code).toBe('INSUFFICIENT_PERMISSIONS');

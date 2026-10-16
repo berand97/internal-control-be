@@ -1,7 +1,3 @@
-// Plantillas de correo por bloques (HTTP real + PostgreSQL real): permisos nuevos y su delegación, migración
-// texto → bloques sin pérdida, versionado y activación, validación estricta, escape de variables maliciosas, correo
-// de prueba y envío multipart por el outbox (sin SMTP queda FAILED y visible), menú sembrado y contrato OpenAPI.
-// Párrafo enriquecido (documento Tiptap de esquema cerrado) e imágenes subidas servidas por un endpoint público.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
@@ -42,7 +38,6 @@ interface Schema {
   readonly items?: Schema;
 }
 
-/** Igual que en document-openapi.int-spec, más oneOf (bloques) y additionalProperties (sampleContext). */
 const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: string, errors: string[]): void => {
   const components = (openapi.components?.schemas ?? {}) as Record<string, Schema>;
   const resolve = (item: Schema): Schema => {
@@ -167,7 +162,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
     expect(errors).toEqual([]);
   };
 
-  /** Usuario activo con sesión MFA; roles por código y, si se indica, un rol ad hoc (nivel 1) con esos permisos. */
   const createActor = async (
     roles: ReadonlyArray<string>,
     extraPermissions: ReadonlyArray<string> = [],
@@ -226,7 +220,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // El worker de importaciones también despacha el outbox cada 5 s: se detiene para que el test decida.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }
@@ -257,7 +250,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       ]);
       for (const row of rows) {
         expect(row.blocks.every((block) => block.type === 'paragraph')).toBe(true);
-        // 1767225820000 los pasó a documento; volver a texto da el cuerpo original.
         expect(row.blocks.map((block) => docToText(block.content)).join('\n\n')).toBe(row.body);
       }
       const invitation = rows.find((row) => row.template_type === 'USER_INVITATION');
@@ -283,8 +275,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       await runner.connect();
       await runner.startTransaction();
       try {
-        // Orden real de un revert: primero 1767225840000 (sus versiones tienen enlaces, que down() de 1767225820000
-        // pierde, documentado), luego 1767225820000; y de vuelta en orden inverso.
         const links = new EmailLinkVariablesAsLinks1767225840000();
         await links.down(runner);
         const migration = new EmailRichParagraphAndAssets1767225820000();
@@ -381,7 +371,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         expect(row).toMatchObject({ created_by: null, activated_by: null, activated: true, has_body: false });
         expect(row.subject).toBe(previous?.subject);
         expect(row.placeholders).toEqual(previous?.placeholders);
-        // La v1 sigue siendo el texto original (historial sin tocar); la v2 ya no muestra el URL.
         expect(previous?.has_body).toBe(true);
         expect(JSON.stringify(previous?.blocks)).toMatch(/"text": ?"[^"]*\{\{(auth\.loginUrl|auth\.resetUrl|app\.loginUrl)\}\}/);
         expect(JSON.stringify(row.blocks)).not.toMatch(/"text": ?"[^"]*\{\{(auth\.loginUrl|auth\.resetUrl|app\.loginUrl)\}\}/);
@@ -392,7 +381,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         { type: 'hardBreak' },
         { type: 'text', text: 'Restablecer contraseña', marks: [{ type: 'link', attrs: { href: '{{auth.resetUrl}}' } }] },
       ]);
-      // Las versiones nuevas pasan la validación que aplica el editor.
       const versions = await http().get('/api/v1/email-templates?templateType=PASSWORD_RESET').set(auth(director)).expect(200);
       const active = (versions.body.data as Array<{ isActive: boolean; subject: string; blocks: unknown }>).find((row) => row.isActive);
       await http()
@@ -406,7 +394,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       await runner.startTransaction();
       try {
         const migration = new EmailLinkVariablesAsLinks1767225840000();
-        // Una versión guardada por una persona con el mismo contenido NO la borra down().
         await runner.query(
           `INSERT INTO email_template (template_type, version, subject, blocks, placeholders, is_active, created_by)
            SELECT template_type, 50, subject, blocks, placeholders, FALSE, $1 FROM email_template
@@ -564,7 +551,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
     });
 
     it('el director delega solo lectura a un rol inferior (cascada); ese rol lee pero no guarda; el superadmin también la concede; quien administra roles sin tenerla no', async () => {
-      // Seed: el director no administra roles; aquí se simula que un superadmin le delegó role:create/manage.
       const delegator = await createActor(['INTERNAL_CONTROL_DIRECTOR'], ['role:create:global', 'role:manage:global']);
       const readId = await scalar<string>(dataSource, `SELECT id FROM permission WHERE code = 'email_template:read:global'`);
       const code = `IT_LECTOR_CORREO_${randomUUID().slice(0, 6).toUpperCase()}`;
@@ -585,7 +571,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         .send({ templateType: 'SYSTEM_ALERT', subject: design.subject, blocks: design.blocks });
       expect(write.status).toBe(403);
 
-      // 1767225810000: SUPER_ADMIN ya tiene email_template:*, así que puede concederlo.
       const superWithRoles = await createActor(['SUPER_ADMIN']);
       const granted = await http()
         .post('/api/v1/roles')
@@ -593,7 +578,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         .send({ reason: 'Motivo de prueba', code: `${code}_SA`, name: 'Lector concedido por el superadmin', permissionIds: [readId] });
       expect(granted.status).toBe(201);
 
-      // Quien administra roles pero no tiene email_template:* no puede concederlo.
       const roleAdminOnly = await createActor([], ['role:create:global', 'role:manage:global']);
       const refused = await http()
         .post('/api/v1/roles')
@@ -684,7 +668,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       expect(missing.body.error.code).toBe('EMAIL_TEMPLATE_MISSING_VARIABLE');
       expect(missing.body.error.details).toEqual([expect.objectContaining({ field: 'auth.resetUrl' })]);
 
-      // Párrafo: el texto plano de antes, HTML o atributos que Tiptap agrega por defecto se rechazan con la ruta exacta.
       const legacy = await post({ templateType: 'SYSTEM_ALERT', subject: '{{alert.title}}', blocks: [{ type: 'paragraph', text: '{{alert.message}}' }] });
       expect(legacy.body.error.code).toBe('EMAIL_TEMPLATE_INVALID_DESIGN');
       expect(legacy.body.error.details.map((item: { field: string }) => item.field)).toEqual(['blocks[0].text', 'blocks[0].content']);
@@ -836,7 +819,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
     const PUBLIC_URL = `https://minio-api.unac.test/control-interno-public/email-assets/${assetId}.png`;
 
     beforeAll(async () => {
-      // Imagen ya subida (la subida real a MinIO se prueba en s3-minio.int-spec.ts): solo metadatos y URL pública.
       await dataSource.query(
         `INSERT INTO email_asset (id, storage_key, public_url, mime, byte_size, width, height, sha256, original_name, created_by)
          VALUES ($1, $2, $3, 'image/png', 2048, 1200, 240, $4, 'logo.png', $5)`,
@@ -849,7 +831,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const response = await upload(director, await png(300, 60), 'logo.png', 'image/png');
       expect(response.status).toBe(409);
       expect(response.body.error.code).toBe('PUBLIC_ASSETS_NOT_CONFIGURED');
-      // 3000 × 1500 px ya no se rechaza por tamaño: pasa la validación y llega al almacenamiento (aquí, sin S3).
       const wide = await upload(director, await png(3000, 1500), 'ancha.png', 'image/png');
       expect(wide.status).toBe(409);
       expect(wide.body.error.code).toBe('PUBLIC_ASSETS_NOT_CONFIGURED');
@@ -894,7 +875,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       const big = await upload(director, Buffer.alloc(1024 * 1024 + 1, 0x41), 'grande.png', 'image/png');
       expect(big.status).toBe(400);
       expect(big.body.error).toMatchObject({ code: 'FILE_TOO_LARGE', message: 'El archivo supera el máximo de 1 MB' });
-      // Más de 100 megapíxeles en 318 KB (un solo color): bomba de descompresión, se rechaza sin decodificarla.
       const bomb = await sharp({ create: { width: 10240, height: 10240, channels: 3, background: '#306999' } })
         .png({ compressionLevel: 9 })
         .toBuffer();
@@ -1060,11 +1040,9 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         expect(delivered?.to).toBe(director.email);
         expect(delivered?.html).toContain('Ana &lt;b&gt;&quot;Mala&quot;&lt;/b&gt; &lt;script&gt;');
         expect(delivered?.html).not.toContain('<script');
-        // El enlace malicioso queda como texto escapado del párrafo migrado, nunca como href.
         expect(delivered?.html).not.toMatch(/href="javascript:/i);
         expect(delivered?.text).toContain(MALICIOUS);
 
-        // Lo que ese correo escribe en el socket: multipart/alternative con ambas partes.
         const message = prepareSmtpMessage({
           from: 'noreply@unac.edu.co',
           to: delivered?.to ?? '',
@@ -1079,7 +1057,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         expect(message.payload).toContain('Content-Type: text/plain; charset=utf-8');
         expect(message.payload).toContain('Content-Type: text/html; charset=utf-8');
 
-        // Correo de prueba de una versión que NO es la activa: sale esa versión.
         const versions = await http().get('/api/v1/email-templates?templateType=SYSTEM_ALERT').set(auth(director)).expect(200);
         const custom = await http()
           .post('/api/v1/email-templates')
@@ -1100,7 +1077,6 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
         expect(captured.at(-1)?.subject).toBe('Versión de prueba: Servicio interrumpido');
         expect(captured.at(-1)?.html).toContain('El almacenamiento no responde.');
 
-        // Una versión de otro tipo no se acepta.
         const wrong = await http()
           .post('/api/v1/email-templates/test-send')
           .set(auth(director))

@@ -1,7 +1,3 @@
-// Formatos SGC administrables (document_format / document_format_version): crear formato y versión por API, versionar
-// sin sobrescribir (las actas conservan la versión con que se emitieron: hoja de firmas y verificación pública con las
-// etiquetas viejas), numeración configurable y rechazo de una versión que rompería un proceso enchufado en código.
-// Formatos, códigos SGC y firmantes de este archivo son de PRUEBA; afterAll los borra.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { Test } from '@nestjs/testing';
@@ -154,7 +150,6 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
 
   it('crear un formato: permisos, validación, plantilla por API y generación con POST /documents', async () => {
     const body = { ...baseVersion, key: FREE, readPermission: 'asset:read:global', generatePermission: 'asset:update:global' };
-    // Leer es document_template:read:global; administrar, document_template:update:global.
     expect((await http().post('/api/v1/documents/formats').set(auth('auditor')).send(body)).status).toBe(403);
     expect((await http().get(`/api/v1/documents/formats/OCI-01-55/versions`).set(auth('auditor'))).status).toBe(200);
     expect((await http().get('/api/v1/documents/formats').set(auth('responsable'))).status).toBe(403);
@@ -188,7 +183,6 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
     expect([repeatedRole.status, repeatedRole.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
     expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM document_format WHERE key LIKE $1', [`${FREE}-%`])).toBe(0);
 
-    // Sin plantilla todavía: el motor lo dice explícitamente.
     expect((await generate(FREE, { AUDITA: users['director']?.personId })).body.error.code).toBe('TEMPLATE_NOT_ACTIVE');
     const uploaded = await uploadTemplate(FREE).expect(201);
     expect(
@@ -231,13 +225,11 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
       [2, 'CURRENT', 0],
       [1, 'SUPERSEDED', 1],
     ]);
-    // La versión 1 no se reescribió (y la BD no deja).
     expect(history[1].signers.map((signer: { label: string }) => signer.label)).toEqual(['Recibe', 'Control Interno']);
     await expect(
       dataSource.query('UPDATE document_format_version SET name = $2 WHERE id = $1', [history[1].versionId, 'otro']),
     ).rejects.toThrow(/no se modifica/);
 
-    // El acta firmada con la versión 1 sigue describiendo sus reglas.
     const firstDetail = (await http().get(`/api/v1/documents/${firstId}`).set(auth('director')).expect(200)).body.data;
     expect(firstDetail.status).toBe('SIGNED');
     expect(firstDetail.signatures.map((signature: { roleLabel: string }) => signature.roleLabel)).toEqual(['Recibe', 'Control Interno']);
@@ -249,7 +241,6 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
     expect(firstSheet).toContain('Control Interno');
     expect(firstSheet).not.toContain('(v2)');
 
-    // Una acta nueva usa la versión 2: su nuevo firmante es obligatorio y sus etiquetas son las nuevas.
     const missing = await generate(FREE, { AUDITA: users['director']?.personId });
     expect([missing.status, missing.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
     expect(missing.body.error.message).toContain('Contabilidad (v2)');
@@ -268,7 +259,6 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
       'Contabilidad (v2)',
       'Auditoría (v2)',
     ]);
-    // Hoja de firmas del sobre (el PDF descargable sin firmar no la lleva): etiquetas de la versión 2.
     const envelopeLabels = (await dataSource.query(
       `SELECT s.role_label FROM signature_envelope_signer s JOIN signature_envelope e ON e.id = s.envelope_id
        WHERE e.document_id = $1 ORDER BY s.sign_order`,
@@ -276,14 +266,12 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
     )) as Array<{ role_label: string }>;
     expect(envelopeLabels.map((row) => row.role_label)).toEqual(['Quien recibe (v2)', 'Contabilidad (v2)', 'Auditoría (v2)']);
 
-    // El listado muestra el código de la versión de cada acta.
     const list = (await http().get('/api/v1/documents').query({ formatKey: FREE }).set(auth('director')).expect(200)).body.data.items as Array<{
       documentId: string;
       sgcCode: string;
     }>;
     expect(list.find((item) => item.documentId === firstId)?.sgcCode).toBe('PRUEBA-FMT');
     expect(list.find((item) => item.documentId === second.body.data.id)?.sgcCode).toBe('PRUEBA-FMT2');
-    // Y la vigente en GET /documents/formats es la 2.
     const formats = (await http().get('/api/v1/documents/formats').set(auth('director')).expect(200)).body.data;
     expect(formats.find((format: { key: string }) => format.key === FREE)).toMatchObject({
       versionNumber: 2,
@@ -312,7 +300,6 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
     expect(wide.body.data.number).toBe('00044');
     expect(await versionOf(wide.body.data.id)).toBe(3);
 
-    // Vigencia: nunca en el pasado; una versión futura queda programada y no se usa todavía.
     const past = await http()
       .post(`/api/v1/documents/formats/${FREE}/versions`)
       .set(auth('director'))
@@ -339,7 +326,6 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
       .send({ ...baseVersion, signers: v2Signers, numbering: { width: 5, perYear: false, lastIssued: 41 } });
     expect([beforeScheduled.status, beforeScheduled.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
 
-    // Consecutivo anual con valor inicial del año en curso.
     const year = String(new Date().getFullYear());
     const noYear = await http()
       .post('/api/v1/documents/formats')
@@ -393,7 +379,6 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
         { role: 'CONTABILIDAD', source: 'REQUEST' },
       ],
     });
-    // Orden: por código SGC, el formato sin código al final (como el catálogo en código).
     const seeded = formats.map((format) => format.key).filter((key) => !key.startsWith('IT-'));
     expect(seeded.slice(0, 6)).toEqual(['OCI-01-55', 'OCI-01-65', 'OCI-17-89', 'OCI-17-90-BAJA', 'OCI-17-90-INFORME', 'OCI-21-37']);
     expect(seeded.at(-1)).toBe('LOAN_RETURN');

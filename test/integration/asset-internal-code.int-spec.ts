@@ -82,8 +82,6 @@ describe('Código interno de activo (PostgreSQL real)', () => {
       'SELECT count(*) FROM asset_movement',
     );
 
-    // responsibleId no existe: el INSERT del activo viola la FK después de
-    // haber reservado el código, dentro de la misma transacción.
     await expect(newAsset({ responsibleId: randomUUID() })).rejects.toThrow();
 
     expect(await counter()).toBe(before);

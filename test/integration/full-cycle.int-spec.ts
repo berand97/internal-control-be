@@ -142,14 +142,12 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     };
     state.director = await user('Carolina', 'Directora E2E', '1000000901', 'INTERNAL_CONTROL_DIRECTOR');
     state.auditor = state.director;
-    // La responsable no tiene usuario: firma por el enlace de un solo uso que le llega al correo institucional.
     const [outsider] = (await dataSource.query(
       `INSERT INTO person (first_name, last_name, email, document_type, document_number, position_title)
        VALUES ('Laura', 'Responsable E2E', $1, 'CC', '1000000902', 'Coordinadora de Finanzas Estudiantiles') RETURNING id`,
       [`e2e.${randomUUID().slice(0, 8)}@unac.edu.co`],
     )) as Array<{ id: string }>;
     state.responsible = { userId: '', personId: outsider?.id ?? '', token: '' };
-    // Sin SMTP en CI: el correo se captura aquí (el enlace es el mismo que se enviaría).
     const { MailService } = await import('../../src/shared/mail/mail.service.js');
     vi.spyOn(app.get(MailService), 'sendSigningLink').mockImplementation((to, context) => {
       mailed.push({ to, url: context.url });
@@ -189,8 +187,6 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       const confirm = await http()
         .post(`/api/v1/imports/previews/${preview.body.data?.importId}/confirm`)
         .set('Authorization', auth(state.director));
-      // Confirmar solo encola (202): el worker escribe en segundo plano. Se procesa el trabajo como lo haría el worker
-      // y se espera su estado final por la API, sin depender del tic de 5 s del cron.
       const jobId = confirm.body.data?.id as string | undefined;
       if (jobId) {
         await app.get(ImportJobsService).processJob(jobId);
@@ -297,7 +293,6 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       .post(`/api/v1/documents/${state.documentId}/signatures/2`)
       .set('Authorization', auth(state.auditor))
       .send({ rubric: await rubric('rubrica control interno') });
-    // Turno 1 por enlace: página pública, PDF para leer, identidad (últimos 4 dígitos) y firma.
     const token = mailed.at(-1)?.url.split('/firmar/')[1] ?? '';
     const linkView = await http().get(`/api/v1/public/signing-links/${token}`);
     const linkPdf = await http().get(`/api/v1/public/signing-links/${token}/pdf`).buffer(true).parse((res, done) => {
@@ -384,7 +379,6 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     });
     expect(response.body.data?.integrity).toBe('ALTERED');
   });
-  // ---------- Actas reales en PDF para revisión humana (artefacto de CI): OCI-01-65 y OCI-01-55 ----------
 
   const loanState: {
     solicitante?: User;
@@ -409,7 +403,6 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
         res.on('end', () => done(null, Buffer.concat(chunks)));
       });
 
-  /** Escribe el PDF y su capa de texto; devuelve el texto aplanado. */
   const keepPdf = async (name: string, body: Buffer): Promise<string> => {
     await writeFile(join(OUTPUT, `${name}.pdf`), body);
     const text = squash(await pdfText(body));
@@ -470,9 +463,7 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       return { userId, personId, token };
     };
     loanState.solicitante = await person('Gabriel', 'Solicitante E2E', 'CC', '1000000910', 'Coordinador de Biblioteca', true, 'INTERNAL_CONTROL_DIRECTOR');
-    // Entrega: persona con cédula de extranjería (el acta debe imprimir C.E.), firma con su sesión.
     loanState.entrega = await person('Anneliese', 'Extranjera E2E', 'CE', 'E2E847361', 'Jefa de Finanzas Estudiantiles', true, null);
-    // Recibe: sin usuario, firma por enlace.
     const recibe = await person('Tomas', 'Receptor E2E', 'CC', '1000000912', 'Auxiliar de Biblioteca', false, null);
     loanState.recibe = { personId: recibe.personId, last4: '0912' };
     const [target] = (await dataSource.query(

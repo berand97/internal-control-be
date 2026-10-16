@@ -35,12 +35,6 @@ interface Item {
   voided: boolean;
 }
 
-/**
- * Ejecución de la toma física contra PostgreSQL real y por HTTP: quién puede operarla (responsable o
- * inventory:create:global, nunca el auditado), la foto de start(), el cierre con umbral y NOT_VERIFIED, causas de
- * faltante, categorías de hallazgo, correcciones con historial y la conciliación. Las respuestas se comparan con el
- * OpenAPI publicado.
- */
 describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorías y correcciones (PostgreSQL real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -193,7 +187,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
 
   afterAll(async () => {
     await discardInventoryActRequests(dataSource);
-    // Los avisos de tomas no quedan en la cola compartida: otro archivo despacha el outbox por orden de llegada.
     await dataSource.query(`DELETE FROM mail_outbox WHERE entity_type = 'INVENTORY' AND delivery_status = 'PENDING_SEND'`);
     await app.close();
   });
@@ -233,8 +226,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect(closeByAuditedHead.status).toBe(403);
     expect(errorCode(closeByAuditedHead)).toBe('INVENTORY_CONFLICT_OF_INTEREST');
 
-    // Leer el detalle (trae activos) exige alcance sobre el centro de la toma: un ejecutor de otro centro recibe 404
-    // aunque tenga inventory:read:global; quien tiene asset:read:global sí lo lee. La lista no trae activos.
     const hidden = await http().get(`/api/v1/inventories/${inventoryId}`).set(as(outsiderExecutor));
     expect([hidden.status, errorCode(hidden)]).toEqual([404, 'RESOURCE_NOT_FOUND']);
     const read = await http().get(`/api/v1/inventories/${inventoryId}`).set(as(director));
@@ -368,7 +359,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     for (const assetId of assets.slice(0, 20)) {
       expect((await post(responsible, `/${inventoryId}/verify-asset`, { assetId, condition: 'NEW' })).status).toBe(200);
     }
-    // 1 de 21 = 4,76 %: no supera el 5 %.
     const closed = await post(responsible, `/${inventoryId}/close`);
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expect(closed.body.data.progress).toMatchObject({ expected: 21, verified: 20, notVerified: 1 });
@@ -402,7 +392,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     });
     expect(verifiedMisplaced.body.data).toMatchObject({ result: 'MISPLACED', suggestedCategory: 'AOD' });
 
-    // Faltante: exactamente una causa.
     const noCause = await post(responsible, `/${inventoryId}/report-not-found`, { assetId: missingOther });
     expect(noCause.status).toBe(400);
     expect(errorCode(noCause)).toBe('INVENTORY_MISSING_CAUSE_REQUIRED');
@@ -452,7 +441,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       expect.arrayContaining([expect.objectContaining({ text: 'Se lo llevó el contratista', count: 1, inventories: 1 })]),
     );
 
-    // Sobrantes.
     const writtenOff = await post(responsible, `/${inventoryId}/report-unexpected`, { assetId: writtenOffOutside });
     expect(writtenOff.status).toBe(406);
     expect(errorCode(writtenOff)).toBe('INVENTORY_ASSET_WRITTEN_OFF');
@@ -465,7 +453,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     const mistaken = await post(responsible, `/${inventoryId}/report-unexpected`, { notes: 'Silla sin placa' });
     const mistakenId = mistaken.body.data.id as string;
 
-    // Categoría: la fija el auditor; ANI no se puede asignar.
     const foundItemId = verifiedFound.body.data.id as string;
     const setCategory = await http()
       .put(`/api/v1/inventories/${inventoryId}/items/${foundItemId}/finding-category`)
@@ -486,7 +473,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       .send({ code: 'AU' });
     expect(errorCode(setByOutsider)).toBe('INVENTORY_ACTOR_NOT_ALLOWED');
 
-    // Corrección con evidencia: el faltante del catálogo apareció.
     const cataloguedItemId = byCatalog.body.data.id as string;
     const missingReason = await post(responsible, `/${inventoryId}/items/${cataloguedItemId}/correct`, { result: 'FOUND' });
     expect(missingReason.status).toBe(400);
@@ -536,7 +522,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect(history.body.data).toHaveLength(1);
     expect(history.body.data[0]).toMatchObject({ correctedBy: responsible.userId, correctedByName: 'Responsable Ejecución' });
 
-    // Anular el sobrante registrado por error.
     const voided = await post(responsible, `/${inventoryId}/items/${mistakenId}/void`, { reason: 'Registrado dos veces' });
     expect(voided.status, JSON.stringify(voided.body)).toBe(200);
     expectConforms('post', '/api/v1/inventories/{id}/items/{itemId}/void', 200, voided.body);
@@ -549,9 +534,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect(voided.body.data.correction).toMatchObject({ kind: 'VOID', before: { voided: false }, after: { voided: true } });
     expect((await post(responsible, `/${inventoryId}/items/${mistakenId}/void`, { reason: 'Otra vez' })).status).toBe(406);
 
-    // Catálogo: lo usado no se borra, se desactiva.
     const deleteUsed = await http().delete(`/api/v1/inventories/catalogs/missing-causes/${causeId}`).set(as(director));
-    // La corrección quitó la causa del ítem, pero el historial la cita: sigue en uso.
     expect(deleteUsed.status).toBe(406);
     expect(errorCode(deleteUsed)).toBe('INVENTORY_CATALOG_ENTRY_IN_USE');
     const deleteCategory = await http().delete('/api/v1/inventories/catalogs/finding-categories/AU').set(as(director));
@@ -589,7 +572,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect(byId.get(found)).toMatchObject({ physical_condition: 'GOOD', operational_status: 'IN_USE' });
     expect(byId.get(missingCataloged)).toMatchObject({ physical_condition: 'FAIR', operational_status: 'IN_USE' });
     expect(byId.get(missingOther)?.operational_status).toBe('LOST');
-    // El sobrante de un activo LOST no lo recupera la conciliación.
     expect(byId.get(lostOutside)?.operational_status).toBe('LOST');
 
     const audit = (await dataSource.query(
@@ -659,7 +641,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       .send({ label: 'HURTO con denuncia' });
     expect(errorCode(repeated)).toBe('INVENTORY_CATALOG_ENTRY_EXISTS');
 
-    // 1767225895000: SUPER_ADMIN no tiene permisos operativos; solo el director administra los catálogos.
     expect(
       await dataSource.query(
         `SELECT r.code FROM role_permission rp JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id

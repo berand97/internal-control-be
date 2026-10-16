@@ -1,11 +1,3 @@
-// Plantilla OCI-21-37 (Acta de toma física de inventario de activos fijos).
-//
-// El formato institucional solo existe en Excel (docs/acta de toma física de inventario de activos fijos mdf.xlsx); la
-// plantilla Word se arma con sus textos sobre el paquete limpio de OCI-01-65-v2.docx:
-//   node scripts/formats/build-oci-21-37-template.mjs templates/formats/OCI-01-65-v2.docx "docs/acta de toma física de inventario de activos fijos mdf.xlsx" templates/formats/OCI-21-37-v2.docx
-// y se carga al motor como plantilla del formato (POST /documents/formats/OCI-21-37/templates, sgcVersion=2).
-// Renderiza el DOCX con el renderizador real del repo y el contenido real del acta (buildInventoryActContent). Con
-// GOTENBERG_URL, además lo convierte a PDF y revisa la capa de texto.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
@@ -36,7 +28,6 @@ import { pdfText, sampleLeftovers, squash } from './pdf-text.js';
 
 const TEMPLATE = 'templates/formats/OCI-21-37-v2.docx';
 const BASE = 'templates/formats/OCI-01-65-v2.docx';
-// El nombre del Excel lleva tilde: se busca por su forma normalizada (el disco puede guardarlo en NFD).
 const XLSX = join(
   'docs',
   (existsSync('docs') ? readdirSync('docs') : []).find(
@@ -451,15 +442,12 @@ describe('Plantilla OCI-21-37 (acta de toma física, construida desde el Excel i
       expect(text).toContain(
         'Sin corte contable: estado del sistema al 2 de septiembre de 2026',
       );
-      // Una fila por categoría configurada, en su orden, y la fila Total.
       for (const category of options.categories) {
         expect(text).toContain(`${category.code} — ${category.label}`);
       }
-      // Porcentaje sobre el precio de compra (2 320 000 / 4 670 000), no sobre el número de bienes (2 de 3).
       expect(text).toContain(
         `AU — En uso\n2\n${formatMoney(2_320_000)}\n49,68 %\n${formatMoney(1_310_000)}`,
       );
-      // Valor en libros desconocido: «Sin dato», nunca 0; no afecta el porcentaje, que es sobre el precio de compra.
       expect(text).toContain(
         `ANE — No encontrado\n1\n${formatMoney(2_350_000)}\n50,32 %\nSin dato`,
       );
@@ -548,12 +536,10 @@ describe('Plantilla OCI-21-37 (acta de toma física, construida desde el Excel i
         writeFileSync(join(OUTPUT, 'muestra-60-activos.pdf'), pdf);
         writeFileSync(join(OUTPUT, 'muestra-60-activos.txt'), layer);
       }
-      // El anexo ocupa varias páginas y su encabezado se repite en cada una (fila de encabezado de tabla).
       expect(pages).toBeGreaterThanOrEqual(3);
       expect((layer.match(/Descripción del activo/g) ?? []).length).toBe(
         pages - 1,
       );
-      // Ni el # ni el código se parten: cada fila empieza con su número y su código enteros.
       const rows = squash(layer);
       for (let index = 0; index < 60; index += 1) {
         expect(rows).toMatch(

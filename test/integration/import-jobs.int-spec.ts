@@ -1,6 +1,3 @@
-// Importación asíncrona (outbox + worker): confirmar encola y responde, el worker procesa, progreso, fallo a mitad
-// y reintento idempotente, dos workers, notificación en la app, correo por outbox y firma de los movimientos
-// escritos por conjuntos. HTTP real + PostgreSQL real.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { Test } from '@nestjs/testing';
@@ -66,7 +63,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
   const count = (sql: string, params: unknown[] = []) => scalar<string>(dataSource, sql, params).then(Number);
   const tag = () => randomUUID().slice(0, 6).toUpperCase();
 
-  /** Sube y previsualiza un archivo de activos con `n` filas válidas y 2 en cuarentena; devuelve importId e ids. */
   const assetPreview = async (n: number) => {
     const t = tag();
     const ids = Array.from({ length: n }, (_, index) => `AJ-${t}-${index + 1}`);
@@ -100,7 +96,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // Los crons (worker de importaciones cada 5 s, documentos) se detienen: el test decide cuándo corre el worker.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }
@@ -116,10 +111,8 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
       [actor.id],
     );
     token = app.get(TokenService).signAccessToken({ ...actor, sessionId: await openTestSession(dataSource, actor.id) });
-    // Sin SMTP: los correos del outbox deben quedar FAILED y visibles.
     await dataSource.query('UPDATE mail_settings SET enabled = FALSE');
 
-    // Centros de costo por el camino asíncrono (destino COST_CENTERS).
     center = `AJ-${tag()}`;
     const centers = await imports.upload(
       await workbook('Centros', [['Codigo', 'Nombre'], [center, 'Centro importación asíncrona'], [`${center}-B`, 'Otro']]),
@@ -157,11 +150,9 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
       email: null,
       requestedBy: actor.id,
     });
-    // Nada se hizo en la petición.
     expect(await count('SELECT count(*) FROM asset')).toBe(assetsBefore);
     expect(await count('SELECT count(*) FROM staging_quarantine WHERE import_id = $1', [importId])).toBe(0);
 
-    // Confirmar otra vez es idempotente: mismo trabajo.
     const again = await http().post(`/api/v1/imports/previews/${importId}/confirm`).set(auth());
     expect(again.status).toBe(202);
     expect(again.body.data.id).toBe(job.id);
@@ -193,13 +184,7 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     const mine = await http().get('/api/v1/imports/jobs').set(auth());
     expect((mine.body.data as Array<{ id: string }>).map((item) => item.id)).toContain(job.id);
 
-    // Sin SMTP el correo queda FALLIDO y visible en el trabajo. mail_outbox es una cola compartida por todos los
-    // archivos (FIFO por created_at, 20 por pasada): otros archivos dejan avisos pendientes (tomas físicas, …) y, según
-    // el orden de los archivos y si el job de cada 5 s de otra app alcanzó a despacharlos, el de este trabajo puede
-    // quedar fuera de la primera pasada. Se vacía la cola vencida: cada pasada toma filas distintas (una fila
-    // despachada no vuelve a estar vencida hasta OUTBOX_RETRY_MINUTES), así que el bucle termina.
     for (let pass = await outbox.dispatchPending(); pass.sent + pass.failed > 0; pass = await outbox.dispatchPending()) {
-      // sigue hasta que no quede nada vencido
     }
     const mailed = await jobs.find(job.id);
     expect(mailed.email).toMatchObject({
@@ -254,7 +239,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     expect(read.body.data.readAt).not.toBeNull();
     expect((await http().get('/api/v1/notifications/unread-count').set(auth())).body.data.count).toBe(before - 1);
 
-    // Otro usuario no ve ni marca las ajenas.
     const other = await createActor(dataSource);
     const otherToken = app.get(TokenService).signAccessToken({ ...other, sessionId: await openTestSession(dataSource, other.id) });
     const foreign = await http()
@@ -286,7 +270,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
       rows: { inserted: 4, skippedAlreadyPresent: 0 },
       result: null,
     });
-    // Las filas quedaron escritas (su transacción terminó); los movimientos no.
     const assets = await importedAssets(importId);
     expect(assets).toHaveLength(4);
     expect(await count('SELECT count(*) FROM asset_movement WHERE asset_id = ANY($1)', [assets.map((a) => a.asset_id)])).toBe(0);
@@ -299,7 +282,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
       ),
     ).toBe('IMPORT_FAILED');
 
-    // Solo se reintenta lo FAILED.
     const retried = await http().post(`/api/v1/imports/jobs/${job.id}/retry`).set(auth());
     expect(retried.status).toBe(202);
     expect(retried.body.data).toMatchObject({ status: 'QUEUED', phase: 'QUEUED', error: null });
@@ -314,7 +296,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
       status: 'SUCCEEDED',
       attempts: 2,
       progress: { movementsTotal: 4, movementsDone: 4, percent: 100 },
-      // Conteos del intento que escribió las filas, no "0 insertados / 4 ya existían".
       result: { inserted: 4, skippedAlreadyPresent: 0, registrationMovements: 4, quarantined: { COST_CENTER_UNKNOWN: 1, ROW_WITHOUT_ASSET_ID: 1 } },
     });
     expect(await count('SELECT count(*) FROM asset')).toBe(assetsBefore);
@@ -332,7 +313,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     const { importId } = await assetPreview(2);
     const job = await jobs.enqueue(importId, actor.id);
     const writeRows = imports.writeRows.bind(imports);
-    // Escribe todo lo de la fase de filas y falla al final, dentro de la misma transacción.
     const rows = vi.spyOn(imports, 'writeRows').mockImplementationOnce(async (manager, id, actorId) => {
       await writeRows(manager, id, actorId);
       await manager.query(`INSERT INTO cost_center (external_code, name) VALUES ($1, 'Efímero')`, [`EF-${tag()}`]);
@@ -367,7 +347,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     });
     const first = jobs.processNext();
     await inside;
-    // El primero tiene el trabajo (RUNNING y su fila bloqueada): el segundo no lo toma.
     expect(await jobs.processNext()).toBeNull();
     expect(await jobs.processJob(job.id)).toBeNull();
     release();
@@ -375,7 +354,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     spy.mockRestore();
     expect(await jobs.find(job.id)).toMatchObject({ status: 'SUCCEEDED', attempts: 1, result: { inserted: 2, registrationMovements: 2 } });
 
-    // Con dos trabajos en cola, dos workers a la vez toman uno cada uno.
     const a = await jobs.enqueue((await assetPreview(1)).importId, actor.id);
     const b = await jobs.enqueue((await assetPreview(1)).importId, actor.id);
     const outcomes = await Promise.all([jobs.processNext(), jobs.processNext()]);
@@ -440,7 +418,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
       expect(await movements.verifyAssetChain(row['asset_id'] as string)).toEqual([]);
       expect(await movements.verify(row['id'] as string)).toEqual({ id: row['id'], valid: true, unsigned: false });
     }
-    // La cadena sigue: un movimiento posterior por el camino normal se encadena al registro inicial y verifica.
     const first = rows[0]?.['asset_id'] as string;
     await app.get(AssetsService).changeStatus(first, OperationalStatus.InStorage, 'bodega', actor);
     const chain = (await dataSource.query(
@@ -450,7 +427,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     expect(chain).toHaveLength(2);
     expect(chain[1]?.previous_movement_id).toBe(chain[0]?.id);
     expect(await movements.verifyAssetChain(first)).toEqual([]);
-    // Alterar un registro inicial se detecta (y se deja como estaba: verifySample de otro archivo recorre toda la base).
     const setReason = async (reason: string) => {
       const runner = dataSource.createQueryRunner();
       await runner.connect();
@@ -468,7 +444,6 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     ]);
     await setReason('Importación desde Excel');
     expect(await movements.verifyAssetChain(rows[1]?.['asset_id'] as string)).toEqual([]);
-    // recordInitial se niega sobre un activo que ya tiene movimientos.
     await expect(
       dataSource.transaction((manager) =>
         movements.recordInitial(

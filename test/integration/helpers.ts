@@ -71,12 +71,6 @@ export const useSharedStorage = async (dataSource: DataSource): Promise<string> 
   return SHARED_STORAGE_DIR;
 };
 
-/**
- * Formato libre de prueba (clave IT-…): con código SGC y los firmantes de un acta de dos turnos (RESPONSABLE =
- * RESPONSIBLE, AUDITA = REQUEST), sin plantilla y sin proceso enchufado. Para las pruebas del motor que necesitan un
- * formato "de nadie": los institucionales sembrados ya pertenecen a un proceso (OCI-21-37 → tomas físicas).
- * Borrarlo con dropTestFormat después de borrar sus actas.
- */
 export const createFreeTestFormat = async (
   catalog: DocumentFormatCatalogService,
   key: string,
@@ -109,10 +103,6 @@ export const dropTestFormat = async (dataSource: DataSource, key: string): Promi
   await dataSource.query('DELETE FROM document_format WHERE key = $1', [key]);
 };
 
-/**
- * Aprobar una conciliación encola el acta OCI-21-37 (outbox). Los archivos que concilian tomas la descartan al
- * terminar: processPending procesa toda la cola y otros archivos cuentan exactamente lo que generan.
- */
 export const discardInventoryActRequests = async (dataSource: DataSource): Promise<void> => {
   await dataSource.query(
     `UPDATE physical_inventory_act SET document_request_id = NULL
@@ -123,10 +113,6 @@ export const discardInventoryActRequests = async (dataSource: DataSource): Promi
   );
 };
 
-/**
- * Abre una sesión real (familia de refresh ACTIVE) para un usuario de prueba y devuelve su id, que va en el claim
- * sid del access token. Desde BE-09 el guard JWT exige que esa sesión exista y siga activa.
- */
 export const openTestSession = async (
   dataSource: DataSource,
   userId: string,
@@ -141,7 +127,6 @@ export const openTestSession = async (
   return sessionId;
 };
 
-/** Motivo que exigen los otorgamientos y retiros de roles y permisos (3..500). */
 export const GRANT_REASON = 'Motivo de prueba de integración';
 
 const GRANT_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
@@ -155,19 +140,11 @@ const GRANT_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ['post', /^\/users\/[^/]+\/roles\/[^/]+\/delegate$/],
 ];
 
-/**
- * Si la ruta (sin /api/v1) es un otorgamiento o retiro, adelanta el motivo obligatorio en el cuerpo; un `.send({...})`
- * posterior se combina con él (superagent fusiona objetos). Para probar el motivo ausente, no use este helper.
- */
 export const withGrantReason = <T extends { send(body: object): T }>(method: string, path: string, pending: T): T =>
   GRANT_ROUTES.some(([verb, route]) => verb === method && route.test(path))
     ? pending.send({ reason: GRANT_REASON })
     : pending;
 
-/**
- * Rol nuevo, como lo crearía el SUPER_ADMIN desde la interfaz: un código cualquiera y los permisos indicados. Sirve
- * para probar que el comportamiento lo deciden los permisos y no el nombre del rol. Devuelve el código.
- */
 export const createPermissionRole = async (
   dataSource: DataSource,
   permissionCodes: ReadonlyArray<string>,
@@ -187,10 +164,6 @@ export const createPermissionRole = async (
   return code;
 };
 
-/**
- * Otorga «Firmar actas por Control Interno» (act:sign_control:global) con un rol propio de prueba: todo turno AUDITA o
- * CONTROL_INTERNO lo exige (domain/signer-separation.ts). Si la persona no tiene usuario, le crea uno ACTIVE.
- */
 export const grantControlSigner = async (dataSource: DataSource, personId: string): Promise<void> => {
   await dataSource.query(
     `INSERT INTO app_user (person_id, username, password_hash, status)

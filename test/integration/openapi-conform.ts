@@ -1,7 +1,5 @@
 import type { OpenAPIObject } from '@nestjs/swagger';
 
-// Copia del comparador de document-openapi.int-spec.ts para reutilizarlo en otros contratos (ese archivo conserva el suyo).
-
 export interface Schema {
   readonly $ref?: string;
   readonly allOf?: ReadonlyArray<Schema>;
@@ -14,10 +12,6 @@ export interface Schema {
   readonly additionalProperties?: boolean | Schema;
 }
 
-/**
- * Compara una respuesta real contra el esquema publicado en OpenAPI: sobran o faltan propiedades, null no declarado,
- * tipo o enum distinto. Es lo que detecta que el frontend (que genera sus tipos del OpenAPI) quedó desalineado.
- */
 export const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: string, errors: string[]): void => {
   const components = (openapi.components?.schemas ?? {}) as Record<string, Schema>;
   const resolve = (item: Schema): Schema => {
@@ -26,7 +20,6 @@ export const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, 
     }
     const { allOf, ...own } = item;
     if (allOf) {
-      // allOf: el envelope + { data } o un $ref con nullable/description al lado. Las partes posteriores ganan.
       const parts = [...allOf.map(resolve), own];
       return parts.reduce<Schema>(
         (merged, part) => ({
@@ -67,7 +60,6 @@ export const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, 
     }
     const declared = resolved.properties ?? {};
     for (const key of Object.keys(value)) {
-      // additionalProperties: true declara un objeto libre (payload de un evento): cualquier clave vale.
       if (!(key in declared) && resolved.additionalProperties !== true) {
         errors.push(`${path}.${key}: la respuesta la trae y el esquema no la declara`);
       }

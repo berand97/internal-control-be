@@ -156,7 +156,6 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     expect(errors).toEqual([]);
   };
 
-  /** Crea, genera y devuelve el traslado con su acta generada. */
   const generated = async (assetIds: ReadonlyArray<string>, body: Record<string, unknown> = {}, overrides: Record<string, unknown> = {}) => {
     const created = (await create(assetIds, overrides).expect(201)).body.data;
     await generate(created.id, body).expect(200);
@@ -197,7 +196,6 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     reasonId = await scalar<string>(dataSource, `SELECT id FROM asset_transfer_reason WHERE code = 'REUBICACION'`);
 
     director = await actor('Directora', { mfa: true, role: 'INTERNAL_CONTROL_DIRECTOR' });
-    // Firma por Control Interno por tener act:sign_control:global en un rol cualquiera, no por llamarse AUDITOR.
     auditor = await actor('Auditora', { mfa: true, role: 'AUDITOR' });
     await grant(auditor.userId, await createPermissionRole(dataSource, ['act:sign_control:global'], 'IT_FIRMA_CONTROL'));
     accountant = await actor('Contadora', { mfa: false });
@@ -207,7 +205,6 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     outsider = await actor('Ajeno', { mfa: false });
     scopedReader = await actor('Lectora', { mfa: false, role: 'VIEWER', scopeId: target });
     rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica', { width: 120 })).toString('base64')}`;
-    // Plantilla vigente del formato (solo en tests: en producción la carga Control Interno).
     const uploaded = await engine.uploadTemplate(
       FORMAT,
       { buffer: await readFile(TEMPLATE), originalname: 'OCI-17-89-v1.docx' },
@@ -257,12 +254,10 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     expect(none.body.error.message).toContain('Pídele al administrador');
     expect((await detail(created.id)).status).toBe('DRAFT');
 
-    // Uno: el rol CONTABILIDAD (sembrado sin usuarios) lo da transfer:sign_accounting:global.
     await grant(accountant.userId, 'CONTABILIDAD');
     expect((await http().get('/api/v1/transfers/accounting-signers').set(auth(director)).expect(200)).body.data).toEqual([
       { personId: accountant.personId, name: accountant.name },
     ]);
-    // Varios: hay que decir cuál, y debe ser uno de ellos.
     await grant(secondAccountant.userId, 'CONTABILIDAD');
     const many = await http().post(`/api/v1/transfers/${created.id}/generate`).set(auth(director)).send({ controlSignerPersonId: auditor.personId });
     expect([many.status, many.body.error.code]).toEqual([400, 'TRANSFER_SIGNER_REQUIRED']);
@@ -279,7 +274,6 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
       warnings: [],
       document: { generation: 'PENDING' },
     });
-    // Control Interno: lo decide act:sign_control:global vigente, no el nombre del rol.
     const plainAuditor = await actor('Auditor', { mfa: true, role: 'AUDITOR' });
     const controlSigners = (await http().get('/api/v1/transfers/control-signers').set(auth(director)).expect(200)).body.data as Array<{
       personId: string;
@@ -319,7 +313,6 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     expect(data.activos[0]?.campos).toMatchObject({ fisico: 'Sí', numeracion: 'Sí', motivo: 'Reubicación', estado: 'Bueno', observaciones: 'Con cojín' });
     expect(data.activos[1]?.campos).toMatchObject({ numeracion: 'No', modelo: 'CO-1', serie: 'SN-1', numeroDocumento: 'FV-7788' });
 
-    // Nada se mueve antes de la última firma.
     await sign(documentId, 1, deliverer).expect(200);
     await sign(documentId, 2, receiver).expect(200);
     await sign(documentId, 3, auditor).expect(200);
@@ -344,7 +337,6 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
       expect(await scalar<string>(dataSource, 'SELECT movement_id FROM document_asset WHERE document_id = $1 AND asset_id = $2', [documentId, assetId])).toBe(
         movements[0]?.id,
       );
-      // La línea de tiempo del activo muestra el traslado con su acta.
       const timeline = await app.get(AssetTimelineService).timeline(assetId, { page: 1, pageSize: 50, order: 'asc' }, GLOBAL_COST_CENTER_SCOPE);
       expect(timeline.items.find((entry) => entry.type === 'TRANSFER')).toMatchObject({
         documentId,
@@ -352,12 +344,10 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
       });
     }
     expectConforms('get', '/api/v1/transfers/{id}', 200, (await http().get(`/api/v1/transfers/${id}`).set(auth(director))).body);
-    // Reintento del ciclo de vida sobre el traslado cerrado: no mueve nada otra vez.
     await engine.syncSignatures(documentId);
     expect(
       await scalar<number>(dataSource, `SELECT count(*)::int FROM asset_movement WHERE asset_id = $1 AND movement_type = 'TRANSFER'`, [first]),
     ).toBe(1);
-    // Libre de nuevo: puede entrar en otro traslado (ahora desde el destino).
     const back = await create([first], { targetCostCenterId: source }).expect(201);
     await http().post(`/api/v1/transfers/${back.body.data.id}/cancel`).set(auth(director)).send({ reason: 'Prueba terminada' }).expect(200);
   });
@@ -462,7 +452,6 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     expect(reassignments).toEqual([
       expect.objectContaining({ source: 'AT_ISSUE', fromPersonId: auditor.personId, toPersonId: director.personId, previousPdfSha256: null }),
     ]);
-    // La reasignación posterior tampoco puede dejar a una persona en dos firmas.
     const reassigned = await http()
       .post(`/api/v1/documents/${documentId}/signatures/1/reassign`)
       .set(auth(director))
@@ -476,7 +465,6 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     const list = (await http().get('/api/v1/transfers?pageSize=100').set(auth(director)).expect(200)).body;
     expectConforms('get', '/api/v1/transfers', 200, list);
     expect(list.data.items.map((item: { id: string }) => item.id)).toContain(created.id);
-    // Lectora acotada al centro de destino: lo ve; uno entre otros centros no.
     await detail(created.id, scopedReader);
     const foreign = (await http()
       .post('/api/v1/transfers')
@@ -495,7 +483,6 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     );
     expect(scopedList).toContain(created.id);
     expect(scopedList).not.toContain(foreign.id);
-    // Contabilidad lee todos sin permisos de activos.
     await detail(foreign.id, accountant);
     await http().get(`/api/v1/transfers/${created.id}`).set(auth(outsider)).expect(403);
     for (const id of [created.id, foreign.id]) {

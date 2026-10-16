@@ -47,10 +47,8 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
   let ipCounter = 0;
   let templateId = '';
   let sequenceBefore: string | undefined;
-  /** Correos que "salieron": el token solo existe aquí (y en el correo real). */
   const outbox: Array<{ to: string; url: string }> = [];
   let smtpUp = true;
-  /** Todo lo que la aplicación escribe en consola durante las pruebas. */
   let output = '';
   const lifecycleFailures = { onSigned: 0 };
 
@@ -90,7 +88,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     return { userId, personId, sessionId, token };
   };
 
-  /** Persona sin usuario: firma por enlace. */
   const outsider = (first: string, documentNumber: string | null) => {
     const tag = randomUUID().slice(0, 8);
     return scalar<string>(
@@ -148,7 +145,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }
@@ -160,7 +156,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     const original = mail.sendSigningLink.bind(mail);
     vi.spyOn(mail, 'sendSigningLink').mockImplementation(async (to, context) => {
       if (!smtpUp) {
-        // Sin SMTP configurado (estado de la BD de pruebas): el servicio real devuelve false.
         return original(to, context);
       }
       outbox.push({ to, url: context.url });
@@ -198,7 +193,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
       `SELECT current_value FROM document_sequence WHERE format_key = $1 AND period = ''`,
       [FORMAT],
     );
-    // Vigente hoy para ganarle a cualquier otra plantilla del formato; se borra en afterAll.
     const uploaded = await engine.uploadTemplate(
       FORMAT,
       { buffer: await readFile(TEMPLATE), originalname: 'plantilla.docx' },
@@ -210,7 +204,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
 
   afterAll(async () => {
     vi.restoreAllMocks();
-    // Deja OCI-01-55 como estaba: otros archivos esperan su consecutivo y su plantilla.
     const ids = (
       (await dataSource.query('SELECT id FROM document WHERE created_by = $1 OR template_version_id = $2', [
         director.userId,
@@ -246,7 +239,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     const personId = await outsider('Laura', documentNumber);
     const document = await generate(personId);
 
-    // El enlace se emitió y se "envió" al generar el acta; en BD solo queda su hash.
     const sent = outbox.at(-1);
     expect(sent?.url).toMatch(/\/firmar\/[A-Za-z0-9_-]{43}$/);
     const token = tokenOf(sent?.url ?? '');
@@ -263,7 +255,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     expect(before.viewer).toMatchObject({ canResendLink: true, canReassign: true });
     expect(JSON.stringify(before)).not.toContain(token);
 
-    // Página pública: solo lo necesario para firmar este turno; ni nombres (ni enmascarados), ni otros turnos, ni rutas.
     const page = await view(token).expect(200);
     expect(page.body.data).toEqual({
       status: 'ACTIVE',
@@ -289,7 +280,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     expect(pdf.header['content-type']).toBe('application/pdf');
     expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
 
-    // Sin confirmar identidad no firma.
     const unconfirmed = await signByLink(token, 'A'.repeat(43));
     expect([unconfirmed.status, unconfirmed.body.error.code]).toEqual([403, 'SIGNATURE_IDENTITY_REQUIRED']);
     const identityToken = await confirmedToken(token, documentNumber);
@@ -297,12 +287,10 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     expect(signed.status).toBe(200);
     expect(signed.body.data).toEqual({ action: 'SIGNED', at: expect.any(String), verificationUrl: expect.any(String) });
 
-    // Un solo uso.
     const reused = await signByLink(token, identityToken);
     expect([reused.status, reused.body.error.code]).toEqual([410, 'SIGNATURE_LINK_UNAVAILABLE']);
     expect((await view(token)).body.data).toMatchObject({ status: 'CONSUMED', consumedAction: 'SIGNED', document: null });
 
-    // Control Interno firma con sesión y MFA.
     await signBySession(document.id, 2, auditor).expect(200);
     const after = await detail(document.id);
     expect(after.status).toBe('SIGNED');
@@ -319,7 +307,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
       ['SESSION_MFA', 'Sesión con verificación en dos pasos'],
     ]);
 
-    // Evidencia en BD según el método.
     const evidence = (await dataSource.query(
       `SELECT s.sign_order, s.method, s.signer_user_id, s.session_id, s.signing_link_id, s.link_email, s.link_sent_at,
               s.identity_confirmed_at, host(s.ip_address) AS ip, s.user_agent
@@ -340,12 +327,10 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     expect(evidence[0]?.['identity_confirmed_at']).not.toBeNull();
     expect(evidence[1]).toMatchObject({ method: 'SESSION_MFA', signer_user_id: auditor.userId, session_id: auditor.sessionId });
 
-    // El PDF firmado dice el método de cada firmante.
     const signedText = squash(await pdfText((await engine.download(document.id, 'pdf', director.userId)).body));
     expect(signedText).toContain('Método: Enlace de un solo uso enviado al correo');
     expect(signedText).toContain('Método: Sesión con verificación en dos pasos');
 
-    // El CHECK de evidencia depende del método: una firma por enlace sin identidad confirmada no entra.
     await expect(
       dataSource.query(
         `UPDATE signature_envelope_signer SET identity_confirmed_at = NULL
@@ -354,7 +339,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
       ),
     ).rejects.toThrow(/chk_signature_envelope_signer_evidence/);
 
-    // El token nunca aparece en logs ni en audit_log.
     expect(output).not.toContain(token);
     expect(output).not.toContain(identityToken);
     expect(
@@ -382,7 +366,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     }
     const locked = await identity(first, wrong);
     expect([locked.status, locked.body.error.code]).toEqual([410, 'SIGNATURE_IDENTITY_LOCKED']);
-    // Ni con los dígitos correctos: hay que reenviar.
     expect((await identity(first, documentNumber.slice(-4))).body.error.code).toBe('SIGNATURE_LINK_UNAVAILABLE');
     expect((await view(first)).body.data).toMatchObject({ status: 'INVALIDATED', document: null, turn: null });
     expect((await view(first)).body.data).not.toHaveProperty('signerName');
@@ -392,7 +375,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
       identityAttempts: 5,
     });
 
-    // Solo quien administra el proceso reenvía.
     const stranger = await user('Ajeno', true, docNumber());
     const denied = await http()
       .post(`/api/v1/documents/${document.id}/signatures/1/signing-link`)
@@ -412,7 +394,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     expect(resent.body.data.signatures[0].signingLink).toMatchObject({ status: 'SENT', identityAttempts: 0 });
     expect(JSON.stringify(resent.body)).not.toContain(second);
 
-    // Reenviar otra vez invalida el segundo (RESENT).
     await http()
       .post(`/api/v1/documents/${document.id}/signatures/1/signing-link`)
       .set('Authorization', `Bearer ${director.token}`)
@@ -426,7 +407,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
       ]),
     ).toBe('RESENT');
 
-    // Vence a las 72 h: se simula el paso del tiempo.
     await dataSource.query(
       `UPDATE signature_signing_link SET expires_at = NOW() - interval '1 minute' WHERE token_hash = encode(sha256($1::bytea), 'hex')`,
       [third],
@@ -588,7 +568,6 @@ describe('Tres caminos de firma: sesión con MFA, sesión y enlace de un solo us
     expect(items.find((item) => item.id === document.id)?.status).toBe('VOIDED');
     expect(items.find((item) => item.id === pendingRequest)).toMatchObject({ status: 'CANCELLED', error: 'La entrega se canceló' });
 
-    // Un acta ya firmada no se anula: error explícito y la transacción del proceso se revierte.
     const signedEntity = randomUUID();
     const plain = await user('Valeria', false, docNumber());
     const signedDoc = await generate(plain.personId, { entityType: ENTITY, entityId: signedEntity });

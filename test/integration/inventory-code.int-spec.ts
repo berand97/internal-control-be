@@ -14,7 +14,6 @@ describe('Código de toma física (PostgreSQL real)', () => {
   let actor: AuthenticatedUser;
 
   beforeAll(async () => {
-    // InventoriesModule encola el acta OCI-21-37: el motor de actas necesita el almacenamiento.
     moduleRef = await bootModules(InventoriesModule, StorageModule);
     dataSource = moduleRef.get(DataSource);
     inventories = moduleRef.get(InventorySchedulesService);

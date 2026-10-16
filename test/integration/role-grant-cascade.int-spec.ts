@@ -11,12 +11,6 @@ import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { GRANT_REASON, openTestSession, scalar, withGrantReason } from './helpers.js';
 
-/**
- * Cascada de permisos (decisión del desarrollador, ronda 5): SUPER_ADMIN otorga cualquier permiso a cualquier rol
- * aunque no lo tenga; los demás solo lo que tienen y a roles inferiores; nadie se autoasigna (tampoco por caminos
- * indirectos: rol propio vigente o futuro, con alcance COST_CENTER o heredado); cada otorgamiento queda auditado con
- * motivo, IP y user-agent y la Directora lo consulta en GET /roles/grants-history. HTTP real + PostgreSQL real.
- */
 describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -139,7 +133,6 @@ describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HT
         expect(restored.status).toBe(201);
         expect(await roleHas('INTERNAL_CONTROL_DIRECTOR', 'cost_center:manage:global')).toBe(true);
 
-        // Otorga, no opera: el SUPER_ADMIN sigue sin el permiso operativo.
         const own = (await dataSource.query(
           `SELECT DISTINCT permission_code FROM v_user_effective_permissions WHERE user_id = $1`,
           [admin.id],
@@ -200,7 +193,6 @@ describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HT
 
   describe('Directora: cascada normal', () => {
     beforeAll(async () => {
-      // En la semilla la Directora no administra roles; se le concede para probar la cascada y se retira después.
       for (const code of ['role:manage:global', 'role:create:global', 'role:assign:global']) {
         await grantSql('INTERNAL_CONTROL_DIRECTOR', code);
       }
@@ -231,7 +223,6 @@ describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HT
       expect(granted.status).toBe(201);
       expect(await roleHas('DEPARTMENT_HEAD', 'inventory:create:global')).toBe(true);
 
-      // INTERNAL_CONTROL_DIRECTOR hereda de AUDITOR (semilla): lo que se agregue a AUDITOR le llega a ella misma.
       const inherited = await call('post', `/roles/${await roleId('AUDITOR')}/permissions`, director.token).send({
         permissionIds: [await permissionId('inventory:create:global')],
       });
@@ -408,7 +399,6 @@ describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HT
       }
 
       const viewer = await createUser(['VIEWER']);
-      // El AUDITOR de la semilla ya no lo trae (migración 1767225940000): role:audit:global es de la Directora y SUPER_ADMIN.
       expect((await call('get', '/roles/grants-history', auditor.token)).status).toBe(403);
       expect((await call('get', '/roles/grants-history', viewer.token)).status).toBe(403);
       expect((await call('get', '/roles/grants-history', director.token).query({ roleId: 'x' })).status).toBe(400);
@@ -431,7 +421,6 @@ describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HT
         addedPermissions: [{ id: second, code: 'loan:read:global', label: 'Ver todos los préstamos' }],
         removedPermissions: [{ id: first, code: 'inventory:read:global', label: 'Consultar tomas físicas' }],
       });
-      // La etiqueta es la del catálogo de permisos (GET /permissions/catalog), no un mapa aparte.
       const catalog = await call('get', '/permissions/catalog', admin.token);
       const catalogDescription = (id: string): unknown =>
         (catalog.body.data as Array<{ resources: Array<{ permissions: Array<{ id: string; description: string | null }> }> }>)
@@ -441,13 +430,11 @@ describe('Cascada de permisos, autoescalamiento e historial de otorgamientos (HT
       expect(catalogDescription(second)).toBe('Ver todos los préstamos');
       expect(catalogDescription(first)).toBe('Consultar tomas físicas');
 
-      // Un permiso que ya no existe conserva el código guardado en la bitácora, sin etiqueta.
       const temporary = await scalar<string>(
         dataSource,
         `INSERT INTO permission (code, module, resource_type, resource_label, action, scope_level, description)
          VALUES ('loan:it_label:global', 'LOAN', 'loan', 'Préstamos', 'it_label', 'GLOBAL', NULL) RETURNING id`,
       );
-      // Quien otorga debe tenerlo (cascada): se le da a SUPER_ADMIN solo para esta prueba.
       await grantSql('SUPER_ADMIN', 'loan:it_label:global');
       const grantTemporary = await call('post', `/roles/${role}/permissions`, admin.token).send({ permissionIds: [temporary] });
       expect(grantTemporary.status, JSON.stringify(grantTemporary.body)).toBe(201);

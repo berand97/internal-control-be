@@ -35,7 +35,6 @@ describe('Enlace de verificación del documento', () => {
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }

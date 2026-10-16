@@ -179,7 +179,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     );
     reasonId = await scalar<string>(dataSource, `SELECT id FROM asset_transfer_reason WHERE code = 'REUBICACION'`);
     director = await actor('Directora', ['INTERNAL_CONTROL_DIRECTOR']);
-    // Revisa solicitudes y firma por Control Interno por sus permisos, con un rol cualquiera (no por llamarse AUDITOR).
     auditor = await actor('Auditora', ['AUDITOR', await createPermissionRole(dataSource, ['asset_request:review:global', 'act:sign_control:global'], 'IT_REVISORA')]);
     accountant = await actor('Contadora', ['CONTABILIDAD']);
     requester = await actor('Solicitante', ['DEPARTMENT_HEAD'], [requesting]);
@@ -213,7 +212,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       `SELECT id FROM document WHERE (entity_type = 'LOAN' AND entity_id = ANY($1::uuid[])) OR (entity_type = 'TRANSFER' AND entity_id = ANY($2::uuid[]))`,
       [loanIds, transferIds],
     )) as Array<{ id: string }>).map((row) => row.id);
-    // Los avisos no quedan en la cola: otro archivo despacha el outbox por orden de llegada.
     await dataSource.query(`DELETE FROM mail_outbox WHERE entity_type = 'ASSET_REQUEST'`);
     await dataSource.query(`DELETE FROM notification WHERE entity_type = 'ASSET_REQUEST'`);
     await dataSource.query('DELETE FROM asset_request_event');
@@ -276,7 +274,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     for (const row of [...headed, ...owners]) {
       expect(Object.keys(row).sort()).toEqual(['code', 'id', 'name']);
     }
-    // Una jefatura vencida no cuenta; quien no dirige nada igual ve a quién podría pedir.
     const other = (await http().get('/api/v1/asset-requests/centers').set(auth(expired)).expect(200)).body.data;
     expect(other.headed).toEqual([]);
     expect(other.owners.length).toBe(owners.length);
@@ -313,7 +310,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(await notices(ownerHead.userId, id)).toEqual([{ type: 'ASSET_REQUEST_CREATED' }]);
     expect(await notices(bothHead.userId, id)).toEqual([{ type: 'ASSET_REQUEST_CREATED' }]);
 
-    // Solo el jefe dueño ve los elegibles de su centro (ni el solicitante ni otro jefe).
     const eligible = await http().get(`/api/v1/asset-requests/${id}/eligible-assets`).set(auth(ownerHead)).expect(200);
     expectConforms('get', '/api/v1/asset-requests/{id}/eligible-assets', 200, eligible.body);
     const eligibleIds = eligible.body.data.map((item: { id: string }) => item.id);
@@ -322,7 +318,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(eligibleIds).not.toContain(foreign);
     expect((await http().get(`/api/v1/asset-requests/${id}/eligible-assets`).set(auth(requester))).status).toBe(404);
 
-    // QR de la etiqueta: el del centro dueño se resuelve; el de otro centro, como si no existiera.
     const qrOwn = (await http().post(`/api/v1/assets/${first}/qr`).set(auth(director)).expect(201)).body.data.token as string;
     const qrForeign = (await http().post(`/api/v1/assets/${foreign}/qr`).set(auth(director)).expect(201)).body.data.token as string;
     const scanned = await http().post(`/api/v1/asset-requests/${id}/resolve-scan`).set(auth(ownerHead)).send({ token: qrOwn }).expect(200);
@@ -333,7 +328,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect([foreignScan.status, foreignScan.body.error]).toEqual([garbageScan.status, garbageScan.body.error]);
     expect(foreignScan.status).toBe(404);
 
-    // Separación: quien dirige ambos centros no decide la solicitud que él mismo hizo; otro jefe del dueño sí.
     const sod = (await create(temporary(), bothHead).expect(201)).body.data.id as string;
     const selfAccept = await http().post(`/api/v1/asset-requests/${sod}/accept`).set(auth(bothHead)).send({ assetIds: [second] });
     expect([selfAccept.status, selfAccept.body.error.code]).toEqual([403, 'ASSET_REQUEST_SOD_VIOLATION']);
@@ -343,7 +337,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(closed.body.data.status).toBe('CLOSED_BY_OWNER');
     expect(await notices(bothHead.userId, sod)).toEqual([{ type: 'ASSET_REQUEST_CLOSED' }]);
 
-    // Aceptar con un activo ajeno: 404 como inexistente; con uno no prestable: 406 con el motivo.
     const withForeign = await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(ownerHead)).send({ assetIds: [first, foreign] });
     expect([withForeign.status, withForeign.body.error.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
     const withDamaged = await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(ownerHead)).send({ assetIds: [first, damaged] });
@@ -354,13 +347,11 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(accepted.body.data.expiresAt).not.toBeNull();
     expect(await notices(requester.userId, id)).toEqual([{ type: 'ASSET_REQUEST_ACCEPTED' }]);
     expect(await notices(auditor.userId, id)).toEqual([{ type: 'ASSET_REQUEST_ACCEPTED' }]);
-    // Reservados: no aparecen para otra solicitud.
     const other = (await create(temporary()).expect(201)).body.data.id as string;
     const otherEligible = (await http().get(`/api/v1/asset-requests/${other}/eligible-assets`).set(auth(ownerHead)).expect(200)).body.data;
     expect(otherEligible.map((item: { id: string }) => item.id)).not.toContain(first);
     await http().post(`/api/v1/asset-requests/${other}/cancel`).set(auth(requester)).send({ reason: 'Ya no se necesita' }).expect(200);
 
-    // Control Interno devuelve; el solicitante corrige solo texto → vuelve a Control Interno con los mismos activos.
     const notReviewer = await http().post(`/api/v1/asset-requests/${id}/return`).set(auth(ownerHead)).send({ reason: 'Falta algo' });
     expect(notReviewer.status).toBe(403);
     await http().post(`/api/v1/asset-requests/${id}/return`).set(auth(auditor)).send({ reason: 'Precise el uso de los equipos' }).expect(200);
@@ -371,10 +362,8 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       .expect(200);
     expect(corrected.body.data).toMatchObject({ status: 'ACCEPTED', assetCount: 2 });
 
-    // Generar: el auditor revisa pero no tiene el permiso de generación del OCI-01-65.
     const auditorGenerate = await http().post(`/api/v1/asset-requests/${id}/generate`).set(auth(auditor)).send({});
     expect([auditorGenerate.status, auditorGenerate.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
-    // Firmantes y observaciones del acta son de la entrega, no de la generación.
     const withSigners = await http()
       .post(`/api/v1/asset-requests/${id}/generate`)
       .set(auth(director))
@@ -402,7 +391,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       source_cost_center_id: owner,
       start_date: bogotaToday(),
     });
-    // Generar no entrega: los activos siguen en el dueño, sin movimiento ni acta.
     expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [first])).toBe('IN_USE');
     expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM asset_movement WHERE asset_id = $1 AND movement_type::text = 'LOAN'`, [first])).toBe(0);
     expect(
@@ -411,7 +399,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     for (const who of [requester, ownerHead]) {
       expect((await notices(who.userId, id)).map((row) => row.type)).toContain('ASSET_REQUEST_LOAN_SCHEDULED');
     }
-    // Entrega: el jefe dueño (sin loan:update:global), desde la fecha de inicio (hoy).
     const delivered = await http()
       .post(`/api/v1/loans/${loanId}/deliver`)
       .set(auth(ownerHead))
@@ -475,7 +462,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     )) as Array<{ personId: string }>;
     expect(expected.length).toBeGreaterThan(1);
 
-    // La lista de /transfers exige asset:update:global; la neutral acepta cualquier permiso de generación o la revisión.
     expect((await http().get('/api/v1/transfers/control-signers').set(auth(loanOnly))).status).toBe(403);
     const listed = await http().get('/api/v1/documents/control-signers').set(auth(loanOnly)).expect(200);
     expectConforms('get', '/api/v1/documents/control-signers', 200, listed.body);
@@ -486,15 +472,11 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     for (const row of listed.body.data as Array<Record<string, unknown>>) {
       expect(Object.keys(row).sort()).toEqual(['name', 'personId']);
     }
-    // Revisar solicitudes basta (el auditor no genera préstamos); sin ninguno de esos permisos, 403.
     expect((await http().get('/api/v1/documents/control-signers').set(auth(auditor)).expect(200)).body.data).toEqual(listed.body.data);
     const denied = await http().get('/api/v1/documents/control-signers').set(auth(nobody));
     expect([denied.status, denied.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
-    // Mismo contenido que la lista de traslados.
     expect((await http().get('/api/v1/transfers/control-signers').set(auth(director)).expect(200)).body.data).toEqual(listed.body.data);
 
-    // Préstamo de una solicitud: se genera sin firmantes; al entregar, fuera de la lista → no elegible (nada se mueve);
-    // de la lista → se usa. Quien genera (loan:update:global) también puede entregar.
     const assetId = await asset(owner);
     const id = (await create(temporary()).expect(201)).body.data.id as string;
     await http().post(`/api/v1/asset-requests/${id}/accept`).set(auth(ownerHead)).send({ assetIds: [assetId] }).expect(200);
@@ -525,7 +507,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
   });
 
   it('entrega por el jefe dueño sin permisos generales: opciones acotadas al préstamo, ENTREGA = él mismo, AUDITA de la lista', async () => {
-    // Jefe vigente del centro dueño y nada más: ni loan:update, ni asset:update, ni /persons, ni la lista general de firmantes.
     const plainHead = await actor('Jefa sin permisos', [], [owner]);
     const assetId = await asset(owner);
     const id = (await create(temporary()).expect(201)).body.data.id as string;
@@ -552,17 +533,14 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(data.controlSigners).toEqual(listed);
     expect(data.controlSigners.length).toBeGreaterThan(1);
 
-    // Nadie más ve las opciones: otro jefe, el solicitante, un préstamo inexistente → 404 idéntico.
     const missing = await http().get(`/api/v1/loans/${randomUUID()}/delivery-options`).set(auth(plainHead));
     for (const who of [outsider, requester]) {
       const denied = await http().get(`/api/v1/loans/${loanId}/delivery-options`).set(auth(who));
       expect([denied.status, denied.body.error.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
     }
     expect([missing.status, missing.body.error.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
-    // Control Interno: ENTREGA la elige él (deliverer null).
     expect((await http().get(`/api/v1/loans/${loanId}/delivery-options`).set(auth(director)).expect(200)).body.data.deliverer).toBeNull();
 
-    // ENTREGA no se delega; AUDITA es obligatorio con varias personas en la lista. Nada se mueve.
     const other = await http()
       .post(`/api/v1/loans/${loanId}/deliver`)
       .set(auth(plainHead))
@@ -591,7 +569,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       ['RECIBE', requester.personId],
       ['AUDITA', auditor.personId],
     ]);
-    // Ya entregado: las opciones dicen que no se puede entregar hoy.
     expect((await http().get(`/api/v1/loans/${loanId}/delivery-options`).set(auth(plainHead)).expect(200)).body.data.canDeliverNow).toBe(false);
     await dataSource.query('UPDATE cost_center_head SET valid_until = NOW() WHERE person_id = $1', [plainHead.personId]);
   });
@@ -630,7 +607,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(mail.length).toBeGreaterThanOrEqual(3);
     expect(new Set(mail.map((row) => row.reason))).toEqual(new Set(['Los equipos se necesitan para el cierre del semestre']));
 
-    // Activos libres: vuelven a ser elegibles; el préstamo rechazado ya no se entrega.
     const next = (await create(temporary()).expect(201)).body.data.id as string;
     const eligible = (await http().get(`/api/v1/asset-requests/${next}/eligible-assets`).set(auth(ownerHead)).expect(200)).body.data;
     expect(eligible.map((item: { id: string }) => item.id)).toContain(assetId);
@@ -652,7 +628,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     const cancel = (loanId: string, who: Actor, reason = 'El solicitante ya no necesita los equipos') =>
       http().post(`/api/v1/loans/${loanId}/cancel`).set(auth(who)).send({ reason });
 
-    // 1. El solicitante cancela (es quien sabe que ya no lo necesita).
     const first = await scheduled();
     expect((await cancel(first.loanId, outsider)).status).toBe(403);
     expect((await cancel(first.loanId, auditor)).status).toBe(403);
@@ -695,7 +670,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       [first.loanId],
     )) as Array<{ changes: Record<string, unknown> }>;
     expect(audit?.changes).toEqual({ from: 'APPROVED', to: 'CANCELLED' });
-    // Activos libres y sin moverse; un cancelado no se vuelve a cancelar ni se entrega.
     expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [first.assetId])).toBe('IN_USE');
     const next = (await create(temporary()).expect(201)).body.data.id as string;
     const eligible = (await http().get(`/api/v1/asset-requests/${next}/eligible-assets`).set(auth(ownerHead)).expect(200)).body.data;
@@ -706,12 +680,10 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       'INVALID_LOAN_STATE_TRANSITION',
     ]);
 
-    // 2. El jefe del centro dueño también cancela (el activo se dañó).
     const second = await scheduled();
     expect((await cancel(second.loanId, ownerHead, 'El equipo se dañó antes de la entrega')).status).toBe(200);
     expect((await detail(second.id)).status).toBe('CLOSED_LOAN_CANCELLED');
 
-    // 3. Entregado ya no se cancela (se deshace la entrega); Control Interno sí cancela uno programado.
     const third = await scheduled();
     await dataSource.query('UPDATE asset_loan SET start_date = $2 WHERE id = $1', [third.loanId, bogotaToday()]);
     const delivered = await http()
@@ -768,7 +740,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     const moved = await http().patch(`/api/v1/asset-requests/${id}`).set(auth(requester)).send({ ownerCostCenterId: secondOwner }).expect(200);
     expect(moved.body.data).toMatchObject({ status: 'REQUESTED', assetCount: 0, ownerCostCenter: { id: secondOwner } });
     expect(await notices(secondHead.userId, id)).toEqual([{ type: 'ASSET_REQUEST_CORRECTED' }]);
-    // El dueño anterior ya no es parte.
     expect((await http().get(`/api/v1/asset-requests/${id}`).set(auth(ownerHead))).status).toBe(404);
     const cancelled = await http().post(`/api/v1/asset-requests/${id}/cancel`).set(auth(requester)).send({ reason: 'Se resolvió de otra forma' }).expect(200);
     expect(cancelled.body.data.status).toBe('CANCELLED');
@@ -791,7 +762,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(await movementCount()).toBe(0);
     expect(await actCount()).toBe(0);
 
-    // Reservado por el préstamo APPROVED: no se elige en otra solicitud ni entra en otro préstamo.
     const other = (await create(temporary()).expect(201)).body.data.id as string;
     const otherEligible = (await http().get(`/api/v1/asset-requests/${other}/eligible-assets`).set(auth(ownerHead)).expect(200)).body.data;
     expect(otherEligible.map((item: { id: string }) => item.id)).not.toContain(assetId);
@@ -799,7 +769,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect([reserved.status, reserved.body.error.code]).toEqual([406, 'ASSET_REQUEST_ASSET_UNAVAILABLE']);
     await http().post(`/api/v1/asset-requests/${other}/cancel`).set(auth(requester)).send({ reason: 'Ya no se necesita' }).expect(200);
 
-    // Quién entrega: ni otro jefe ni el solicitante; el jefe dueño sí, pero no antes de la fecha.
     const body = { deliveredByPersonId: ownerHead.personId, controlInternoPersonId: director.personId };
     for (const who of [outsider, requester]) {
       const denied = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(who)).send(body);
@@ -815,14 +784,12 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(await movementCount()).toBe(0);
     expect(await actCount()).toBe(0);
 
-    // Aviso del día de inicio: nada antes de la fecha; llegado el día, una sola vez aunque el job corra de nuevo.
     const service = app.get(AssetRequestsService);
     const startNotices = async () =>
       (await notices(requester.userId, id)).filter((row) => row.type === 'ASSET_REQUEST_LOAN_STARTS').length +
       (await notices(ownerHead.userId, id)).filter((row) => row.type === 'ASSET_REQUEST_LOAN_STARTS').length;
     await service.noticeLoanStarts();
     expect(await startNotices()).toBe(0);
-    // Llega el día: se simula moviendo la fecha de inicio a hoy.
     await dataSource.query('UPDATE asset_loan SET start_date = $2 WHERE id = $1', [loanId, bogotaToday()]);
     await dataSource.query('UPDATE asset_request SET start_date = $2 WHERE id = $1', [id, bogotaToday()]);
     expect(await service.noticeLoanStarts()).toBeGreaterThanOrEqual(1);
@@ -832,7 +799,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect(
       await scalar<number>(dataSource, `SELECT count(*)::int FROM asset_request_event WHERE request_id = $1 AND event_type = 'LOAN_START_NOTICE'`, [id]),
     ).toBe(1);
-    // El aviso no entrega nada.
     expect(await scalar<string>(dataSource, 'SELECT status FROM asset_loan WHERE id = $1', [loanId])).toBe('APPROVED');
 
     const before = new Date(Date.now() - 1000);
@@ -855,7 +821,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       'LOAN_START_NOTICE',
       'LOAN_DELIVERED',
     ]);
-    // Entregado: un segundo intento ya no es una transición válida.
     const again = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(ownerHead)).send(body);
     expect(again.status).toBe(406);
   });
@@ -886,7 +851,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     for (const who of [requester, ownerHead, director]) {
       expect((await notices(who.userId, id)).map((row) => row.type)).toContain('ASSET_REQUEST_EXPIRED');
     }
-    // El activo quedó libre: vuelve a ser elegible.
     const next = (await create(temporary()).expect(201)).body.data.id as string;
     const eligible = (await http().get(`/api/v1/asset-requests/${next}/eligible-assets`).set(auth(ownerHead)).expect(200)).body.data;
     expect(eligible.map((item: { id: string }) => item.id)).toContain(assetId);
@@ -932,7 +896,6 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expectConforms('get', '/api/v1/asset-requests', 200, all);
     const total = await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_request');
     expect(all.data.total).toBe(total);
-    // Una en cada estado accionable: REQUESTED (dueño), ACCEPTED (Control Interno), RETURNED (solicitante).
     const assetId = await asset(owner);
     const requested = (await create(temporary()).expect(201)).body.data.id as string;
     const accepted = (await create(temporary()).expect(201)).body.data.id as string;
@@ -955,10 +918,8 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     }
     expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [requested])).toBe('REQUESTED');
     expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [accepted])).toBe('ACCEPTED');
-    // Los activos del dueño y el QR siguen siendo solo del jefe dueño.
     expect((await http().get(`/api/v1/asset-requests/${requested}/eligible-assets`).set(auth(plainAuditor))).status).toBe(404);
 
-    // Menú: lo ven quien lee todas, quien revisa y quien solicita.
     const menuPaths = async (who: Actor) =>
       ((await http().get('/api/v1/auth/me').set(auth(who)).expect(200)).body.data.navigation as Array<{ path: string }>).map((item) => item.path);
     for (const who of [plainAuditor, director, requester]) {

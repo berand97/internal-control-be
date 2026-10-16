@@ -11,7 +11,6 @@ import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { GRANT_REASON, scalar, openTestSession, withGrantReason } from './helpers.js';
 
-/** Regla del desarrollador: nadie se autoasigna roles ni permisos, tampoco SUPER_ADMIN (HTTP real + PostgreSQL real). */
 describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -152,7 +151,6 @@ describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () 
 
   describe('Director de Control Interno', () => {
     beforeAll(async () => {
-      // En la semilla el Director no asigna roles; se le concede para probar que tampoco puede autoasignarse.
       await dataSource.query(
         `INSERT INTO role_permission (role_id, permission_id)
          SELECT r.id, p.id FROM role r, permission p
@@ -210,13 +208,11 @@ describe('Autoasignación de roles prohibida (HTTP real + PostgreSQL real)', () 
 
     it('agregarlo cuando el actor solo lo tiene en un alcance menor lo ampliaría: 403', async () => {
       const admin = await createUser(['SUPER_ADMIN']);
-      const unit = randomUUID(); // scope_id es polimórfico (sin FK): basta un id de unidad
-      // El actor tiene asset:read:org_unit solo con alcance ORG_UNIT (VIEWER en su unidad)...
+      const unit = randomUUID();
       await dataSource.query(
         `INSERT INTO user_role (user_id, role_id, scope_type, scope_id) SELECT $1, id, 'ORG_UNIT', $2 FROM role WHERE code = 'VIEWER'`,
         [admin.id, unit],
       );
-      // ...y un rol propio con alcance GLOBAL: agregarle ese permiso se lo daría en todo el sistema.
       const ownRole = await scalar<string>(
         dataSource,
         `INSERT INTO role (code, name, hierarchy_level) VALUES ($1, 'Propio global', 3) RETURNING id`,

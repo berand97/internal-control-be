@@ -39,7 +39,6 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
   const tokenFor = async (user: AuthenticatedUser) =>
     app.get(TokenService).signAccessToken({ ...user, sessionId: await openTestSession(dataSource, user.id) });
 
-  /** Crea un usuario con las asignaciones dadas (SQL directo sobre user_role). */
   const userWith = async (
     name: string,
     assignments: ReadonlyArray<{
@@ -96,14 +95,11 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
     for (let index = 1; index <= 3; index += 1) {
       assetsB.push(await insertAsset(`SCOPE-B-${index}`, centerB));
     }
-    // Mismo prefijo de placa en ambos centros: la búsqueda debe respetar el alcance.
     await dataSource.query(
       `INSERT INTO asset_identifier (asset_id, identifier_type, value, origin)
        VALUES ($1, 'LEGACY_CODE', 'PLACA-SCOPE-001', 'IMPORTED'), ($2, 'LEGACY_CODE', 'PLACA-SCOPE-002', 'IMPORTED')`,
       [assetsA[0], assetsB[0]],
     );
-    // Sin movimientos por SQL directo: romperían la cadena de firmas que verifica movement-signature.
-    // El timeline trae al menos el evento de compra (acquisition_date).
 
     await userWith('director', [{ role: 'INTERNAL_CONTROL_DIRECTOR', scopeType: 'GLOBAL' }]);
     await userWith('jefe', [{ role: 'DEPARTMENT_HEAD', scopeType: 'COST_CENTER', scopeId: centerA }]);
@@ -221,7 +217,6 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
     expect(revoked.items.map((item) => item.id).sort()).toEqual([...assetsB].sort());
     expect((await get(`/${assetsA[0]}`, 'revocado')).status).toBe(404);
     expect((await get(`/${assetsA[0]}/timeline`, 'revocado')).status).toBe(404);
-    // Sin ninguna otra asignación vigente no queda ningún permiso de lectura.
     for (const who of ['vencido', 'futuro']) {
       for (const path of ['', `/${assetsA[0]}`, `/${assetsA[0]}/timeline`]) {
         const response = await get(path, who);

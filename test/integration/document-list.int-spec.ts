@@ -77,8 +77,6 @@ describe('GET /documents y reintento por el outbox (HTTP real + PostgreSQL real)
     return totals;
   };
 
-  // withSession: sesión con MFA verificado si el usuario lo tiene (firma). Sin ella, igual hay una sesión activa
-  // (el guard JWT la exige desde BE-09), pero sin segundo factor.
   const tokenFor = async (user: AuthenticatedUser, withSession: boolean) => {
     const sessionId = randomUUID();
     await dataSource.query(
@@ -104,7 +102,6 @@ describe('GET /documents y reintento por el outbox (HTTP real + PostgreSQL real)
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }
@@ -243,7 +240,6 @@ describe('GET /documents y reintento por el outbox (HTTP real + PostgreSQL real)
     const generated = (await items({ formatKey: FORMAT, status: 'PENDING_SIGNATURE', pageSize: 100 })).items.find(
       (item) => item.requestId === exhaustedId,
     );
-    // El reintento manual reinicia el contador: el intento que la generó es el primero del nuevo ciclo.
     expect(generated).toMatchObject({ id: documentId, documentId, status: 'PENDING_SIGNATURE', attempts: 1 });
     expect(generated?.number).toBeTruthy();
   });

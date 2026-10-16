@@ -1,7 +1,3 @@
-// Estructura de centros de costo con historial (ubicación = unidad, padre y movimiento): HTTP real + PostgreSQL real.
-// También la reconstrucción por la importación existente (UPDATE_STRUCTURE) con un Excel mínimo con la forma de la
-// hoja 2025 de docs/centros de costo.xlsx (raíces de un dígito, sin «3», subgrupo 3050 por código, 9205 solo por
-// nombre y la columna RESPONSABLE), sin mover un solo activo de centro.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
@@ -141,7 +137,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(child.status).toBe(201);
     ids['c7210'] = child.body.data.id as string;
 
-    // El alta abre el historial con quién, IP y agente.
     const [opened] = (await dataSource.query(
       `SELECT source, changed_by, host(ip_address) AS ip, user_agent, valid_until FROM cost_center_placement WHERE cost_center_id = $1`,
       [ids['c7100']],
@@ -154,7 +149,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     const byUnit = await http().get('/api/v1/cost-centers/suggest-code').query({ unitId: ids['u7'] }).set(auth('viewer'));
     expect(byUnit.status).toBe(200);
     expectConforms('get', '/api/v1/cost-centers/suggest-code', 200, byUnit.body);
-    // Regla del organigrama: los centros propios de una unidad de un dígito van en X0Z0 (7010, 7020…).
     expect(byUnit.body.data).toEqual({
       code: '7010',
       rangeFrom: '7010',
@@ -196,7 +190,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     const same = await place(ids['c7100'] ?? '', { organizationalUnitId: ids['u8'], reason: 'Otra vez lo mismo' });
     expect(same.status).toBe(409);
     expect(same.body.error.code).toBe('COST_CENTER_PLACEMENT_UNCHANGED');
-    // La caché de cost_center sigue a la vigente; el código nunca cambia.
     const center = await http().get(`/api/v1/cost-centers/${ids['c7100']}`).set(auth('admin'));
     expect(center.body.data).toMatchObject({ externalCode: '7100', organizationalUnitId: ids['u8'] });
 
@@ -210,7 +203,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(audit?.changes).toMatchObject({ event: 'COST_CENTER_PLACEMENT_CHANGED', source: 'MANUAL' });
     expect(JSON.stringify(audit?.changes)).not.toContain('Resolución');
 
-    // Ninguna ubicación se solapa con otra del mismo centro y hay a lo sumo una vigente por centro.
     expect(
       await scalar<number>(
         dataSource,
@@ -226,7 +218,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
            GROUP BY cost_center_id HAVING count(*) > 1) x`,
       ),
     ).toBe(0);
-    // Ni escribiendo por fuera del servicio: el EXCLUDE lo impide.
     await expect(
       dataSource.query(
         `INSERT INTO cost_center_placement (cost_center_id, has_movement, valid_from, reason, source)
@@ -235,7 +226,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
       ),
     ).rejects.toMatchObject({ driverError: { code: '23P01' } });
 
-    // Historia con fechas: la inicial del 10 de enero al 1 de marzo, la nueva desde el 1 de marzo.
     const [initial, current] = (await dataSource.query(
       'SELECT id FROM cost_center_placement WHERE cost_center_id = $1 ORDER BY valid_from',
       [ids['c7100']],
@@ -252,7 +242,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expectConforms('get', '/api/v1/cost-centers/{id}/placement', 200, february.body);
     expect(february.body.data.placement).toMatchObject({ organizationalUnit: { id: ids['u7'] }, isCurrent: false });
     expect((await at('2026-03-15')).body.data.placement).toMatchObject({ organizationalUnit: { id: ids['u8'] }, isCurrent: true });
-    // El día del cambio cuenta al final del día (hora de Colombia): ya es la nueva.
     expect((await at('2026-03-01')).body.data.placement).toMatchObject({ organizationalUnit: { id: ids['u8'] } });
     expect((await at('2026-01-09')).body.data.placement).toBeNull();
     expect((await at('2026-02-31')).status).toBe(400);
@@ -270,7 +259,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     const patch = await http().patch(`/api/v1/cost-centers/${ids['c7210']}`).set(auth('admin')).send({ parentId: ids['c7100'] });
     expect(patch.status).toBe(400);
     expect(patch.body.error.code).toBe('COST_CENTER_PLACEMENT_REQUIRED');
-    // Igual al vigente sí se acepta (el formulario puede reenviarlo).
     const unchanged = await http()
       .patch(`/api/v1/cost-centers/${ids['c7210']}`)
       .set(auth('admin'))
@@ -323,7 +311,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     const removed = await http().delete(`/api/v1/organizational-units/${unitId}`).set(auth('admin'));
     expect(removed.status).toBe(200);
     expect(await scalar<boolean>(dataSource, 'SELECT is_active FROM organizational_unit WHERE id = $1', [unitId])).toBe(false);
-    // El centro inactivo conserva su unidad (desactivación lógica).
     expect(await scalar<string>(dataSource, 'SELECT organizational_unit_id FROM cost_center WHERE id = $1', [center.body.data.id])).toBe(
       unitId,
     );
@@ -362,7 +349,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
       ['PLACEMENT', '2026-01-10'],
     ]);
     const adminName = `Integración ${admin.username.slice(3)}`;
-    // Quién, legible: el visor no administra usuarios y aun así ve el nombre de quien hizo cada cambio.
     expect(
       (history.body.data.events as Array<{ placement: { changedBy: string | null; changedByName: string | null } }>).map((event) => [
         event.placement.changedBy,
@@ -377,7 +363,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(kinds).toEqual(['HEAD', 'PLACEMENT']);
     expect(headed.body.data.events[0].head).toMatchObject({ assignedBy: admin.id, assignedByName: adminName, endedBy: null, endedByName: null });
 
-    // Sin nombres en la persona, el nombre legible es el usuario; sin usuario, null.
     const nameless = await createActor(dataSource);
     await dataSource.query(`UPDATE person SET first_name = '', last_name = '' WHERE id = $1`, [nameless.personId]);
     const [names] = (await dataSource.query(
@@ -395,7 +380,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(root?.children.map((node) => node.id).sort()).toEqual([ids['c7210'], ids['c7220']].sort());
     expect(root?.children.find((node) => node.id === ids['c7210'])?.directAssets).toBe(1);
 
-    // En febrero el 7100 estaba en la unidad 7; los centros creados hoy no existían.
     const february = await http().get('/api/v1/cost-centers/tree').query({ at: '2026-02-15' }).set(auth('viewer'));
     const roots = february.body.data.roots as Array<{ id: string; organizationalUnit: { id: string } | null }>;
     expect(roots.find((node) => node.id === ids['c7100'])?.organizationalUnit?.id).toBe(ids['u7']);
@@ -453,7 +437,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     };
 
     it('la vista previa cuenta lo que cambia y avisa; la confirmación lo aplica sin mover activos', async () => {
-      // Como en la base de staging: centros importados de la hoja 2026 (sin padre ni unidad) con activos.
       for (const [external, name] of [
         ['1010', 'Rectoría'],
         ['1110', 'OFICINA JURÍDICA'],
@@ -473,7 +456,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
       const imports = app.get(ExcelImportService);
       const upload = await imports.upload(await workbook(), 'centros de costo.xlsx', admin.id);
       expect(upload.sheets[0]).toMatchObject({ name: '2025', detectedHeaderRow: 4 });
-      // El operador asigna por error la columna RESPONSABLE a la unidad: se quita del mapeo y se avisa.
       const mapping = { code: 'D', name: 'E', movement: 'F', unitCode: 'H' };
 
       const outsider = await createActor(dataSource);
@@ -520,7 +502,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
           'UNIT_CREATED:9',
         ]),
       );
-      // La vista previa no escribe nada.
       expect(await scalar<string | null>(dataSource, `SELECT id FROM cost_center WHERE external_code = '9205'`)).toBeUndefined();
 
       const result = await app.get(ImportJobsService).runNow(preview.importId, admin.id);
@@ -538,9 +519,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
       for (const external of ['9206', '9207', '9210']) {
         expect((await structureOf(external))?.parent).toBe('9200');
       }
-      // El conciliador (misma transacción) aplica la regla del organigrama: 9211 cuelga de 9210 porque existe.
       expect((await structureOf('9211'))?.parent).toBe('9210');
-      // No viene en la hoja, pero su código empieza por 1: el conciliador lo lleva a la unidad CC_1.
       expect(await structureOf('1120')).toMatchObject({ parent: null, unit: 'CC_1', name: 'CENTRO QUE NO ESTÁ EN LA HOJA' });
       expect(
         await dataSource.query(`SELECT code, name, unit_type, code_prefix FROM organizational_unit WHERE code IN ('CC_1', 'CC_9') ORDER BY code`),
@@ -549,7 +528,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
         { code: 'CC_9', name: 'INSTITUCIONAL', unit_type: 'VICERECTORATE', code_prefix: '9' },
       ]);
 
-      // Historial: el existente tiene su alta y el cambio por importación (con el lote); el nuevo, su alta por importación.
       const history = (await dataSource.query(
         `SELECT source, staging_import_id, valid_until IS NULL AS current FROM cost_center_placement
          WHERE cost_center_id = $1 ORDER BY valid_from, changed_at`,
@@ -563,7 +541,6 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
         await dataSource.query(`SELECT source, staging_import_id FROM cost_center_placement WHERE cost_center_id = $1`, [await code('9205')]),
       ).toEqual([{ source: 'IMPORT', staging_import_id: preview.importId }]);
 
-      // Ni un activo cambió de centro.
       expect(await assetCountsByCenter()).toEqual(before);
     });
   });

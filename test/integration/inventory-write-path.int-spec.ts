@@ -22,7 +22,6 @@ describe('Toma física sobre el camino único de escritura (PostgreSQL real)', (
   let roomB: string;
 
   beforeAll(async () => {
-    // InventoriesModule encola el acta OCI-21-37: el motor de actas necesita el almacenamiento.
     moduleRef = await bootModules(AssetsModule, InventoriesModule, StorageModule);
     dataSource = moduleRef.get(DataSource);
     assets = moduleRef.get(AssetsService);

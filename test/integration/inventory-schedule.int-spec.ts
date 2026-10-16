@@ -147,7 +147,6 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // Los crons se detienen: el test decide cuándo corre el worker de recordatorios y el del outbox.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }
@@ -192,7 +191,6 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
 
   afterAll(async () => {
     delete process.env['INVENTORY_WEEKLY_CONCENTRATION_THRESHOLD'];
-    // Los avisos de tomas no quedan en la cola compartida: otro archivo despacha el outbox por orden de llegada.
     await dataSource.query(`DELETE FROM mail_outbox WHERE entity_type = 'INVENTORY' AND delivery_status = 'PENDING_SEND'`);
     await app.close();
   });
@@ -246,7 +244,6 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     )) as Array<{ recipient_user_id: string }>;
     expect(notified.map((row) => row.recipient_user_id).sort()).toEqual([headUser.userId, responsible.userId].sort());
 
-    // El correo a la persona sin usuario sale a su person.email.
     const sendTemplated = vi.spyOn(app.get(MailService), 'sendTemplated').mockResolvedValue(true);
     const toPerson = mails.find((mail) => mail.recipient_person_id === headNoUser.personId);
     expect(await app.get(MailOutboxService).dispatchNow(toPerson?.id ?? '')).toBe('SENT');
@@ -287,7 +284,6 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
       expect.objectContaining({ id: first.data.id, reason: 'SAME_SCOPE', status: 'PLANNED' }),
     ]);
 
-    // Una toma por ubicación que comparte activos con el centro también choca (SHARED_ASSETS).
     await newAsset(centerId, base.roomB);
     const byRoom = await schedule({ scope: 'LOCATION', scopeId: base.roomB, plannedStartDate: day(61), plannedEndDate: day(61) });
     expect(byRoom.data['conflicts']).toEqual([expect.objectContaining({ id: later.data.id, reason: 'SHARED_ASSETS' })]);
@@ -367,7 +363,7 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
       `SELECT count(*) FROM notification WHERE entity_id = $1 AND notification_type = 'INVENTORY_REMINDER'`,
       [created.data.id],
     );
-    expect(Number(notified)).toBe(2); // jefa con usuario + responsable
+    expect(Number(notified)).toBe(2);
   });
 
   it('reprogramar: los pendientes quedan SUPERSEDED, nacen los de la nueva revisión, se avisa y se audita', async () => {
@@ -419,8 +415,6 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     expect(audit).toHaveLength(1);
     expect(audit[0]?.changes).toMatchObject({ reason: 'Coincide con el cierre contable', rescheduleCount: 1 });
 
-    // Aunque un recordatorio de la revisión vieja volviera a quedar PENDING (carrera con el worker), no sale:
-    // su revisión ya no es la vigente y queda SUPERSEDED.
     await dataSource.query(
       `UPDATE inventory_reminder SET status = 'PENDING' WHERE inventory_id = $1 AND schedule_rev = 0 AND offset_days = 30`,
       [id],
@@ -583,7 +577,6 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
   });
 
   it('programar, listar y detalle traen el nombre del responsable; la Directora no necesita user:read:global', async () => {
-    // Causa del UUID en pantalla: el frontend pedía GET /users, que exige user:read:global y la Directora no tiene.
     expect((await http().get('/api/v1/users').set(auth())).status).toBe(403);
     const created = await schedule({ scope: 'GLOBAL', plannedStartDate: day(200), plannedEndDate: day(201) });
     const expected = { id: responsible.userId, name: 'Responsable Programación' };
@@ -650,7 +643,6 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     const [old, current, next] = [await unit(`U1${tag}`), await unit(`U2${tag}`), await unit(`U3${tag}`)];
     const centerId = await center('Centro que cambia de unidad');
     await newAsset(centerId, base.roomB);
-    // Historial: U1 hasta hace 5 días, U2 hasta el día 60 y U3 desde entonces (fin del día, hora de Colombia).
     const boundary = (offset: number) => `${day(offset)}T23:59:59.999-05:00`;
     await dataSource.query('DELETE FROM cost_center_placement WHERE cost_center_id = $1', [centerId]);
     for (const [unitId, from, until] of [
@@ -675,7 +667,6 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     expect(byId.get(before.data.id)).toEqual({ code: `U2${tag}`, name: `Unidad U2${tag}` });
     expect(byId.get(after.data.id)).toEqual({ code: `U3${tag}`, name: `Unidad U3${tag}` });
 
-    // Última toma cerrada hace 10 días, cuando el centro estaba en U1.
     const closedId = await scalar<string>(
       dataSource,
       `INSERT INTO physical_inventory (code, name, scheduled_start_date, scheduled_end_date, status, responsible_user_id,

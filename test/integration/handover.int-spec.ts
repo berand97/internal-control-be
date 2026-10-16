@@ -21,7 +21,6 @@ import { DocxTextPdfConverter } from './pdf-text.js';
 const FORMAT = 'OCI-01-55';
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 
-/** PDF real (texto del DOCX) para que el proveedor interno estampe firmas; puede fallar a pedido. */
 class SwitchablePdfConverter implements PdfConverter {
   failing = false;
   private readonly inner = new DocxTextPdfConverter();
@@ -42,7 +41,6 @@ interface Schema {
   readonly items?: Schema;
 }
 
-/** Misma comparación que document-openapi.int-spec.ts: la respuesta real contra el esquema publicado. */
 const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: string, errors: string[]): void => {
   const components = (openapi.components?.schemas ?? {}) as Record<string, Schema>;
   const resolve = (item: Schema): Schema => {
@@ -243,7 +241,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect(errors).toEqual([]);
   };
 
-  /** Crea la entrega, genera el acta y devuelve la entrega con su documentId. */
   const generated = async (assetIds: ReadonlyArray<string>, overrides: Record<string, unknown> = {}) => {
     const created = (await create(assetIds, overrides).expect(201)).body.data;
     await drain();
@@ -263,7 +260,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // El job del outbox corre cada minuto: se detiene para que el test decida cuándo se genera cada acta.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }
@@ -304,7 +300,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
       `INSERT INTO asset_category (code, name, requires_photo) VALUES ($1, 'Muebles de entrega', FALSE) RETURNING id`,
       [`ENT_${tag}`],
     );
-    // Vigencia antigua: si otro archivo ya subió su OCI-01-55 manda la suya; esta solo cubre que no haya ninguna.
     const uploaded = await engine.uploadTemplate(
       FORMAT,
       { buffer: await readFile(TEMPLATE), originalname: 'OCI-01-55-v2.docx' },
@@ -315,7 +310,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
   });
 
   afterAll(async () => {
-    // Deja OCI-01-55 como estaba: otros archivos esperan su consecutivo (0093...) y ninguna acta de más.
     const ids = (
       (await dataSource.query(`SELECT id FROM document WHERE entity_type = 'HANDOVER'`)) as Array<{ id: string }>
     ).map((item) => item.id);
@@ -399,7 +393,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     ]);
     expect(data?.centroCosto.nombre).toBe('Laboratorio de Entregas');
 
-    // Antes de firmar nada cambió en los activos.
     expect(await responsibleOf(first)).toBeNull();
     await sign(documentId, 2, auditor).expect(409);
     await sign(documentId, 1, receiver).expect(200);
@@ -428,7 +421,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
         authorized_by: auditor.userId,
         metadata: expect.objectContaining({ handoverId: pending.id, documentId }),
       });
-      // Enlace en ambos sentidos: ítem de la entrega → movimiento, acta (document_asset) → movimiento.
       const item = signed.items.find((entry: { asset: { id: string } }) => entry.asset.id === assetId);
       expect(item.movementId).toBe(movement?.id);
       expect(item.asset.responsibleId).toBe(receiver.personId);
@@ -441,7 +433,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     }
     expectConforms('get', '/api/v1/handovers/{id}', 200, (await http().get(`/api/v1/handovers/${pending.id}`).set(auth(director))).body);
 
-    // El activo quedó libre: puede entrar en otra entrega.
     await create([first]).expect(201);
   });
 
@@ -506,7 +497,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
       documentId: null,
       assetCount: 1,
     });
-    // Sigue abierta: el activo no entra en otra entrega mientras tanto.
     const blocked = await create([assetId]).expect(409);
     expect(blocked.body.error.code).toBe('HANDOVER_ASSET_IN_OPEN_HANDOVER');
 
@@ -515,7 +505,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     const recovered = await detail(created.id);
     expect(recovered).toMatchObject({
       status: 'PENDING_SIGNATURE',
-      // El reintento manual reinicia attempts (Tarea 2): el intento que la generó cuenta como 1.
       document: { generation: 'GENERATED', attempts: 1, lastError: null, retryable: false, status: 'PENDING_SIGNATURE' },
     });
     expect(recovered.document.documentId).not.toBeNull();
@@ -526,7 +515,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     const [low, high] = [await asset(), await asset()].sort();
     const handover = await generated([low ?? '', high ?? '']);
     await sign(handover.documentId, 1, receiver).expect(200);
-    // El segundo activo (en orden de aplicación) cambia de centro mientras el acta espera la firma de Control Interno.
     await dataSource.query('UPDATE asset SET current_cost_center_id = $2 WHERE id = $1', [high, otherCostCenter]);
 
     const stalled = (await sign(handover.documentId, 2, auditor).expect(200)).body.data;
@@ -536,7 +524,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect(blocked).toMatchObject({ status: 'PENDING_SIGNATURE', assignedPerson: null, closedAt: null });
     expect(blocked.document.lifecycleError).toBe(stalled.lifecycleError);
     expect(blocked.document.signatures.map((signature: { status: string }) => signature.status)).toEqual(['SIGNED', 'SIGNED']);
-    // El primer activo alcanzó a aplicarse dentro de la transacción y se revirtió con ella.
     for (const assetId of [low ?? '', high ?? '']) {
       expect(await responsibleOf(assetId)).toBeNull();
       expect(await assignments(assetId)).toEqual([]);
@@ -647,7 +634,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect(messages.find((message) => message.includes('reservado por una solicitud de activos'))).toBeDefined();
     expect(await count()).toBe(before);
 
-    // Liberados (préstamo rechazado, solicitud vencida), se pueden entregar.
     await dataSource.query(`UPDATE asset_loan SET status = 'REJECTED' WHERE id = $1`, [loanId]);
     await dataSource.query('UPDATE asset_request_item SET open = FALSE WHERE request_id = $1', [requestId]);
     const created = await create([scheduled, reserved]).expect(201);
@@ -670,7 +656,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     const cancel = (id: string, reason: string, who: Actor = director) =>
       http().post(`/api/v1/handovers/${id}/cancel`).set(auth(who)).send({ reason });
 
-    // 1. Acta aún en el outbox: la solicitud queda CANCELLED y el job ya no la genera.
     const queuedAsset = await asset();
     const queued = (await create([queuedAsset]).expect(201)).body.data;
     expect((await cancel(queued.id, 'no', director).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
@@ -690,7 +675,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
       await scalar<string>(dataSource, 'SELECT status FROM document_request WHERE id = $1', [queued.document.requestId]),
     ).toBe('CANCELLED');
 
-    // 2. Acta generada y pendiente de firma: queda VOIDED con el motivo y nadie puede firmarla.
     const pendingAsset = await asset();
     const pending = await generated([pendingAsset]);
     const cancelled = await cancel(pending.id, 'El receptor ya no trabaja en el centro').expect(200);
@@ -703,12 +687,9 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect(late.status).toBe(406);
     expect(await responsibleOf(pendingAsset)).toBeNull();
     expect(await assignments(pendingAsset)).toEqual([]);
-    // Activos liberados: entran en otra entrega.
     await create([queuedAsset, pendingAsset]).expect(201);
-    // Cancelar dos veces: estado inválido.
     expect((await cancel(pending.id, 'Otra vez por error').expect(406)).body.error.code).toBe('INVALID_STATE');
 
-    // 3. Firmada: 409 DOCUMENT_ALREADY_SIGNED y nada cambia.
     const signedAsset = await asset();
     const signedHandover = await generated([signedAsset]);
     await sign(signedHandover.documentId, 1, receiver).expect(200);
@@ -719,8 +700,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect(await responsibleOf(signedAsset)).toBe(receiver.personId);
     await cancel(randomUUID(), 'No existe esta entrega').expect(404);
 
-    // 4. Auditoría: una fila HANDOVER_CANCELLED por cancelación efectiva, en la misma transacción; los intentos
-    // rechazados (400, 403, 406, 409) no dejan fila. Sin datos personales: ni números de documento en changes.
     const audits = (await dataSource.query(
       `SELECT entity_id, entity_type, performed_by, changes FROM audit_log
        WHERE action = 'HANDOVER_CANCELLED' AND entity_id = ANY($1) ORDER BY id`,
@@ -822,7 +801,6 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect([rejected.status, rejected.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
     expect(rejected.body.error.details).toEqual([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]);
     expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_handover')).toBe(before);
-    // Con el permiso vigente se crea.
     await create([assetId], { auditorPersonId: auditor.personId }).expect(201);
   });
 

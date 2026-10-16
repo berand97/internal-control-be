@@ -1,13 +1,3 @@
-// Plantilla OCI-01-65 (Acta de préstamo temporal de activos fijos).
-//
-// Se construye desde el Word institucional con:
-//   node scripts/formats/build-oci-01-65-template.mjs "docs/acta de préstamo temporal de activos fijos mdf.docx" templates/formats/OCI-01-65-v2.docx
-// y se carga al motor como versión de plantilla del formato:
-//   POST /documents/formats/OCI-01-65/templates   (multipart/form-data, permiso document_template:update:global)
-//     file=@templates/formats/OCI-01-65-v2.docx  sgcVersion=2  effectiveDate=2026-09-08
-// La carga guarda los marcadores que lee readDocxPlaceholders; este test fija esa lista.
-//
-// No usa Gotenberg: renderiza el DOCX con el renderizador real del repo.
 import { readFileSync } from 'node:fs';
 import PizZip from 'pizzip';
 import { readDocxPlaceholders, renderDocx } from '../../src/modules/document-templates/domain/docx-template.js';
@@ -16,8 +6,6 @@ import { assertTemplateClean, findLeftovers } from '../../scripts/formats/templa
 
 const TEMPLATE = 'templates/formats/OCI-01-65-v2.docx';
 
-// Contrato de marcadores del OCI-01-65. Cualquier marcador nuevo o faltante
-// en la plantilla rompe el test.
 const EXPECTED_TAGS = [
   '#activos',
   '/activos',
@@ -95,9 +83,6 @@ const ASSETS = [
   { id: 'a-3', idOrigen: '41003', codigo: '50013', descripcion: 'CAMARA DOCUMENTAL IPEVO', estado: 'Sin verificar', observacion: '' },
 ];
 
-// Misma forma que DocumentEngineService.buildContext
-// (src/modules/documents/services/document-engine.service.ts:934-962) más
-// `firmante.<rol>` y los campos del préstamo en `campos`.
 const context = (count: number, signers: Signer[] = SIGNERS): Record<string, unknown> => {
   const auditor = signers.find((signer) => signer.rol === 'AUDITA');
   const recibe = signers.find((signer) => signer.rol === 'RECIBE');
@@ -144,7 +129,6 @@ describe('Plantilla OCI-01-65 (acta de préstamo temporal)', () => {
       .map((tag) => tag.slice(2, -2).trim())
       .sort();
     expect(tags).toEqual([...EXPECTED_TAGS].sort());
-    // Lo que la carga (POST /documents/formats/OCI-01-65/templates) registra como marcadores.
     expect([...readDocxPlaceholders(template)].sort()).toEqual(
       EXPECTED_TAGS.filter((tag) => !tag.startsWith('#') && !tag.startsWith('/')).sort(),
     );
@@ -192,7 +176,6 @@ describe('Plantilla OCI-01-65 (acta de préstamo temporal)', () => {
     for (const [label, docx, expected] of cases) {
       expect(findLeftovers(docx, SAMPLE, { metadata: true }).join('\n'), label).toMatch(expected);
     }
-    // Los números de página del pie son campos permitidos.
     expect(findLeftovers(template, SAMPLE).join('\n')).not.toMatch(/PAGE/);
   });
 
@@ -236,7 +219,6 @@ describe('Plantilla OCI-01-65 (acta de préstamo temporal)', () => {
         expect(text, signer.rol).toContain(signer.nombre);
         expect(text, signer.rol).toContain(signer.cargo);
       }
-      // Cada firmante con la abreviatura de su tipo (quien recibe tiene cédula de extranjería).
       expect(text).toContain('C.E. 98000222');
       expect(text).toContain('C.C. 71000111');
       expect(text).not.toContain('C.C 98000222');

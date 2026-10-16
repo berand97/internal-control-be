@@ -1,5 +1,3 @@
-// Hallazgos BE-10, BE-11 (almacenamiento), BE-12, BE-15, BE-16, BE-17 y Ley 1581 (logs de correo) con HTTP real y
-// PostgreSQL real. La política de destinos salientes se fija como en producción antes de cargar la configuración.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -137,8 +135,6 @@ describe('Endurecimiento BE-10/11/12/15/16/17 (HTTP real + PostgreSQL real)', ()
       }
     };
 
-    // La BD de integración es compartida (verifySample de movement-signature recorre activos al azar y allí no hay
-    // clave anterior configurada): todo movimiento re-firmado aquí vuelve a la clave actual, falle o no la prueba.
     const resigned = new Set<string>();
     const restoreCurrentSignatures = async () => {
       for (const movementId of resigned) {
@@ -399,8 +395,6 @@ describe('Endurecimiento BE-10/11/12/15/16/17 (HTTP real + PostgreSQL real)', ()
         [first.body.data.id],
       )) as Array<{ storage_key: string; file_hash: string }>;
       expect(row?.storage_key).toMatch(/^templates\/documents\/OCI-01-55\/2026-09-02-v2-[0-9a-f-]{36}\.docx$/);
-      // Misma fecha y versión con otro archivo: antes la clave era idéntica y el archivo se sobrescribía antes de que
-      // la BD rechazara la fila (uq_document_template_version). Ahora el archivo registrado queda intacto.
       const second = await upload('templates/formats/OCI-01-65-v2.docx');
       expect(second.status).not.toBe(201);
       const stored = await readFile(join(SHARED_STORAGE_DIR, row?.storage_key ?? ''));

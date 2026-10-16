@@ -1,8 +1,3 @@
-// Batería de privacidad (decisión del desarrollador: ningún endpoint expone activos de otro centro de costo).
-// Un jefe del centro A (DEPARTMENT_HEAD asignado a A y jefatura vigente de A) recorre todos los endpoints que leen
-// activos o sus datos, tomados de los controladores (assets, asset-depreciation, movements, qr-tokens, loans,
-// transfers, handovers, inventories, documents, depreciation, asset-requests), contra activos del centro B. Ninguno
-// debe devolver datos de B: 403/404/400 o, en listas, sin rastro de B.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
@@ -34,7 +29,6 @@ interface Probe {
   readonly method: 'get' | 'post' | 'patch' | 'put';
   readonly path: string;
   readonly body?: Record<string, unknown>;
-  /** Lista: 200 permitido si no trae rastro de B. */
   readonly list?: boolean;
 }
 
@@ -125,7 +119,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
     return { id, code, serial };
   };
 
-  /** Rastros de B en una respuesta: códigos, series, identificadores, descripciones o el nombre del centro B. */
   const leaks = (body: unknown): string[] => {
     const text = JSON.stringify(body ?? '');
     return secrets.filter((secret) => text.includes(secret));
@@ -167,7 +160,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
     contactC = await actor('ContactoC', null, null, []);
     await asset(centerA, 'A');
 
-    // Activos de B con sus rastros: código interno, serie, identificador visible y descripción.
     const loaned = await asset(centerB, 'L');
     const transferred = await asset(centerB, 'T');
     const inventoried = await asset(centerB, 'I');
@@ -188,7 +180,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
     ids['qr'] = (await http().post(`/api/v1/assets/${loaned.id}/qr`).set(auth(director)).expect(201)).body.data.token;
     ids['qrRequest'] = (await http().post(`/api/v1/assets/${requested.id}/qr`).set(auth(director)).expect(201)).body.data.token;
 
-    // Préstamo B → C entregado, con su acta OCI-01-65 generada (movimientos, documento).
     templateId =
       (
         await engine.uploadTemplate(
@@ -224,7 +215,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
       loaned.id,
     ]);
 
-    // Traslado B → C en borrador.
     const reasonId = await scalar<string>(dataSource, `SELECT id FROM asset_transfer_reason WHERE code = 'REUBICACION'`);
     ids['transfer'] = (
       await http()
@@ -240,7 +230,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
         .expect(201)
     ).body.data.id;
 
-    // Toma física del centro B, iniciada (con sus ítems).
     const inventory = await http()
       .post('/api/v1/inventories')
       .set(auth(director))
@@ -257,7 +246,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
     ids['inventory'] = inventory.body.data.id;
     await http().post(`/api/v1/inventories/${ids['inventory']}/start`).set(auth(director)).send({});
 
-    // Solicitud ajena: el jefe de C le pide a B.
     ids['request'] = (
       await http()
         .post('/api/v1/asset-requests')
@@ -275,7 +263,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
   });
 
   afterAll(async () => {
-    // Los avisos de tomas no quedan en la cola compartida: otro archivo despacha el outbox por orden de llegada.
     await dataSource.query(`DELETE FROM mail_outbox WHERE entity_type = 'INVENTORY' AND delivery_status = 'PENDING_SEND'`);
     const docs = ((await dataSource.query(`SELECT id FROM document WHERE entity_type = 'LOAN' AND entity_id = $1`, [ids['loan'] ?? null])) as Array<{
       id: string;
@@ -306,7 +293,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
     await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE revoked_at IS NULL AND user_id = ANY($1)', [
       [director, headA, headB, headC, contactC].map((who) => who.userId),
     ]);
-    // Tabla endpoint → resultado para el reporte (PRIVACY_BATTERY_OUT=<archivo> la escribe; la consola de la suite va en silencio).
     const out = process.env['PRIVACY_BATTERY_OUT'];
     if (out) {
       await writeFile(out, results.map(([name, status, verdict]) => `| ${name} | ${status} | ${verdict} |`).join('\n'));
@@ -317,7 +303,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
   it('ningún endpoint que lee activos devuelve datos del centro B al jefe del centro A', async () => {
     const a = ids['asset'] ?? '';
     const probes: Probe[] = [
-      // assets.controller.ts
       { name: 'GET /assets?q=<código interno de B>', method: 'get', path: `/assets?q=${ids['assetCode']}`, list: true },
       { name: 'GET /assets?q=<serie de B>', method: 'get', path: `/assets?q=${ids['assetSerial']}`, list: true },
       { name: 'GET /assets?q=<identificador visible de B>', method: 'get', path: `/assets?q=VISPRV${tag}`, list: true },
@@ -327,16 +312,13 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
       { name: 'PATCH /assets/:id', method: 'patch', path: `/assets/${a}`, body: { description: 'x' } },
       { name: 'POST /assets/:id/change-status', method: 'post', path: `/assets/${a}/change-status`, body: { status: 'IN_STORAGE', reason: 'x' } },
       { name: 'POST /assets/:id/reassign-location', method: 'post', path: `/assets/${a}/reassign-location`, body: {} },
-      // asset-depreciation.controller.ts y depreciation.controller.ts
       { name: 'GET /assets/:id/depreciation-history', method: 'get', path: `/assets/${a}/depreciation-history` },
       { name: 'GET /depreciation', method: 'get', path: '/depreciation', list: true },
       { name: 'GET /depreciation/summary', method: 'get', path: '/depreciation/summary', list: true },
-      // movements.controller.ts
       { name: 'GET /movements', method: 'get', path: `/movements?assetId=${a}`, list: true },
       { name: 'GET /movements/:id/verify', method: 'get', path: `/movements/${ids['movement']}/verify` },
       { name: 'GET /assets/:assetId/movements', method: 'get', path: `/assets/${a}/movements` },
       { name: 'GET /assets/:assetId/movements/export', method: 'get', path: `/assets/${a}/movements/export` },
-      // qr-tokens.controller.ts
       { name: 'GET /qr/verify?token=', method: 'get', path: `/qr/verify?token=${ids['qr']}` },
       { name: 'GET /qr/verify?token=&format=png', method: 'get', path: `/qr/verify?token=${ids['qr']}&format=png` },
       { name: 'POST /qr/verify', method: 'post', path: '/qr/verify', body: { token: ids['qr'] } },
@@ -344,7 +326,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
       { name: 'GET /assets/:id/qr/history', method: 'get', path: `/assets/${a}/qr/history` },
       { name: 'POST /assets/:id/qr', method: 'post', path: `/assets/${a}/qr` },
       { name: 'POST /assets/:id/qr/revoke', method: 'post', path: `/assets/${a}/qr/revoke` },
-      // loans.controller.ts
       {
         name: 'POST /loans con activos de B',
         method: 'post',
@@ -361,7 +342,6 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
       { name: 'GET /loans', method: 'get', path: '/loans', list: true },
       { name: 'GET /loans/overdue', method: 'get', path: '/loans/overdue', list: true },
       { name: 'POST /loans/:id/approve', method: 'post', path: `/loans/${ids['loan']}/approve` },
-      // transfers.controller.ts
       { name: 'GET /transfers/:id (B → C)', method: 'get', path: `/transfers/${ids['transfer']}` },
       { name: 'GET /transfers', method: 'get', path: '/transfers', list: true },
       {
@@ -376,10 +356,8 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
           justification: 'Intento',
         },
       },
-      // handovers.controller.ts
       { name: 'GET /handovers', method: 'get', path: '/handovers', list: true },
       { name: 'GET /handovers/:id', method: 'get', path: `/handovers/${randomUUID()}` },
-      // inventories.controller.ts (toma del centro B)
       { name: 'GET /inventories', method: 'get', path: '/inventories', list: true },
       { name: 'GET /inventories/calendar', method: 'get', path: `/inventories/calendar?from=${plusDays(-5)}&to=${plusDays(30)}`, list: true },
       { name: 'GET /inventories/coverage', method: 'get', path: '/inventories/coverage', list: true },
@@ -392,12 +370,10 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
         path: `/inventories/${ids['inventory']}/verify-asset`,
         body: { assetId: ids['asset'], condition: 'GOOD' },
       },
-      // documents.controller.ts (acta OCI-01-65 del préstamo B → C)
       { name: 'GET /documents', method: 'get', path: '/documents', list: true },
       { name: 'GET /documents/:id', method: 'get', path: `/documents/${ids['document']}` },
       { name: 'GET /documents/:id/pdf', method: 'get', path: `/documents/${ids['document']}/pdf` },
       { name: 'GET /documents/:id/docx', method: 'get', path: `/documents/${ids['document']}/docx` },
-      // asset-requests.controller.ts (solicitud C → B, ajena al jefe de A)
       { name: 'GET /asset-requests/:id (ajena)', method: 'get', path: `/asset-requests/${ids['request']}` },
       { name: 'GET /asset-requests?box=to-decide', method: 'get', path: '/asset-requests?box=to-decide', list: true },
       { name: 'GET /asset-requests/:id/eligible-assets (ajena)', method: 'get', path: `/asset-requests/${ids['request']}/eligible-assets` },
@@ -420,9 +396,7 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
       const call = http()[probe.method](`/api/v1${probe.path}`).set(auth(headA));
       const response = probe.body ? await call.send(probe.body) : await call;
       const body = response.headers['content-type']?.includes('json') ? response.body : response.text;
-      // En listas institucionales (calendario y cobertura de tomas) el NOMBRE del centro B no es dato de sus activos.
       const found = leaks(body).filter((secret) => !(probe.list && secret === `Centro B Privado ${tag}`));
-      // 503: el módulo está apagado en esta corrida (FEATURE_*): no responde nada.
       const denied = (response.status >= 400 && response.status < 500) || response.status === 503;
       const ok = found.length === 0 && (probe.list ? response.status < 500 || response.status === 503 : denied);
       const verdict = ok ? (response.status === 503 ? 'módulo apagado, sin datos' : 'sin datos de B') : `FUGA: ${found.join(', ') || `status ${response.status}`}`;
@@ -432,15 +406,12 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
       }
     }
 
-    // QR: la respuesta a un activo ajeno es idéntica a la de un token inexistente.
     const foreign = await http().get(`/api/v1/qr/verify?token=${ids['qr']}`).set(auth(headA));
     const garbage = await http().get('/api/v1/qr/verify?token=no-existe').set(auth(headA));
     expect([foreign.status, foreign.body.error]).toEqual([garbage.status, garbage.body.error]);
-    // El mismo QR sí responde al jefe de B y a quien tiene alcance global; sin sesión, 401.
     expect((await http().get(`/api/v1/qr/verify?token=${ids['qr']}`).set(auth(headB))).status).toBe(200);
     expect((await http().post('/api/v1/qr/verify').set(auth(director)).send({ token: ids['qr'] })).status).toBe(200);
     expect((await http().get(`/api/v1/qr/verify?token=${ids['qr']}`)).status).toBe(401);
-    // POST /loans con un activo ajeno responde igual que con uno inexistente.
     const ghost = await http()
       .post('/api/v1/loans')
       .set(auth(headA))

@@ -1,9 +1,3 @@
-// Acta de devolución (LOAN_RETURN) generada de punta a punta con un formato de PRUEBA.
-// El formato institucional no existe: la migración lo siembra sin código SGC ni firmantes. Aquí Control Interno (el
-// director, permiso document_template:update:global) le crea una versión por API con un código y firmantes de prueba
-// (POST /documents/formats/LOAN_RETURN/versions), sube la plantilla por API y la devolución del préstamo genera el acta.
-// La plantilla es un DOCX mínimo armado en el test con el contrato de marcadores documentado en document-formats.ts.
-// Nada de esto es institucional: código, firmantes y plantilla son fixtures; afterAll borra la versión de prueba.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
@@ -25,7 +19,6 @@ import { DocxTextPdfConverter } from './pdf-text.js';
 
 const FORMAT = 'LOAN_RETURN';
 
-/** Versión de PRUEBA: código y firmantes inventados para el test, nunca para producción. */
 const TEST_VERSION = {
   sgcCode: 'PRUEBA-DEV',
   sgcVersion: '0',
@@ -38,7 +31,6 @@ const TEST_VERSION = {
   changeReason: 'Formato de prueba del test de integración',
 };
 
-/** DOCX mínimo con el contrato de marcadores del acta de devolución (document-formats.ts). */
 const fixtureTemplate = (): Buffer => {
   const zip = new PizZip();
   zip.file(
@@ -174,19 +166,16 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     await user('solicitante', 'Solicitante', 'Coordinador', 'INTERNAL_CONTROL_DIRECTOR');
     await user('contacto', 'Contacto', 'DOCENTE QUE DEVUELVE', null);
     await user('receptor', 'Receptor', 'ALMACENISTA DE ORIGEN', null);
-    // Sembrado sin código ni firmantes: el motor no lo genera.
     const before = (await http().get('/api/v1/documents/formats').set(auth('director')).expect(200)).body.data.find(
       (format: { key: string }) => format.key === FORMAT,
     );
     expect(before).toMatchObject({ sgcCode: null, ready: false, versionNumber: 1, signers: [] });
-    // Control Interno crea la versión por API...
     const version = await http()
       .post(`/api/v1/documents/formats/${FORMAT}/versions`)
       .set(auth('director'))
       .send(TEST_VERSION)
       .expect(201);
     expect(version.body.data).toMatchObject({ key: FORMAT, versionNumber: 2, status: 'CURRENT', sgcCode: 'PRUEBA-DEV' });
-    // ... sube la plantilla por API (sgcVersion por defecto: la de la versión del formato)...
     const uploaded = await http()
       .post(`/api/v1/documents/formats/${FORMAT}/templates`)
       .set(auth('director'))
@@ -197,7 +186,6 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     expect(
       await scalar<string>(dataSource, "SELECT sgc_code || '/' || sgc_version FROM document_template_version WHERE id = $1", [templateId]),
     ).toBe('PRUEBA-DEV/0');
-    // ... y el formato queda listo.
     expect((await engine.formatReadiness(FORMAT)).ready).toBe(true);
   });
 
@@ -240,7 +228,6 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
       .set(auth('director'))
       .send({ deliveredByPersonId: users['receptor']?.personId, controlInternoPersonId: users['director']?.personId })
       .expect(200);
-    // El acta de entrega no es lo que se prueba aquí: su solicitud se cancela y el préstamo se da por activo.
     await dataSource.query(
       `UPDATE document_request SET status = 'CANCELLED', cancelled_at = NOW(), cancel_reason = 'prueba de devolución'
        WHERE payload->>'entityId' = $1`,
@@ -261,7 +248,6 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
       })
       .expect(200);
 
-    // Sin el firmante REQUEST del formato: 400 y nada cambia.
     const missing = await http().post(`/api/v1/loans/${loanId}/receive-return`).set(auth('director')).send({});
     expect([missing.status, missing.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
     const unknownRole = await http()
@@ -291,10 +277,8 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     expect(act).toMatchObject({ status: 'GENERATED', requestId, error: null });
     expect(act.number).toMatch(/^\d{4}-0001$/);
     expect(loan.events.map((event: { eventType: string }) => event.eventType)).toContain('RETURN_ACT_GENERATED');
-    // El acta de devolución no toca el acta de entrega del préstamo.
     expect(loan.deliveryDocumentId).toBeNull();
 
-    // Acta ↔ movimiento RETURN de cada activo.
     const links = (await dataSource.query(
       `SELECT da.asset_id, m.movement_type, m.metadata->>'loanId' AS loan FROM document_asset da
        JOIN asset_movement m ON m.id = da.movement_id WHERE da.document_id = $1 ORDER BY da.asset_id`,
@@ -321,7 +305,6 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     expect(text).toContain(`DEVUELVE|${users['contacto']?.fullName}|DOCENTE QUE DEVUELVE|`);
     expect(text).toContain(`RECIBE_ORIGEN|${users['receptor']?.fullName}|ALMACENISTA DE ORIGEN|`);
 
-    // Firmas en el orden del formato de prueba → RETURN_ACT_SIGNED.
     const sign = (order: number, who: string) =>
       http().post(`/api/v1/documents/${act.documentId}/signatures/${order}`).set(auth(who)).send({ rubric });
     await sign(1, 'contacto').expect(200);

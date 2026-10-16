@@ -30,9 +30,7 @@ const ACT_FORMAT = 'OCI-21-37';
 const TEMPLATE = 'templates/formats/OCI-21-37-v2.docx';
 const GOTENBERG = process.env['GOTENBERG_URL'];
 const OUTPUT = process.env['OCI_21_37_OUTPUT_DIR'];
-/** Montos como quedan en la capa de texto del PDF (el espacio duro del formato es-CO se vuelve espacio). */
 const money = (value: number) => squash(formatMoney(value));
-// Fecha de vigencia del formato según el Excel (celda I6, «Fecha: 2026-09-08»).
 const EFFECTIVE_DATE = '2026-09-08';
 
 interface Who {
@@ -42,12 +40,6 @@ interface Who {
   readonly actor: AuthenticatedUser;
 }
 
-/**
- * Acta OCI-21-37 de punta a punta contra PostgreSQL real y Gotenberg: la plantilla construida desde el Excel se carga
- * como versión vigente (solo en esta prueba), una toma de un centro se programa, se verifica, se categoriza, se cierra
- * y se concilia con doble firma; el motor genera el DOCX y lo convierte a PDF. Con OCI_21_37_OUTPUT_DIR deja el PDF,
- * el DOCX y la capa de texto para que alguien los abra.
- */
 describe
   .runIf(Boolean(GOTENBERG))
   .sequential(
@@ -126,7 +118,6 @@ describe
         };
       };
 
-      /** Jefatura vigente del centro: firma el acta como ENCARGADO. */
       const headOf = (costCenterId: string, who: Who) =>
         dataSource.query(
           `INSERT INTO cost_center_head (person_id, cost_center_id, reason) VALUES ($1, $2, 'Prueba')`,
@@ -184,7 +175,6 @@ describe
           act: Record<string, unknown>;
         };
 
-      /** Programa, inicia, verifica, categoriza y cierra una toma del centro; devuelve su id. */
       const executed = async (
         costCenterId: string,
         responsible: Who,
@@ -256,7 +246,6 @@ describe
         return id;
       };
 
-      /** Genera el acta encolada y deja PDF, DOCX y texto; devuelve el texto del PDF y del DOCX. */
       const generated = async (id: string, name: string) => {
         await engine.processPending(1000);
         const view = await detail(id);
@@ -351,7 +340,6 @@ describe
           'INTERNAL_CONTROL_DIRECTOR',
           true,
         );
-        // Solo en esta prueba: la plantilla construida desde el Excel queda como versión vigente del formato.
         const uploaded = await engine.uploadTemplate(
           ACT_FORMAT,
           { buffer: readFileSync(TEMPLATE), originalname: 'OCI-21-37-v2.docx' },
@@ -362,7 +350,6 @@ describe
       });
 
       afterAll(async () => {
-        // Deja la BD compartida como estaba: OCI-21-37 sin plantilla, sin actas ni solicitudes de tomas, y su consecutivo.
         await dataSource.query(
           'UPDATE physical_inventory_act SET document_request_id = NULL, document_id = NULL',
         );
@@ -449,8 +436,6 @@ describe
         await depreciation(desk, 830_000);
         await depreciation(laptop, 2_090_000);
         await depreciation(chair, 120_000);
-        // Proyector y teléfono sin depreciación: su valor en libros no existe y el acta debe decir «Sin dato».
-        // Firma como ENCARGADO la jefa vigente del centro, no el responsable de la toma.
         const head = await person('Gloria Patricia', 'Rendón Mejía', 'Decana', null);
         await headOf(centerId, head);
         const responsible = await person(
@@ -477,7 +462,6 @@ describe
           { assetId: projector, action: 'MISSING', category: 'ANE' },
           { assetId: phone, action: 'SKIP' },
         ], 'Asistente de la decanatura');
-        // Doble firma de la conciliación: la pide el responsable y la aprueba otra persona (INVENTORY_RECONCILE_SOD).
         expect((await post(responsible, `/${id}/reconcile`)).status).toBe(200);
         const approved = await post(approver, `/${id}/reconcile/approve`);
         expect(approved.status, JSON.stringify(approved.body)).toBe(200);
@@ -507,7 +491,6 @@ describe
           `Toma física ${tomaCode} — Toma anual del centro`,
           'Responsable Gloria Patricia Rendón Mejía',
           'Atendió por el área Asistente de la decanatura',
-          // Porcentaje sobre el precio de compra (5 430 000 / 8 100 000), no sobre el número de bienes.
           `AU — Activos en uso 2 ${money(5_430_000)} 67,04 % ${money(2_920_000)}`,
           `ANE — Activos no encontrados 1 ${money(1_980_000)} 24,44 % Sin dato`,
           `AOD — Activos obsoletos dañados 1 ${money(690_000)} 8,52 % ${money(120_000)}`,
@@ -522,11 +505,9 @@ describe
         ]) {
           expect(text, fragment).toContain(fragment);
         }
-        // ANI está inactiva y pendiente de definición en el catálogo: no aparece como fila.
         expect(text).not.toMatch(/\bANI\b/);
         expect(text).not.toContain('Sustitución de firmante');
 
-        // Lo que ven los firmantes: el PDF del sobre, con la hoja de firmas al final.
         const [envelope] = (await dataSource.query(
           'SELECT current_pdf_driver, current_pdf_key FROM signature_envelope WHERE document_id = $1',
           [documentId],
@@ -544,7 +525,6 @@ describe
         expect(sheet).toContain('Hoja de firmas');
         expect(sheet).toContain('1. Responsable');
         expect(sheet).toContain('2. Control Interno');
-        // Firman en el orden del formato: primero el responsable, luego Control Interno (sesión con MFA).
         const rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica', { width: 120 })).toString('base64')}`;
         const early = await http()
           .post(`/api/v1/documents/${documentId}/signatures/2`)
@@ -593,7 +573,6 @@ describe
           870_000,
         );
         await depreciation(cabinet, 410_000);
-        // El aprobador es a la vez el jefe del centro de la toma: firmaría RESPONSABLE (ENCARGADO) y AUDITA.
         await headOf(centerId, approver);
         const responsible = await person(
           'Mateo',
@@ -691,7 +670,6 @@ describe
         });
         expect(closed.status, JSON.stringify(closed.body)).toBe(200);
         expect(closed.body.data.acts).toHaveLength(3);
-        // El sobrante sin placa no es de ningún centro: bloquea la conciliación hasta elegir el suyo (la facultad).
         const blocked = await post(responsible, `/${id}/reconcile`);
         expect([blocked.status, blocked.body.error.code]).toEqual([409, 'INVENTORY_UNASSIGNED_SURPLUS']);
         const surplusId = ((await detail(id)).items as unknown as Array<{ id: string; notes: string | null }>).find(

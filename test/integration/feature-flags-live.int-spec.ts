@@ -6,7 +6,6 @@ import { bootModules } from './helpers.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Evalúa la condición una vez por vuelta (admit tiene efecto: toma el turno de prueba). */
 const waitUntil = async (condition: () => boolean, timeoutMs = 3000): Promise<boolean> => {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -20,7 +19,6 @@ const waitUntil = async (condition: () => boolean, timeoutMs = 3000): Promise<bo
   }
 };
 
-/** La BD es la fuente de verdad de los módulos: dos "instancias" (dos contenedores Nest) y SQL a mano. */
 describe('Módulos: caché viva por NOTIFY', () => {
   let a: TestingModule;
   let b: TestingModule;
@@ -114,7 +112,6 @@ describe('Módulos: caché viva por NOTIFY', () => {
     )) as Array<{ entity_type: string; performed_by: string | null; changes: Record<string, unknown> }>;
     expect(opened[0]).toMatchObject({ entity_type: 'FEATURE', performed_by: null, changes: { code: 'categories' } });
 
-    // La espera venció (se simula moviendo disabled_at en la BD, como lo vería cualquier instancia).
     await dataSource.query(`UPDATE feature_flag SET disabled_at = now() - interval '1 day' WHERE code = 'categories'`);
     expect(await waitUntil(() => flagsB.admit('categories'))).toBe(true);
     expect(flagsB.isEnabled('categories')).toBe(false);

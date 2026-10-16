@@ -28,14 +28,9 @@ const fold = (text: string): string => text.normalize('NFD').replace(/\p{M}/gu, 
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Clase que no puede tocar ese borde del fragmento: un dígito no sigue a un dígito, una letra no sigue a una letra. */
 const edgeClass = (char: string | undefined): string | null =>
   char === undefined ? null : /\p{N}/u.test(char) ? '\\p{N}' : /\p{L}/u.test(char) ? '\\p{L}' : null;
 
-/**
- * El fragmento aparece como palabra/número completo: "9 de septiembre" no coincide dentro de "19 de septiembre" ni
- * "Buen estado" dentro de "Buen estados", pero sí con cualquier puntuación o espacio alrededor.
- */
 export const containsFragment = (haystack: string, fragment: string): boolean => {
   const before = edgeClass(fragment[0]);
   const after = edgeClass(fragment.at(-1));

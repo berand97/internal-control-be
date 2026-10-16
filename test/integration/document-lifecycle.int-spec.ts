@@ -32,7 +32,6 @@ import { DocumentFormatCatalogService } from '../../src/modules/documents/servic
 import { createActor, createFreeTestFormat, dropTestFormat, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 
 const ENTITY = 'IT_PROCESS';
-/** Formato libre de prueba: RESPONSABLE (RESPONSIBLE) y AUDITA (REQUEST), sin proceso enchufado. */
 const LIFECYCLE_FORMAT = 'IT-LIFECYCLE';
 const ROLES_FORMAT = 'OCI-01-65';
 
@@ -42,7 +41,6 @@ class FakePdfConverter implements PdfConverter {
   }
 }
 
-/** Proveedor de firma guionado: el test decide el estado de cada turno. */
 class ScriptedSignatureProvider implements SignatureProvider {
   readonly name = 'scripted';
   private readonly envelopes = new Map<string, Map<number, SignerStatus>>();
@@ -77,7 +75,6 @@ class ScriptedSignatureProvider implements SignatureProvider {
   }
 }
 
-/** Un proceso de negocio como lo harían entrega o préstamo: registra su manejador sin tocar el módulo de documentos. */
 @Injectable()
 class ItProcess implements OnModuleInit {
   readonly failures: Record<DocumentLifecyclePhase, number> = { onGenerated: 0, onSigned: 0, onRejected: 0 };
@@ -95,7 +92,6 @@ class ItProcess implements OnModuleInit {
   }
 
   private async apply(manager: EntityManager, phase: DocumentLifecyclePhase, event: DocumentLifecycleEvent): Promise<void> {
-    // El efecto se escribe ANTES de fallar: si la transacción no se revierte, el test lo ve.
     await manager.query('INSERT INTO it_lifecycle_effect (entity_id, phase, document_id) VALUES ($1, $2, $3)', [
       event.entityId,
       phase,
@@ -112,7 +108,6 @@ class ItProcess implements OnModuleInit {
 @Module({ imports: [DocumentsModule], providers: [ItProcess] })
 class ItProcessModule {}
 
-/** DOCX mínimo que usa exactamente los placeholders del contrato de la plantilla OCI-01-65. */
 const rolesTemplate = (): Buffer => {
   const zip = new PizZip();
   zip.file(
@@ -128,7 +123,6 @@ const rolesTemplate = (): Buffer => {
     (role) =>
       `${role.toUpperCase()}|{{firmante.${role}.nombre}}|{{firmante.${role}.documento}}|{{firmante.${role}.cargo}}|`,
   );
-  // Tipo de documento de cada firmante y del responsable (abreviatura del catálogo o vacío).
   lines.push(
     ...['entrega', 'recibe', 'audita'].map((role) => `TIPO-${role}|{{firmante.${role}.tipoDocumento}} {{firmante.${role}.documento}}|`),
     'TIPO-responsable|{{responsable.tipoDocumento}} {{responsable.documento}}|',
@@ -165,7 +159,6 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     );
 
   const drain = async () => {
-    // processPending también toma solicitudes que otros archivos de prueba dejaron: el límite alto asegura las nuestras.
     await engine.processPending(1000);
   };
 
@@ -262,7 +255,6 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     people.entrega = await person('Entregador', `73${tag}`, 'Almacenista');
     people.reemplazo = await person('Reemplazo', `74${tag}`, 'Auxiliar de almacén');
 
-    // Vigente hoy, para ganarle a cualquier plantilla anterior del mismo formato; se borra en afterAll.
     const today = new Date().toISOString().slice(0, 10);
     for (const [formatKey, buffer] of [
       [LIFECYCLE_FORMAT, await readFile('templates/formats/OCI-01-55-v2.docx')],
@@ -279,7 +271,6 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
   });
 
   afterAll(async () => {
-    // Deja la BD compartida como estaba: sin el formato de prueba y con el consecutivo de OCI-01-65.
     const documents = (await dataSource.query('SELECT id FROM document WHERE template_version_id = ANY($1)', [
       templateIds,
     ])) as Array<{ id: string }>;
@@ -342,7 +333,6 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
       ),
     ).toBe(sequenceBefore);
 
-    // El siguiente intento del job la genera y el proceso se entera.
     await drain();
     const recovered = await registry.stateFor(ENTITY, failingEntity);
     expect(recovered.generation).toBe('GENERATED');
@@ -376,7 +366,6 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     expect((await effects(entityId)).map((item) => item.phase)).toEqual(['onGenerated']);
 
     provider.mark(documentId, 2, 'SIGNED');
-    // Dos sincronizaciones a la vez: la fila bloqueada garantiza una sola transición.
     await Promise.all([engine.syncSignatures(documentId), engine.syncSignatures(documentId), engine.syncSignatures(documentId)]);
     await engine.syncSignatures(documentId);
     const signed = await row(documentId);
@@ -413,7 +402,6 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
       lifecycle_attempts: 1,
       signatures: ['SIGNED', 'SIGNED'],
     });
-    // El efecto que el manejador alcanzó a escribir se revirtió con la transición.
     expect((await effects(entityId)).map((item) => item.phase)).toEqual(['onGenerated']);
     expect((await registry.stateFor(ENTITY, entityId)).documents[0]).toMatchObject({
       status: 'PENDING_SIGNATURE',
@@ -421,11 +409,9 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
       lifecycleAttempts: 1,
     });
 
-    // El sync manual reintenta; vuelve a fallar y cuenta el intento.
     await engine.syncSignatures(documentId);
     expect(await row(documentId)).toMatchObject({ status: 'PENDING_SIGNATURE', lifecycle_attempts: 2 });
 
-    // El job lo reintenta y esta vez el proceso aplica su efecto: la transición y el efecto quedan juntos.
     const retried = await engine.retryLifecycle(1000);
     expect(retried.retried).toBeGreaterThanOrEqual(1);
     const signed = await row(documentId);
@@ -434,7 +420,6 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
     expect((await effects(entityId)).map((item) => item.phase)).toEqual(['onGenerated', 'onSigned']);
     expect((await engine.detail(documentId)).lifecycleError).toBeNull();
 
-    // Ya firmada, el job no la vuelve a tocar.
     await engine.retryLifecycle(1000);
     expect((await effects(entityId)).map((item) => item.phase)).toEqual(['onGenerated', 'onSigned']);
   });
@@ -578,7 +563,6 @@ describe('Ciclo de vida del acta: el proceso que la originó se entera y aplica 
       ['AUDITA', 'C.C.'],
     ]);
     const text = docxText(await storage.getFrom(original?.docx_driver ?? 'project', original?.docx_key ?? ''));
-    // Tipo desconocido: solo el número, nunca «C.C.» supuesto.
     expect(text).toContain(`TIPO-recibe| 81${tag}|`);
     expect(text).toContain(`TIPO-responsable| 81${tag}|`);
     expect(text).toContain(`TIPO-entrega|C.E. 82${tag}|`);

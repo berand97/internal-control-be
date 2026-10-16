@@ -1,5 +1,3 @@
-// Menú administrable: los ítems sembrados por 1767225740000 (importar, entregas, documentos), el ícono como dato en
-// /auth/me y en el CRUD, el catálogo cerrado de íconos, y la migración ante un /imports creado a mano.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
@@ -28,7 +26,6 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
   const http = () => request(app.getHttpServer());
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who] ?? ''}` });
 
-  /** Usuario activo con sesión (MFA verificado) y, si se indica, un rol GLOBAL o un rol ad hoc con esos permisos. */
   const user = async (name: string, grant: { role?: string; permissions?: ReadonlyArray<string> }) => {
     const suffix = randomUUID().slice(0, 8);
     const personId = await scalar<string>(
@@ -161,8 +158,6 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
     expect(reader.map((item) => item.path)).toEqual(['/assets', '/assets/price-zero', '/handovers']);
     expect(reader.find((item) => item.path === '/imports')).toBeUndefined();
 
-    // El menú no mira el alcance: asset:read:org_unit también publica /handovers aunque la ruta del frontend
-    // exija asset:read:global (comportamiento previo de actionSatisfies, documentado en el reporte).
     const orgReader = await menu('orgReader');
     expect(orgReader.map((item) => item.path)).toEqual(['/assets', '/assets/price-zero', '/handovers']);
   });
@@ -260,7 +255,6 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
       expect(afterDown.map((row) => row.path)).not.toContain('/handovers');
       expect(afterDown.find((row) => row.path === '/document-templates')?.label).toBe('Plantillas');
 
-      // Un administrador creó /imports a su manera y renombró el ítem de plantillas.
       const manualId = await scalar<string>(
         runner as unknown as DataSource,
         `INSERT INTO navigation_item (module, module_label, resource, path, label, required_action, sort_order)
@@ -283,7 +277,6 @@ describe('Menú: ítems nuevos e íconos como dato (HTTP real + PostgreSQL real)
       )) as Array<{ path: string; label: string; icon: string }>;
       expect(templates).toEqual([{ path: '/document-templates', label: 'Formatos', icon: 'file-text' }]);
 
-      // Correr up otra vez no duplica ni falla.
       await migration.up(runner);
       expect(Number(await scalar<string>(runner as unknown as DataSource, `SELECT count(*) FROM navigation_item WHERE path IN ('/imports', '/handovers')`))).toBe(2);
 

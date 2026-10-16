@@ -135,7 +135,6 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }
@@ -255,7 +254,6 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     const pages = async (pdf: Buffer) => (await PDFDocument.load(pdf)).getPageCount();
     expect(await pages(signed.body)).toBe((await pages(unsigned)) + 1);
 
-    // Organización del almacenamiento: todo en la carpeta del año de creación del acta (Bogotá).
     const [keys] = (await dataSource.query(
       `SELECT d.format_key, d.number, d.signed_pdf_key, e.current_pdf_key, e.verification_code,
          to_char(d.created_at AT TIME ZONE 'America/Bogota', 'YYYY') AS year,
@@ -312,13 +310,11 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
         responsible.sessionId,
       ]);
 
-      // Responsable (turno no CI) sin MFA: firma con sesión y queda como SESSION.
       const first = await sign(document.id, 1, responsible);
       expect(first.status).toBe(200);
       const [slot] = first.body.data.signatures as Array<{ method: string; methodLabel: string }>;
       expect(slot).toMatchObject({ method: 'SESSION', methodLabel: 'Sesión' });
 
-      // Control Interno sin MFA: bloqueado, sin excepción.
       const withoutMfa = await sign(document.id, 2, auditor);
       expect([withoutMfa.status, withoutMfa.body.error.code]).toEqual([403, 'SIGNATURE_MFA_REQUIRED']);
       const detail = (await http().get(`/api/v1/documents/${document.id}`).set('Authorization', `Bearer ${auditor.token}`)).body.data;

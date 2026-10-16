@@ -12,15 +12,6 @@ import { S3StorageAdapter, type S3AdapterConfig } from '../../src/shared/storage
 import type { StorageSettings } from '../../src/shared/storage/entities/storage-settings.entity.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
 
-/**
- * Driver S3 contra un MinIO real. Se salta si no hay S3_TEST_ENDPOINT. Preparación (ver docs/DEPLOY.md §10):
- * bucket privado con versionado y un usuario con la política mínima (DeleteObject solo en health/*).
- *   S3_TEST_ENDPOINT=http://127.0.0.1:19000 S3_TEST_BUCKET=control-interno
- *   S3_TEST_ACCESS_KEY=<usuario de servicio> S3_TEST_SECRET_KEY=<su clave>
- * Imágenes de correo (§10.7), opcional: bucket público (o el mismo de documentos) con lectura anónima solo de
- * images/email/* y la política de la aplicación que permite escribir y borrar ahí.
- *   S3_TEST_PUBLIC_BUCKET=control-interno-public [S3_TEST_PUBLIC_BASE_URL=<endpoint>/control-interno-public]
- */
 const endpoint = process.env['S3_TEST_ENDPOINT'] ?? '';
 const bucket = process.env['S3_TEST_BUCKET'] ?? 'control-interno';
 const accessKey = process.env['S3_TEST_ACCESS_KEY'] ?? '';
@@ -44,7 +35,6 @@ const adapterConfig = (overrides: Partial<S3AdapterConfig> = {}): S3AdapterConfi
 });
 
 const run = Date.now().toString(36);
-// Espacios, tildes, ñ, +, &, =, %, paréntesis y comillas: todo lo que admite assertSafeStorageKey.
 const SPECIAL = `Acta nº 5 (firmada) — Peña & Cía + 100% = "ok" 'v2'.pdf`;
 
 describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
@@ -52,7 +42,6 @@ describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
 
   afterAll(() => rmSync(projectRoot, { recursive: true, force: true }));
 
-  /** StorageService con una fila storage_settings en memoria que el test puede cambiar (como la pantalla). */
   const serviceWith = (row: Partial<StorageSettings>, outbound: OutboundPolicy) => {
     const settings = {
       find: async () => [row],
@@ -99,7 +88,6 @@ describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
     expect(await adapter.exists(key)).toBe(true);
     expect(await adapter.exists(`it/${run}/no-existe.pdf`)).toBe(false);
 
-    // Sin firma: el bucket no es público.
     const anonymous = await fetch(`${endpoint}/${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`);
     expect(anonymous.status).toBe(403);
   });
@@ -126,7 +114,6 @@ describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
     await allowed.put({ key, body: Buffer.from('ok'), contentType: 'text/plain' });
     expect((await allowed.get(key)).toString()).toBe('ok');
 
-    // Por nombre (pasa por guardedLookup en cada conexión): localhost autorizado explícitamente.
     const byName = new S3StorageAdapter(
       adapterConfig({ endpoint: endpoint.replace(host, 'localhost') }),
       { allowPrivateNetworks: false, allowedHosts: ['localhost'] },
@@ -172,7 +159,6 @@ describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
 
     const missing = await serviceWith(s3Row({ s3Bucket: `no-existe-${run}` }), DEV).testConnection();
     const bucketCheck = missing.checks.find((check) => check.name === 'BUCKET');
-    // Con la política mínima el usuario no tiene ListBucket sobre otro bucket: MinIO responde AccessDenied.
     expect(['BUCKET_NOT_FOUND', 'ACCESS_DENIED']).toContain(bucketCheck?.errorCode);
     expect(missing.ok).toBe(false);
 
@@ -183,7 +169,6 @@ describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
     });
   });
 
-  // Opcional: un bucket creado con `mc mb --with-lock` y una clave que pueda consultarlo.
   it.runIf(Boolean(process.env['S3_TEST_LOCK_BUCKET']))('Probar conexión detecta object lock', async () => {
     const result = await serviceWith(
       s3Row({
@@ -202,14 +187,13 @@ describe.runIf(Boolean(endpoint))('Driver S3 contra MinIO real', () => {
     const before = await service.put({ key: `generated/${run}/antes.pdf`, body: Buffer.from('antes'), contentType: 'application/pdf' });
     expect(before.driver).toBe('project');
 
-    row.driver = 's3'; // lo que hace guardar driver=s3 desde la pantalla de Almacenamiento
+    row.driver = 's3';
     const after = await service.put({ key: `generated/${run}/despues.pdf`, body: Buffer.from('despues'), contentType: 'application/pdf' });
     expect(after.driver).toBe('s3');
     expect(await new S3StorageAdapter(adapterConfig(), DEV).exists(after.key)).toBe(true);
 
     expect((await service.getFrom(before.driver, before.key)).toString()).toBe('antes');
     expect((await service.getFrom(after.driver, after.key)).toString()).toBe('despues');
-    // Leer con el driver activo (get) ya no encuentra lo anterior: por eso todo documento guarda su driver.
     await expect(service.get(before.key)).rejects.toMatchObject({ code: ErrorCode.ResourceNotFound });
   });
 

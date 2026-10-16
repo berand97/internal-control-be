@@ -1,6 +1,3 @@
-// Conciliador de estructura (organigrama ↔ centros de costo) con HTTP real + PostgreSQL real: centro propio pendiente
-// que se amarra al crear el centro, reubicación por prefijo más largo, ubicación MANUAL respetada, vista previa y
-// aplicación de «Recalcular estructura», pendientes, vuelta a automático y unidad movida a otro jefe con advertencia.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
@@ -119,7 +116,6 @@ describe('Conciliador de estructura (HTTP real + PostgreSQL real)', () => {
     });
     expectConforms('post', '/api/v1/organizational-units', 201, pending.body);
 
-    // Se crea en la vicerrectoría 5: el código manda (prefijo más largo, 54).
     await createCenter('5410', { organizationalUnitId: ids['u5'] });
     expect(await center('5410')).toMatchObject({ organizational_unit_id: ids['u54'], mode: 'AUTO', source: 'AUTO' });
     expect((await center('5410'))?.reason).toBe('Se creó el centro 5410');
@@ -133,7 +129,6 @@ describe('Conciliador de estructura (HTTP real + PostgreSQL real)', () => {
     const unit = await http().get(`/api/v1/organizational-units/${ids['u54']}`).set(auth('admin'));
     expect(unit.body.data).toMatchObject({ headCostCenterId: ids['5410'], headCostCenterPending: false });
 
-    // Hijo XYZn: unidad por prefijo y padre XYZ0 por regla.
     await createCenter('5411', { organizationalUnitId: ids['u5'] });
     expect(await center('5411')).toMatchObject({ organizational_unit_id: ids['u54'], parent_id: ids['5410'] });
   });
@@ -169,7 +164,6 @@ describe('Conciliador de estructura (HTTP real + PostgreSQL real)', () => {
   });
 
   it('Recalcular estructura: vista previa, 409 si cambió, aplicar e idempotencia', async () => {
-    // Un centro que entró por fuera de la aplicación (sin conciliar).
     await dataSource.query(
       `INSERT INTO cost_center (external_code, name, organizational_unit_id, accepts_assets, is_active, sync_source, created_at, updated_at)
        VALUES ('5420', 'CENTRO 5420', $1, TRUE, TRUE, 'MANUAL', NOW(), NOW())`,
@@ -237,7 +231,6 @@ describe('Conciliador de estructura (HTTP real + PostgreSQL real)', () => {
     const archived = await http().patch(`/api/v1/cost-centers/${ids['5410']}`).set(auth('admin')).send({ isActive: false });
     expect(archived.status, JSON.stringify(archived.body)).toBe(200);
     expect(await unitRow('u54')).toEqual({ head_cost_center_id: null, head_cost_center_code: '5410' });
-    // 5411 pierde su padre 5410 (archivado): cuelga de su unidad.
     expect(await center('5411')).toMatchObject({ parent_id: null });
     const pendingList = await http().get('/api/v1/organizational-units/structure-pending').set(auth('admin'));
     expect(pendingList.body.data.pendingHeadCenters).toContainEqual({

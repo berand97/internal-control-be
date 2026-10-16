@@ -28,11 +28,6 @@ interface PriceZeroList {
   summary: { total: number; classified: number; unclassified: number };
 }
 
-/**
- * Activos con precio de compra cero: marca PRICE_ZERO (importación, alta y trigger), catálogo de motivos que nace vacío,
- * lista de trabajo con el alcance de lectura de activos y registro del motivo sin tocar el precio. PostgreSQL real y
- * HTTP, con las respuestas comparadas contra el OpenAPI publicado.
- */
 describe('Activos con precio cero: marca, catálogo de motivos y lista de trabajo (PostgreSQL real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -120,7 +115,6 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
     const empty = await http().get('/api/v1/assets/price-zero-reasons').set(auth('viewerA')).expect(200);
     expectConforms('get', '/api/v1/assets/price-zero-reasons', 200, empty.body);
     expect(empty.body.data).toEqual([]);
-    // Sembrado solo a la Dirección de Control Interno.
     expect(
       await scalar<string[]>(
         dataSource,
@@ -166,7 +160,6 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
       director,
     );
     expect(await flagsOf(priced.id)).not.toContain('PRICE_ZERO');
-    // Como la importación: un precio que faltaba (PRICE_MISSING) no es un precio cero.
     const missing = await rawAsset(centerB, 0, ['PRICE_MISSING']);
     expect(await flagsOf(missing)).toEqual(['PRICE_MISSING']);
 
@@ -190,7 +183,6 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
     const all = await list('director', { costCenterId: centerA });
     expect(all.items.map((row) => row.id).sort()).toEqual([a1, a2].sort());
     expect(all.summary).toEqual({ total: 2, classified: 0, unclassified: 2 });
-    // La consulta del centro A solo ve su centro, aunque pida el B.
     expect((await list('viewerA')).items.every((row) => row.costCenter?.id === centerA)).toBe(true);
     expect((await list('viewerA', { costCenterId: centerB })).total).toBe(0);
     expect((await list('director', { costCenterId: centerB })).items.map((row) => row.id)).toContain(b1);
@@ -224,7 +216,6 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
     expect((await list('director', { costCenterId: centerA, classified: false })).items.map((row) => row.id)).toEqual([a2]);
     expect((await list('director', { reasonId })).items.map((row) => row.id)).toEqual([a1]);
 
-    // Precio distinto de cero, motivo inactivo o inexistente, fuera de alcance.
     const priced = await rawAsset(centerA, 10);
     expect((await put('director', priced, { reasonId })).body.error.code).toBe('ASSET_PRICE_NOT_ZERO');
     const inactive = await http().post('/api/v1/assets/price-zero-reasons').set(auth('director')).send({ label: 'Inactivo', isActive: false });
@@ -233,11 +224,9 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
     );
     expect((await put('director', randomUUID(), { reasonId })).status).toBe(404);
 
-    // En uso: no se borra.
     const inUse = await http().delete(`/api/v1/assets/price-zero-reasons/${reasonId}`).set(auth('director'));
     expect([inUse.status, inUse.body.error.code]).toEqual([406, 'ASSET_PRICE_ZERO_REASON_IN_USE']);
 
-    // Si el precio deja de ser 0 la marca se quita y el activo sale de la lista (su motivo queda como historia).
     await dataSource.query('UPDATE asset SET acquisition_price = 500 WHERE id = $1', [a1]);
     expect((await list('director', { costCenterId: centerA })).items.map((row) => row.id)).toEqual([a2]);
     expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_price_zero_classification WHERE asset_id = $1', [a1])).toBe(1);

@@ -1,4 +1,3 @@
-// Sin Gotenberg ni BD: la comparación de restos del ejemplo no puede depender de la fecha del día.
 import { SAMPLE as OCI_01_65_SAMPLE } from '../../scripts/formats/build-oci-01-65-template.mjs';
 import { OCI_01_55_SAMPLE } from '../../scripts/formats/template-leftovers.mjs';
 import { containsFragment, sampleLeftovers } from './pdf-text.js';
@@ -37,7 +36,6 @@ describe('sampleLeftovers: fragmentos del ejemplo por límites de palabra/númer
     expect(sampleLeftovers('Ver Link de Imagenes', OCI_01_65_SAMPLE, OPTIONS)).toEqual(['Link de Imágenes']);
     expect(sampleLeftovers('host 192.168.4.60:80', OCI_01_65_SAMPLE, OPTIONS)).toEqual(['192.168.4.60']);
     expect(sampleLeftovers('Link de fotografías: x', OCI_01_55_SAMPLE, OPTIONS)).toEqual(['Link de', 'fotografías:']);
-    // Documentos y números del ejemplo: sin cambios.
     expect(sampleLeftovers('C.C. 1.234.089.865', OCI_01_65_SAMPLE, OPTIONS)).toEqual(['1234089865']);
     expect(sampleLeftovers('Consecutivo 0001', OCI_01_65_SAMPLE, OPTIONS)).toEqual(['0001']);
   });

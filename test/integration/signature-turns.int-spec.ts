@@ -108,7 +108,6 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
-    // El job de documentos corre cada minuto: se detiene para que el test decida cuándo se procesa el outbox.
     for (const job of app.get(SchedulerRegistry).getCronJobs().values()) {
       await job.stop();
     }
@@ -217,7 +216,6 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
       const first = await sign(document.id, 1, responsible);
       expect(first.status).toBe(200);
       expect(first.body.data.signatures[0]).toMatchObject({ status: 'SIGNED', method: 'SESSION', methodLabel: 'Sesión' });
-      // canReassign pasa a false tras la primera firma, aunque el acta siga pendiente.
       expect((await detail(document.id, director)).viewer).toMatchObject({ canReassign: false });
 
       const blocked = await sign(document.id, 2, auditor);
@@ -241,24 +239,19 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
         [tag, `sinusuario.${tag}@unac.edu.co`, documentNumber, active],
       );
     };
-    // Turno de Control Interno: una persona sin usuario no puede firmarlo.
     const noUser = await bare(`6${Date.now().toString().slice(-9)}`);
     const ci = await reassign(document.id, 2, director, noUser);
     expect([ci.status, ci.body.error.code]).toEqual([409, 'SIGNATURE_SIGNER_CANNOT_SIGN']);
     expect(ci.body.error.details).toEqual([{ field: 'personId', message: 'SIGNATURE_NO_CHANNEL' }]);
-    // Usuario con MFA deshabilitado en turno CI.
     const noMfa = await person('SinMfa', false);
     const ciNoMfa = await reassign(document.id, 2, director, noMfa.personId);
     expect(ciNoMfa.body.error.details).toEqual([{ field: 'personId', message: 'SIGNATURE_MFA_REQUIRED' }]);
-    // Turno no CI: sin usuario y sin número de documento no hay confirmación de identidad.
     const noDocument = await bare(null);
     const nd = await reassign(document.id, 1, director, noDocument);
     expect(nd.body.error.details).toEqual([{ field: 'personId', message: 'SIGNATURE_NO_IDENTITY_CHECK' }]);
-    // Persona inactiva.
     const inactive = await bare(`5${Date.now().toString().slice(-9)}`, false);
     const ina = await reassign(document.id, 1, director, inactive);
     expect(ina.body.error.details).toEqual([{ field: 'personId', message: 'SIGNATURE_SIGNER_INACTIVE' }]);
-    // Sin usuario, con correo y documento: firma por enlace, se acepta.
     const byLink = await reassign(document.id, 1, director, noUser);
     expect(byLink.status).toBe(200);
     expect(byLink.body.data.currentTurn).toMatchObject({ order: 1, personId: noUser, channel: 'EMAIL_LINK', blockedBy: null });
@@ -318,7 +311,6 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
   });
 
   it('regla del firmante de Control Interno: AUDITA exige act:sign_control:global vigente al emitir (salvo sustituto) y al reasignar', async () => {
-    // Emitir con AUDITA sin el permiso (usuario activo con MFA, pero sin act:sign_control:global): 400 con el rol en details.
     const withoutPermission = await engine
       .generate({ formatKey: FORMAT, responsiblePersonId: responsible.personId, signers: { AUDITA: stranger.personId } }, director.userId)
       .catch((error: unknown) => error);
@@ -326,7 +318,6 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
       code: 'DOCUMENT_SIGNER_NOT_ELIGIBLE',
       details: [{ field: 'signers.AUDITA', message: expect.stringContaining('AUDITA') }],
     });
-    // El mismo designado con un sustituto que sí tiene el permiso: se emite y firma el sustituto.
     const substituted = await engine.generate(
       {
         formatKey: FORMAT,
@@ -343,18 +334,14 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     expect(slot?.signer_person_id).toBe(replacement.personId);
 
     const document = await generate(true);
-    // Reasignar AUDITA a quien no tiene el permiso: 400, aunque tenga usuario activo con MFA.
     const notEligible = await reassign(document.id, 2, director, stranger.personId);
     expect([notEligible.status, notEligible.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
     expect(notEligible.body.error.details).toEqual([{ field: 'personId', message: expect.stringContaining('AUDITA') }]);
-    // Permiso revocado: deja de estar vigente y la reasignación se rechaza igual.
     const revoked = await person('Revocada', true);
     await grantControlSigner(dataSource, revoked.personId);
     await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE user_id = $1', [revoked.userId]);
     const afterRevoke = await reassign(document.id, 2, director, revoked.personId);
     expect([afterRevoke.status, afterRevoke.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
-    // Separación de funciones: nadie queda en dos casillas del acta.
-    // AUDITA a quien ya firma como RESPONSABLE y sí tiene el permiso: 409, no se deja en dos casillas.
     const holder = await person('Titular', true);
     await grantControlSigner(dataSource, holder.personId);
     const otherDocument = await engine.generate(
@@ -365,11 +352,9 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     expect([duplicatedAudit.status, duplicatedAudit.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
     const duplicatedResponsible = await reassign(document.id, 1, director, auditor.personId);
     expect([duplicatedResponsible.status, duplicatedResponsible.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
-    // El conflicto es con un turno de Control Interno: el detalle dice que ese turno se resuelve con un sustituto.
     expect(duplicatedResponsible.body.error.details).toEqual(
       expect.arrayContaining([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]),
     );
-    // Con el permiso vigente: se acepta.
     const accepted = await reassign(document.id, 2, director, replacement.personId);
     expect(accepted.status).toBe(200);
     expect(accepted.body.data.reassignments).toEqual([expect.objectContaining({ role: 'AUDITA', toPersonId: replacement.personId })]);

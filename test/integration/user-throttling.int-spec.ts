@@ -12,10 +12,6 @@ import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { openTestSession, scalar } from './helpers.js';
 
-/**
- * Límite de peticiones por usuario (no por IP) detrás del NAT de la universidad, HTTP real + PostgreSQL real. La ruta
- * pública GET /api/v1 (sin @Throttle propio) cuenta por usuario si trae un access token válido y por IP si no.
- */
 describe('Límite de peticiones: por usuario autenticado, por IP sin sesión (HTTP real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -81,9 +77,7 @@ describe('Límite de peticiones: por usuario autenticado, por IP sin sesión (HT
     const blocked = await ping(nat, first.token);
     expect(blocked.status).toBe(429);
     expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
-    // El compañero detrás del mismo NAT sigue con su propio cupo.
     expect((await ping(nat, second.token)).status).toBe(200);
-    // Y el cupo es del usuario, no de la IP: desde otra IP sigue bloqueado.
     expect((await ping('203.0.113.51', first.token)).status).toBe(429);
   });
 

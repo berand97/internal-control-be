@@ -1,6 +1,3 @@
-// Préstamo temporal y devolución (OCI-01-65) sobre el outbox del motor de documentos.
-// HTTP real (AppModule) + PostgreSQL real. Sin Gotenberg: el PDF se arma con el texto del DOCX (DocxTextPdfConverter)
-// y los marcadores del acta se leen del DOCX renderizado con la plantilla real templates/formats/OCI-01-65-v2.docx.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
@@ -45,7 +42,6 @@ interface Schema {
   readonly items?: Schema;
 }
 
-/** Igual que document-openapi.int-spec.ts, más additionalProperties (payload libre de los eventos). */
 const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: string, errors: string[]): void => {
   const components = (openapi.components?.schemas ?? {}) as Record<string, Schema>;
   const resolve = (item: Schema): Schema => {
@@ -128,7 +124,6 @@ const conform = (openapi: OpenAPIObject, value: unknown, schema: Schema, path: s
 
 const PARTS = /^word\/(document|header\d*|footer\d*)\.xml$/;
 
-/** Párrafos del DOCX, como en oci-01-65-template.int-spec.ts. */
 const paragraphs = (docx: Buffer): string[] => {
   const zip = new PizZip(docx);
   return Object.keys(zip.files)
@@ -236,7 +231,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       [code, description, categoryId, centerA, creatorId],
     );
 
-  /** Solicitud por HTTP (solicitante) → préstamo REQUESTED. */
   const requestLoan = async (assets: string[], expectedReturnDate: string) => {
     const response = await http()
       .post('/api/v1/loans')
@@ -352,7 +346,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
   });
 
   afterAll(async () => {
-    // OCI-01-65 queda como estaba: sin esta plantilla (document-lifecycle sube la suya con la misma fecha) y con su consecutivo.
     const ids = (
       (await dataSource.query(`SELECT id FROM document WHERE format_key = $1 AND entity_type = 'LOAN'`, [FORMAT])) as Array<{
         id: string;
@@ -386,11 +379,9 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     const byDirector = await requestLoan([a1 ?? ''], addDays(today, 30));
     const byHead = await requestLoan([a2 ?? ''], addDays(today, 30));
 
-    // Solicitante (tiene loan:approve:global) no aprueba lo que pidió: regla SoD.
     const own = await approve(byDirector, 'solicitante');
     expect([own.status, own.body.error.code]).toEqual([403, 'LOAN_SOD_VIOLATION']);
 
-    // Jefe del centro de destino: tiene loan:approve:org_unit pero no sobre el origen → igual que inexistente.
     const other = await approve(byHead, 'jefeB');
     const missing = await approve(randomUUID(), 'jefeB');
     expect(other.status).toBe(404);
@@ -399,10 +390,8 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     const otherReject = await http().post(`/api/v1/loans/${byHead}/reject`).set(auth('jefeB')).send({ reason: 'No corresponde' });
     expect(otherReject.status).toBe(404);
 
-    // Rol acotado asignado con alcance GLOBAL: no da centros (decisión de la ola anterior).
     const global = await approve(byHead, 'jefeGlobal');
     expect([global.status, global.body.error.code]).toEqual([403, 'SCOPE_NO_COST_CENTER']);
-    // Sin ningún permiso de aprobación.
     const reader = await approve(byHead, 'lector');
     expect([reader.status, reader.body.error.code]).toEqual([403, 'INSUFFICIENT_PERMISSIONS']);
 
@@ -415,7 +404,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     expect(director.status).toBe(200);
     expect(director.body.data).toMatchObject({ status: 'APPROVED', approvedBy: users['director']?.userId });
 
-    // Rechazo: misma regla; el jefe del origen rechaza uno nuevo.
     const toReject = await requestLoan([await asset(`LP-${tag}-A03`, 'TABLERO RECHAZO')], addDays(today, 10));
     const rejected = await http()
       .post(`/api/v1/loans/${toReject}/reject`)
@@ -435,7 +423,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     const second = await asset(`LP-${tag}-B02`, 'TRIPODE ENTREGA FALLIDA');
     const id = await requestLoan([first, second], addDays(bogotaDate(new Date()), 20));
     await approve(id, 'director').expect(200);
-    // El segundo (por código) deja de estar disponible después de aprobado: el primero ya habría pasado a ON_LOAN.
     await dataSource.query(`UPDATE asset SET operational_status = 'IN_MAINTENANCE' WHERE id = $1`, [second]);
 
     const response = await deliver(id);
@@ -453,7 +440,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE payload->>'entityId' = $1`, [id]),
     ).toBe(0);
 
-    // Firmantes inexistentes: 404 antes de tocar nada.
     await dataSource.query(`UPDATE asset SET operational_status = 'IN_USE' WHERE id = $1`, [second]);
     const ghost = await http()
       .post(`/api/v1/loans/${id}/deliver`)
@@ -461,7 +447,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       .send({ deliveredByPersonId: randomUUID(), controlInternoPersonId: users['audita']?.personId });
     expect([ghost.status, ghost.body.error.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
     expect(await movements([first, second])).toEqual([]);
-    // Sin firmantes en el body: 400 (el frontend hoy envía {}).
     const empty = await http().post(`/api/v1/loans/${id}/deliver`).set(auth('director')).send({});
     expect([empty.status, empty.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
   });
@@ -495,7 +480,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     let expectedReturnDate = '';
 
     it('entrega: activos ON_LOAN con movimiento LOAN, préstamo PENDING_SIGNATURES y acta encolada; responsable y centro no cambian; si la generación falla el préstamo queda intacto y visible', async () => {
-      // Esta corrida no debe tener plantilla OCI-01-65 vigente todavía: la generación falla de verdad.
       expect(
         await scalar<number>(dataSource, 'SELECT count(*)::int FROM document_template_version WHERE format_key = $1', [FORMAT]),
       ).toBe(0);
@@ -510,7 +494,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expectConforms('post', '/api/v1/loans/{id}/deliver', 200, delivered.body);
       const data = delivered.body.data;
       expect(data).toMatchObject({ status: 'PENDING_SIGNATURES', deliveredBy: users['director']?.userId, deliveryDocumentId: null });
-      // El préstamo es a la dependencia: el activo conserva su centro de costo (origen) y su responsable.
       const holders = (await dataSource.query(
         'SELECT current_cost_center_id, current_responsible_id FROM asset WHERE id = ANY($1)',
         [assets],
@@ -530,7 +513,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect(recorded.map((item) => [item.movement_type, item.to_operational_status])).toEqual(
         assets.map(() => ['LOAN', 'ON_LOAN']),
       );
-      // AssetStateService no escribe asset_movement.loan_id: el vínculo va en metadata.
       expect(recorded.every((item) => item.loan_id === null && item.metadata['loanId'] === loanId)).toBe(true);
 
       const outbox = (
@@ -593,7 +575,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       const generatedEvent = loan.events.find((event: { eventType: string }) => event.eventType === 'DELIVERY_ACT_GENERATED');
       expect(generatedEvent?.payload).toMatchObject({ documentId, number: loan.deliveryAct.number });
 
-      // Acta ↔ movimiento LOAN de cada activo.
       const links = (await dataSource.query(
         `SELECT da.asset_id, m.movement_type FROM document_asset da JOIN asset_movement m ON m.id = da.movement_id
          WHERE da.document_id = $1 ORDER BY da.asset_id`,
@@ -616,7 +597,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         expect(text, who).toContain(users[who]?.fullName);
         expect(text, who).toContain(users[who]?.title);
       }
-      // Personas con tipo CC: el acta imprime la abreviatura del catálogo.
       expect(text).toContain(`C.C. ${users['recibe']?.documentNumber}`);
       expect(text).toContain(`C.C. ${users['entrega']?.documentNumber}`);
       const deliveredDay = bogotaDate(new Date(loan.deliveredAt));
@@ -630,7 +610,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       for (const [index, code] of codes.entries()) {
         expect(trimmed).toContain(`${code} - ${code} ${descriptions[index]}`);
       }
-      // La sección de devolución sigue en blanco: el acta de devolución está bloqueada.
       expect(trimmed).toContain('Fecha de devolución:');
     });
 
@@ -654,7 +633,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       const beforeLast = await detail(loanId);
       expect(beforeLast.deliveryAct.status).toBe('GENERATED');
       expect(beforeLast.status).toBe('PENDING_SIGNATURES');
-      // Falta una firma del acta de entrega: la devolución no se registra ni se recibe, y el error dice por qué.
       for (const path of ['return', 'receive-return']) {
         const blocked = await http()
           .post(`/api/v1/loans/${loanId}/${path}`)
@@ -678,7 +656,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect(signed).toMatchObject({ performedBy: users['audita']?.userId });
       expect(signed?.payload.closedByPersonId).toBe(users['audita']?.personId);
       expect(signed?.payload.activated).toBe(true);
-      // El responsable del activo sigue sin cambiar tras la activación.
       expect(
         await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset WHERE id = ANY($1) AND current_responsible_id IS NOT NULL', [assets]),
       ).toBe(0);
@@ -731,16 +708,13 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       const byAsset = new Map(returnedItems.map((item) => [item.assetId, item]));
       expect(byAsset.get(good ?? '')).toMatchObject({ returnCondition: 'GOOD', returnedAt: goodAt.toISOString() });
       expect(byAsset.get(damaged ?? '')).toMatchObject({ returnCondition: 'DAMAGED', returnedAt: damagedAt.toISOString() });
-      // Mientras no se recibe, siguen prestados.
       expect(await assetRow(good ?? '')).toMatchObject({ operational_status: 'ON_LOAN' });
 
       const received = await http().post(`/api/v1/loans/${loanId}/receive-return`).set(auth('director')).send({}).expect(200);
       expectConforms('post', '/api/v1/loans/{id}/receive-return', 200, received.body);
       const data = received.body.data;
-      // Todos resueltos y uno perdido: cerrado con pérdidas (el activo perdido queda LOST, mapeo heredado).
       expect(data.status).toBe('CLOSED_WITH_LOSSES');
       expect(data.items.every((item: { outstanding: boolean; receivedAt: string | null }) => !item.outstanding && item.receivedAt)).toBe(true);
-      // Acta de devolución: formato institucional pendiente; la devolución quedó registrada igual.
       expect(data.returnActFormat).toMatchObject({ formatKey: 'LOAN_RETURN', sgcCode: null, ready: false });
       expect(data.returnActFormat.pendingDecisions.length).toBeGreaterThanOrEqual(2);
       expect(data.returnActs).toHaveLength(1);
@@ -770,7 +744,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         'RETURN_STARTED',
         'RECEIVED',
       ]);
-      // No se generó acta de devolución (formato pendiente) ni quedó solicitud en el outbox.
       expect(
         await scalar<number>(dataSource, `SELECT count(*)::int FROM document WHERE entity_type = 'LOAN' AND entity_id = $1`, [loanId]),
       ).toBe(1);
@@ -801,7 +774,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       [activeLate, overdueLate, activeOnTime, returnedLate].includes(item.id),
     );
     const unsigned = (response.body.data as Array<{ id: string; daysOverdue: number; status: string }>).find((item) => item.id === unsignedLate);
-    // Entregado sin firmas completas y vencido: cuenta como vencido (los activos salieron).
     expect(unsigned).toMatchObject({ status: 'PENDING_SIGNATURES', daysOverdue: 3 });
     expect(mine.map((item) => [item.id, item.status, item.daysOverdue])).toEqual([
       [overdueLate, 'OVERDUE', 12],
@@ -828,11 +800,9 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       [activeOnTime]: 'ACTIVE',
       [returnedLate]: 'RETURNED',
     });
-    // El job no toca PENDING_SIGNATURES: pasa a ACTIVE solo con la firma.
     expect(await scalar<string>(dataSource, 'SELECT status::text FROM asset_loan WHERE id = $1', [unsignedLate])).toBe('PENDING_SIGNATURES');
   });
   describe('decisiones de Control Interno y defectos corregidos', () => {
-    /** Filas de audit_log del préstamo con esa acción; ninguna lleva números de documento de los usuarios. */
     const loanAudits = async (loanId: string, action: string) => {
       const rows = (await dataSource.query(
         `SELECT entity_type, performed_by, changes FROM audit_log WHERE entity_id = $1 AND action = $2 ORDER BY id`,
@@ -847,7 +817,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     const sign = (documentId: string, order: number, who: string) =>
       http().post(`/api/v1/documents/${documentId}/signatures/${order}`).set(auth(who)).send({ rubric });
 
-    /** Préstamo entregado con su acta generada (plantilla OCI-01-65 ya vigente desde el ciclo completo). */
     const deliveredWithAct = async (codes: string[]) => {
       const ids: string[] = [];
       for (const code of codes) {
@@ -862,7 +831,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       return { id, assets: ids, documentId: loan.deliveryAct.documentId as string, number: loan.deliveryAct.number as string };
     };
 
-    /** Atajo de prueba: préstamo entregado y ACTIVE sin pasar por las firmas (lo que se prueba es otra cosa). */
     const activeLoan = async (codes: string[]) => {
       const ids: string[] = [];
       for (const code of codes) {
@@ -883,13 +851,11 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
           (item) => item.id,
         );
 
-      // Jefe del origen (el que aprueba) y jefe del destino (la dependencia que recibe) ven el préstamo.
       for (const who of ['jefeA', 'jefeB', 'lector']) {
         const response = await get(who).expect(200);
         expectConforms('get', '/api/v1/loans/{id}', 200, response.body);
         expect(await listIds(who)).toContain(id);
       }
-      // Jefe de otro centro: 404 idéntico a inexistente, y no aparece en la lista ni en vencidos.
       const outside = await get('jefeC');
       const missing = await get('jefeC', randomUUID());
       expect(outside.status).toBe(404);
@@ -899,12 +865,10 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect(others.filter((loanId) => loanIds.includes(loanId))).toEqual([]);
       const overdue = await http().get('/api/v1/loans/overdue').set(auth('jefeC')).expect(200);
       expect(overdue.body.data).toEqual([]);
-      // Sin permiso: 403; rol acotado asignado GLOBAL (sin centros): 403 SCOPE_NO_COST_CENTER.
       expect((await get('nadie')).body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
       expect((await get('nadie')).status).toBe(403);
       const global = await http().get('/api/v1/loans').set(auth('jefeGlobal'));
       expect([global.status, global.body.error.code]).toEqual([403, 'SCOPE_NO_COST_CENTER']);
-      // El jefe del destino lee pero no aprueba (404, como antes).
       expect((await approve(id, 'jefeB')).status).toBe(404);
     });
 
@@ -928,7 +892,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       }
       loanIds.push(...results.filter((item) => item.status === 201).map((item) => item.body.data.id as string));
       expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_loan_item WHERE asset_id = $1', [shared])).toBe(1);
-      // Secuencial también: una solicitud abierta reserva el activo.
       expect((await send()).body.error.code).toBe('ASSET_ALREADY_LOANED');
     });
 
@@ -961,7 +924,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
             reason: 'Se corrige la persona que recibe',
           });
       expect((await regenerate('jefeA')).status).toBe(403);
-      // AUDITA sin act:sign_control:global: 400 antes de tocar el acta rechazada ni el préstamo.
       const notEligible = await http()
         .post(`/api/v1/loans/${loan.id}/delivery-act/regenerate`)
         .set(auth('director'))
@@ -978,7 +940,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expectConforms('post', '/api/v1/loans/{id}/delivery-act/regenerate', 200, regenerated.body);
       expect(regenerated.body.data).toMatchObject({ status: 'PENDING_SIGNATURES', contactPersonId: users['recibe2']?.personId });
       expect(regenerated.body.data.deliveryAct).toMatchObject({ status: 'PENDING', documentId: null, regenerable: false });
-      // Auditoría con su propia acción (antes LOAN_DELIVERED + changes.kind), en la transacción de la regeneración.
       expect(await loanAudits(loan.id, 'LOAN_ACT_REGENERATED')).toEqual([
         {
           entity_type: 'LOAN',
@@ -993,7 +954,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect(
         (await loanAudits(loan.id, 'LOAN_DELIVERED')).filter((row) => row.changes !== null && 'kind' in row.changes),
       ).toEqual([]);
-      // La movida del enlace movimiento ↔ acta: la rechazada ya no lo tiene.
       expect(
         await scalar<number>(dataSource, 'SELECT count(*)::int FROM document_asset WHERE document_id = $1 AND movement_id IS NOT NULL', [
           loan.documentId,
@@ -1042,7 +1002,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         'DELIVERY_ACT_SIGNED',
       ]);
 
-      // Con el acta firmada no se deshace la entrega.
       const undo = await http().post(`/api/v1/loans/${loan.id}/undo-delivery`).set(auth('director')).send({ reason: 'Ya no se necesita' });
       expect([undo.status, undo.body.error.code]).toEqual([409, 'DOCUMENT_ALREADY_SIGNED']);
       expect((await detail(loan.id)).status).toBe('ACTIVE');
@@ -1085,11 +1044,9 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         },
       ]);
       expect(await loanAudits(loan.id, 'LOAN_RETURNED')).toEqual([]);
-      // Nadie firma el acta anulada; deshacer dos veces no es una transición válida.
       expect((await sign(loan.documentId, 1, 'entrega')).status).toBe(406);
       const again = await http().post(`/api/v1/loans/${loan.id}/undo-delivery`).set(auth('director')).send({ reason: 'Otra vez' });
       expect([again.status, again.body.error.code]).toEqual([406, 'INVALID_LOAN_STATE_TRANSITION']);
-      // Los activos quedan libres para otra solicitud.
       loanIds.push(await requestLoan(loan.assets, addDays(bogotaDate(new Date()), 5)));
     });
 
@@ -1107,10 +1064,8 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect(byAsset.get(kept ?? '')?.outstanding).toBe(false);
       expect(byAsset.get(later ?? '')?.outstanding).toBe(true);
       expect(await assetRow(later ?? '')).toMatchObject({ operational_status: 'ON_LOAN' });
-      // Sigue con activos fuera: aparece en active=true.
       const active = await http().get('/api/v1/loans').query({ active: 'true', pageSize: 100 }).set(auth('director')).expect(200);
       expect(active.body.data.items.map((item: { id: string }) => item.id)).toContain(first.id);
-      // Un activo ya recibido no se vuelve a registrar.
       expect((await returnAssets(first.id, [{ assetId: kept ?? '', condition: 'GOOD' }])).status).toBe(400);
 
       await returnAssets(first.id, [{ assetId: later ?? '', condition: 'GOOD' }]).expect(200);
@@ -1123,7 +1078,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         'INVALID_LOAN_STATE_TRANSITION',
       );
 
-      // Otro préstamo: el pendiente se declara perdido → CLOSED_WITH_LOSSES, el activo queda LOST.
       const second = await activeLoan([`LP-${tag}-P03`, `LP-${tag}-P04`]);
       const [ok, gone] = second.assets;
       await returnAssets(second.id, [{ assetId: ok ?? '', condition: 'DAMAGED' }]).expect(200);
@@ -1144,10 +1098,8 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       const ask = (who: string, date = newDate) =>
         http().post(`/api/v1/loans/${loan.id}/extend`).set(auth(who)).send({ expectedReturnDate: date, reason: 'Se alarga el semestre' });
 
-      // Aprobar sin pedido: 409.
       const early = await http().post(`/api/v1/loans/${loan.id}/extension/approve`).set(auth('jefeA')).send({});
       expect([early.status, early.body.error.code]).toEqual([409, 'LOAN_NO_PENDING_EXTENSION']);
-      // Solo el solicitante pide (el director tiene loan:request:own pero no pidió el préstamo).
       const notRequester = await ask('director');
       expect([notRequester.status, notRequester.body.error.code]).toEqual([403, 'LOAN_EXTENSION_NOT_REQUESTER']);
       expect((await ask('solicitante', current)).status).toBe(400);
@@ -1156,10 +1108,8 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expectConforms('post', '/api/v1/loans/{id}/extend', 200, asked.body);
       expect(asked.body.data).toMatchObject({ expectedReturnDate: current, extensionRequestedDate: newDate });
 
-      // El solicitante (que además tiene loan:approve:global) no aprueba su propia extensión.
       const own = await http().post(`/api/v1/loans/${loan.id}/extension/approve`).set(auth('solicitante')).send({});
       expect([own.status, own.body.error.code]).toEqual([403, 'LOAN_SOD_VIOLATION']);
-      // Jefe del destino: no aprueba (404 como en la aprobación del préstamo); sin permiso: 403.
       expect((await http().post(`/api/v1/loans/${loan.id}/extension/approve`).set(auth('jefeB')).send({})).status).toBe(404);
       expect((await http().post(`/api/v1/loans/${loan.id}/extension/approve`).set(auth('lector')).send({})).status).toBe(403);
 
@@ -1172,7 +1122,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         payload: { expectedReturnDate: newDate, previousExpectedReturnDate: current },
       });
 
-      // Rechazo de un segundo pedido.
       await ask('solicitante', addDays(newDate, 5)).expect(200);
       const rejected = await http()
         .post(`/api/v1/loans/${loan.id}/extension/reject`)
@@ -1187,7 +1136,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       ]);
       expect((await loanAudits(loan.id, 'LOAN_EXTENDED')).filter((row) => row.changes !== null && 'kind' in row.changes)).toEqual([]);
 
-      // OVERDUE con la nueva fecha no vencida vuelve a ACTIVE.
       await dataSource.query(`UPDATE asset_loan SET status = 'OVERDUE', expected_return_date = $2 WHERE id = $1`, [
         loan.id,
         addDays(bogotaDate(new Date()), -2),
@@ -1270,7 +1218,6 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     expect((await detail(id)).status).toBe('APPROVED');
     expect(await scalar<string>(dataSource, 'SELECT operational_status FROM asset WHERE id = $1', [assetId])).not.toBe('ON_LOAN');
     expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE payload->>'entityId' = $1`, [id])).toBe(0);
-    // Con el permiso vigente: la entrega sigue.
     await http()
       .post(`/api/v1/loans/${id}/deliver`)
       .set(auth('director'))

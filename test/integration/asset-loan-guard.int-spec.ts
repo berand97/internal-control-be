@@ -1,8 +1,3 @@
-// Un activo retenido por un préstamo abierto no se edita, no se da de baja ni entra a un traslado de centro de costo
-// (el centro solo cambia con un traslado OCI-17-89 firmado; TransfersService aplica la guarda al crearlo). La definición de
-// "retenido" es la de la solicitud de préstamo (LoansService.create): OPEN_LOAN_STATUSES y el ítem sin received_at.
-// Los activos se dejan IN_USE a propósito: el estado ON_LOAN es otra defensa (assertMutable) y aquí se prueba que la
-// del préstamo se sostiene sola.
 import type { TestingModule } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
@@ -67,7 +62,6 @@ describe('Guardas del activo frente a préstamos abiertos (PostgreSQL real)', ()
       )
     ).id;
 
-  /** Préstamo en ese estado con sus ítems; received marca el ítem como ya recibido de vuelta. */
   const loan = async (status: LoanStatus, items: ReadonlyArray<{ assetId: string; received?: boolean }>) => {
     const delivered = status !== 'REQUESTED';
     const id = await scalar<string>(

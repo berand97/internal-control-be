@@ -1,6 +1,3 @@
-// Importación de personas por la importación de Excel existente (destino PERSONS): upload → mapeo → vista previa
-// → confirmar, idempotente, identidad por (tipo, número), cuarentena con motivo, y sin copiar el número de
-// documento a la cuarentena, los problemas ni audit_log.
 import type { TestingModule } from '@nestjs/testing';
 import ExcelJS from 'exceljs';
 import { randomUUID } from 'node:crypto';
@@ -30,7 +27,6 @@ const workbook = async (sheet: string, rows: ReadonlyArray<ReadonlyArray<Cell>>)
   return Buffer.from(await book.xlsx.writeBuffer());
 };
 
-// Mismas columnas que la hoja revision_datos_migrados de «contratos activos»: sin tipo de documento ni correo.
 const CONTRACT_HEADER = [
   'Número de documento de identificación',
   'Nombres y Apellidos del empleado',
@@ -67,7 +63,6 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
 
   const count = (sql: string, params: unknown[] = []) => scalar<string>(dataSource, sql, params).then(Number);
 
-  /** El número no puede aparecer en cuarentena, problemas ni audit_log de la importación. */
   const expectNoDocumentNumbers = async (importId: string, numbers: ReadonlyArray<string>) => {
     const texts = (await dataSource.query(
       `SELECT to_jsonb(q)::text AS t FROM staging_quarantine q WHERE import_id = $1
@@ -96,7 +91,6 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
       actor.id,
     );
     expect(asIs.sheets[0]).toMatchObject({ detectedHeaderRow: 1, columns: { A: CONTRACT_HEADER[0], B: CONTRACT_HEADER[1] } });
-    // Sin correo ninguna fila entra: no es un aviso, es un error del mapeo que dice qué hacer (y no crea la vista previa).
     const previewsBefore = await count('SELECT count(*) FROM staging_import');
     await expect(
       imports.preview(asIs.batchId, { sheet: 'revision_datos_migrados', target: 'PERSONS', mapping: CONTRACT_MAPPING }, actor.id),
@@ -111,7 +105,6 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
     });
     expect(await count('SELECT count(*) FROM staging_import')).toBe(previewsBefore);
 
-    // El mismo archivo con la columna de correo agregada pero vacía: la vista previa corre y todo va a cuarentena.
     const file = await workbook('revision_datos_migrados', [
       [...CONTRACT_HEADER, 'Correo'],
       ...contractRows.map((row) => [...row, null]),
@@ -191,7 +184,6 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
     }>;
     expect(job[0]?.options).toEqual({ documentTypeSource: 'UNKNOWN' });
 
-    // El nombre sin partir se muestra completo, sin espacios sobrantes, donde se concatenan nombres y apellidos.
     const directory = moduleRef.get(PersonDirectoryService, { strict: false });
     const found = await directory.search({ search: 'GOMEZ TUBERQUIA', page: 1, pageSize: 5 });
     expect(found.items.find((item) => item.documentNumber === numbers[0])).toMatchObject({
@@ -204,7 +196,6 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
     expect(await moduleRef.get(ImportJobsService).runNow(again.importId, actor.id)).toMatchObject({ inserted: 0, skippedAlreadyPresent: 2 });
     expect(await count('SELECT count(*) FROM person WHERE document_number = ANY($1)', [numbers])).toBe(2);
 
-    // Protección de números sin tipo: la base rechaza otra persona sin tipo con el mismo número.
     await expect(
       dataSource.query(
         `INSERT INTO person (first_name, last_name, email, document_number) VALUES ('Otra', 'Persona', 'otra@unac.edu.co', $1)`,
@@ -212,7 +203,6 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
       ),
     ).rejects.toThrow(/uq_person_document_number_untyped/);
 
-    // Mismo número con tipo declarado: la persona ya existe sin tipo → conflicto a cuarentena, sin duplicar.
     const declared = await imports.preview(
       upload.batchId,
       { sheet: 'Personas', target: 'PERSONS', mapping, documentType: 'CC' },
@@ -302,7 +292,6 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
       { document_type: null, document_type_source: 'UNKNOWN' },
       { document_type: 'CE', document_type_source: 'COLUMN' },
     ]);
-    // Mismo número con otro tipo es otra persona: la unicidad es por el par (tipo, número).
     await dataSource.query(
       `INSERT INTO person (first_name, last_name, email, document_type, document_number) VALUES ('Par', 'Distinto', 'par@unac.edu.co', 'PA', $1)`,
       [`40${base}`],

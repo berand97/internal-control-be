@@ -1,6 +1,3 @@
-// Estado del almacenamiento y guardado del formulario con HTTP real y PostgreSQL real:
-// - GET /storage/status devuelve el s3ForcePathStyle guardado y si hay credenciales (`*Set`), nunca su valor.
-// - PATCH /storage/settings sin credenciales, con vacías, null o `****` conserva las guardadas.
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
@@ -64,7 +61,6 @@ describe('Estado del almacenamiento: path style e indicadores de credenciales (H
     const text = JSON.stringify(body);
     for (const secret of SECRETS) {
       expect(text).not.toContain(secret);
-      // Ni fragmentos: el mask de los Client ID usa los 2 primeros y 2 últimos caracteres.
       expect(text).not.toContain(secret.slice(0, 6));
       expect(text).not.toContain(secret.slice(-6));
     }

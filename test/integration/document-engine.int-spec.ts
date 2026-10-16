@@ -20,7 +20,6 @@ import { createActor, createFreeTestFormat, dropTestFormat, grantControlSigner, 
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 const CLEANED_FORMATS = ['OCI-01-55', 'OCI-17-89', 'OCI-01-65'];
-/** Formato libre sin plantilla (los institucionales pueden tener plantilla o proceso según el orden de los archivos). */
 const NO_TEMPLATE_FORMAT = 'IT-ENGINE-SIN-PLANTILLA';
 const snapshot: {
   templates: string[];
@@ -95,7 +94,6 @@ describe('Motor de documentos (PostgreSQL real)', () => {
     costCenterId: fixture.costCenterId,
     responsiblePersonId: fixture.responsibleId,
     assetIds: fixture.assetIds,
-    // Una persona por firma: la separación de funciones rechaza a la misma persona en dos turnos.
     signers: {
       AUDITA: fixture.auditorId,
       ENTREGA: fixture.deliveryId,
@@ -171,7 +169,6 @@ describe('Motor de documentos (PostgreSQL real)', () => {
       accountingId: await person('Contadora', 'Contable Prueba', '1000000004', 'Contabilidad'),
       assetIds,
     };
-    // AUDITA y CONTROL_INTERNO exigen act:sign_control:global (regla del firmante de Control Interno).
     await grantControlSigner(dataSource, fixture.auditorId);
 
     const template = await readFile(TEMPLATE);
@@ -186,8 +183,6 @@ describe('Motor de documentos (PostgreSQL real)', () => {
   });
 
   afterAll(async () => {
-    // Deja la BD compartida como estaba (plantillas, actas y consecutivos de estos formatos): loans espera OCI-01-65
-    // sin plantilla y otros archivos esperan el consecutivo inicial de OCI-01-55, sea cual sea el orden de los archivos.
     const templates = (
       (await dataSource.query('SELECT id FROM document_template_version WHERE format_key = ANY($1) AND NOT (id = ANY($2))', [
         CLEANED_FORMATS,
@@ -374,7 +369,6 @@ describe.runIf(Boolean(process.env['GOTENBERG_URL']))('Motor de documentos con G
         { sgcVersion: '2', effectiveDate: '2026-09-09' },
         actor.id,
       );
-      // Separación de funciones: quien audita no puede ser el responsable y debe tener act:sign_control:global.
       const auditor = await createActor(dataSource);
       await grantControlSigner(dataSource, auditor.personId);
       const document = await engine.generate(

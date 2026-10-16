@@ -11,13 +11,6 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { createActor, openTestSession, scalar } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
 
-/**
- * Edición del activo sin campos descartados en silencio: el precio de compra se corrige con motivo (bitácora con el
- * valor anterior y el nuevo, movimiento CORRECTION en el historial, marca PRICE_ZERO por el trigger, clasificación de
- * precio cero conservada como histórico), el documento de adquisición y la foto se guardan, y tipo y fecha de
- * adquisición se rechazan si cambian. El detalle trae el motivo de precio cero. PostgreSQL real y HTTP, contra el
- * OpenAPI publicado.
- */
 describe('Edición del activo: corrección del precio de compra y campos que antes se ignoraban (PostgreSQL real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -89,7 +82,6 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
   });
 
   afterAll(async () => {
-    // El catálogo de motivos nace vacío (asset-price-zero lo comprueba): no se dejan motivos de este archivo.
     await dataSource.query('DELETE FROM asset_price_zero_classification WHERE reason_id = ANY($1::uuid[])', [reasonIds]);
     await dataSource.query('DELETE FROM asset_price_zero_reason WHERE id = ANY($1::uuid[])', [reasonIds]);
     await app.close();
@@ -103,7 +95,6 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
     reasonIds.push(reasonId);
     await http().put(`/api/v1/assets/${id}/price-zero-reason`).set(auth('director')).send({ reasonId, note: 'Sin factura' }).expect(200);
 
-    // El detalle trae el motivo de precio cero.
     const before = await http().get(`/api/v1/assets/${id}`).set(auth('director')).expect(200);
     expectConforms('get', '/api/v1/assets/{id}', 200, before.body);
     expect(before.body.data.priceZeroReason).toMatchObject({
@@ -114,7 +105,6 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
     });
     expect(typeof before.body.data.priceZeroReason.classifiedAt).toBe('string');
 
-    // Sin motivo no se corrige; solo con asset:update:global.
     const noReason = await patch(id, { acquisitionPrice: 1250000 });
     expect([noReason.status, noReason.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
     expect(noReason.body.error.details).toEqual([expect.objectContaining({ field: 'priceChangeReason' })]);
@@ -126,7 +116,6 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
     expectConforms('patch', '/api/v1/assets/{id}', 200, fixed.body);
     expect(fixed.body.data.acquisitionPrice).toBe(1250000);
     expect(fixed.body.data.dataQualityFlags).not.toContain('PRICE_ZERO');
-    // La clasificación queda como histórico.
     expect(fixed.body.data.priceZeroReason).toMatchObject({ id: reasonId });
 
     const [audit] = (await dataSource.query(
@@ -155,12 +144,10 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
       actor: { userId: director.id },
     });
 
-    // El mismo precio no es una corrección: no pide motivo ni deja movimiento.
     const movements = await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_movement WHERE asset_id = $1', [id]);
     expect((await patch(id, { acquisitionPrice: 1250000 })).status).toBe(200);
     expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_movement WHERE asset_id = $1', [id])).toBe(movements);
 
-    // Volver a 0 lo vuelve a marcar (trigger).
     expect((await patch(id, { acquisitionPrice: 0, priceChangeReason: 'Era una donación' })).status).toBe(200);
     expect(await flagsOf(id)).toContain('PRICE_ZERO');
   });
@@ -191,7 +178,6 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
         is_primary: boolean;
       }>;
     expect(await photos()).toEqual([{ file_url: 'https://fotos.unac.edu.co/activo-1.jpg', is_primary: true }]);
-    // La misma foto no se duplica; otra pasa a ser la principal y la anterior queda.
     expect((await patch(id, { photoUrl: 'https://fotos.unac.edu.co/activo-1.jpg' })).status).toBe(200);
     expect((await patch(id, { photoUrl: 'https://fotos.unac.edu.co/activo-2.jpg' })).status).toBe(200);
     expect(await photos()).toEqual([

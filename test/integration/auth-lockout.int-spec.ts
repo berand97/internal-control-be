@@ -16,11 +16,6 @@ const PASSWORD = 'Clave-Segura-2026!';
 const WRONG_PASSWORD = 'Clave-Incorrecta-2026!';
 const MINUTE = 60_000;
 
-/**
- * BE-04: bloqueo temporal por cuenta, persistente en la BD, para contraseña, TOTP y códigos de recuperación.
- * Cada intento sale de una IP distinta (X-Forwarded-For desde loopback, que TRUST_PROXY por defecto acepta): el
- * throttler por IP nunca interviene, solo el contador por cuenta.
- */
 describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -111,7 +106,6 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       expect(remaining).toBeGreaterThan(14 * MINUTE);
       expect(remaining).toBeLessThanOrEqual(15 * MINUTE);
 
-      // También por correo: el contador es de la cuenta, no del texto tecleado.
       const byEmail = await login(`${user.username}@unac.edu.co`, PASSWORD);
       expect(byEmail.status).toBe(429);
     });
@@ -171,7 +165,6 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       const realSeq = await sequence(real.username);
       expect(ghostSeq).toEqual(realSeq);
       expect(ghostSeq.at(-1)).toEqual({ status: 429, code: 'ACCOUNT_TEMPORARILY_LOCKED' });
-      // Lo guardado para la cuenta inexistente es un hash, no el identificador.
       const stored = (await dataSource.query(
         `SELECT subject FROM auth_attempt_lockout WHERE subject LIKE 'id:%'`,
       )) as Array<{ subject: string }>;
@@ -210,7 +203,6 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       const secret = started.body.data.secret as string;
       const confirmed = await post('/auth/me/mfa/enrollment/confirm', token).send({ code: await freshTotp(secret) });
       expect(confirmed.status).toBe(200);
-      // El código de la confirmación ya se usó (BE-11); las pruebas de abajo simulan el paso de 30 s siguiente.
       await dataSource.query('UPDATE app_user SET mfa_last_totp_step = NULL WHERE id = $1', [user.id]);
       return { user, secret, codes: confirmed.body.data.recoveryCodes as string[] };
     };
@@ -236,7 +228,6 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       expect(blocked.body.error.code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
       expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
 
-      // El código de recuperación comparte el contador: tampoco sirve mientras dure el bloqueo, ni se consume.
       const recovery = await post('/auth/mfa/recovery', await challenge(user)).send({ recoveryCode: codes[0] });
       expect(recovery.status).toBe(429);
       expect(

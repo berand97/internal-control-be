@@ -2,7 +2,6 @@ import { DataSource, type QueryRunner } from 'typeorm';
 import dataSourceConfig from '../../src/database/data-source.js';
 import { OrgUnitTypesEstructuraOrganica1767226080000 } from '../../src/database/migrations/1767226080000-org-unit-types-estructura-organica.js';
 
-/** Unidades con los tipos de antes de la Estructura Orgánica: [código, nombre, tipo]. */
 const LEGACY: ReadonlyArray<readonly [string, string, string]> = [
   ['IT_MT_AREA', 'Área de Calidad', 'AREA'],
   ['IT_MT_OTHER', 'Institucional', 'OTHER'],
@@ -45,7 +44,6 @@ describe('Migración de tipos de unidad (Estructura Orgánica, Acuerdo 008/2021)
   });
 
   beforeEach(async () => {
-    // Todo en una transacción que se deshace: up/down tocan todas las unidades de la base de pruebas.
     runner = dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
@@ -81,7 +79,6 @@ describe('Migración de tipos de unidad (Estructura Orgánica, Acuerdo 008/2021)
       ['IT_MT_COMITE', 'COUNCIL', 'COMMITTEE', 'AUTO', reason],
       ['IT_MT_OTHER', 'OTHER', 'DEPENDENCY', 'AUTO', reason],
     ]);
-    // Correr otra vez no cambia nada ni duplica el historial.
     await migration.up(runner);
     expect(await history()).toHaveLength(5);
   });
