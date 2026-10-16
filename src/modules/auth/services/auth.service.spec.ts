@@ -97,7 +97,6 @@ describe('AuthService', () => {
       findByEmailWithPerson: vi.fn(),
       findByIdWithPerson: vi.fn(),
       findActiveRoleCodes: vi.fn().mockResolvedValue(['VIEWER']),
-      // Mismos roles que findActiveRoleCodes (cada test ajusta ese mock), con un nombre para mostrar.
       findActiveRoles: vi.fn(async (userId: string) =>
         (await authUsersRepository.findActiveRoleCodes(userId)).map((code) => ({ code, name: `Rol ${code}` })),
       ),
@@ -182,7 +181,6 @@ describe('AuthService', () => {
       completeSetupEnrollment: vi.fn().mockResolvedValue(['AAAA-BBBB-CCCC']),
       consumeForLogin: vi.fn().mockResolvedValue(9),
       acceptTotp: vi.fn().mockResolvedValue(true),
-      // Misma regla que MfaAccountService.requiredFor, sobre los repositorios simulados.
       requiredFor: vi.fn(async (userId: string) =>
         requiresMfaEnrollment({
           roleCodes: await authUsersRepository.findActiveRoleCodes(userId),
@@ -520,7 +518,6 @@ describe('AuthService', () => {
         otpauthUrl: 'otpauth://totp/x',
         qrDataUrl: 'data:image/png;base64,iVBORw0KGgo',
       });
-      // BE-11: lo que se guarda es la semilla cifrada, nunca la que se muestra en el QR.
       expect(authUsersRepository.saveMfaSecret).toHaveBeenCalledWith(
         'user-1',
         'enc.v1.sealed-SECRET',

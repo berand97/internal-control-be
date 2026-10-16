@@ -2,15 +2,6 @@ import type { EmailBlock, EmailDesignIssue } from './email-blocks.js';
 import { extractEmailPlaceholders, urlVariables, type EmailTemplateType } from './email-template-catalog.js';
 import type { RichTextParagraph } from './rich-text.js';
 
-/**
- * Regla de diseño: una variable de enlace (kind = url en el catálogo del tipo) no se muestra como texto. Su lugar es
- * el href de un enlace del párrafo, el URL de un botón o el enlace de una imagen; como texto visible en un párrafo
- * (incluido el texto de un enlace), un título, una nota destacada o el valor de una lista de datos, el correo muestra
- * el URL crudo. Se rechaza con la ruta exacta del texto (misma forma que validateEmailBlocks / validateRichTextDoc).
- *
- * Se aplica al diseño ya validado en estructura (bloques y documento con la forma del catálogo cerrado).
- */
-
 const message = (token: string): string => `Use la variable {{${token}}} como enlace o botón, no como texto`;
 
 const check = (text: string, field: string, urls: ReadonlyMap<string, unknown>, issues: EmailDesignIssue[]): void => {

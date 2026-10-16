@@ -7,17 +7,6 @@ import { PermissionsService } from '../../roles/services/permissions.service.js'
 const ASSET_READ_GLOBAL = 'asset:read:global';
 const ASSET_READ_SCOPED = 'asset:read:org_unit';
 
-/**
- * Lectura del detalle de una toma física (ítems con código, serie y descripción de cada activo). Decisión del
- * desarrollador: ningún endpoint expone activos de otro centro de costo. inventory:read:global (que los roles de jefe y
- * custodio traen sembrado) sigue siendo el permiso del endpoint, pero además:
- * - asset:read:global: cualquier toma;
- * - quien la tiene a cargo (responsable) o quien la programó: su toma;
- * - asset:read:org_unit: tomas de UN centro de costo que esté en su alcance (asignaciones COST_CENTER ∪ jefaturas),
- *   por scope_id o por physical_inventory_scope.
- * Cualquier otro caso: 404 RESOURCE_NOT_FOUND, igual que una toma inexistente. La lista, el calendario y la cobertura
- * no traen activos y no cambian.
- */
 @Injectable()
 export class InventoryReadAccess {
   constructor(

@@ -1,16 +1,9 @@
-/**
- * Fechas del préstamo. Todo en días calendario de America/Bogota: la entrega es un instante (timestamptz), la
- * fecha estimada de devolución es un DATE; se comparan como fechas de Bogotá, no como instantes UTC.
- */
-
 export const LOAN_TIME_ZONE = 'America/Bogota';
 
-/** Fecha de hoy en Bogotá, como expresión SQL (CURRENT_DATE depende del timezone de la sesión). */
 export const SQL_BOGOTA_TODAY = `(now() AT TIME ZONE '${LOAN_TIME_ZONE}')::date`;
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-/** YYYY-MM-DD del instante en Bogotá. */
 export const bogotaDate = (instant: Date): string =>
   new Intl.DateTimeFormat('en-CA', {
     timeZone: LOAN_TIME_ZONE,
@@ -21,7 +14,7 @@ export const bogotaDate = (instant: Date): string =>
 
 interface CalendarDate {
   readonly year: number;
-  readonly month: number; // 1-12
+  readonly month: number;
   readonly day: number;
 }
 
@@ -41,7 +34,6 @@ const daysInMonth = (year: number, month: number): number => new Date(Date.UTC(y
 
 const toUtcMs = (date: CalendarDate): number => Date.UTC(date.year, date.month - 1, date.day);
 
-/** Suma meses; si el día no existe en el mes de llegada, se queda en el último día (31-ene + 1 mes = 28/29-feb). */
 const addMonths = (date: CalendarDate, months: number): CalendarDate => {
   const index = date.year * 12 + (date.month - 1) + months;
   const year = Math.floor(index / 12);
@@ -53,9 +45,7 @@ export interface LoanUsage {
   readonly years: number;
   readonly months: number;
   readonly days: number;
-  /** Días calendario entre las dos fechas. */
   readonly totalDays: number;
-  /** "0 años, 8 meses, 14 días", como el acta institucional OCI-01-65. */
   readonly text: string;
 }
 
@@ -69,12 +59,6 @@ export const formatUsage = (usage: Pick<LoanUsage, 'years' | 'months' | 'days'>)
     unit(usage.days, 'día', 'días'),
   ].join(', ');
 
-/**
- * Tiempo entre dos fechas calendario (YYYY-MM-DD), sin contar el día de inicio: meses completos contados desde
- * el día de inicio (con el día recortado al fin de mes) y los días que sobran. Mismo día = 0 días.
- * Ejemplo institucional: 2026-03-27 → 2026-12-11 = "0 años, 8 meses, 14 días".
- * null si `to` es anterior a `from`.
- */
 export const usageBetween = (from: string, to: string): LoanUsage | null => {
   const start = parse(from);
   const end = parse(to);
@@ -93,7 +77,6 @@ export const usageBetween = (from: string, to: string): LoanUsage | null => {
   return { ...usage, totalDays, text: formatUsage(usage) };
 };
 
-/** Días de atraso: días calendario desde la fecha estimada de devolución hasta `today`; 0 si no está vencido. */
 export const daysOverdue = (expectedReturnDate: string, today: string): number => {
   const days = Math.round((toUtcMs(parse(today)) - toUtcMs(parse(expectedReturnDate))) / 86_400_000);
   return Math.max(0, days);
@@ -114,11 +97,6 @@ const MONTHS = [
   'DICIEMBRE',
 ];
 
-/**
- * Fecha larga en español, igual que documento.fecha del motor de actas
- * (DocumentEngineService.longDate, no exportado): "25 DE SEPTIEMBRE DE 2026".
- * Recibe una fecha calendario (YYYY-MM-DD) ya expresada en Bogotá.
- */
 export const longSpanishDate = (iso: string): string => {
   const date = parse(iso);
   return `${date.day} DE ${MONTHS[date.month - 1]} DE ${date.year}`;

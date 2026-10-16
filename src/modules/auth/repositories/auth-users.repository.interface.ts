@@ -2,7 +2,6 @@ import type { GrantedPermission } from '../../../common/authorization/granted-pe
 import type { TokenScope } from '../../../common/types/authenticated-user.type.js';
 import type { AppUser } from '../entities/app-user.entity.js';
 
-/** Rol activo del usuario: código (estable) y nombre editable por el administrador. */
 export interface ActiveRole {
   readonly code: string;
   readonly name: string;

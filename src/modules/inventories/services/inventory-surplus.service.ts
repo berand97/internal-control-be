@@ -18,20 +18,8 @@ import { toItemView } from './inventory-item-view.js';
 import { InventorySignerHeadService } from './inventory-signer-head.service.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
 
-/** Registrar un activo nuevo exige el mismo permiso que el alta normal. */
 const ASSET_CREATE_PERMISSION = 'asset:create:global';
 
-/**
- * Qué hacer con un sobrante sin activo registrado, con la toma CLOSED y antes de aprobar la conciliación (la
- * aprobación es de otra persona y ve lo decidido). CREATE_ASSET registra el activo (mismo camino que el alta normal,
- * con movimiento REGISTRATION que cita la toma) y lo enlaza al ítem, todo en una transacción; LEAVE_UNRESOLVED deja
- * constancia del motivo y se puede cambiar después por CREATE_ASSET. Un sobrante de un activo LOST no pasa por aquí.
- *
- * En tomas por ubicación, unidad o global un sobrante sin activo no es de ningún centro: no va a ningún acta y bloquea
- * la conciliación hasta que se elija su centro (setCenter) o se registre como activo. LEAVE_UNRESOLVED también exige
- * centro (el del cuerpo o el ya elegido): el acta de ese centro lo lista como sobrante sin resolver; sin centro nadie
- * respondería por él.
- */
 @Injectable()
 export class InventorySurplusService {
   constructor(
@@ -77,7 +65,6 @@ export class InventorySurplusService {
         where: { id: itemId, inventoryId: inventory.id },
         lock: { mode: 'pessimistic_write' },
       });
-      // La toma no debe haberse conciliado entre la lectura y el bloqueo del ítem.
       const [current] = (await manager.query('SELECT status FROM physical_inventory WHERE id = $1 FOR SHARE', [
         inventory.id,
       ])) as Array<{ status: InventoryStatus }>;
@@ -128,7 +115,6 @@ export class InventorySurplusService {
       target.resolvedAt = now;
       target.resolvedBy = actor.id;
       await items.save(target);
-      // El activo creado puede ser de un centro sin acta en la toma: recibe la suya (con su único jefe, si lo tiene).
       await this.signerHead.sync(manager, inventory, actor);
       await this.auditLogs.record(
         {
@@ -152,13 +138,6 @@ export class InventorySurplusService {
     return toItemView(item, await this.valuation.viewContext(inventory, [item]));
   }
 
-  /**
-   * Elige el centro de costo de un sobrante sin activo en una toma que no es de un centro: pasa al acta OCI-21-37 de ese
-   * centro (que se crea si la toma no la tenía). Mismo momento, permisos y conflictos que resolver: toma CLOSED antes
-   * de aprobar la conciliación, responsable o inventory:create:global, sin ser auditado por la toma. Se puede cambiar
-   * mientras no se registre como activo (el activo creado define su centro). El centro debe estar activo y admitir
-   * activos (400 si no). En alcance COST_CENTER el sobrante ya es del centro de la toma: 406 INVALID_STATE.
-   */
   async setCenter(inventoryId: string, itemId: string, costCenterId: string, actor: AuthenticatedUser) {
     const inventory = await this.dataSource.getRepository(PhysicalInventory).findOne({ where: { id: inventoryId } });
     if (!inventory) {
@@ -243,10 +222,6 @@ export class InventorySurplusService {
     }
   }
 
-  /**
-   * Alcance COST_CENTER: el centro de la toma. Otro alcance: el que venga en el cuerpo o, si no, el ya elegido para el
-   * sobrante (uno de los dos es obligatorio, para registrarlo como activo y para dejarlo sin resolver).
-   */
   private costCenterFor(inventory: PhysicalInventory, requested: string | undefined, action: ResolveSurplusDto['action']): string {
     if (inventory.scopeType === InventoryScopeType.CostCenter && inventory.scopeId) {
       if (requested && requested !== inventory.scopeId) {

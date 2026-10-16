@@ -100,7 +100,6 @@ export class DocumentTemplatesService {
     });
     const version = (latest?.version ?? 0) + 1;
     const stored = await this.storageService.put({
-      // Sin fecha de vigencia en este módulo: templates/documents/<tipo>/v<versión>-<uuid>.docx.
       key: documentTemplateKey({ formatKey: documentType, version, id: randomUUID() }),
       body: file.buffer,
       contentType: DOCX_MIME,

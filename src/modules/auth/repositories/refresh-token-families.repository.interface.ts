@@ -5,7 +5,6 @@ export interface NewRefreshTokenFamily {
   readonly userId: string;
   readonly currentJti: string;
   readonly expiresAt: Date;
-  /** Momento de la verificación del segundo factor; null o ausente = sesión solo con contraseña. */
   readonly mfaVerifiedAt?: Date | null;
 }
 

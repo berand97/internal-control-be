@@ -26,7 +26,7 @@ describe('recordatorios de toma: vencimiento en Bogotá', () => {
   });
 
   it('programar la próxima semana deja SKIPPED los de 30 y 15 días; el de 1 día queda PENDING', () => {
-    const now = new Date('2026-09-27T15:00:00Z'); // domingo 10:00 Bogotá
+    const now = new Date('2026-09-27T15:00:00Z');
     const plan = planReminders('2026-10-05', [1, 30, 15], now);
     expect(plan.map((item) => [item.offsetDays, item.status])).toEqual([
       [30, 'SKIPPED'],

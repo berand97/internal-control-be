@@ -8,13 +8,11 @@ import { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 import { PhysicalInventoryAct } from '../entities/physical-inventory-act.entity.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
 
-/** Aviso del cierre y del detalle: un acta OCI-21-37 no se puede emitir (no hay jefe que firme como ENCARGADO). */
 export const ACT_CANNOT_BE_ISSUED = 'ACT_CANNOT_BE_ISSUED';
 
 export interface InventoryWarning {
   readonly code: typeof ACT_CANNOT_BE_ISSUED;
   readonly message: string;
-  /** Centro del acta que no se puede emitir. */
   readonly costCenterId: string | null;
 }
 
@@ -46,9 +44,7 @@ export interface ActAttendedByInput {
 }
 
 export interface CloseSignerInput {
-  /** Compatibilidad: firmante de la única acta de una toma de un solo centro. */
   readonly signerHeadPersonId?: string;
-  /** Quién atendió, para todas las actas que no lo indiquen en attendedBy. */
   readonly attendedByPersonId?: string;
   readonly attendedByName?: string;
   readonly signerHeads?: ReadonlyArray<SignerHeadChoice>;
@@ -67,18 +63,10 @@ const fail = (message: string, field: string, detail: string): never => {
   throw new ApiException(ErrorCode.ValidationFailed, message, [{ field, message: detail }]);
 };
 
-/**
- * Actas OCI-21-37 de una toma, una por centro de costo presente en sus ítems (decisión del desarrollador: la ubicación
- * define el trabajo de campo, no el acta). Cada acta la firma como ENCARGADO el jefe vigente de SU centro, haya estado o
- * no en sitio, resuelto al CERRAR: un solo jefe vigente, él; varios, se elige (signerHeads); ninguno, el cierre procede
- * y esa acta no se emite hasta indicarlo (aviso ACT_CANNOT_BE_ISSUED), sin bloquear las demás. Quién atendió por el área
- * es un dato de cada acta, solo informativo (en una toma por ubicación cada área pudo tener su encargado).
- */
 @Injectable()
 export class InventorySignerHeadService {
   constructor(private readonly dataSource: DataSource) {}
 
-  /** Centros de costo de las actas según los ítems vigentes (alcance COST_CENTER: siempre el suyo), sin repetir. */
   async centersOf(manager: EntityManager, inventory: PhysicalInventory): Promise<string[]> {
     const rows = (await manager.query(
       `SELECT DISTINCT center FROM (
@@ -92,7 +80,6 @@ export class InventorySignerHeadService {
     return rows.map((row) => row.center);
   }
 
-  /** Ítems vigentes que no van a ninguna acta (sobrante sin activo ni resolución, o activo sin centro en la foto). */
   async unassignedItems(inventory: PhysicalInventory, manager: EntityManager = this.dataSource.manager): Promise<number> {
     const [row] = (await manager.query(
       `SELECT count(*)::int AS total FROM ${ITEM_JOINS}
@@ -102,10 +89,6 @@ export class InventorySignerHeadService {
     return row?.total ?? 0;
   }
 
-  /**
-   * Conciliar (solicitar o aprobar) exige que todo sobrante vigente tenga centro, es decir, acta: 409
-   * INVENTORY_UNASSIGNED_SURPLUS con el conteo en details (unassignedSurplus) si no.
-   */
   async assertNoUnassignedSurplus(inventory: PhysicalInventory, manager: EntityManager = this.dataSource.manager): Promise<void> {
     const [row] = (await manager.query(
       `SELECT count(*)::int AS total FROM ${ITEM_JOINS} WHERE i.inventory_id = $1 AND ${UNASSIGNED_SURPLUS_SQL}`,
@@ -131,7 +114,6 @@ export class InventorySignerHeadService {
     return new Map(rows.map((row) => [row.id, row]));
   }
 
-  /** Jefes vigentes (persona activa) de cada centro; un centro sin jefes queda con lista vacía. */
   async candidatesByCenter(
     manager: EntityManager,
     centers: ReadonlyArray<string>,
@@ -150,10 +132,6 @@ export class InventorySignerHeadService {
     return byCenter;
   }
 
-  /**
-   * Jefes candidatos por centro de la toma: los centros de sus actas si ya existen (cerrada), si no los de sus ítems.
-   * Sirve para el formulario del cierre y para indicar el firmante después.
-   */
   async candidatesFor(inventory: PhysicalInventory): Promise<CenterHeadCandidates[]> {
     const manager = this.dataSource.manager;
     const rows = await manager.getRepository(PhysicalInventoryAct).find({ where: { inventoryId: inventory.id } });
@@ -173,17 +151,11 @@ export class InventorySignerHeadService {
       .sort((left, right) => left.costCenter.code.localeCompare(right.costCenter.code));
   }
 
-  /** Compatibilidad (GET /inventories/:id/head-candidates): los jefes de la única acta; vacío con varios centros. */
   async singleCenterCandidates(inventory: PhysicalInventory): Promise<HeadCandidate[]> {
     const centers = await this.candidatesFor(inventory);
     return centers.length === 1 ? (centers[0]?.candidates ?? []) : [];
   }
 
-  /**
-   * Al cerrar (en la transacción del cierre): crea una fila por centro con quién firma como ENCARGADO y quién atendió.
-   * 400 VALIDATION_FAILED si un elegido no es jefe vigente de su centro, si un centro tiene varios jefes y no se eligió,
-   * si se elige para un centro que no está en la toma, o si «atendió» trae persona y texto a la vez.
-   */
   async applyOnClose(
     manager: EntityManager,
     inventory: PhysicalInventory,
@@ -270,7 +242,6 @@ export class InventorySignerHeadService {
     return choices;
   }
 
-  /** Quién atendió por centro: el de attendedBy para ese centro o, si no, el general de la toma. */
   private async attended(
     manager: EntityManager,
     centers: ReadonlyArray<string>,
@@ -308,12 +279,6 @@ export class InventorySignerHeadService {
     return { personId: personId ?? null, name: name?.trim() || null };
   }
 
-  /**
-   * Alinea las actas con los ítems (al aprobar la conciliación y al resolver un sobrante con la toma cerrada): un
-   * centro nuevo (p. ej. el del activo creado desde un sobrante) recibe su acta con su único jefe vigente como
-   * firmante (con varios o ninguno queda sin firmante); un acta sin ítems y sin encolar se quita (salvo la del centro
-   * de una toma COST_CENTER).
-   */
   async sync(manager: EntityManager, inventory: PhysicalInventory, actor: AuthenticatedUser): Promise<void> {
     const repository = manager.getRepository(PhysicalInventoryAct);
     const centers = await this.centersOf(manager, inventory);
@@ -325,7 +290,6 @@ export class InventorySignerHeadService {
       await repository.delete(stale.map((row) => row.id));
     }
     const existing = new Set(rows.map((row) => row.costCenterId));
-    // Una toma migrada con su acta única (sin centro) no recibe actas por centro.
     if (existing.has(null)) {
       return;
     }
@@ -357,11 +321,6 @@ export class InventorySignerHeadService {
     );
   }
 
-  /**
-   * Después del cierre, cuando el centro ya tiene jefe (o para corregir cuál firma): solo con la toma CLOSED o
-   * RECONCILED y el acta de ese centro aún sin encolar. costCenterId null (compatibilidad, PUT /inventories/:id/
-   * signer-head): la única acta de la toma. Luego se encola con POST /inventories/:id/acts/:costCenterId/enqueue.
-   */
   async assign(
     inventoryId: string,
     costCenterId: string | null,
@@ -402,10 +361,6 @@ export class InventorySignerHeadService {
     });
   }
 
-  /**
-   * El acta de un centro de la toma (bloqueada). costCenterId null: la única acta (compatibilidad); con varias,
-   * 406 INVALID_STATE pidiendo el centro. 404 si la toma no tiene acta para ese centro.
-   */
   async actFor(manager: EntityManager, inventoryId: string, costCenterId: string | null): Promise<PhysicalInventoryAct> {
     const rows = await manager.getRepository(PhysicalInventoryAct).find({
       where: costCenterId ? { inventoryId, costCenterId } : { inventoryId },
@@ -423,7 +378,6 @@ export class InventorySignerHeadService {
     return rows[0] as PhysicalInventoryAct;
   }
 
-  /** Aviso de un acta sin firmante: el centro no tiene jefe vigente o tiene varios y no se eligió. */
   warning(center: CostCenterRef | null, candidates: number): InventoryWarning {
     const label = center ? `${center.code} ${center.name}` : '';
     return {
@@ -438,7 +392,6 @@ export class InventorySignerHeadService {
     };
   }
 
-  /** Nombres de personas (firmantes y quién atendió) por id. */
   async personNames(manager: EntityManager, ids: ReadonlyArray<string | null>): Promise<Map<string, string>> {
     const wanted = [...new Set(ids.filter((id): id is string => !!id))];
     if (wanted.length === 0) {
@@ -450,7 +403,6 @@ export class InventorySignerHeadService {
     return new Map(rows.map((row) => [row.id, row.name ?? '']));
   }
 
-  /** Nombre de quién atendió el área del acta (persona o texto) para el acta; null si no se indicó. */
   async attendedName(manager: EntityManager, act: PhysicalInventoryAct): Promise<string | null> {
     if (act.attendedByName) {
       return act.attendedByName;

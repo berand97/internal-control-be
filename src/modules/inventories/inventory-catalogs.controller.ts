@@ -43,7 +43,6 @@ const MANAGE = 'inventory_catalog:manage:global';
 const IN_USE =
   'Una opción ya usada por algún ítem no se borra (406 INVENTORY_CATALOG_ENTRY_IN_USE): se desactiva con PATCH.';
 
-/** Catálogos de la toma física: categorías de hallazgo y causas de faltante. */
 @ApiTags(OpenApiTag.Inventories)
 @ApiBearerAuth()
 @ApiExtraModels(

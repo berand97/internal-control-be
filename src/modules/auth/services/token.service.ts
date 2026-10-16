@@ -136,11 +136,6 @@ export class TokenService {
     return decoded;
   }
 
-  /**
-   * Usuario de un access token válido (firma, emisor, audiencia, vigencia, tipo access y sesión sid), o null. Sin
-   * consultar la BD: lo usa el límite de peticiones, que corre antes que JwtAuthGuard; la sesión la sigue validando
-   * JwtStrategy.
-   */
   accessTokenSubject(authorizationHeader: string | undefined): string | null {
     if (
       authorizationHeader === undefined ||

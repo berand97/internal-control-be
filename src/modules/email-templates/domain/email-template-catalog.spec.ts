@@ -94,7 +94,6 @@ describe('email-template-catalog', () => {
       kind: 'url',
       linkText: 'Restablecer contraseña',
     });
-    // Los datos de ejemplo de una variable de enlace son un URL http(s).
     for (const type of EMAIL_TEMPLATE_TYPES) {
       for (const name of urlVariables(type).keys()) {
         expect(EMAIL_SAMPLE_CONTEXT[type][name]).toMatch(/^https?:\/\//);

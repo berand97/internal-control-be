@@ -17,7 +17,6 @@ import type { PriceZeroAssetDto, PriceZeroAssetListDto } from '../dto/responses/
 import { AssetPriceZeroReason } from '../entities/asset-price-zero-reason.entity.js';
 import type { OperationalStatus } from '../enums/operational-status.enum.js';
 
-/** Marca de calidad de un precio de compra cero (la pone la importación y el trigger trg_asset_price_zero_flag). */
 export const PRICE_ZERO_FLAG = 'PRICE_ZERO';
 
 const CATALOG_ENTITY = 'ASSET_PRICE_ZERO_REASON';
@@ -58,12 +57,6 @@ const ROW_SELECT = `
   LEFT JOIN app_user u ON u.id = c.classified_by
   LEFT JOIN person p ON p.id = u.person_id`;
 
-/**
- * Activos con precio de compra cero: se cargan y quedan marcados (PRICE_ZERO), sin bloquear la importación. Control
- * Interno los clasifica con un motivo de un catálogo administrable que nace vacío; registrar el motivo no toca el
- * precio. Si el precio deja de ser 0, el trigger quita la marca y el activo sale de la lista (su motivo queda como
- * historia). La lista respeta el alcance de lectura de activos (asset:read:global / asset:read:org_unit).
- */
 @Injectable()
 export class AssetPriceZeroService {
   constructor(
@@ -73,8 +66,6 @@ export class AssetPriceZeroService {
     @Inject('AuditLogsRepository')
     private readonly auditLogs: AuditLogsRepository,
   ) {}
-
-  // ---------- Catálogo de motivos ----------
 
   async listReasons() {
     const rows = await this.reasons.find({ order: { sortOrder: 'ASC', label: 'ASC' } });
@@ -115,8 +106,6 @@ export class AssetPriceZeroService {
     await this.auditCatalog(actor, reason.id, { op: 'DELETE', label: reason.label });
     return { deleted: true };
   }
-
-  // ---------- Lista de trabajo ----------
 
   async list(query: QueryPriceZeroAssetsDto, scope: ReadableCostCenterScope): Promise<PriceZeroAssetListDto> {
     const page = query.page ?? 1;
@@ -171,11 +160,6 @@ export class AssetPriceZeroService {
     };
   }
 
-  /**
-   * Registra (o cambia) el motivo del precio cero de un activo, sin tocar el precio. 404 si el activo no existe o está
-   * fuera del alcance de lectura; 406 ASSET_PRICE_NOT_ZERO si no tiene la marca PRICE_ZERO; 406
-   * ASSET_PRICE_ZERO_REASON_UNAVAILABLE si el motivo no existe o está inactivo. Auditado (sin el texto de la nota).
-   */
   async setReason(
     assetId: string,
     dto: SetPriceZeroReasonDto,
@@ -223,7 +207,6 @@ export class AssetPriceZeroService {
           performedBy: actor.id,
           ipAddress: null,
           userAgent: null,
-          // Sin el texto de la nota (texto libre): solo si cambió.
           changes: {
             reasonId: { from: previous?.reason_id ?? null, to: dto.reasonId },
             noteChanged: (previous?.note ?? null) !== note,

@@ -21,10 +21,6 @@ export class AssetLoan {
   @Column({ name: 'requested_at', type: 'timestamptz' })
   requestedAt!: Date;
 
-  /**
-   * Desde cuándo se puede entregar (migración 1767225980000): la fecha de inicio de la solicitud de activos que lo
-   * generó. NULL en los préstamos directos (POST /loans) y en los anteriores: se entregan en cualquier momento.
-   */
   @Column({ name: 'start_date', type: 'date', nullable: true })
   startDate!: string | null;
 
@@ -67,14 +63,12 @@ export class AssetLoan {
   @Column({ name: 'rejected_reason', type: 'text', nullable: true })
   rejectedReason!: string | null;
 
-  /** Motivo de la cancelación de un préstamo programado (APPROVED → CANCELLED); null en cualquier otro caso. */
   @Column({ name: 'cancelled_reason', type: 'text', nullable: true })
   cancelledReason!: string | null;
 
   @Column({ name: 'delivery_document_id', type: 'uuid', nullable: true })
   deliveryDocumentId!: string | null;
 
-  /** Solicitud de activos que originó el préstamo (migración 1767225930000); null si se creó por POST /loans. */
   @Column({ name: 'asset_request_id', type: 'uuid', nullable: true })
   assetRequestId!: string | null;
 

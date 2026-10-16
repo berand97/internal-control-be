@@ -27,11 +27,6 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  /**
-   * La firma y el vencimiento no bastan (BE-09): la sesión (sid) debe seguir activa y la cuenta utilizable. Un token
-   * sin sid no se acepta: todo access token emitido por AuthService lleva la familia de refresh de su sesión.
-   * mustChangePassword sale de la BD, no del token.
-   */
   async validate(payload: unknown): Promise<AuthenticatedUser> {
     if (!isAccessTokenPayload(payload)) {
       throw new ApiException(ErrorCode.Unauthorized);

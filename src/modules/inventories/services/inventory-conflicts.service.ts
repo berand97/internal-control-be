@@ -6,7 +6,6 @@ import type { InventoryConflictReason } from '../dto/inventory-schedule.response
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
 
-/** Lo mínimo de una toma para decidir si choca con otra. */
 export interface ConflictSubject {
   readonly id: string | null;
   readonly scopeType: InventoryScopeType;
@@ -43,17 +42,10 @@ interface CandidateRow {
   end: string;
 }
 
-/**
- * Choques de fechas entre tomas planeadas o en curso: mismo alcance, alguna GLOBAL, o activos compartidos (misma
- * consulta que el bloqueo de inicio). Solo informa: programar advierte; el bloqueo duro está en start().
- * Dos alcances COST_CENTER distintos nunca comparten activos (un activo tiene un solo centro actual) y se descartan
- * sin consultar.
- */
 @Injectable()
 export class InventoryConflictsService {
   constructor(private readonly dataSource: DataSource) {}
 
-  /** Tomas planeadas o en curso cuyo rango planeado cruza [from, to]. */
   async openCandidates(from: string, to: string, manager?: EntityManager): Promise<ConflictCandidate[]> {
     const rows = (await (manager ?? this.dataSource).query(
       `SELECT id, code, name, status, scope_type, scope_id,
@@ -76,7 +68,6 @@ export class InventoryConflictsService {
     }));
   }
 
-  /** Conflictos de `subject` con las tomas abiertas (excluida ella misma). */
   async conflictsOf(subject: ConflictSubject, manager?: EntityManager): Promise<InventoryConflict[]> {
     const candidates = await this.openCandidates(subject.plannedStartDate, subject.plannedEndDate, manager);
     return this.match(subject, candidates, manager);

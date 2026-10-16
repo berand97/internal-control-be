@@ -3,31 +3,20 @@ import type { PhysicalInventoryItem } from '../entities/physical-inventory-item.
 import { VerificationResult } from '../enums/verification-result.js';
 import { type AssetIdentity, type AssetValuation, NO_VALUATION } from '../domain/inventory-valuation.js';
 
-/**
- * Serialización de ítems, progreso y reporte de una toma (InventoryItemDto, InventoryProgressDto e
- * InventoryReportDto en dto/inventory.responses.ts: cambiar un shape exige cambiar ambos).
- */
 export interface CatalogViewContext {
   readonly categories: ReadonlyArray<SuggestibleCategory>;
   readonly causeLabels: ReadonlyMap<string, string>;
 }
 
 export interface ItemViewContext extends CatalogViewContext {
-  /** Valoración por activo (InventoryValuationService); el activo del ítem o, en un sobrante resuelto, el creado. */
   readonly valuations: ReadonlyMap<string, AssetValuation>;
-  /** Código y descripción de esos mismos activos. */
   readonly assets: ReadonlyMap<string, AssetIdentity>;
-  /** Nombre visible (USER_DISPLAY_NAME_SQL) de quienes verificaron o resolvieron los ítems. */
   readonly userNames: ReadonlyMap<string, string>;
 }
 
 const userName = (context: ItemViewContext, id: string | null | undefined): string | null =>
   id ? (context.userNames.get(id) ?? null) : null;
 
-/**
- * Lo que siempre sale en vivo, aunque el reporte se haya congelado al cerrar. Los nombres de verifiedBy/resolvedBy
- * también: el reporte se congela sin ellos y tras el cierre ya no hay correcciones que cambien verifiedBy.
- */
 const liveItemFields = (item: PhysicalInventoryItem, context: ItemViewContext) => {
   const valuedAsset = item.assetId ?? item.resolvedAssetId ?? null;
   const valuation = (valuedAsset ? context.valuations.get(valuedAsset) : undefined) ?? NO_VALUATION;
@@ -129,10 +118,6 @@ const REPORT_ITEM_LISTS = [
   'unexpectedItems',
 ] as const;
 
-/**
- * Reporte de una toma cerrada: prevalece lo congelado al cerrar (discrepancy_report), los campos que no existían
- * entonces salen en vivo y la valoración y la resolución de sobrantes salen siempre en vivo.
- */
 export const mergeFrozenReport = (
   frozen: Record<string, unknown>,
   items: ReadonlyArray<PhysicalInventoryItem>,

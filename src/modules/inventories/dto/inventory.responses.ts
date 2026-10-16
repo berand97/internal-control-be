@@ -21,12 +21,6 @@ import { VERIFICATION_RESULTS, VerificationResult } from '../enums/verification-
 import { SUGGESTIBLE_RESULTS } from './inventory-catalog.dto.js';
 import { InventorySummaryDto } from './inventory-schedule.responses.js';
 
-/**
- * Esquemas de respuesta de la ejecución de tomas (detalle, listado, ítems, progreso, reporte, correcciones) y de sus
- * catálogos. Documentan lo que devuelven InventoriesService, InventoryCorrectionsService, InventoryCatalogsService e
- * inventory-item-view.ts: cambiar un shape exige cambiar ambos.
- */
-
 const RESULT_DESCRIPTION =
   'PENDING: sin verificar; FOUND: en su lugar; MISPLACED: en otra ubicación; MISSING: no encontrado (con causa); ' +
   'SURPLUS: sobrante fuera del alcance; NOT_VERIFIED: seguía pendiente al cerrar (no es faltante, la conciliación ' +
@@ -387,7 +381,6 @@ export class InventoryCostCenterRefDto {
   readonly name!: string;
 }
 
-/** Un acta OCI-21-37 de la toma: la de un centro de costo. */
 export class InventoryActDto extends InventoryActStateDto {
   @ApiProperty({ format: 'uuid', description: 'Acta de la toma para el centro (entityId del documento en el motor)' })
   readonly id!: string;
@@ -506,8 +499,6 @@ export class InventoryDetailResponseDto extends InventorySummaryDto {
   readonly unassignedItems!: number;
 }
 
-// ---------- Corte contable ----------
-
 export class AccountingCutDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
@@ -571,8 +562,6 @@ export class InventoryListResponseDto {
   @ApiProperty()
   readonly hasNext!: boolean;
 }
-
-// ---------- Correcciones ----------
 
 export class InventoryItemSnapshotDto {
   @ApiProperty({ enum: VERIFICATION_RESULTS, enumName: 'VerificationResult' })
@@ -650,8 +639,6 @@ export class InventoryItemCorrectionResultDto {
   @ApiProperty({ type: () => InventoryItemCorrectionDto })
   readonly correction!: InventoryItemCorrectionDto;
 }
-
-// ---------- Catálogos ----------
 
 export class InventoryFindingCategoryDto {
   @ApiProperty({ example: 'AU' })

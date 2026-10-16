@@ -50,7 +50,6 @@ import { AssetsService } from './services/assets.service.js';
       Location,
     ]),
   ],
-  // AssetPriceZeroController primero: /assets/price-zero no debe caer en GET /assets/:id.
   controllers: [AssetPriceZeroController, AssetsController],
   providers: [
     AssetsService,

@@ -38,10 +38,8 @@ import {
 } from './inventory-signer-head.service.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
 
-/** Reintentos automáticos del outbox (DocumentEngineService.processPending: attempts < 5). */
 const AUTOMATIC_GENERATION_ATTEMPTS = 5;
 
-/** Errores de separación de funciones que el encolado manual devuelve tal cual. */
 const SIGNER_ERRORS: ReadonlyArray<ErrorCode> = [
   ErrorCode.DocumentSignerDuplicated,
   ErrorCode.DocumentSignerSubstituteInvalid,
@@ -84,15 +82,6 @@ export interface PersonRef {
   readonly name: string;
 }
 
-/**
- * Actas OCI-21-37 de una toma: una por centro de costo (physical_inventory_act). Al aprobar la conciliación se encola
- * una por centro en la misma transacción, cada una en su SAVEPOINT: si el formato no está listo, el centro no tiene
- * jefe que firme o falla armarla, esa acta queda NOT_ENQUEUED con su motivo, las demás siguen y la conciliación
- * también; se reintenta con POST /inventories/:id/acts/:costCenterId/enqueue. Cada acta lleva su propio consecutivo
- * (lo asigna el motor al generarla), su centroCosto (y unidad a la fecha), los hallazgos y sobrantes de su centro y,
- * como ENCARGADO, el jefe de ese centro. La generación es asíncrona (outbox). Los manejadores del ciclo de vida solo
- * guardan el vínculo con el acta: firmarla o rechazarla no cambia la toma.
- */
 @Injectable()
 export class InventoryActService implements OnModuleInit {
   constructor(
@@ -109,8 +98,6 @@ export class InventoryActService implements OnModuleInit {
   onModuleInit(): void {
     this.lifecycle.register({
       entityType: INVENTORY_ACT_ENTITY_TYPE,
-      // RESPONSABLE (ENCARGADO) = jefe vigente del centro del acta resuelto al cerrar (responsiblePersonId);
-      // AUDITA (REVISA) = quien aprueba la conciliación (signers), turno de Control Interno.
       formats: [
         {
           formatKey: INVENTORY_ACT_FORMAT_KEY,
@@ -131,10 +118,6 @@ export class InventoryActService implements OnModuleInit {
     });
   }
 
-  /**
-   * En la transacción de approveReconcile, con la toma ya RECONCILED en `inventory` (sin guardar): alinea las actas con
-   * los ítems y encola cada una sin encolar. Nunca hace fallar la conciliación por un acta.
-   */
   async enqueueOnApproval(manager: EntityManager, inventory: PhysicalInventory, approver: AuthenticatedUser): Promise<void> {
     await this.signerHead.sync(manager, inventory, approver);
     const acts = await this.orderedActs(manager, inventory.id);
@@ -146,10 +129,6 @@ export class InventoryActService implements OnModuleInit {
     }
   }
 
-  /**
-   * POST /inventories/:id/acts/:costCenterId/enqueue: la toma está RECONCILED y el acta de ese centro no se encoló.
-   * costCenterId null (POST /inventories/:id/act/enqueue, compatibilidad): la única acta de la toma.
-   */
   async retryEnqueue(
     inventoryId: string,
     costCenterId: string | null,
@@ -190,10 +169,6 @@ export class InventoryActService implements OnModuleInit {
     return views.find((view) => view.id === actId) as InventoryActView;
   }
 
-  /**
-   * Para el detalle de la toma: las actas (una por centro) y, por compatibilidad, el estado de la única acta (act,
-   * signerHead, attendedBy; null con varias), si todas se pueden emitir y los avisos de todas.
-   */
   async detail(inventory: PhysicalInventory) {
     const acts = await this.views(inventory);
     const single = acts.length === 1 ? (acts[0] as InventoryActView) : null;
@@ -239,7 +214,6 @@ export class InventoryActService implements OnModuleInit {
     };
   }
 
-  /** Actas de la toma con su centro, firmante, quién atendió, estado y avisos, por código de centro. */
   async views(inventory: PhysicalInventory): Promise<InventoryActView[]> {
     const manager = this.dataSource.manager;
     const acts = await this.orderedActs(manager, inventory.id);
@@ -294,7 +268,6 @@ export class InventoryActService implements OnModuleInit {
     return ids.map((row) => rows.find((act) => act.id === row.id) as PhysicalInventoryAct);
   }
 
-  /** Estado de generación de un acta (InventoryActStateDto). */
   private async state(act: PhysicalInventoryAct): Promise<InventoryActState> {
     const base = { ...this.noneState(), requestId: act.documentRequestId, documentId: act.documentId };
     if (!act.documentRequestId) {
@@ -398,7 +371,6 @@ export class InventoryActService implements OnModuleInit {
         message: `El formato ${INVENTORY_ACT_FORMAT_KEY} no se puede generar: ${readiness.reasons.join('; ')}`,
       };
     }
-    // Sin jefe del centro que firme como ENCARGADO esta acta no se emite (aviso ACT_CANNOT_BE_ISSUED); las demás sí.
     const signerHeadPersonId = act.signerHeadPersonId;
     if (!signerHeadPersonId || !act.costCenterId) {
       const center = act.costCenterId
@@ -414,11 +386,8 @@ export class InventoryActService implements OnModuleInit {
     }
     await manager.query('SAVEPOINT inventory_act');
     try {
-      // app_user.person_id es NOT NULL: el aprobador siempre tiene persona que firme.
       const approverPersonId = await this.personOf(manager, approverUserId);
       const payload = await this.payload(manager, inventory, act, signerHeadPersonId, approverPersonId);
-      // Separación de funciones: si quien aprueba (AUDITA) es el jefe que firma como ENCARGADO, el acta necesita un
-      // sustituto de Control Interno (POST /inventories/:id/acts/:costCenterId/enqueue con signerSubstitutions.AUDITA).
       const requestId = await this.engine.enqueue(
         manager,
         signerSubstitutions && Object.keys(signerSubstitutions).length > 0 ? { ...payload, signerSubstitutions } : payload,
@@ -428,9 +397,6 @@ export class InventoryActService implements OnModuleInit {
       return { requestId };
     } catch (error) {
       await manager.query('ROLLBACK TO SAVEPOINT inventory_act');
-      // Encolado manual: los errores de separación de funciones salen tal cual (409 DOCUMENT_SIGNER_DUPLICATED, 400
-      // DOCUMENT_SIGNER_SUBSTITUTE_INVALID, con sus details), como en entregas, préstamos y traslados. Al aprobar la
-      // conciliación nunca se lanza: queda NOT_ENQUEUED/ENQUEUE_FAILED con el motivo.
       if (options.rethrowSignerErrors && error instanceof ApiException && SIGNER_ERRORS.includes(error.code)) {
         throw error;
       }
@@ -451,7 +417,6 @@ export class InventoryActService implements OnModuleInit {
     return row.person_id;
   }
 
-  /** Solicitud del acta de un centro: solo los ítems de ese centro (ITEM_ACT_CENTER_SQL). */
   private async payload(
     manager: EntityManager,
     inventory: PhysicalInventory,
@@ -555,8 +520,6 @@ export class InventoryActService implements OnModuleInit {
     }
   }
 
-  // ---------- Ciclo de vida del acta ----------
-
   private async lockFor(manager: EntityManager, event: DocumentLifecycleEvent) {
     if (event.formatKey !== INVENTORY_ACT_FORMAT_KEY) {
       throw new Error(`El acta ${event.number} es ${event.formatKey}, no ${INVENTORY_ACT_FORMAT_KEY}`);
@@ -581,7 +544,6 @@ export class InventoryActService implements OnModuleInit {
     return row;
   }
 
-  /** En la transacción que inserta el acta: la fila del centro la adopta si la encoló y aún no tiene otra. */
   private async onGenerated(manager: EntityManager, event: DocumentLifecycleEvent): Promise<void> {
     const act = await this.lockFor(manager, event);
     if (act.status !== InventoryStatus.Reconciled || !act.document_request_id) {
@@ -596,7 +558,6 @@ export class InventoryActService implements OnModuleInit {
     ]);
   }
 
-  /** Firmar o rechazar el acta no cambia la toma; solo se comprueba que es la suya. */
   private async assertOwnAct(manager: EntityManager, event: DocumentLifecycleEvent) {
     const act = await this.lockFor(manager, event);
     if (act.document_id !== event.documentId) {
@@ -625,7 +586,6 @@ export interface InventoryActState {
 }
 
 export interface InventoryActView extends InventoryActState {
-  /** Fila physical_inventory_act (entityId del acta en el motor). */
   readonly id: string;
   readonly costCenter: CostCenterRef | null;
   readonly signerHead: PersonRef | null;

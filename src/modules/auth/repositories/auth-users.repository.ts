@@ -67,7 +67,6 @@ export class TypeOrmAuthUsersRepository implements AuthUsersRepository {
     return rows.map((row): string => row.code);
   }
 
-  /** Mismos roles que findActiveRoleCodes, con el nombre editable del rol (role.name) para mostrarlo. */
   async findActiveRoles(userId: string): Promise<ReadonlyArray<ActiveRole>> {
     const rows = await this.userRoles
       .createQueryBuilder('ur')

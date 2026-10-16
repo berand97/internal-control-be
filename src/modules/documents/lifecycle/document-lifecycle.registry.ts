@@ -2,29 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
 import type { ProcessFormatBinding } from '../domain/document-formats.js';
 
-/**
- * Gancho de completitud: el proceso de negocio que originó un acta (entrega, préstamo...) se entera de que el acta
- * se generó, quedó completamente firmada o fue rechazada, sin que el módulo de documentos lo conozca.
- *
- * Un módulo registra su manejador en onModuleInit:
- *
- *   constructor(private readonly lifecycle: DocumentLifecycleRegistry) {}
- *   onModuleInit() {
- *     this.lifecycle.register({ entityType: 'LOAN', onSigned: (manager, event) => this.applyLoan(manager, event) });
- *   }
- *
- * Garantías (DocumentEngineService):
- * - onGenerated corre dentro de la transacción que inserta el documento (processPending del outbox o generate).
- *   Si lanza, no hay documento: la solicitud del outbox queda FAILED con el error en last_error.
- * - onSigned corre dentro de la misma transacción que mueve el acta de PENDING_SIGNATURE a SIGNED, solo en esa
- *   transición (fila bloqueada con FOR UPDATE, nunca dos veces). Si lanza, la transición se revierte: el acta queda
- *   PENDING_SIGNATURE con todas sus firmas SIGNED, el error queda en document.lifecycle_error y el siguiente sync
- *   (POST /documents/:id/signatures/sync o el job de cada minuto, hasta 5 intentos automáticos) lo reintenta.
- * - onRejected igual, en la transición a REJECTED.
- * El manejador debe usar el EntityManager que recibe (no this.dataSource) para quedar dentro de la transacción, y
- * comprobar que event.documentId es el acta que su proceso espera: el entityType/entityId del acta viene del
- * payload de quien la generó.
- */
 export interface DocumentLifecycleSigner {
   readonly order: number;
   readonly role: string;
@@ -41,19 +18,12 @@ export interface DocumentLifecycleEvent {
   readonly number: string;
   readonly entityType: string;
   readonly entityId: string | null;
-  /** Firmantes finales (después de cualquier reasignación), en orden de firma. */
   readonly signers: ReadonlyArray<DocumentLifecycleSigner>;
-  /** personId del firmante final de cada rol: { RECIBE: '…', ENTREGA: '…', AUDITA: '…' }. */
   readonly signersByRole: Readonly<Record<string, string | null>>;
 }
 
 export type DocumentLifecycleCallback = (manager: EntityManager, event: DocumentLifecycleEvent) => Promise<void>;
 
-/**
- * Cómo volver desde el acta a lo que la originó, más allá de entityType/entityId (GET /documents/:id → links). Cada
- * proceso llena lo que le aplica; lo que no, queda null. Hoy: la toma física de un acta OCI-21-37 (entityId es la fila
- * de physical_inventory_act, no la toma) y su centro de costo.
- */
 export interface DocumentLinks {
   readonly inventoryId: string | null;
   readonly costCenterId: string | null;
@@ -66,13 +36,7 @@ export interface DocumentLifecycleHandler {
   readonly onGenerated?: DocumentLifecycleCallback;
   readonly onSigned?: DocumentLifecycleCallback;
   readonly onRejected?: DocumentLifecycleCallback;
-  /**
-   * Formatos que genera este proceso y los firmantes que su código necesita. Con esto la administración de formatos
-   * (DocumentFormatCatalogService.createVersion) rechaza una versión que rompería el proceso. Enchufar un formato a
-   * un proceso es desarrollo: se declara aquí, no desde la interfaz.
-   */
   readonly formats?: ReadonlyArray<ProcessFormatBinding>;
-  /** Enlaces de navegación del acta (solo lectura, fuera de transacción). */
   readonly links?: (manager: EntityManager, entityId: string) => Promise<Partial<DocumentLinks>>;
 }
 
@@ -119,14 +83,8 @@ export interface EntityDocument {
 export interface EntityDocumentsState {
   readonly entityType: string;
   readonly entityId: string;
-  /**
-   * Estado de la generación más reciente de la entidad: la última solicitud del outbox (PENDING, FAILED o
-   * GENERATED) o, si el acta se generó sin outbox, GENERATED. NONE si no hay ninguna.
-   */
   readonly generation: EntityGenerationStatus;
-  /** Solicitudes del outbox de la entidad, más recientes primero; FAILED trae lastError. */
   readonly requests: ReadonlyArray<EntityDocumentRequest>;
-  /** Actas generadas para la entidad, más recientes primero. */
   readonly documents: ReadonlyArray<EntityDocument>;
 }
 
@@ -156,22 +114,15 @@ export class DocumentLifecycleRegistry {
     }
   }
 
-  /**
-   * Observador de una fase de otro proceso (p. ej. la solicitud de activos se entera de que el acta de su préstamo o
-   * traslado quedó firmada). Corre DESPUÉS del manejador dueño, en la misma transacción y con las mismas garantías: si
-   * lanza, la transición se revierte igual que si hubiera fallado el manejador.
-   */
   observe(entityType: string, phase: DocumentLifecyclePhase, callback: DocumentLifecycleCallback): void {
     const key = `${entityType}:${phase}`;
     this.observers.set(key, [...(this.observers.get(key) ?? []), callback]);
   }
 
-  /** Proceso de negocio que usa el formato (declarado en código), o undefined si es un formato libre. */
   bindingFor(formatKey: string): ProcessFormatBinding | undefined {
     return this.bindings.get(formatKey);
   }
 
-  /** Enlaces de navegación de un acta según su proceso; todos null si el proceso no los declara. */
   async links(entityType: string | null, entityId: string | null, manager?: EntityManager): Promise<DocumentLinks> {
     const handler = entityType ? this.handlers.get(entityType) : undefined;
     if (!handler?.links || !entityId || !UUID.test(entityId)) {
@@ -184,10 +135,6 @@ export class DocumentLifecycleRegistry {
     return entityType !== null && entityType !== undefined && this.handlers.has(entityType);
   }
 
-  /**
-   * Corre el manejador de la fase para el documento, dentro de la transacción de `manager`.
-   * Sin manejador registrado para su entity_type no hace nada. Los errores salen envueltos en DocumentLifecycleError.
-   */
   async dispatch(manager: EntityManager, phase: DocumentLifecyclePhase, documentId: string): Promise<void> {
     const [document] = (await manager.query(
       'SELECT id, format_key, number, entity_type, entity_id FROM document WHERE id = $1',
@@ -238,7 +185,6 @@ export class DocumentLifecycleRegistry {
     }
   }
 
-  /** Estado de las actas de una entidad: solicitudes del outbox (pendientes, fallidas con su error) y documentos. */
   async stateFor(
     entityType: string,
     entityId: string,

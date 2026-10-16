@@ -1,6 +1,5 @@
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
-/** Motivo de un precio de compra cero (catálogo administrable; nace vacío, migración 1767226000000). */
 @Entity('asset_price_zero_reason')
 export class AssetPriceZeroReason {
   @PrimaryGeneratedColumn('uuid')

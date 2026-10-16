@@ -8,23 +8,12 @@ import { scopeSql } from '../domain/inventory-scope-sql.js';
 import type { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 
-/** Quien programa tomas puede ejecutar cualquiera; los demás, solo la suya. */
 export const INVENTORY_OVERRIDE_PERMISSION = 'inventory:create:global';
 
 export type InventoryConflictReason = 'COST_CENTER_HEAD' | 'ASSET_CUSTODIAN';
 
 type InventoryRef = Pick<PhysicalInventory, 'id' | 'responsibleUserId' | 'scopeType' | 'scopeId'>;
 
-/**
- * Regla única de quién opera una toma (iniciar, verificar, faltante, sobrante, categoría, corrección, anulación y
- * cierre):
- * 1. el responsable de la toma (responsible_user_id) o quien tenga inventory:create:global;
- * 2. y nunca el auditado: ni un jefe vigente (cost_center_head) de un centro auditado, ni el custodio de un activo
- *    del alcance (asset.current_responsible_id = persona del usuario; el mismo vínculo persona-usuario que usan las
- *    actas de entrega y los préstamos). Centros auditados: los de los activos del alcance (sin dados de baja), los de
- *    la foto de la toma y, en alcance COST_CENTER, el centro mismo. Activos: los del alcance hoy y los de la foto.
- * El permiso de ruta (inventory:execute:global) lo sigue exigiendo el guard; esto va después.
- */
 @Injectable()
 export class InventoryActorPolicy {
   constructor(
@@ -58,7 +47,6 @@ export class InventoryActorPolicy {
     }
   }
 
-  /** null si el usuario no es auditado por la toma. */
   async conflictOf(
     inventory: InventoryRef,
     userId: string,

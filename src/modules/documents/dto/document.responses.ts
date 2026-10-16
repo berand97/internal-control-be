@@ -5,11 +5,6 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { SIGNATURE_METHODS, TURN_BLOCKERS } from '../domain/signing-channel.js';
 import { DOCUMENT_LIST_STATUSES } from '../services/document-list.service.js';
 
-/**
- * Esquemas de respuesta de /documents y /public/signatures. Solo documentan lo que el servicio ya devuelve
- * (DocumentEngineService, DocumentListService, InternalSignatureProvider): cambiar un shape exige cambiar ambos.
- */
-
 export const DOCUMENT_STATUSES = ['PENDING_SIGNATURE', 'SIGNED', 'REJECTED', 'VOIDED'] as const;
 export const SIGNATURE_STATUSES = ['PENDING', 'SIGNED', 'REJECTED'] as const;
 export const SIGNER_REASSIGNMENT_SOURCES = ['REASSIGNED', 'AT_ISSUE'] as const;
@@ -25,7 +20,6 @@ const METHOD_DESCRIPTION =
   'SESSION_MFA: sesión con verificación en dos pasos; SESSION: sesión; EMAIL_LINK: enlace de un solo uso enviado al correo institucional';
 export const ATTESTATION_INTEGRITIES = ['INTACT', 'ALTERED', 'UNAVAILABLE'] as const;
 
-/** Códigos que puede traer viewer.blockedBy (DocumentEngineService.signerBlocker). */
 export const SIGNER_BLOCKERS = [
   ErrorCode.InvalidState,
   ErrorCode.ResourceNotFound,
@@ -36,15 +30,12 @@ export const SIGNER_BLOCKERS = [
   ErrorCode.SignatureMfaRequired,
 ] as const;
 
-/** `data` del envelope como arreglo de `dto` (envelopedSchema solo describe un objeto). */
 export const envelopedArraySchema = (dto: Function): SchemaObject => ({
   allOf: [
     { $ref: getSchemaPath(ApiSuccessEnvelope) },
     { properties: { data: { type: 'array', items: { $ref: getSchemaPath(dto) } } } },
   ],
 });
-
-// ---------- GET /documents, POST /documents/requests/:requestId/retry ----------
 
 export class DocumentListRequesterDto {
   @ApiProperty({ format: 'uuid' })
@@ -145,8 +136,6 @@ export class DocumentListResponseDto {
   readonly hasNext!: boolean;
 }
 
-// ---------- GET /documents/formats ----------
-
 export class DocumentFormatNumberingDto {
   @ApiProperty({ type: 'integer', description: 'Dígitos del consecutivo' })
   readonly width!: number;
@@ -182,7 +171,6 @@ export class DocumentFormatSignerDto {
   })
   readonly source!: (typeof SIGNER_SOURCES)[number];
 }
-
 
 export class DocumentFormatScheduledVersionDto {
   @ApiProperty({ format: 'uuid' })
@@ -303,8 +291,6 @@ export class DocumentFormatResponseDto {
 
 export const DOCUMENT_FORMAT_VERSION_STATUSES = ['CURRENT', 'SCHEDULED', 'SUPERSEDED'] as const;
 
-// ---------- GET/POST /documents/formats/:formatKey/versions ----------
-
 export class DocumentFormatVersionResponseDto {
   @ApiProperty({ example: 'LOAN_RETURN' })
   readonly key!: string;
@@ -362,8 +348,6 @@ export class DocumentFormatVersionResponseDto {
   readonly documentCount!: number;
 }
 
-// ---------- POST /documents/formats/:formatKey/templates ----------
-
 export class UploadedTemplateResponseDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
@@ -374,8 +358,6 @@ export class UploadedTemplateResponseDto {
   @ApiProperty({ type: [String], description: 'Placeholders encontrados en la plantilla' })
   readonly placeholders!: string[];
 }
-
-// ---------- POST /documents ----------
 
 export class GeneratedDocumentResponseDto {
   @ApiProperty({ format: 'uuid' })
@@ -396,8 +378,6 @@ export class GeneratedDocumentResponseDto {
   @ApiProperty({ description: 'Clave del PDF en el almacenamiento' })
   readonly pdfKey!: string;
 }
-
-// ---------- GET /documents/:id (y sign / reject / reassign / sync) ----------
 
 export class DocumentCurrentTurnDto {
   @ApiProperty({ type: 'integer' })
@@ -720,8 +700,6 @@ export class DocumentDetailResponseDto {
   readonly voidReason!: string | null;
 }
 
-// ---------- GET /public/signatures/:code ----------
-
 export class AttestationSignerDto {
   @ApiProperty({ type: 'integer' })
   readonly order!: number;
@@ -780,8 +758,6 @@ export class SignatureAttestationResponseDto {
   @ApiProperty({ type: 'string', format: 'date-time' })
   readonly checkedAt!: string;
 }
-
-// ---------- /public/signing-links/:token ----------
 
 export class SigningLinkDocumentDto {
   @ApiProperty({ example: 'OCI-01-55' })
@@ -851,8 +827,6 @@ export class SigningLinkResultResponseDto {
   @ApiProperty({ type: 'string', nullable: true, description: 'URL pública de verificación del acta (la del QR)' })
   readonly verificationUrl!: string | null;
 }
-
-// ---------- GET /documents/control-signers ----------
 
 export class ControlSignerDto {
   @ApiProperty({ format: 'uuid' })

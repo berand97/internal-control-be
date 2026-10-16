@@ -10,7 +10,6 @@ interface Row {
   updatedAt: Date;
 }
 
-/** Tabla feature_flag en memoria: save escribe, find/findOneBy leen (como la BD real). */
 const createTable = () => {
   const rows = new Map<string, Row>();
   return {
@@ -35,7 +34,6 @@ const createTable = () => {
       rows.set(where.code, { ...row, ...patch });
       return { affected: 1 };
     }),
-    /** Solo la apertura del circuito (TRIP_SQL): upsert que no pisa una fila ya apagada. */
     query: vi.fn(async (sql: string, [code, at]: [string, Date]) => {
       expect(sql).toContain('CIRCUIT');
       const row = rows.get(code);
@@ -183,7 +181,6 @@ describe('FeatureFlagsService: circuito que se recupera solo', () => {
     await service.recordFailure('loans');
     await service.recordFailure('loans');
     vi.advanceTimersByTime(WINDOW_MS + 1);
-    // Los dos primeros salieron de la ventana.
     await service.recordFailure('loans');
     await service.recordSuccess('loans');
     await service.recordFailure('loans');
@@ -223,7 +220,6 @@ describe('FeatureFlagsService: circuito que se recupera solo', () => {
   it('medio abierto: deja pasar UNA prueba; si responde bien reactiva el módulo y lo audita', async () => {
     const { service, table, auditLogs } = await tripped();
     vi.advanceTimersByTime(COOLDOWN_MS);
-    // El menú lo vuelve a mostrar, pero los jobs esperan la confirmación.
     expect(service.list().find((item) => item.code === 'loans')).toMatchObject({
       enabled: true,
       reason: null,
@@ -257,7 +253,6 @@ describe('FeatureFlagsService: circuito que se recupera solo', () => {
     expect(service.list().find((item) => item.code === 'loans')?.retryAt?.toISOString()).toBe(
       new Date(rearmedAt.getTime() + COOLDOWN_MS).toISOString(),
     );
-    // Solo la apertura se audita, no cada prueba fallida.
     expect(auditLogs.record).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(COOLDOWN_MS);
     expect(service.admit('loans')).toBe(true);
@@ -301,7 +296,6 @@ describe('FeatureFlagsService: circuito que se recupera solo', () => {
 
   it('ENV nunca se reactiva solo ni lo abre el circuito', async () => {
     const { service, table } = createService({ loans: false, assets: true }, 2);
-    // Aunque la BD diga CIRCUIT vencido, manda el entorno.
     table.rows.set('loans', {
       code: 'loans',
       enabled: false,
@@ -356,7 +350,6 @@ describe('FeatureFlagsService: caché viva de la BD', () => {
     expect(service.isEnabled('loans')).toBe(false);
     expect(table.findOneBy).toHaveBeenCalledWith({ code: 'loans' });
 
-    // DELETE de la fila: vuelve al valor por defecto del catálogo.
     table.rows.delete('loans');
     handlers.get('feature_flags')?.notification('loans');
     await flush();
@@ -405,7 +398,6 @@ describe('FeatureFlagsService: caché viva de la BD', () => {
       service.onModuleDestroy();
       table.rows.clear();
       await vi.advanceTimersByTimeAsync(60_000);
-      // Detenido: la caché ya no cambia.
       expect(service.isEnabled('campus')).toBe(false);
     } finally {
       vi.useRealTimers();
@@ -453,7 +445,6 @@ describe('FeatureFlagsService: caché viva de la BD', () => {
     const pending = service.reloadAll();
     await service.setEnabled('loans', false);
     expect(service.isEnabled('loans')).toBe(false);
-    // La relectura empezó antes de la escritura y trae la tabla sin la fila.
     release([]);
     await pending;
     expect(service.isEnabled('loans')).toBe(false);

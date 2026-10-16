@@ -76,7 +76,6 @@ describe('urlVariablesAsText', () => {
 
   it('las variables de texto sí van como texto; la regla depende del tipo', () => {
     expect(urlVariablesAsText('PASSWORD_RESET', [{ type: 'heading', text: '{{user.email}} {{app.name}}' }])).toEqual([]);
-    // firma.url no es de PASSWORD_RESET: eso lo reporta la regla de variables ajenas, no esta.
     expect(urlVariablesAsText('PASSWORD_RESET', [{ type: 'heading', text: '{{firma.url}}' }])).toEqual([]);
     expect(urlVariablesAsText('SIGNATURE_LINK', [{ type: 'heading', text: '{{firma.url}}' }])).toHaveLength(1);
   });

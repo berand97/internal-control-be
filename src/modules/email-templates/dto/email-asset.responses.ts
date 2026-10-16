@@ -5,7 +5,6 @@ import { EMAIL_ASSET_MIMES, type EmailAssetMime, type EmailAsset } from '../enti
 
 export const EMAIL_ASSET_LIST_MAX = 100;
 
-/** GET /email-templates/assets: las N más recientes (selector del editor). */
 export class ListEmailAssetsQueryDto {
   @ApiPropertyOptional({ type: 'integer', minimum: 1, maximum: EMAIL_ASSET_LIST_MAX, default: 50 })
   @IsOptional()

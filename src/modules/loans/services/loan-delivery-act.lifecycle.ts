@@ -9,23 +9,8 @@ import { canTransition } from '../domain/loan-transitions.js';
 import { AssetLoan } from '../entities/asset-loan.entity.js';
 import { AssetLoanEvent } from '../entities/asset-loan-item.entity.js';
 
-/** Actas que se pueden reemplazar por una nueva (regenerateDeliveryAct): la rechazada queda como registro. */
 const REPLACEABLE_ACT_STATUSES = ['REJECTED', 'VOIDED'];
 
-/**
- * El préstamo se entera de sus actas por el gancho del motor de documentos (un manejador para entity_type LOAN,
- * que distingue el formato):
- *
- * Acta de entrega (OCI-01-65):
- * - onGenerated: enlaza el acta (asset_loan.delivery_document_id) y registra DELIVERY_ACT_GENERATED. Si el préstamo
- *   ya tenía otra, solo la reemplaza cuando la anterior está REJECTED o VOIDED (acta nueva tras un rechazo).
- * - onSigned: registra DELIVERY_ACT_SIGNED y, si el préstamo está PENDING_SIGNATURES, lo pasa a ACTIVE en esta misma
- *   transacción (payload.activated). Un préstamo entregado antes de esta regla (ya ACTIVE/OVERDUE) solo registra.
- * - onRejected: registra DELIVERY_ACT_REJECTED; el préstamo sigue PENDING_SIGNATURES (nueva acta o deshacer).
- * Acta de devolución (LOAN_RETURN): registra RETURN_ACT_GENERATED / RETURN_ACT_SIGNED / RETURN_ACT_REJECTED.
- *
- * Todo corre dentro de la transacción del motor, con el EntityManager que recibe; si lanza, el motor revierte.
- */
 @Injectable()
 export class LoanDeliveryActLifecycle implements OnModuleInit {
   constructor(private readonly lifecycle: DocumentLifecycleRegistry) {}
@@ -33,8 +18,6 @@ export class LoanDeliveryActLifecycle implements OnModuleInit {
   onModuleInit(): void {
     this.lifecycle.register({
       entityType: LOAN_DOCUMENT_ENTITY,
-      // Firmantes que este código asigna (LoansService.deliver/regenerateDeliveryAct y receiveReturn): la administración
-      // de formatos no puede crear una versión que los quite. La devolución pide los REQUEST que diga su versión vigente.
       formats: [
         {
           formatKey: LOAN_DELIVERY_FORMAT,
@@ -80,7 +63,6 @@ export class LoanDeliveryActLifecycle implements OnModuleInit {
             ? { replacesDocumentId: loan.deliveryDocumentId }
             : {}),
         },
-        // Quien entregó encoló el acta: es el autor de la generación.
         performedBy: loan.deliveredBy ?? loan.requestedBy,
         createdAt: new Date(),
       }),
@@ -133,7 +115,6 @@ export class LoanDeliveryActLifecycle implements OnModuleInit {
     eventType: string,
     extra: { readonly closedBy: 'SIGNED' | 'REJECTED' | null; readonly activated?: boolean },
   ): Promise<void> {
-    // Quien cerró el acta: el último en firmar, o quien rechazó.
     const closer =
       extra.closedBy === 'REJECTED'
         ? event.signers.find((signer) => signer.status === 'REJECTED')
@@ -164,7 +145,6 @@ export class LoanDeliveryActLifecycle implements OnModuleInit {
             signedAt: signer.signedAt,
           })),
         },
-        // performed_by es un usuario (NOT NULL): si el firmante no tiene usuario, queda quien entregó o recibió.
         performedBy: user?.id ?? loan.receivedBackBy ?? loan.deliveredBy ?? loan.requestedBy,
         createdAt: new Date(),
       }),

@@ -11,7 +11,6 @@ import { FeatureFlagsService } from './services/feature-flags.service.js';
 @Module({
   imports: [TypeOrmModule.forFeature([FeatureFlag, AuditLog]), EventBusModule],
   controllers: [FeaturesController],
-  // Auditoría del circuito (apertura y recuperación automática). Local: AuthModule ya depende de este módulo.
   providers: [FeatureFlagsService, { provide: 'AuditLogsRepository', useClass: TypeOrmAuditLogsRepository }],
   exports: [FeatureFlagsService],
 })

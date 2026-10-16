@@ -50,10 +50,6 @@ const READ_SCOPE =
   'Requiere asset:read:global (todos los activos) o asset:read:org_unit (solo los de sus centros de costo); fuera de ' +
   'alcance responde como inexistente.';
 
-/**
- * Activos con precio de compra cero: catálogo de motivos (nace vacío) y lista de trabajo para clasificarlos. Registrado
- * antes que AssetsController para que /assets/price-zero no caiga en GET /assets/:id.
- */
 @ApiTags(OpenApiTag.Assets)
 @ApiBearerAuth()
 @ApiExtraModels(ApiSuccessEnvelope, ApiErrorEnvelope, PriceZeroReasonDto, PriceZeroReasonDeletedDto, PriceZeroAssetDto, PriceZeroAssetListDto)

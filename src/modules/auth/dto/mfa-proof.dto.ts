@@ -1,10 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, Length, Matches } from 'class-validator';
 
-/**
- * Prueba de posesión del factor vigente: un TOTP del dispositivo actual o un código de recuperación (que queda
- * consumido). Basta uno; si llegan ambos se prueba primero el TOTP.
- */
 export class MfaProofDto {
   @ApiPropertyOptional({
     description: 'Código TOTP de 6 dígitos del dispositivo actualmente enrolado',

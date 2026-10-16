@@ -1,6 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-/** Resultado de DELETE de un centro de costo o una unidad: borrado físico o archivado (con el motivo). */
 export class StructureRemovalResultDto {
   @ApiProperty({ description: 'true: se borró de verdad (no tenía historia)' })
   readonly deleted!: boolean;

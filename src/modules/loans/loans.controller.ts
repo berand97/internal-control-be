@@ -66,7 +66,6 @@ const READ_RULE =
 export class LoansController {
   constructor(private readonly loansService: LoansService) {}
 
-  // Lecturas sin @RequirePermission: el alcance (global o por centros) lo resuelve el servicio en la consulta.
   @Get('overdue')
   @ApiOperation({
     summary: 'Alertas de préstamos vencidos',
@@ -97,7 +96,6 @@ export class LoansController {
     return this.loansService.getById(id, actor);
   }
 
-  // Sin @RequirePermission: la misma regla que la entrega (jefe dueño del préstamo de solicitud o loan:update:global).
   @Get(':id/delivery-options')
   @ApiOperation({
     summary: 'Datos del formulario de entrega de ESTE préstamo',
@@ -128,7 +126,6 @@ export class LoansController {
     return this.loansService.create(dto, actor);
   }
 
-  // Sin @RequirePermission: el alcance depende del centro de origen del préstamo, que el guard no conoce.
   @Post(':id/approve')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Aprobar un préstamo', description: APPROVAL_RULE })
@@ -157,7 +154,6 @@ export class LoansController {
     return this.loansService.reject(id, dto, actor);
   }
 
-  // Sin @RequirePermission: quién cancela depende del préstamo (solicitante, jefe dueño o Control Interno).
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -179,7 +175,6 @@ export class LoansController {
     return this.loansService.cancel(id, dto, actor);
   }
 
-  // Sin @RequirePermission: el jefe vigente del centro dueño entrega los préstamos de solicitud, y eso depende del préstamo.
   @Post(':id/deliver')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

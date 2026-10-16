@@ -42,10 +42,6 @@ export interface ValidDesign extends EmailTemplateDesign {
   readonly placeholders: ReadonlyArray<string>;
 }
 
-/**
- * Plantillas de correo: catálogo de tipos y bloques, versiones (una activa por tipo), vista previa y render para el
- * envío. MailService pide aquí el correo ya renderizado (asunto, HTML y texto); este servicio no envía nada.
- */
 @Injectable()
 export class EmailTemplatesService {
   constructor(
@@ -84,7 +80,6 @@ export class EmailTemplatesService {
     return rows.map((row) => EmailTemplateVersionResponseDto.from(row));
   }
 
-  /** Guarda una versión nueva (version + 1) y la deja como la única activa del tipo, en una transacción. */
   async create(
     templateType: EmailTemplateType,
     subject: string,
@@ -116,7 +111,6 @@ export class EmailTemplatesService {
     return EmailTemplateVersionResponseDto.from(saved);
   }
 
-  /** Activa una versión (anterior o actual) y desactiva la que estuviera activa; conserva el autor original. */
   async activate(id: string, actorId: string): Promise<EmailTemplateVersionResponseDto> {
     const row = await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(EmailTemplate);
@@ -134,7 +128,6 @@ export class EmailTemplatesService {
     return EmailTemplateVersionResponseDto.from(row);
   }
 
-  /** Vista previa de un borrador con los datos de ejemplo del tipo. No guarda ni envía. */
   async preview(templateType: EmailTemplateType, subject: string, blocks: unknown): Promise<EmailPreviewResponseDto> {
     const design = await this.validate(templateType, subject, blocks);
     return this.renderDesign(design, EMAIL_SAMPLE_CONTEXT[templateType]);
@@ -148,10 +141,6 @@ export class EmailTemplatesService {
     return this.renderDesign(row, EMAIL_SAMPLE_CONTEXT[row.templateType]);
   }
 
-  /**
-   * Correo listo para enviar: la versión indicada (si es del tipo), si no la activa, si no el diseño por defecto.
-   * El contexto lo arma quien envía; aquí solo se escapa y se ubica en el layout.
-   */
   async render(
     templateType: EmailTemplateType,
     context: EmailContext,
@@ -161,7 +150,6 @@ export class EmailTemplatesService {
     return this.renderDesign(design, context);
   }
 
-  /** Id de la versión que se enviaría (null = diseño por defecto). 404 si templateId no es de ese tipo. */
   async resolveVersionId(templateType: EmailTemplateType, templateId: string | null): Promise<string | null> {
     if (templateId !== null) {
       const row = await this.templates.findOne({ where: { id: templateId, templateType } });
@@ -174,10 +162,6 @@ export class EmailTemplatesService {
     return active?.id ?? null;
   }
 
-  /**
-   * Estructura (catálogo cerrado), variables de enlace no usadas como texto (url-variables-as-text.ts), imágenes
-   * (que cada assetId exista en email_asset) y variables (catálogo del tipo). Devuelve el diseño normalizado.
-   */
   async validate(templateType: EmailTemplateType, subject: string, blocks: unknown): Promise<ValidDesign> {
     const issues = validateEmailBlocks(blocks);
     if (issues.length > 0) {
@@ -235,12 +219,10 @@ export class EmailTemplatesService {
     return active ?? DEFAULT_EMAIL_DESIGNS[templateType];
   }
 
-  /** Serializa versionado y activación por tipo (dos guardados simultáneos no chocan en UNIQUE ni en la activa). */
   private async lockType(manager: EntityManager, templateType: EmailTemplateType): Promise<void> {
     await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`email_template:${templateType}`]);
   }
 
-  /** Render con la marca configurada y las imágenes del diseño resueltas a su URL pública. */
   private async renderDesign(design: EmailTemplateDesign, context: EmailContext): Promise<RenderedEmail> {
     const assets = await this.assets.lookup(imageAssetIds(design.blocks));
     return renderEmail(design, context, this.brand(), assets);

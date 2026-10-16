@@ -22,8 +22,6 @@ import {
   type SignerSource,
 } from '../domain/document-formats.js';
 
-/** Entrada de la administración de formatos. DocumentFormatCatalogService vuelve a validar las reglas cruzadas. */
-
 export class DocumentFormatSignerInputDto {
   @ApiProperty({
     type: 'integer',

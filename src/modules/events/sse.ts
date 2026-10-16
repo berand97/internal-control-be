@@ -1,18 +1,8 @@
-/**
- * Formato text/event-stream (https://html.spec.whatwg.org/multipage/server-sent-events.html). `data` va en una sola
- * línea: JSON.stringify no produce saltos de línea.
- */
 export const formatSseEvent = (event: string, data: unknown, id?: string): string =>
   `${id === undefined ? '' : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
-/**
- * Latido como evento con nombre, no como comentario: EventSource entrega `ping` a JavaScript, así el frontend detecta
- * una conexión medio abierta por silencio. Sin `id`, para no mover el cursor de Last-Event-ID. También mantiene viva
- * la conexión en proxies y detecta clientes caídos.
- */
 export const SSE_PING = formatSseEvent('ping', {});
 
-/** Cabeceras del stream: sin caché ni transformación (compresión) y sin buffering en Nginx/Traefik. */
 export const SSE_HEADERS: Readonly<Record<string, string>> = {
   'Content-Type': 'text/event-stream; charset=utf-8',
   'Cache-Control': 'no-cache, no-transform',
@@ -20,13 +10,8 @@ export const SSE_HEADERS: Readonly<Record<string, string>> = {
   Connection: 'keep-alive',
 };
 
-/** Id de evento: event_seq de notification (BIGINT >= 0) en decimal. */
 const EVENT_ID_PATTERN = /^\d{1,18}$/;
 
-/**
- * Cursor de reposición: cabecera Last-Event-ID (reconexión nativa de EventSource) o, si no viene, `lastEventId` de la
- * query (reconexión con un ticket nuevo). Un valor que no sea un id nuestro se ignora: el stream arranca sin reponer.
- */
 export const resolveLastEventId = (header: unknown, query: unknown): string | null => {
   for (const candidate of [header, query]) {
     if (typeof candidate === 'string' && EVENT_ID_PATTERN.test(candidate.trim())) {

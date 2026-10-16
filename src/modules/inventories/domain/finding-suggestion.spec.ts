@@ -9,7 +9,6 @@ const category = (overrides: Partial<SuggestibleCategory> & { code: string }): S
   ...overrides,
 });
 
-// La siembra de la migración 1767225870000, solo como datos.
 const seeded: ReadonlyArray<SuggestibleCategory> = [
   category({ code: 'AU', sortOrder: 10, suggestResults: ['FOUND', 'MISPLACED'] }),
   category({ code: 'ANE', sortOrder: 20, suggestResults: ['MISSING'] }),

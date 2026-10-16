@@ -40,7 +40,6 @@ export interface CreateAssetRecord {
   readonly createdBy: string;
 }
 
-/** Motivo de precio cero registrado para el activo (asset_price_zero_classification), con quién y cuándo. */
 export interface AssetPriceZeroClassificationRecord {
   readonly id: string;
   readonly name: string;
@@ -87,7 +86,6 @@ export interface AssetSearchFilters {
   readonly acquiredTo?: string;
   readonly hasBarcode?: boolean;
   readonly dataQualityFlags?: ReadonlyArray<string>;
-  /** Alcance de lectura: null = todos; arreglo = solo activos de esos centros. */
   readonly scopeCostCenterIds: ReadonlyArray<string> | null;
   readonly page: number;
   readonly pageSize: number;
@@ -142,7 +140,6 @@ export interface AssetsRepository {
   findPage(
     filters: AssetSearchFilters,
   ): Promise<{ items: ReadonlyArray<Asset>; total: number }>;
-  /** Con scopeCostCenterIds, un activo fuera de esos centros se trata como inexistente. */
   findById(
     id: string,
     scopeCostCenterIds?: ReadonlyArray<string> | null,

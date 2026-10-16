@@ -2,44 +2,18 @@ import { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js
 import { VerificationResult } from '../enums/verification-result.js';
 import type { AssetValuation, ReconciliationBasis } from './inventory-valuation.js';
 
-/**
- * Contenido del acta OCI-21-37 (acta de toma física): campos, tablas y campos por activo que la solicitud del motor
- * de actas lleva. Función pura: InventoryActService reúne los datos y esto arma el texto. El contrato de marcadores
- * está documentado en INVENTORY_ACT_PLACEHOLDERS.
- *
- * Una toma produce un acta por centro de costo (physical_inventory_act): los ítems de cada acta son los de su centro
- * (ITEM_ACT_CENTER_SQL) y centroCosto.* del motor es ese centro.
- */
-
 export const INVENTORY_ACT_FORMAT_KEY = 'OCI-21-37';
-/** Entidad de cada acta en el motor: la fila de physical_inventory_act (una por centro de costo de la toma). */
 export const INVENTORY_ACT_ENTITY_TYPE = 'PHYSICAL_INVENTORY_ACT';
 
-/**
- * Centro de costo al que va un ítem de la toma (alias i = physical_inventory_item, a = su activo, ra = el activo creado
- * al resolver el sobrante; $2 = scope_type y $3 = scope_id de la toma). Alcance COST_CENTER: siempre el centro de la
- * toma (una sola acta). Otro alcance: el centro del activo en la foto (expected_cost_center_id); un sobrante, el centro
- * actual de su activo o del activo creado al resolverlo o, sin activo, el centro elegido para él
- * (surplus_cost_center_id). NULL: el ítem no va a ninguna acta (sobrante sin activo ni centro elegido, o activo sin
- * centro en la foto); un sobrante así bloquea la conciliación (UNASSIGNED_SURPLUS_SQL).
- */
 export const ITEM_ACT_CENTER_SQL = `CASE WHEN $2::text = 'COST_CENTER' THEN $3::uuid
   WHEN i.verification_result = 'SURPLUS' THEN coalesce(a.current_cost_center_id, ra.current_cost_center_id, i.surplus_cost_center_id)
   ELSE i.expected_cost_center_id END`;
 
-/** Sobrantes vigentes que no van a ninguna acta (mismos alias y parámetros que ITEM_ACT_CENTER_SQL). */
 export const UNASSIGNED_SURPLUS_SQL = `i.voided_at IS NULL AND i.verification_result = 'SURPLUS' AND (${ITEM_ACT_CENTER_SQL}) IS NULL`;
 
 export const INVENTORY_ACT_GENERATIONS = ['NONE', 'PENDING', 'FAILED', 'GENERATED', 'NOT_ENQUEUED'] as const;
 export type InventoryActGeneration = (typeof INVENTORY_ACT_GENERATIONS)[number];
 
-/**
- * Por qué el acta no está: FORMAT_NOT_READY (sin código SGC o firmantes), ENQUEUE_FAILED (error inesperado al encolar),
- * TEMPLATE_NOT_ACTIVE (encolada, pero sin plantilla vigente), GENERATION_FAILED (otro error del motor),
- * NO_COST_CENTER_HEAD (el centro del acta no tiene jefe vigente que firme como ENCARGADO), SIGNER_HEAD_NOT_CHOSEN (el
- * centro tiene varios jefes vigentes y no se eligió cuál firma). Las dos últimas se resuelven con
- * PUT /inventories/:id/acts/:costCenterId/signer-head y se encola de nuevo.
- */
 export const INVENTORY_ACT_REASONS = [
   'FORMAT_NOT_READY',
   'NO_COST_CENTER_HEAD',
@@ -53,7 +27,6 @@ export type InventoryActReason = (typeof INVENTORY_ACT_REASONS)[number];
 export const INVENTORY_ACT_RETRY_ACTIONS = ['ENQUEUE', 'RETRY_REQUEST'] as const;
 export type InventoryActRetryAction = (typeof INVENTORY_ACT_RETRY_ACTIONS)[number];
 
-/** Texto de un valor que no se tiene: nunca un 0 inventado. */
 export const NO_DATA = 'Sin dato';
 
 export const RESULT_LABELS: Readonly<Record<VerificationResult, string>> = {
@@ -108,12 +81,10 @@ export interface ActInput {
   readonly approvedAt: Date;
   readonly basis: ReconciliationBasis;
   readonly items: ReadonlyArray<ActItem>;
-  /** Categorías activas y definidas del catálogo, en su orden. */
   readonly categories: ReadonlyArray<ActCategory>;
   readonly causeLabels: ReadonlyMap<string, string>;
   readonly valuations: ReadonlyMap<string, AssetValuation>;
   readonly conditionLabels: Readonly<Record<string, string>>;
-  /** Quién atendió la toma por el área del centro del acta (persona o texto libre); solo informativo, no firma. */
   readonly attendedBy?: string | null;
 }
 
@@ -137,10 +108,8 @@ export const formatMoney = (value: number | null): string => (value === null ? N
 export const formatPercent = (part: number, total: number): string =>
   `${(total === 0 ? 0 : (part / total) * 100).toFixed(2).replace('.', ',')} %`;
 
-/** Base del porcentaje de hallazgos (campos.basePorcentaje): lo dice el acta. */
 export const FINDINGS_PERCENT_BASE = 'Porcentaje calculado sobre el precio de compra';
 
-/** Parte de un total en pesos: "Sin dato" si falta alguno de los dos o el total es 0 (nunca un 0 % inventado). */
 export const formatValuePercent = (part: number | null, total: number | null): string =>
   part === null || total === null || total === 0 ? NO_DATA : formatPercent(part, total);
 
@@ -159,7 +128,6 @@ const bogotaIsoDate = (instant: Date): string =>
     instant,
   );
 
-/** Suma de valores; null si falta alguno (el total no se puede afirmar). */
 const sumOrNull = (values: ReadonlyArray<number | null>): number | null =>
   values.some((value) => value === null) ? null : values.reduce<number>((total, value) => total + (value ?? 0), 0);
 
@@ -211,7 +179,6 @@ export const buildInventoryActContent = (input: ActInput): ActContent => {
     return {
       category,
       count: members.length,
-      // Una categoría sin bienes suma 0 de verdad; con bienes, null si falta el valor de alguno.
       price: members.length === 0 ? 0 : sumOrNull(members.map((item) => valuationOf(item)?.acquisitionPrice ?? null)),
       book: members.length === 0 ? 0 : sumOrNull(members.map((item) => valuationOf(item)?.bookValue ?? null)),
     };
@@ -219,8 +186,6 @@ export const buildInventoryActContent = (input: ActInput): ActContent => {
   const categorized = findingRows.reduce((total, row) => total + row.count, 0);
   const totalPrice = sumOrNull(findingRows.map((row) => row.price));
   const totalBook = sumOrNull(findingRows.map((row) => row.book));
-  // Porcentaje sobre el precio de compra (no sobre el número de bienes): la parte de la categoría en el precio de
-  // compra total de las categorías. Sin precio de algún bien o con total 0: "Sin dato".
   const hallazgos = findingRows.map((row) => ({
     codigo: row.category.code,
     nombre: row.category.label,
@@ -303,7 +268,6 @@ export const buildInventoryActContent = (input: ActInput): ActContent => {
   };
 };
 
-/** Marcadores del acta OCI-21-37, para quien arma la plantilla (además de los comunes del motor). */
 export const INVENTORY_ACT_PLACEHOLDERS: ReadonlyArray<readonly [string, string]> = [
   ['campos.tomaCodigo', 'Código de la toma (TF-2026-001)'],
   ['campos.tomaNombre', 'Nombre de la toma'],

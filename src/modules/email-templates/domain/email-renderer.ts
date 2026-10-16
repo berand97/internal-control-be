@@ -9,16 +9,6 @@ import {
 } from './email-layout.js';
 import type { RichTextDoc, RichTextInline, RichTextParagraph } from './rich-text.js';
 
-/**
- * Renderizador propio bloques → HTML para correo (tablas y estilos en línea, 600 px, sin <script>, sin CSS externo,
- * sin formularios) y su versión en texto plano.
- *
- * Seguridad: TODO texto, literal o de una variable, se escapa; el único marcado es el que escribe este archivo. Los
- * URL de botón, de los enlaces del párrafo y de las imágenes que vienen de una variable se aceptan solo si son
- * http(s) absolutos; si no, el botón se omite y el enlace o la imagen quedan sin enlace. El `src` de una imagen lo
- * arma el servicio (URL pública del backend + id del asset), nunca el diseño.
- */
-
 const TOKEN_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
 
 export type EmailContext = Readonly<Record<string, string>>;
@@ -29,14 +19,12 @@ export interface RenderedEmail {
   readonly text: string;
 }
 
-/** Imagen subida lista para el correo: URL pública absoluta y tamaño natural en px. */
 export interface EmailImageAsset {
   readonly url: string;
   readonly width: number;
   readonly height: number;
 }
 
-/** Imágenes del diseño por id (minúsculas). Una imagen que no está se omite del correo. */
 export type EmailAssetLookup = ReadonlyMap<string, EmailImageAsset>;
 
 const NO_ASSETS: EmailAssetLookup = new Map();
@@ -49,27 +37,21 @@ export const escapeHtml = (value: string): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-/** Sustituye variables; lo que no está en el contexto queda vacío. Resultado en texto plano (sin escapar). */
 export const substitute = (template: string, context: EmailContext): string =>
   template.replace(TOKEN_PATTERN, (_full, token: string) => context[token] ?? '');
 
 const normalizeNewlines = (value: string): string => value.replace(/\r\n|\r/g, '\n');
 
-/** Texto con variables → HTML escapado, con los saltos de línea como <br>. */
 const htmlText = (template: string, context: EmailContext): string =>
   escapeHtml(normalizeNewlines(substitute(template, context))).replace(/\n/g, '<br>');
 
-// Saltos de línea, incluidos U+2028 y U+2029 (construidos con fromCharCode: el literal rompe el analizador).
 const LINE_BREAKS = new RegExp(`[\\r\\n${String.fromCharCode(0x2028, 0x2029)}]+`, 'g');
 
-/** Una sola línea: los saltos de línea de una variable se vuelven espacios. */
 const singleLine = (value: string): string => value.replace(LINE_BREAKS, ' ').replace(/\s{2,}/g, ' ').trim();
 
-/** El asunto es una sola línea: los saltos de línea de una variable se vuelven espacios. */
 export const renderSubject = (subject: string, context: EmailContext): string =>
   singleLine(substitute(subject, context));
 
-/** URL final de un botón (o de un enlace o imagen), o null si no es un http(s) absoluto seguro. */
 export const resolveButtonUrl = (url: string, context: EmailContext): string | null => {
   const token = buttonUrlToken(url);
   if (token === null) {
@@ -92,11 +74,8 @@ const SPACER_PX = { sm: 8, md: 16, lg: 32 } as const;
 const row = (inner: string, padding = '0 32px 16px'): string =>
   `<tr><td style="padding:${padding};">${inner}</td></tr>`;
 
-// ---------- Texto enriquecido (párrafo) ----------
-
 const TEXT_STYLE = `font-family:${EMAIL_FONT_STACK};font-size:15px;line-height:23px;color:${C.text};`;
 const LINK_STYLE = `color:${C.accent};text-decoration:underline;`;
-/** Separación entre los párrafos y listas de un mismo bloque. */
 const RICH_BLOCK_GAP = '12px';
 
 const inlineHtml = (node: RichTextInline, context: EmailContext): string => {
@@ -105,7 +84,6 @@ const inlineHtml = (node: RichTextInline, context: EmailContext): string => {
   }
   let html = htmlText(node.text, context);
   const marks = new Set((node.marks ?? []).map((mark) => mark.type));
-  // Orden fijo de anidado, sin importar el orden en que lleguen las marcas.
   if (marks.has('underline')) {
     html = `<u>${html}</u>`;
   }
@@ -166,7 +144,6 @@ const inlineText = (node: RichTextInline, context: EmailContext): string => {
 const paragraphText = (paragraph: RichTextParagraph, context: EmailContext): string =>
   (paragraph.content ?? []).map((node) => inlineText(node, context)).join('');
 
-/** Texto plano: párrafos separados por línea en blanco, ítems "- " o "1. ", enlaces "texto (url)". */
 export const richTextPlain = (doc: RichTextDoc, context: EmailContext): string =>
   doc.content
     .map((block) =>
@@ -183,9 +160,6 @@ export const richTextPlain = (doc: RichTextDoc, context: EmailContext): string =
     .join('\n\n')
     .trim();
 
-// ---------- Imagen ----------
-
-/** Ancho final: el pedido, o el natural limitado al máximo; alto proporcional. */
 export const imageBox = (block: ImageBlock, asset: EmailImageAsset): { width: number; height: number } => {
   const width = block.width ?? Math.min(asset.width, EMAIL_DESIGN_LIMITS.imageMaxWidth);
   return { width, height: Math.max(1, Math.round((width * asset.height) / asset.width)) };

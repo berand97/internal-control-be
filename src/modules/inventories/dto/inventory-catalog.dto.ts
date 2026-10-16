@@ -16,7 +16,6 @@ import {
 } from 'class-validator';
 import { PHYSICAL_CONDITIONS } from '../../assets/enums/physical-condition.enum.js';
 
-/** Resultados que una categoría de hallazgo puede sugerir (los mismos del CHECK de la migración 1767225870000). */
 export const SUGGESTIBLE_RESULTS = ['FOUND', 'MISSING', 'MISPLACED', 'SURPLUS'] as const;
 export type SuggestibleResult = (typeof SUGGESTIBLE_RESULTS)[number];
 

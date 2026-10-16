@@ -291,7 +291,6 @@ export class ReportUnexpectedDto {
   readonly notes?: string;
 }
 
-/** Firmante ENCARGADO del acta de un centro de la toma, elegido al cerrar. */
 export class ActSignerHeadChoiceDto {
   @ApiProperty({ format: 'uuid', description: 'Centro de costo del acta (GET /inventories/{id}/acts/head-candidates)' })
   @IsUUID('all')
@@ -302,7 +301,6 @@ export class ActSignerHeadChoiceDto {
   readonly personId!: string;
 }
 
-/** Quién atendió por el área de un centro de la toma (solo informativo). */
 export class ActAttendedByDto {
   @ApiProperty({ format: 'uuid', description: 'Centro de costo del acta' })
   @IsUUID('all')

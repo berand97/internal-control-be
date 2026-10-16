@@ -24,20 +24,12 @@ interface RuntimeOverride {
   readonly disabledAt: Date | null;
 }
 
-/** Canal de NOTIFY del trigger feature_flag_notify (migración FeatureFlagNotify1767226060000). */
 export const FEATURE_FLAGS_CHANNEL = 'feature_flags';
-/** Payload del trigger tras TRUNCATE: releer todo. */
 const RELOAD_ALL_PAYLOAD = '*';
-/**
- * Vida de la petición de prueba del circuito medio abierto. Si nunca llega a la respuesta (p. ej. la rechaza un guard
- * posterior con 403), al vencer otra petición puede probar.
- */
 export const PROBE_LEASE_MS = 30_000;
 
-/** Circuito abierto: esperando. Medio abierto: la espera venció y se deja pasar UNA petición de prueba. */
 type CircuitPhase = 'OPEN' | 'HALF_OPEN';
 
-/** Abre el circuito solo si el módulo sigue activo en la BD (no pisa un MANUAL ni otro CIRCUIT de otra instancia). */
 const TRIP_SQL = `
   INSERT INTO feature_flag (code, enabled, disabled_reason, disabled_at, updated_at)
   VALUES ($1, false, 'CIRCUIT', $2, $2)
@@ -46,33 +38,13 @@ const TRIP_SQL = `
     WHERE feature_flag.enabled = true
   RETURNING code`;
 
-/**
- * Estado de los módulos. La BD (feature_flag) es la fuente de verdad; la memoria es una caché viva para que
- * `isEnabled`/`admit` sigan siendo síncronos (los usan el guard en cada petición y los jobs):
- * - Al iniciar se carga todo.
- * - En el proceso HTTP (main.ts llama `startLiveSync`): LISTEN del canal `feature_flags` (un trigger avisa cada
- *   INSERT/UPDATE/DELETE, también los hechos a mano por SQL) y relectura completa periódica como red de seguridad
- *   (FEATURE_FLAGS_RELOAD_SECONDS). Si la conexión LISTEN se cae y vuelve, se relee todo.
- * - Los cambios hechos por este proceso (setEnabled, circuito) actualizan la caché en el acto.
- * CLI, exportador de OpenAPI y pruebas no llaman `startLiveSync`: no abren LISTEN ni temporizadores.
- *
- * Circuito (FeatureCircuitInterceptor): FEATURE_CIRCUIT_THRESHOLD errores internos dentro de
- * FEATURE_CIRCUIT_WINDOW_SECONDS apagan el módulo con motivo CIRCUIT y `disabled_at` en la BD. Pasada la espera
- * (FEATURE_CIRCUIT_COOLDOWN_SECONDS desde `disabled_at`, así sobrevive reinicios y vale entre instancias) queda medio
- * abierto: el menú lo vuelve a mostrar y el guard deja pasar UNA petición de prueba. Si responde bien el módulo se
- * reactiva (motivo borrado, auditado); si falla, `disabled_at` se renueva y la espera vuelve a empezar. Solo CIRCUIT
- * se recupera solo: MANUAL y ENV nunca.
- */
 @Injectable()
 export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FeatureFlagsService.name);
   private readonly stored = new Map<string, RuntimeOverride>();
-  /** Instantes de los errores internos recientes por módulo (ventana deslizante). */
   private readonly failures = new Map<string, number[]>();
-  /** Petición de prueba en curso por módulo (instante en que se dejó pasar). */
   private readonly probes = new Map<string, number>();
   private readonly tripping = new Set<string>();
-  /** Sube con cada escritura local: una relectura que empezó antes no pisa la caché con datos viejos. */
   private writeSeq = 0;
   private reloadTimer: NodeJS.Timeout | null = null;
   private unlisten: (() => void) | null = null;
@@ -91,10 +63,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     await this.reloadAll();
   }
 
-  /**
-   * Mantiene la caché al día con la BD: LISTEN `feature_flags` + relectura periódica. Solo el proceso HTTP la arranca
-   * (main.ts); es idempotente.
-   */
   async startLiveSync(): Promise<void> {
     if (this.liveSync) {
       return;
@@ -131,12 +99,10 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     this.liveSync = false;
   }
 
-  /** Relee toda la tabla y reemplaza la caché (una fila borrada vuelve al valor por defecto del catálogo). */
   async reloadAll(): Promise<void> {
     const seq = this.writeSeq;
     const rows = await this.flags.find();
     if (seq !== this.writeSeq) {
-      // Hubo una escritura local mientras se leía: su NOTIFY trae la fila al día.
       return;
     }
     const seen = new Set<string>();
@@ -151,7 +117,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Relee una fila (NOTIFY del trigger). */
   async reloadOne(code: string): Promise<void> {
     const seq = this.writeSeq;
     const row = await this.flags.findOneBy({ code });
@@ -161,10 +126,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     this.apply(code, row ? toOverride(row) : null);
   }
 
-  /**
-   * Módulo activo y sano. Lo usan los jobs: con el circuito medio abierto sigue en false hasta que una petición de
-   * prueba confirme la recuperación.
-   */
   isEnabled(code: string): boolean {
     if (this.circuitPhase(code) === 'HALF_OPEN') {
       return false;
@@ -172,10 +133,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     return this.snapshotFor(code).enabled;
   }
 
-  /**
-   * ¿Puede pasar esta petición? (FeatureGuard). Igual que isEnabled, salvo con el circuito medio abierto: deja pasar
-   * UNA petición de prueba a la vez (las demás reciben MODULE_UNAVAILABLE hasta que la prueba decida).
-   */
   admit(code: string): boolean {
     if (this.isEnabled(code)) {
       return true;
@@ -193,7 +150,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
-  /** Lo que ve el usuario (/features, /auth/me): con el circuito medio abierto el módulo se muestra para poder probarlo. */
   list(): ReadonlyArray<FeatureSnapshot> {
     return FEATURE_CATALOG.map((feature) => this.snapshotFor(feature.code));
   }
@@ -225,7 +181,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     return this.snapshotFor(code);
   }
 
-  /** La petición respondió bien. Solo importa si era la prueba del circuito medio abierto: reactiva el módulo. */
   async recordSuccess(code: string): Promise<void> {
     if (!this.probes.has(code)) {
       return;
@@ -244,7 +199,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
         ),
       );
       if (!result.affected) {
-        // Otra instancia lo reactivó (o alguien lo cambió) primero: se toma lo que diga la BD.
         await this.reloadOne(code);
         return;
       }
@@ -262,22 +216,16 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     await this.audit(AuditAction.FeatureCircuitRecovered, code, { code, downtimeSeconds });
   }
 
-  /**
-   * La petición terminó con un error que no es interno (4xx): no dice nada de la salud del módulo. Si era la prueba,
-   * se libera para que la siguiente petición pruebe.
-   */
   releaseProbe(code: string): void {
     this.probes.delete(code);
   }
 
-  /** Error interno (5xx) en el módulo. */
   async recordFailure(code: string): Promise<void> {
     const definition = findFeatureDefinition(code);
     if (!definition || definition.core) {
       return;
     }
     if (this.envOverride(code) !== undefined) {
-      // Fijado por entorno: ni el circuito lo apaga ni hay nada que recuperar.
       return;
     }
     if (this.probes.has(code)) {
@@ -313,12 +261,10 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     try {
       const rows = (await this.write(() => this.flags.query(TRIP_SQL, [code, now]))) as unknown[];
       if (rows.length === 0) {
-        // Ya estaba apagado en la BD (otra instancia abrió el circuito o un operador lo apagó).
         await this.reloadOne(code);
         return;
       }
     } catch (error) {
-      // Sin BD no se puede guardar: el circuito se abre igual en esta instancia (la relectura lo corrige luego).
       this.logger.error(`Módulo ${code}: no se pudo guardar la apertura del circuito: ${errorMessage(error)}`);
     }
     this.stored.set(code, { enabled: false, reason: 'CIRCUIT', disabledAt: now });
@@ -334,7 +280,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  /** La prueba falló: el circuito sigue abierto y la espera vuelve a empezar (disabled_at = ahora). */
   private async rearm(code: string): Promise<void> {
     if (this.circuitPhase(code) !== 'HALF_OPEN') {
       return;
@@ -378,7 +323,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     return this.config.getOrThrow('features.circuitCooldownMs', { infer: true });
   }
 
-  /** Auditoría sin actor ni datos personales; si falla no tumba la petición. */
   private async audit(action: AuditAction, code: string, changes: Record<string, unknown>): Promise<void> {
     try {
       await this.auditLogs.record({
@@ -395,7 +339,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Escritura local: una relectura que empezó antes no pisa la caché. */
   private async write<T>(operation: () => Promise<T>): Promise<T> {
     this.writeSeq += 1;
     try {
@@ -434,7 +377,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     if (stored) {
       const phase = this.circuitPhase(code);
       if (phase === 'HALF_OPEN') {
-        // Se muestra para que la siguiente petición pruebe; los jobs siguen esperando (isEnabled).
         return this.toSnapshot(definition, true, null);
       }
       if (phase === 'OPEN') {
@@ -483,7 +425,6 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Pone en caché el estado leído de la BD y deja constancia si cambió lo que ve el usuario. */
   private apply(code: string, next: RuntimeOverride | null): void {
     const before = this.isEnabled(code);
     if (next) {
@@ -542,10 +483,6 @@ const toOverride = (row: FeatureFlag): RuntimeOverride => ({
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : 'error');
 
-/**
- * audit_log.entity_id es UUID y un módulo se identifica por código: UUID determinista (estilo v5, SHA-1 de
- * `feature:<código>`) para que el historial de un módulo se pueda consultar por entity_id.
- */
 export const featureAuditId = (code: string): string => {
   const bytes = createHash('sha1').update(`feature:${code}`).digest().subarray(0, 16);
   bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50;

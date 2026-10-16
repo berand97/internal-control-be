@@ -1,14 +1,6 @@
 import { blockTexts, type EmailBlock, type ParagraphBlock } from './email-blocks.js';
 import { textToRichText } from './rich-text.js';
 
-/**
- * Catálogo de los correos que el sistema YA envía (tipos fijos en código) y de sus variables.
- *
- * Límite de alcance: desde la pantalla "Plantillas de correo" se diseña el CONTENIDO de estos tipos (asunto y
- * bloques). Un tipo nuevo exige desarrollo: agregarlo aquí (variables obligatorias/opcionales, contexto de ejemplo,
- * diseño por defecto) y escribir el código que lo envía con esas variables. Las variables las pone quien envía
- * (MailService, MailOutboxService): agregar una al catálogo sin enviarla solo produce un texto vacío.
- */
 export const EMAIL_TEMPLATE_TYPES = [
   'USER_INVITATION',
   'PASSWORD_RESET',
@@ -67,7 +59,6 @@ export const EMAIL_TEMPLATE_LABEL: Record<EmailTemplateType, string> = {
   ASSET_REQUEST_LOAN_CANCELLED: 'Préstamo programado de la solicitud de activos cancelado',
 };
 
-/** Obligatorias y opcionales comunes de los avisos de solicitudes de activos (AssetRequestNoticesService). */
 const ASSET_REQUEST_REQUIRED = [
   'solicitud.codigo',
   'solicitud.tipo',
@@ -88,7 +79,6 @@ export interface EmailPlaceholderCatalog {
   readonly optional: ReadonlyArray<string>;
 }
 
-/** Opcionales comunes de los avisos de toma física (InventoryNoticesService). */
 const INVENTORY_OPTIONAL = [
   'centro.codigo',
   'centro.nombre',
@@ -184,29 +174,16 @@ export const EMAIL_PLACEHOLDER_CATALOG: Record<
 export const EMAIL_VARIABLE_KINDS = ['url', 'text'] as const;
 export type EmailVariableKind = (typeof EMAIL_VARIABLE_KINDS)[number];
 
-/**
- * Qué es cada variable, para el editor. `url`: su valor es un enlace; en el diseño va como href de un enlace del
- * párrafo, URL de un botón o enlace de una imagen, nunca como texto visible (url-variables-as-text.ts); `linkText`
- * es el texto sugerido del enlace. `text`: se muestra tal cual.
- */
 export interface EmailVariableSpec {
   readonly name: string;
   readonly label: string;
   readonly kind: EmailVariableKind;
-  /** Solo kind = url; null en las de texto. */
   readonly linkText: string | null;
 }
 
 const textVar = (label: string): Omit<EmailVariableSpec, 'name'> => ({ label, kind: 'text', linkText: null });
 const urlVar = (label: string, linkText: string): Omit<EmailVariableSpec, 'name'> => ({ label, kind: 'url', linkText });
 
-/**
- * Significado de cada variable, tomado de quien la pone en el contexto: MailService (src/shared/mail/mail.service.ts:
- * invitación, restablecimiento, enlace de firma), ImportJobsService.notify (importaciones), InventoryNoticesService
- * (avisos y recordatorios de tomas físicas) y MailOutboxService (agrega user.fullName). GENERIC_NOTIFICATION, SYSTEM_ALERT, LOAN_STATUS_NOTIFICATION e INVENTORY_ALERT aún no los envía
- * ningún código: su significado sale de su diseño por defecto y sus datos de ejemplo. Una variable significa lo mismo
- * en todos los tipos que la usan.
- */
 const EMAIL_VARIABLES: Readonly<Record<string, Omit<EmailVariableSpec, 'name'>>> = {
   'user.email': textVar('Correo del usuario'),
   'user.username': textVar('Usuario con el que inicia sesión'),
@@ -279,7 +256,6 @@ const variableSpec = (name: string): EmailVariableSpec => {
   return { name, ...spec };
 };
 
-/** Variables de cada tipo con su descripción: primero las obligatorias, luego las opcionales. */
 const typeVariables = (type: EmailTemplateType): ReadonlyArray<EmailVariableSpec> =>
   [...EMAIL_PLACEHOLDER_CATALOG[type].required, ...EMAIL_PLACEHOLDER_CATALOG[type].optional].map(variableSpec);
 
@@ -311,7 +287,6 @@ export const EMAIL_TEMPLATE_VARIABLES: Record<EmailTemplateType, ReadonlyArray<E
   ASSET_REQUEST_LOAN_CANCELLED: typeVariables('ASSET_REQUEST_LOAN_CANCELLED'),
 };
 
-/** Variables de enlace (kind = url) del tipo. */
 export const urlVariables = (type: EmailTemplateType): ReadonlyMap<string, EmailVariableSpec> =>
   new Map(EMAIL_TEMPLATE_VARIABLES[type].filter((item) => item.kind === 'url').map((item) => [item.name, item]));
 
@@ -320,10 +295,8 @@ export interface EmailTemplateDesign {
   readonly blocks: ReadonlyArray<EmailBlock>;
 }
 
-/** Párrafo de texto simple (sin formato) para los diseños por defecto. */
 const paragraph = (text: string): ParagraphBlock => ({ type: 'paragraph', content: textToRichText(text) });
 
-/** Diseño por defecto de los avisos de solicitud de activos: título, texto, datos, aviso opcional y botón. */
 const assetRequestDesign = (
   subject: string,
   heading: string,
@@ -351,10 +324,6 @@ const assetRequestDesign = (
   ],
 });
 
-/**
- * Diseño por defecto de cada tipo: se usa mientras el tipo no tenga versión activa en BD. Mismo texto que las
- * plantillas de texto anteriores, organizado en bloques (datos en lista, enlace como botón).
- */
 export const DEFAULT_EMAIL_DESIGNS: Record<EmailTemplateType, EmailTemplateDesign> = {
   USER_INVITATION: {
     subject: 'Invitación a {{app.name}}',
@@ -710,7 +679,6 @@ export const EMAIL_SAMPLE_CONTEXT: Record<EmailTemplateType, Record<string, stri
     },
   };
 
-
 const TOKEN_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
 
 export const extractEmailPlaceholders = (text: string): ReadonlyArray<string> => {
@@ -720,7 +688,6 @@ export const extractEmailPlaceholders = (text: string): ReadonlyArray<string> =>
   );
 };
 
-/** Variables usadas en el asunto y en los bloques, sin repetir, en orden de aparición. */
 export const designPlaceholders = (design: EmailTemplateDesign): ReadonlyArray<string> =>
   extractEmailPlaceholders([design.subject, ...design.blocks.flatMap(blockTexts)].join('\n'));
 
@@ -737,7 +704,6 @@ export interface PlaceholderCheck {
   readonly missing: ReadonlyArray<string>;
 }
 
-/** Variables del diseño frente al catálogo del tipo: las que no pertenecen y las obligatorias que faltan. */
 export const checkDesignPlaceholders = (
   type: EmailTemplateType,
   design: EmailTemplateDesign,

@@ -3,7 +3,6 @@ import { DataSource } from 'typeorm';
 import { UserStatus } from '../enums/user-status.enum.js';
 import { isInvitationExpired } from './invitation-policy.js';
 
-/** Estado de la sesión que el guard JWT necesita en cada petición. */
 export interface LiveSessionState {
   readonly mustChangePassword: boolean;
 }
@@ -20,24 +19,9 @@ interface CacheEntry {
   readonly expiresAt: number;
 }
 
-/**
- * Vida de una respuesta positiva en caché. Es el retraso máximo con el que OTRA réplica ve una revocación; en la
- * réplica que la ejecuta, la invalidación explícita (invalidate) la hace inmediata.
- */
 export const SESSION_STATE_TTL_MS = 5_000;
-/** Tope de entradas: evita que la caché crezca sin límite con muchas sesiones distintas. */
 const MAX_ENTRIES = 10_000;
 
-/**
- * Validez de la sesión en cada petición autenticada (BE-09). Un access token solo sirve si su familia de refresh
- * (claim sid) sigue ACTIVE y sin vencer, y si el usuario puede usar la cuenta (ACTIVE, o PENDING_ACTIVATION con
- * la contraseña temporal aún vigente). Así logout, desactivación, suspensión, revocación de sesiones o reset de MFA
- * surten efecto de inmediato, no al vencer el token.
- *
- * Costo: una consulta por petición cuando no hay caché (dos búsquedas por clave primaria); las respuestas positivas
- * se guardan SESSION_STATE_TTL_MS por (usuario, sesión). Las negativas no se guardan: una sesión cerrada nunca vuelve
- * a ser válida y un usuario reactivado debe verse en el acto.
- */
 @Injectable()
 export class SessionStateService {
   private readonly entries = new Map<string, Map<string, CacheEntry>>();
@@ -45,7 +29,6 @@ export class SessionStateService {
 
   constructor(private readonly dataSource: DataSource) {}
 
-  /** null si la sesión ya no es utilizable. */
   async resolve(
     userId: string,
     sessionId: string,
@@ -79,7 +62,6 @@ export class SessionStateService {
     return state;
   }
 
-  /** Borra lo guardado del usuario: se llama al cerrar sesiones o cambiar el estado de la cuenta. */
   invalidate(userId: string): void {
     const sessions = this.entries.get(userId);
     if (sessions) {
@@ -115,7 +97,6 @@ export class SessionStateService {
   }
 }
 
-/** Misma regla que AuthService.assertAccountUsable, sobre la fila leída. */
 const isUsable = (row: SessionRow, now: Date): boolean => {
   const mustChange = row.must_change_password === true;
   const statusAllows =

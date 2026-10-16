@@ -83,7 +83,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ASSET_READ_GLOBAL = 'asset:read:global';
 const ASSET_READ_SCOPED = 'asset:read:org_unit';
 
-/** Datos del préstamo que crea createWithin (POST /loans o la solicitud de activos). */
 export interface CreateLoanInput {
   readonly assetIds: ReadonlyArray<string>;
   readonly targetCostCenterId: string;
@@ -92,11 +91,9 @@ export interface CreateLoanInput {
   readonly expectedReturnDate: string;
   readonly justification: string;
   readonly deliveryNotes: string | null;
-  /** Desde cuándo se puede entregar (solicitud de activos TEMPORARY); sin él, en cualquier momento. */
   readonly startDate?: string | null;
 }
 
-/** Entrega registrada (deliverWithin), en la transacción que la hizo. */
 export interface LoanDeliveredEvent {
   readonly loanId: string;
   readonly assetRequestId: string | null;
@@ -107,7 +104,6 @@ export interface LoanDeliveredEvent {
 
 export type LoanDeliveredListener = (manager: EntityManager, event: LoanDeliveredEvent) => Promise<void>;
 
-/** Préstamo rechazado (reject), en la transacción que lo rechazó. */
 export interface LoanRejectedEvent {
   readonly loanId: string;
   readonly assetRequestId: string | null;
@@ -117,15 +113,10 @@ export interface LoanRejectedEvent {
 
 export type LoanRejectedListener = (manager: EntityManager, event: LoanRejectedEvent) => Promise<void>;
 
-/** Préstamo programado cancelado (cancel), en la transacción que lo canceló. */
 export type LoanCancelledEvent = LoanRejectedEvent;
 
 export type LoanCancelledListener = (manager: EntityManager, event: LoanCancelledEvent) => Promise<void>;
 
-/**
- * Quién entrega un préstamo: Control Interno (loan:update:global) elige ENTREGA; el jefe vigente del centro dueño de un
- * préstamo de solicitud entrega él mismo (ENTREGA = su persona, sin elegir).
- */
 export type DeliveryRole = { readonly kind: 'CONTROL' } | { readonly kind: 'HEAD'; readonly personId: string };
 
 const LOAN_UPDATE_GLOBAL = 'loan:update:global';
@@ -138,7 +129,6 @@ const RETURN_CONDITION_LABELS: Record<LoanReturnCondition, string> = {
   LOST: 'Perdido',
 };
 
-/** Mismas etiquetas que el motor de actas (CONDITION_LABELS de DocumentEngineService). */
 const PHYSICAL_CONDITION_LABELS: Record<string, string> = {
   NEW: 'Nuevo',
   GOOD: 'Bueno',
@@ -147,11 +137,6 @@ const PHYSICAL_CONDITION_LABELS: Record<string, string> = {
   OBSOLETE: 'Obsoleto',
 };
 
-/**
- * La devolución exige el acta de entrega OCI-01-65 firmada por todos: mientras el préstamo está PENDING_SIGNATURES
- * (activos entregados, acta sin todas sus firmas) no se registra ni se recibe una devolución, con un error propio que
- * lo dice en lenguaje llano en vez del INVALID_LOAN_STATE_TRANSITION genérico. Los demás estados siguen las transiciones.
- */
 const assertDeliveryActSigned = (loan: AssetLoan): void => {
   if (loan.status === 'PENDING_SIGNATURES') {
     throw new ApiException(ErrorCode.LoanDeliveryActNotSigned);
@@ -164,20 +149,6 @@ interface ReturnActEventPayload {
   readonly reasons?: ReadonlyArray<string>;
 }
 
-/**
- * Préstamo temporal de activos entre dependencias (decisiones en docs/decisiones.md):
- *
- * - El préstamo se otorga a una DEPENDENCIA (centro de costo de destino), no a una persona. La persona de contacto
- *   (asset_loan.target_responsible_id) es quien firma RECIBE, pero no pasa a ser responsable de los activos: el
- *   responsable y el centro de costo del activo NO cambian durante el préstamo (la entrega solo cambia el estado
- *   operativo a ON_LOAN). El acta OCI-01-65 usa el centro de costo de ORIGEN. Origen ≠ destino.
- * - La entrega física registra el movimiento LOAN y deja los activos ON_LOAN en el momento en que salen, y el
- *   préstamo queda PENDING_SIGNATURES; pasa a ACTIVE en la transacción que completa las firmas del acta (onSigned,
- *   LoanDeliveryActLifecycle). Acta rechazada: nueva acta (regenerateDeliveryAct) o deshacer la entrega
- *   (undoDelivery, anula el acta con voidForEntity y revierte los activos con movimiento RETURN).
- * - La devolución tiene su propia acta (LOAN_RETURN), cuyo formato institucional aún no existe: la recepción se
- *   registra igual y el acta queda PENDING_FORMAT.
- */
 @Injectable()
 export class LoansService {
   private readonly deliveredListeners: LoanDeliveredListener[] = [];
@@ -205,25 +176,18 @@ export class LoansService {
     private readonly auditLogsRepository: AuditLogsRepository,
   ) {}
 
-  /**
-   * Quien necesita enterarse de una entrega (la solicitud de activos que originó el préstamo) se registra aquí; corre en
-   * la transacción de la entrega, después de encolar el acta. Así loans no depende de asset-requests.
-   */
   onDelivered(listener: LoanDeliveredListener): void {
     this.deliveredListeners.push(listener);
   }
 
-  /** Igual que onDelivered, para el rechazo: la solicitud que originó un préstamo programado se cierra con él. */
   onRejected(listener: LoanRejectedListener): void {
     this.rejectedListeners.push(listener);
   }
 
-  /** Igual que onRejected, para la cancelación de un préstamo programado. */
   onCancelled(listener: LoanCancelledListener): void {
     this.cancelledListeners.push(listener);
   }
 
-  /** Alcance de lectura del usuario (403 si no tiene ninguno de los dos permisos o no alcanza centros). */
   private async readScope(actor: AuthenticatedUser): Promise<ReadableCostCenterScope> {
     return requireReadScope(await this.permissions.costCenterScope(actor.id, LOAN_READ_GLOBAL, LOAN_READ_SCOPED));
   }
@@ -280,11 +244,6 @@ export class LoansService {
     };
   }
 
-  /**
-   * Alertas de vencidos: préstamos con activos fuera y sin recepción en curso (LOAN_OVERDUE_CANDIDATE_STATUSES) con
-   * la fecha estimada anterior a hoy (Bogotá), aunque el job diario todavía no los haya marcado OVERDUE. Filtro,
-   * alcance y días de atraso en SQL; los más atrasados primero.
-   */
   async overdue(actor: AuthenticatedUser) {
     const scope = costCenterFilter(await this.readScope(actor));
     const qb = this.loans
@@ -306,7 +265,6 @@ export class LoansService {
     }));
   }
 
-  /** Detalle con alcance de lectura: fuera de alcance responde 404, igual que un préstamo inexistente. */
   async getById(id: string, actor: AuthenticatedUser) {
     const scope = costCenterFilter(await this.readScope(actor));
     const qb = this.loans.createQueryBuilder('l').where('l.id = :id', { id });
@@ -320,7 +278,6 @@ export class LoansService {
     return this.detail(loan);
   }
 
-  /** Detalle sin comprobar alcance: respuesta de las acciones, que ya exigieron su propio permiso. */
   private async detailById(id: string) {
     return this.detail(await this.requireLoan(id));
   }
@@ -369,15 +326,7 @@ export class LoansService {
     };
   }
 
-  /**
-   * Solicitud, en UNA transacción con las filas de los activos bloqueadas (FOR UPDATE, en orden de id): la
-   * disponibilidad se comprueba dentro, así dos solicitudes concurrentes con el mismo activo se serializan y la
-   * segunda ve la primera. Un activo en un préstamo abierto (OPEN_LOAN_STATUSES, incluida otra solicitud) no entra.
-   */
   async create(dto: CreateLoanDto, actor: AuthenticatedUser) {
-    // Ningún endpoint expone activos de otro centro: quien crea el préstamo debe alcanzar el centro de ORIGEN de los
-    // activos (asset:read:global, o asset:read:org_unit por asignación COST_CENTER o jefatura). Si no, 404 sin datos,
-    // igual que un activo inexistente (el pedido a otro centro va por POST /asset-requests).
     const scope = await this.permissions.costCenterScope(actor.id, ASSET_READ_GLOBAL, ASSET_READ_SCOPED);
     const loanId = await this.dataSource.transaction((manager) =>
       this.createWithin(
@@ -398,11 +347,6 @@ export class LoansService {
     return this.detailById(loanId);
   }
 
-  /**
-   * Crea el préstamo dentro de la transacción del llamador. sourceScope: alcance que debe cubrir el centro de origen
-   * (POST /loans). approved: el préstamo nace APPROVED (solicitud de activos aceptada por el jefe dueño y revisada por
-   * Control Interno), con quién y cuándo aprobó y la solicitud que lo origina (asset_loan.asset_request_id).
-   */
   async createWithin(
     manager: EntityManager,
     input: CreateLoanInput,
@@ -512,7 +456,6 @@ export class LoansService {
         ...(approved ? { assetRequestId: approved.assetRequestId } : {}),
       });
       if (approved) {
-        // La aprobación es la aceptación del jefe del centro dueño (origen) en la solicitud de activos.
         await this.addEvent(manager, saved.id, 'APPROVED', approved.by, { assetRequestId: approved.assetRequestId });
         await this.audit(manager, AuditAction.LoanApproved, saved.id, actorId, { assetRequestId: approved.assetRequestId });
       }
@@ -520,10 +463,6 @@ export class LoansService {
     }
   }
 
-  /**
-   * Aprueba con loan:approve:global, o con loan:approve:org_unit sobre el centro de costo de ORIGEN del préstamo
-   * (PermissionsService.costCenterScope, misma semántica que la lectura de activos). Quien solicita no aprueba.
-   */
   async approve(id: string, actor: AuthenticatedUser) {
     const scope = requireApprovalScope(
       await this.permissions.costCenterScope(actor.id, LOAN_APPROVE_GLOBAL, LOAN_APPROVE_SCOPED),
@@ -573,15 +512,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /**
-   * Cancela un préstamo programado que no va a ocurrir (el activo se dañó, ya no se necesita, el solicitante se fue):
-   * APPROVED → CANCELLED, solo antes de entregarlo (después, deshacer la entrega). Motivo obligatorio. Pueden hacerlo
-   * quienes pueden entregarlo (Control Interno con loan:update:global, o un jefe vigente del centro dueño si salió de una
-   * solicitud de activos) y quien lo solicitó (es quien sabe que ya no lo necesita). Nadie más: 403, también si el
-   * préstamo no existe (igual que entregar). En una transacción: estado, motivo, evento CANCELLED, auditoría y, si salió
-   * de una solicitud, la solicitud se cierra (CLOSED_LOAN_CANCELLED) con sus avisos. Los activos quedan libres: el
-   * préstamo cancelado ya no es un préstamo abierto (y nada salió: siguen como estaban).
-   */
   async cancel(id: string, dto: CancelLoanDto, actor: AuthenticatedUser) {
     const reason = dto.reason.trim();
     await this.dataSource.transaction(async (manager) => {
@@ -606,7 +536,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /** Quién cancela: quien puede entregarlo (deliveryRole) o quien lo solicitó. */
   private async canCancel(manager: EntityManager, id: string, actorId: string): Promise<boolean> {
     if (await this.deliveryRole(manager, id, actorId)) {
       return true;
@@ -620,13 +549,6 @@ export class LoansService {
     return loan?.requested_by === actorId;
   }
 
-  /**
-   * Entrega física, en UNA transacción con la fila del préstamo bloqueada: cada activo pasa a ON_LOAN con su
-   * movimiento LOAN fechado en la entrega (los activos salieron: la trazabilidad registra el hecho cuando ocurre),
-   * el préstamo queda PENDING_SIGNATURES y se encola el acta OCI-01-65 en el outbox del motor. El préstamo pasa a
-   * ACTIVE cuando el acta queda firmada (LoanDeliveryActLifecycle.onSigned). Si la generación falla, deliveryAct la
-   * muestra FAILED con su error (se reintenta con POST /documents/requests/:requestId/retry).
-   */
   async deliver(id: string, dto: DeliverLoanDto, actor: AuthenticatedUser) {
     await this.dataSource.transaction(async (manager) => {
       const role = await this.deliveryRole(manager, id, actor.id);
@@ -641,13 +563,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /**
-   * Quién entrega: Control Interno (loan:update:global, el permiso de generación del OCI-01-65), o un jefe vigente del
-   * centro dueño (ORIGEN) si el préstamo salió de una solicitud de activos y no es quien la pidió (separación de
-   * funciones, como al aceptar la solicitud). No existe loan:update:org_unit: la jefatura vigente (cost_center_head) es
-   * el mismo criterio con el que ese jefe aceptó la solicitud. Los préstamos directos se entregan como antes (solo
-   * loan:update:global). null: no puede entregarlo (o el préstamo no existe).
-   */
   private async deliveryRole(manager: EntityManager, id: string, actorId: string): Promise<DeliveryRole | null> {
     if (await this.permissions.userHasPermission(actorId, LOAN_UPDATE_GLOBAL)) {
       return { kind: 'CONTROL' };
@@ -668,13 +583,6 @@ export class LoansService {
     return head ? { kind: 'HEAD', personId: head.person_id } : null;
   }
 
-  /**
-   * Lo que necesita el formulario de entrega, acotado a ESTE préstamo y a quien puede entregarlo (misma regla que
-   * deliver): quién firma ENTREGA (el propio jefe; null si entrega Control Interno, que la elige), quiénes pueden firmar
-   * AUDITA (misma lista que GET /documents/control-signers), quién firma RECIBE y los activos para anotar
-   * observaciones. Así el jefe dueño entrega sin GET /persons, sin GET /loans/:id y sin la lista general de firmantes.
-   * Cualquier otro usuario: 404, igual que un préstamo inexistente.
-   */
   async deliveryOptions(id: string, actor: AuthenticatedUser): Promise<LoanDeliveryOptionsDto> {
     const manager = this.dataSource.manager;
     const role = await this.deliveryRole(manager, id, actor.id);
@@ -710,11 +618,6 @@ export class LoansService {
     };
   }
 
-  /**
-   * Firmantes ENTREGA y AUDITA de la entrega. ENTREGA: el jefe dueño es él mismo (otra persona: 400); Control Interno
-   * la indica. AUDITA: si viene, la valida el motor (assertSigners, con sus sustituciones); si no, la única persona con
-   * act:sign_control:global, o 400 TRANSFER_SIGNER_REQUIRED si hay varias (409 TRANSFER_NO_CONTROL_SIGNER si ninguna).
-   */
   private async deliverySigners(
     manager: EntityManager,
     dto: DeliverLoanDto,
@@ -756,7 +659,6 @@ export class LoansService {
     return { deliveredBy, control: only.personId };
   }
 
-  /** Entrega dentro de la transacción del llamador (deliver), con quién entrega ya resuelto (deliveryRole). */
   async deliverWithin(
     manager: EntityManager,
     id: string,
@@ -768,7 +670,6 @@ export class LoansService {
     {
       const loan = await this.lockLoan(manager, id);
       assertLoanTransition(loan.status, 'PENDING_SIGNATURES');
-      // Un préstamo programado (solicitud de activos) se entrega desde su fecha de inicio, nunca antes.
       const today = bogotaDate(new Date());
       if (loan.startDate && today < loan.startDate) {
         throw new ApiException(
@@ -786,7 +687,6 @@ export class LoansService {
       }
       const { deliveredBy, control } = await this.deliverySigners(manager, dto, role);
       await this.requirePersons(manager, [deliveredBy, control]);
-      // Antes de mover activos: AUDITA exige act:sign_control:global y nadie firma dos veces (misma regla que enqueue).
       await this.documents.assertSigners(
         manager,
         {
@@ -832,7 +732,6 @@ export class LoansService {
           {
             assetId: item.asset_id,
             actorId: actor.id,
-            // Solo el estado operativo: el responsable y el centro de costo del activo no cambian en un préstamo.
             patch: { operationalStatus: OperationalStatus.OnLoan },
             movement: {
               type: MovementType.Loan,
@@ -840,7 +739,6 @@ export class LoansService {
               documentReference: null,
               executedAt: deliveredAt,
               requestedBy: loan.requestedBy,
-              // AssetStateService no pasa loanId a asset_movement.loan_id: el vínculo queda en metadata.
               metadata: {
                 loanId: loan.id,
                 targetCostCenterId: loan.targetCostCenterId,
@@ -894,7 +792,6 @@ export class LoansService {
           formatKey: LOAN_DELIVERY_FORMAT,
           entityType: LOAN_DOCUMENT_ENTITY,
           entityId: loan.id,
-          // Centro de ORIGEN: en el acta firmada de ejemplo firma como Entrega el jefe de ese centro.
           costCenterId: loan.sourceCostCenterId,
           responsiblePersonId: contactPersonId,
           assetIds,
@@ -925,13 +822,6 @@ export class LoansService {
     }
   }
 
-  /**
-   * Nueva acta OCI-01-65 cuando la vigente fue RECHAZADA, con el préstamo PENDING_SIGNATURES. En una transacción:
-   * encola otra solicitud (el acta nueva tendrá otro consecutivo) con los mismos activos, movimientos LOAN, notas y
-   * fechas de la entrega, y los firmantes corregidos; la rechazada queda como registro REJECTED. El enlace
-   * movimiento ↔ acta es único (uq_document_asset_movement): pasa del acta rechazada a la nueva.
-   * Permiso: el de generación del formato (loan:update:global).
-   */
   async regenerateDeliveryAct(id: string, dto: RegenerateDeliveryActDto, actor: AuthenticatedUser) {
     const { format } = await this.documents.formatReadiness(LOAN_DELIVERY_FORMAT);
     if (!(await this.permissions.userHasPermission(actor.id, format.generatePermission))) {
@@ -976,7 +866,6 @@ export class LoansService {
       await manager.query('UPDATE document_asset SET movement_id = NULL WHERE document_id = $1', [act.documentId]);
       const signers = { ENTREGA: dto.deliveredByPersonId, AUDITA: dto.controlInternoPersonId };
       const payload: DocumentRequestPayload = {
-        // Las sustituciones del acta rechazada no se heredan: valen las de esta solicitud.
         ...(Object.fromEntries(
           Object.entries(previousRequest.payload).filter(([key]) => key !== 'signerSubstitutions'),
         ) as DocumentRequestPayload),
@@ -1006,15 +895,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /**
-   * Deshace la entrega de un préstamo PENDING_SIGNATURES que no va a seguir, en UNA transacción: anula el acta
-   * pendiente (voidForEntity: solicitudes → CANCELLED, acta PENDING_SIGNATURE → VOIDED; nunca una firmada), cada
-   * activo vuelve a su estado previo con un movimiento RETURN trazable (metadata.undoDelivery) y el préstamo queda
-   * CANCELLED. Quién y cuándo puede hacerlo no está definido: se exige el permiso de generación del acta
-   * (loan:update:global) y es una pregunta abierta para Control Interno (docs/decisiones.md).
-   * Orden de bloqueos: primero el acta (voidForEntity) y después el préstamo, el mismo orden que la generación
-   * (fila del outbox → onGenerated bloquea el préstamo), para no cruzarse con el job.
-   */
   async undoDelivery(id: string, dto: UndoDeliveryDto, actor: AuthenticatedUser) {
     const { format } = await this.documents.formatReadiness(LOAN_DELIVERY_FORMAT);
     if (!(await this.permissions.userHasPermission(actor.id, format.generatePermission))) {
@@ -1081,11 +961,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /**
-   * Registra la devolución (fecha real y condición por activo). Desde ACTIVE/OVERDUE, o desde PARTIALLY_RETURNED
-   * para los activos que siguían fuera (devolverlos después o declararlos perdidos con LOST). Un activo ya recibido
-   * no se vuelve a registrar.
-   */
   async startReturn(id: string, dto: ReturnLoanDto, actor: AuthenticatedUser) {
     await this.dataSource.transaction(async (manager) => {
       const loan = await this.lockLoan(manager, id);
@@ -1137,15 +1012,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /**
-   * Recepción de la devolución, en UNA transacción: cada activo registrado y aún no recibido sale de ON_LOAN con su
-   * movimiento RETURN (fecha del movimiento = fecha real de devolución) y queda recibido (received_at). Mapeo de
-   * condición heredado: GOOD conserva la condición, DAMAGED la deja FAIR y LOST marca el activo LOST sin tocar la
-   * condición (pregunta abierta para Control Interno). Estado: statusAfterReception.
-   * Acta de devolución (LOAN_RETURN): si el formato está listo se encola aquí, con cada activo enlazado a su
-   * movimiento RETURN; si no (hoy: sin código SGC ni firmantes) la recepción se registra igual y el evento RECEIVED
-   * guarda returnAct.status = PENDING_FORMAT.
-   */
   async receiveReturn(id: string, dto: ReceiveReturnDto, actor: AuthenticatedUser) {
     const readiness = await this.documents.formatReadiness(LOAN_RETURN_FORMAT);
     await this.dataSource.transaction(async (manager) => {
@@ -1239,7 +1105,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /** Firmantes REQUEST del acta de devolución según el catálogo; RESPONSIBLE es la persona de contacto. */
   private async returnActSigners(
     manager: EntityManager,
     specs: ReadonlyArray<{ readonly role: string; readonly source: 'RESPONSIBLE' | 'REQUEST' }>,
@@ -1263,7 +1128,6 @@ export class LoansService {
     }
     const signers = Object.fromEntries(roles.map((role) => [role, given[role] as string]));
     await this.requirePersons(manager, Object.values(signers));
-    // Antes de recibir los activos: si el formato administrado tiene un turno de Control Interno, exige el permiso.
     await this.documents.assertSigners(
       manager,
       { formatKey: LOAN_RETURN_FORMAT, ...(loan.contactPersonId ? { responsiblePersonId: loan.contactPersonId } : {}), signers },
@@ -1272,7 +1136,6 @@ export class LoansService {
     return signers;
   }
 
-  /** Solicitud del acta LOAN_RETURN: contrato de marcadores en documents/domain/document-formats.ts. */
   private async returnActPayload(
     manager: EntityManager,
     loan: AssetLoan,
@@ -1333,11 +1196,6 @@ export class LoansService {
     };
   }
 
-  /**
-   * Pedir extensión: solo quien solicitó el préstamo (loan:request:own), con el préstamo ACTIVE u OVERDUE y una
-   * fecha posterior a la vigente y no pasada. Queda pendiente (extensionRequestedDate) hasta que la apruebe quien
-   * puede aprobar el préstamo.
-   */
   async requestExtension(id: string, dto: ExtendLoanDto, actor: AuthenticatedUser) {
     await this.dataSource.transaction(async (manager) => {
       const loan = await this.lockLoan(manager, id);
@@ -1366,11 +1224,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /**
-   * Aprobar la extensión pedida: loan:approve:global o loan:approve:org_unit sobre el centro de ORIGEN (mismo
-   * alcance y respuestas que aprobar el préstamo); quien la pidió (el solicitante) no la aprueba. Un OVERDUE cuya
-   * nueva fecha no está vencida vuelve a ACTIVE.
-   */
   async approveExtension(id: string, actor: AuthenticatedUser) {
     const scope = requireApprovalScope(
       await this.permissions.costCenterScope(actor.id, LOAN_APPROVE_GLOBAL, LOAN_APPROVE_SCOPED),
@@ -1409,7 +1262,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /** Rechazar la extensión pedida: mismo permiso, alcance y separación de funciones que aprobarla. */
   async rejectExtension(id: string, dto: RejectLoanDto, actor: AuthenticatedUser) {
     const scope = requireApprovalScope(
       await this.permissions.costCenterScope(actor.id, LOAN_APPROVE_GLOBAL, LOAN_APPROVE_SCOPED),
@@ -1435,7 +1287,6 @@ export class LoansService {
     return this.detailById(id);
   }
 
-  /** Job diario: ACTIVE con la fecha estimada anterior a hoy (Bogotá) pasa a OVERDUE. Una sola tabla. */
   async markOverdue(): Promise<number> {
     const result = await this.loans
       .createQueryBuilder()
@@ -1487,7 +1338,6 @@ export class LoansService {
       ...(manager ? { manager } : {}),
     });
     const request = state.requests[0];
-    // El outbox puede traer CANCELLED (voidForEntity) aunque el tipo del registro no lo nombre.
     const requestStatus = request?.status as string | undefined;
     const waiting = requestStatus === 'PENDING' || requestStatus === 'FAILED';
     const document = waiting
@@ -1522,7 +1372,6 @@ export class LoansService {
     };
   }
 
-  /** Un acta de devolución por recepción (evento RECEIVED), con su estado en el motor. */
   private async returnActs(loan: AssetLoan, events: ReadonlyArray<AssetLoanEvent>) {
     const receptions = events.filter((event) => event.eventType === 'RECEIVED');
     if (receptions.length === 0) {
@@ -1547,7 +1396,6 @@ export class LoansService {
         ? state.requests.find((item) => item.requestId === act.documentRequestId)
         : undefined;
       if (!request) {
-        // Recepciones anteriores a esta versión no guardaron returnAct: tampoco se generó acta.
         return {
           ...base,
           status: 'PENDING_FORMAT' as LoanReturnActStatus,
@@ -1585,7 +1433,6 @@ export class LoansService {
     }
   }
 
-  /** Movimiento que AssetStateService acaba de registrar: la cabeza de la cadena del activo (fila bloqueada). */
   private async lastMovementId(manager: EntityManager, assetId: string): Promise<string> {
     const [row] = (await manager.query(
       `SELECT m.id FROM asset_movement m
@@ -1607,7 +1454,6 @@ export class LoansService {
     return loan;
   }
 
-  /** SELECT … FOR UPDATE del préstamo: serializa entregas, devoluciones y aprobaciones concurrentes. */
   private async lockLoan(manager: EntityManager, id: string): Promise<AssetLoan> {
     const loan = await manager.findOne(AssetLoan, {
       where: { id },

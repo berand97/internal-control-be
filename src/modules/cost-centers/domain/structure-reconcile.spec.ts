@@ -32,7 +32,6 @@ const center = (code: string, unitId: string | null, extra: Partial<ReconcileCen
   ...extra,
 });
 
-/** Aplica planes hasta que no quede nada (máximo 5 vueltas) y devuelve el estado final. */
 const converge = (state: ReconcileState): ReconcileState => {
   let current = state;
   for (let round = 0; round < 5; round += 1) {
@@ -90,12 +89,10 @@ describe('planStructureReconcile', () => {
   });
 
   it('organigrama→centros y centros→organigrama convergen al mismo estado', () => {
-    // A: primero el organigrama (43 con centro propio pendiente 4310), después los centros (creados en la 4).
     const orgFirst: ReconcileState = {
       units: [unit('u4', '4'), unit('u43', '43', { headCostCenterCode: '4310' })],
       centers: [center('4010', 'u4'), center('4310', 'u4'), center('4311', 'u4')],
     };
-    // B: primero los centros (todos en la 4), después la unidad 43 con su centro propio ya amarrado.
     const centersFirst: ReconcileState = {
       units: [unit('u4', '4'), unit('u43', '43', { headCostCenterId: 'c4310', headCostCenterCode: '4310' })],
       centers: [center('4010', 'u4'), center('4310', 'u4'), center('4311', 'u4', { parentId: 'c4310' })],

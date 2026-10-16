@@ -28,10 +28,6 @@ interface ValuationRow {
 
 const toNumber = (value: string | null): number | null => (value === null ? null : Number(value));
 
-/**
- * Valor en libros y precio de compra de los activos de una toma, y la base de conciliación (valuationOf).
- * Solo lee asset_depreciation: funciona con la funcionalidad de depreciación apagada.
- */
 @Injectable()
 export class InventoryValuationService {
   constructor(
@@ -89,7 +85,6 @@ export class InventoryValuationService {
     );
   }
 
-  /** Contexto de serialización de ítems de la toma: catálogos y valoración de sus activos. */
   async viewContext(
     inventory: PhysicalInventory,
     items: ReadonlyArray<PhysicalInventoryItem>,
@@ -108,7 +103,6 @@ export class InventoryValuationService {
     };
   }
 
-  /** Código (visible > heredado > interno), descripción y código heredado (o de barras) de cada activo. */
   async identities(assetIds: ReadonlyArray<string>, manager?: EntityManager): Promise<Map<string, AssetIdentity>> {
     const ids = [...new Set(assetIds)];
     if (ids.length === 0) {

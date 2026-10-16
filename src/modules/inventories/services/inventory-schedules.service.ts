@@ -39,11 +39,6 @@ export type InventoryCancelResult = InventorySummary & {
 
 const day = (value: string): string => value.slice(0, 10);
 
-/**
- * Programar, reprogramar y cancelar tomas físicas. La toma programada es la misma physical_inventory (nace PLANNED y
- * start() la inicia). Cada operación es una transacción: la toma, sus recordatorios, el aviso (correo en el outbox +
- * notificación) y la auditoría se confirman juntos o nada. Los choques de fechas con otras tomas solo advierten.
- */
 @Injectable()
 export class InventorySchedulesService {
   constructor(
@@ -237,7 +232,6 @@ export class InventorySchedulesService {
     });
   }
 
-  /** Recordatorios de la revisión vigente (para el detalle). */
   async remindersOf(id: string): Promise<ReminderView[]> {
     const inventory = await this.dataSource.getRepository(PhysicalInventory).findOne({ where: { id } });
     if (!inventory) {
@@ -261,7 +255,6 @@ export class InventorySchedulesService {
     }
   }
 
-  /** Bloquea la fila: dos reprogramaciones o una reprogramación y una cancelación no se cruzan. Solo PLANNED. */
   private async lockPlanned(manager: EntityManager, id: string): Promise<PhysicalInventory> {
     const inventory = await manager
       .getRepository(PhysicalInventory)
@@ -319,7 +312,6 @@ export class InventorySchedulesService {
     return warnings;
   }
 
-  /** Para auditoría: cuántos y con qué rol, nunca correos ni nombres. */
   private noticeAudit(
     recipients: ReadonlyArray<NoticeRecipientView>,
     emails: number,

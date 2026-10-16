@@ -40,7 +40,6 @@ export class AppUser {
   @Column({ name: 'must_change_password', type: 'boolean', default: false })
   mustChangePassword!: boolean;
 
-  /** Vencimiento de la contraseña temporal de la invitación (BE-14); null si la cuenta no tiene una. */
   @Column({ name: 'invitation_expires_at', type: 'timestamptz', nullable: true })
   invitationExpiresAt!: Date | null;
 
@@ -50,7 +49,6 @@ export class AppUser {
   @Column({ name: 'mfa_secret', type: 'text', nullable: true })
   mfaSecret!: string | null;
 
-  /** Secreto TOTP en enrolamiento; no se usa para verificar hasta confirmarse. */
   @Column({
     name: 'mfa_pending_secret',
     type: 'text',
@@ -66,7 +64,6 @@ export class AppUser {
   })
   mfaPendingCreatedAt!: Date | null;
 
-  /** El siguiente login exige enrolar MFA aunque el rol no lo exija (reset administrativo). */
   @Column({ name: 'mfa_enrollment_required', type: 'boolean', default: false })
   mfaEnrollmentRequired!: boolean;
 

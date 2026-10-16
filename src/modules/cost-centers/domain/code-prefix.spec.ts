@@ -9,7 +9,6 @@ import {
   suggestUnderParent,
 } from './code-prefix.js';
 
-// Forma de la hoja 2025: false = agrupador (Movimiento 0), true = de movimiento.
 const SHEET: Record<string, boolean> = {
   '1': false,
   '1000': false,
@@ -55,16 +54,12 @@ describe('código de centro de costo', () => {
     expect(deriveParentCode('1010', lookup)).toBe('1000');
     expect(deriveParentCode('1110', lookup)).toBe('1100');
     expect(deriveParentCode('1100', lookup)).toBe('1000');
-    // Subgrupo por código: 3050 es agrupador.
     expect(deriveParentCode('3051', lookup)).toBe('3050');
-    // 3040 no es agrupador: su XYZ0 es él mismo; sube a 3000. No existe «3»: 3000 queda sin padre.
     expect(deriveParentCode('3040', lookup)).toBe('3000');
     expect(deriveParentCode('3000', lookup)).toBeNull();
-    // 9205 es subgrupo solo por nombre: por código, 9206–9211 van a 9200 y 9205 queda sin hijos.
     expect(deriveParentCode('9206', lookup)).toBe('9200');
     expect(deriveParentCode('9211', lookup)).toBe('9200');
     expect(deriveParentCode('9205', lookup)).toBe('9200');
-    // 9220 tiene movimiento: no es padre de 9221.
     expect(deriveParentCode('9221', lookup)).toBe('9200');
   });
 

@@ -20,8 +20,6 @@ import type { EmailTemplate } from '../entities/email-template.entity.js';
 import { MAIL_OUTBOX_STATUSES, type MailOutboxStatus } from '../../../shared/mail/mail-outbox-status.js';
 import { emailBlocksSchema } from './email-template.dto.js';
 
-// ---------- GET /email-templates/catalog ----------
-
 export const EMAIL_BLOCK_FIELD_KINDS = ['text', 'multiline', 'url', 'enum', 'items', 'richText', 'image', 'integer'] as const;
 
 export class EmailBlockFieldSpecDto {
@@ -176,8 +174,6 @@ export class EmailTemplateCatalogResponseDto {
   readonly imageAligns!: ReadonlyArray<string>;
 }
 
-// ---------- Versiones ----------
-
 export class EmailTemplateVersionResponseDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
@@ -229,8 +225,6 @@ export class EmailTemplateVersionResponseDto {
   }
 }
 
-// ---------- Vista previa y prueba ----------
-
 export class EmailPreviewResponseDto {
   @ApiProperty({ description: 'Asunto renderizado con los datos de ejemplo' })
   readonly subject!: string;
@@ -259,7 +253,6 @@ export class EmailTestSendResponseDto {
   readonly templateId!: string | null;
 }
 
-/** `data` del envelope como arreglo de `dto` (envelopedSchema solo describe un objeto). */
 export const envelopedArraySchema = (dto: Function): SchemaObject => ({
   allOf: [
     { $ref: getSchemaPath(ApiSuccessEnvelope) },

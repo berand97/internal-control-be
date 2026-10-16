@@ -27,8 +27,6 @@ import {
 
 const L = EMAIL_DESIGN_LIMITS;
 
-// ---------- Bloques (esquemas OpenAPI; la validación estricta es validateEmailBlocks) ----------
-
 export class HeadingBlockDto {
   @ApiProperty({ enum: ['heading'], enumName: 'EmailHeadingBlockType' })
   readonly type!: 'heading';
@@ -36,8 +34,6 @@ export class HeadingBlockDto {
   @ApiProperty({ maxLength: L.headingMaxLength, description: 'Admite variables {{...}}' })
   readonly text!: string;
 }
-
-// ---------- Texto enriquecido del párrafo (esquema cerrado; ver domain/rich-text.ts) ----------
 
 const HREF_DESCRIPTION =
   'Exactamente una variable del catálogo ({{app.loginUrl}}) o un literal https://. Sin target, rel ni class: el frontend los quita antes de enviar';
@@ -300,7 +296,6 @@ const BLOCK_DTO_BY_TYPE = {
   image: ImageBlockDto,
 } as const;
 
-/** Arreglo de bloques como oneOf con discriminador `type`. */
 export const emailBlocksSchema = (extra: SchemaObject = {}): SchemaObject => ({
   type: 'array',
   items: {
@@ -314,8 +309,6 @@ export const emailBlocksSchema = (extra: SchemaObject = {}): SchemaObject => ({
   },
   ...extra,
 });
-
-// ---------- Solicitudes ----------
 
 export class ListEmailTemplatesQueryDto {
   @ApiProperty({ enum: EMAIL_TEMPLATE_TYPES, enumName: 'EmailTemplateType' })
@@ -347,10 +340,7 @@ export class EmailTemplateDesignDto {
   readonly blocks!: ReadonlyArray<EmailBlock>;
 }
 
-/** POST /email-templates: guarda una versión nueva (queda activa). */
 export class CreateEmailTemplateVersionDto extends EmailTemplateDesignDto {}
-
-/** POST /email-templates/preview: renderiza un borrador con datos de ejemplo, sin guardar ni enviar. */
 export class PreviewEmailTemplateDto extends EmailTemplateDesignDto {}
 
 export class SendTestEmailDto {

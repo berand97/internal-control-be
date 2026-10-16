@@ -2,7 +2,6 @@ import { bogotaDate, daysOverdue, formatUsage, longSpanishDate, usageBetween } f
 
 describe('usageBetween: tiempo de uso del préstamo', () => {
   it('reproduce el ejemplo institucional del OCI-01-65', () => {
-    // Acta de ejemplo: entrega 27 de marzo del 2026, devolución estimada 11 de diciembre de 2026.
     expect(usageBetween('2026-03-27', '2026-12-11')?.text).toBe('0 años, 8 meses, 14 días');
   });
 
@@ -20,7 +19,6 @@ describe('usageBetween: tiempo de uso del préstamo', () => {
     expect(usageBetween('2026-01-31', '2026-02-28')).toMatchObject({ months: 1, days: 0, totalDays: 28 });
     expect(usageBetween('2026-01-31', '2026-03-01')).toMatchObject({ months: 1, days: 1 });
     expect(usageBetween('2026-01-31', '2026-03-31')).toMatchObject({ months: 2, days: 0 });
-    // Con el recorte, 30-ene y 31-ene cumplen un mes el 28-feb.
     expect(usageBetween('2026-01-30', '2026-02-28')).toMatchObject({ months: 1, days: 0 });
     expect(usageBetween('2026-01-30', '2026-02-27')).toMatchObject({ months: 0, days: 28 });
     expect(usageBetween('2026-08-31', '2026-09-30')).toMatchObject({ months: 1, days: 0 });
@@ -58,13 +56,11 @@ describe('daysOverdue', () => {
 
 describe('fechas en America/Bogota', () => {
   it('bogotaDate usa el día de Bogotá, no el UTC', () => {
-    // 03:00 UTC del 26 = 22:00 del 25 en Bogotá (UTC-5).
     expect(bogotaDate(new Date('2026-09-26T03:00:00Z'))).toBe('2026-09-25');
     expect(bogotaDate(new Date('2026-09-26T05:00:00Z'))).toBe('2026-09-26');
   });
 
   it('longSpanishDate escribe la fecha como documento.fecha del motor de actas', () => {
-    // Misma expresión que DocumentEngineService.longDate (no exportada).
     const engineLongDate = (date: Date): string =>
       new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Bogota' })
         .format(date)

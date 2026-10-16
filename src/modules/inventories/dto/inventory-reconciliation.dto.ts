@@ -17,8 +17,6 @@ import {
 import { PHYSICAL_CONDITIONS, PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
 import { SURPLUS_RESOLUTIONS, type SurplusResolution } from '../entities/physical-inventory-item.entity.js';
 
-/** Entradas del corte contable, su asociación a una toma y la resolución de sobrantes. */
-
 const trimmed = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
 export class CreateAccountingCutDto {
@@ -159,7 +157,6 @@ export class SetSurplusCenterDto {
   readonly costCenterId!: string;
 }
 
-/** POST /inventories/:id/act/enqueue: cuerpo opcional. */
 export class EnqueueInventoryActDto {
   @ApiSignerSubstitutions()
   readonly signerSubstitutions?: SignerSubstitutionsInput;

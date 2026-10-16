@@ -62,11 +62,6 @@ const ASSET_CODE = `coalesce(
 
 const CURRENT_HEAD = `h.valid_from <= NOW() AND (h.valid_until IS NULL OR h.valid_until > NOW())`;
 
-/**
- * Motivos por los que un activo del centro dueño no se puede elegir. Mismas guardas que el préstamo (estado IN_USE o
- * IN_STORAGE, sin préstamo abierto) y que el traslado (sin traslado abierto ni toma física abierta), más: no reservado
- * por otra solicitud abierta. $2 = OPEN_LOAN_STATUSES, $3 = solicitud propia (se excluye).
- */
 const BLOCKERS = holdReasons(
   `CASE WHEN a.operational_status::text NOT IN ('IN_USE', 'IN_STORAGE') THEN 'está ' || a.operational_status::text END`,
   HOLD_OPEN_LOAN('$2'),
@@ -121,17 +116,6 @@ const iso = (value: Date | string | null): string | null => (value === null ? nu
 const longDate = (date: Date): string =>
   new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Bogota' }).format(date);
 
-/**
- * Solicitud de activos entre centros de costo (domain/asset-request.ts). Reglas de quién:
- * - solicita: un usuario cuya persona es jefe VIGENTE del centro que solicita (cost_center_head);
- * - acepta o cierra: un jefe vigente del centro dueño que no sea quien solicitó (separación de funciones);
- * - revisa (devuelve o genera): asset_request:review:global; generar exige además el permiso de generación del formato
- *   (OCI-01-65 o OCI-17-89), el mismo que pide generarlo por su propio proceso;
- * - lee todas sin ninguna acción: asset_request:read:global (READER; el auditor).
- * Privacidad: nadie ve activos de otro centro. Una solicitud solo la ven sus partes (solicitante, jefes del dueño,
- * revisores); los activos elegibles y la lectura de QR, solo el jefe dueño y solo del centro dueño. Cualquier otro caso
- * responde 404 RESOURCE_NOT_FOUND, igual que una solicitud o un activo inexistentes.
- */
 @Injectable()
 export class AssetRequestsService {
   constructor(
@@ -143,8 +127,6 @@ export class AssetRequestsService {
     private readonly documents: DocumentEngineService,
     private readonly qr: QrTokensService,
   ) {}
-
-  // ---------- Quién ----------
 
   private async isHead(manager: EntityManager, userId: string, costCenterId: string): Promise<boolean> {
     const [row] = (await manager.query(
@@ -172,7 +154,6 @@ export class AssetRequestsService {
     return this.permissions.userHasPermission(userId, ASSET_REQUEST_READ_GLOBAL);
   }
 
-  /** Jefes vigentes (persona activa) del centro, sin contar a la persona indicada. */
   private async headCount(manager: EntityManager, costCenterId: string, exceptPersonId: string | null): Promise<number> {
     const [row] = (await manager.query(
       `SELECT count(DISTINCT h.person_id)::int AS total FROM cost_center_head h JOIN person p ON p.id = h.person_id AND p.is_active
@@ -210,7 +191,6 @@ export class AssetRequestsService {
     return row;
   }
 
-  /** La solicitud si el usuario es parte; si no (o no existe), 404 sin distinguir. */
   private async partyRequest(
     manager: EntityManager,
     id: string,
@@ -225,7 +205,6 @@ export class AssetRequestsService {
     return { request, roles };
   }
 
-  /** Acción del jefe dueño: 403 si no lo es; 403 SOD si además es quien solicitó. */
   private assertOwnerHead(request: AssetRequestRow, roles: ReadonlyArray<AssetRequestViewerRole>, userId: string): void {
     if (!roles.includes('OWNER_HEAD')) {
       throw new ApiException(ErrorCode.AssetRequestNotHead, 'Solo un jefe vigente del centro dueño decide la solicitud');
@@ -247,13 +226,6 @@ export class AssetRequestsService {
     }
   }
 
-  // ---------- Crear ----------
-
-  /**
-   * Centros para el formulario de la solicitud (crear o corregir), sin cost_center:read:global: headed con el mismo
-   * criterio que assertCenters (centro activo y jefatura vigente del usuario); owners, los centros activos que aceptan
-   * activos. Solo id, código y nombre: nada de jefes, conteos ni activos.
-   */
   async centers(actor: AuthenticatedUser): Promise<AssetRequestCentersDto> {
     const headed = (await this.dataSource.query(
       `SELECT c.id, c.external_code AS code, c.name FROM cost_center c
@@ -306,7 +278,6 @@ export class AssetRequestsService {
     }
   }
 
-  /** Centros válidos: distintos, existentes y activos; quien solicita es jefe del que solicita; el dueño tiene jefe. */
   private async assertCenters(
     manager: EntityManager,
     actorId: string,
@@ -385,8 +356,6 @@ export class AssetRequestsService {
     return `${reserved.prefix ?? 'SOL-'}${year}-${String(reserved.current_value).padStart(reserved.padding_length, '0')}`;
   }
 
-  // ---------- Decisión del dueño ----------
-
   async accept(id: string, dto: AcceptAssetRequestDto, actor: AuthenticatedUser): Promise<AssetRequestDetailDto> {
     await this.dataSource.transaction(async (manager) => {
       const { request, roles } = await this.partyRequest(manager, id, actor.id, true);
@@ -419,10 +388,6 @@ export class AssetRequestsService {
     return this.getById(id, actor);
   }
 
-  /**
-   * Los activos elegidos (filas bloqueadas): todos del centro dueño (si alguno no existe o es de otro centro, 404 como
-   * inexistente, sin decir cuál) y elegibles (si no, 406 ASSET_REQUEST_ASSET_UNAVAILABLE con el motivo por activo).
-   */
   private async assertEligible(manager: EntityManager, request: AssetRequestRow, assetIds: ReadonlyArray<string>): Promise<void> {
     await manager.query('SELECT id FROM asset WHERE id = ANY($1) ORDER BY id FOR UPDATE', [assetIds]);
     const rows = (await manager.query(
@@ -454,8 +419,6 @@ export class AssetRequestsService {
     });
     return this.getById(id, actor);
   }
-
-  // ---------- Solicitante ----------
 
   async correct(id: string, dto: CorrectAssetRequestDto, actor: AuthenticatedUser): Promise<AssetRequestDetailDto> {
     await this.dataSource.transaction(async (manager) => {
@@ -539,15 +502,11 @@ export class AssetRequestsService {
     return this.getById(id, actor);
   }
 
-  // ---------- Control Interno ----------
-
   async returnToRequester(id: string, reason: string, actor: AuthenticatedUser): Promise<AssetRequestDetailDto> {
     await this.dataSource.transaction(async (manager) => {
       const { request, roles } = await this.partyRequest(manager, id, actor.id, true);
       this.assertReviewer(roles);
       assertAssetRequestTransition(request.status, 'RETURNED');
-      // Los activos siguen reservados: si el solicitante solo corrige texto o fechas, vuelve a Control Interno con ellos.
-      // Mismo reloj que ACCEPTED: si no la corrige ni la cancela en el plazo, vence y los libera (expireDue).
       await manager.query(
         `UPDATE asset_request SET status = 'RETURNED', expires_at = NOW() + make_interval(days => $3), decided_by = $2,
            decided_at = NOW() WHERE id = $1`,
@@ -559,19 +518,6 @@ export class AssetRequestsService {
     return this.getById(id, actor);
   }
 
-  /**
-   * Genera el documento en UNA transacción:
-   * - TEMPORARY: generar NO es entregar. El préstamo nace APPROVED (la aprobación es la aceptación del jefe dueño) con
-   *   los activos aceptados, la fecha de inicio y la de devolución de la solicitud; los activos siguen en el centro
-   *   dueño (IN_USE / IN_STORAGE), reservados por el préstamo abierto, sin movimiento ni acta. La solicitud queda
-   *   LOAN_SCHEDULED. La entrega es POST /loans/:id/deliver desde la fecha de inicio (jefe dueño o Control Interno):
-   *   activos ON_LOAN, movimiento LOAN con la fecha real y acta OCI-01-65 (onLoanDelivered → DOCUMENT_GENERATED).
-   *   Firmantes del acta y observaciones por activo se indican al entregar, no aquí.
-   * - PERMANENT: el traslado se crea con asset_request_id y los datos por activo del cuerpo, y su acta OCI-17-89 se
-   *   encola (TransfersService.generateWithin) con ENTREGA = jefe dueño, RECIBE = solicitante, CONTROL_INTERNO y
-   *   CONTABILIDAD por rol.
-   * Las guardas de cada proceso se vuelven a aplicar; además todos los activos deben seguir en el centro dueño.
-   */
   async generate(id: string, dto: GenerateAssetRequestDto, actor: AuthenticatedUser): Promise<AssetRequestDetailDto> {
     await this.dataSource.transaction(async (manager) => {
       const { request, roles } = await this.partyRequest(manager, id, actor.id, true);
@@ -615,7 +561,6 @@ export class AssetRequestsService {
       if (!ownerPerson) {
         throw new ApiException(ErrorCode.InvalidState, 'Quien aceptó la solicitud no tiene persona asociada: no puede firmar ENTREGA');
       }
-      // Liberar la reserva antes de crear el documento: desde aquí los retiene el préstamo o el traslado.
       await manager.query('UPDATE asset_request_item SET open = FALSE WHERE request_id = $1', [request.id]);
       const justification = dto.justification?.trim() || request.description;
       let loanId: string | null = null;
@@ -703,10 +648,6 @@ export class AssetRequestsService {
     return kind === 'TEMPORARY' ? `Préstamo de activos (${LOAN_DELIVERY_FORMAT})` : `Traslado de activos (${TRANSFER_FORMAT_KEY})`;
   }
 
-  /**
-   * El préstamo de una solicitud se entregó (LoansService.deliverWithin, misma transacción): la solicitud pasa de
-   * LOAN_SCHEDULED a DOCUMENT_GENERATED (su acta OCI-01-65 quedó encolada) y avisa al solicitante y al dueño.
-   */
   async onLoanDelivered(manager: EntityManager, delivered: LoanDeliveredEvent): Promise<void> {
     if (!delivered.assetRequestId) {
       return;
@@ -730,23 +671,10 @@ export class AssetRequestsService {
     });
   }
 
-  /**
-   * El préstamo programado de una solicitud se rechazó antes de entregarse (LoansService.reject, APPROVED → REJECTED,
-   * misma transacción): la solicitud pasa de LOAN_SCHEDULED a CLOSED_LOAN_REJECTED con el motivo del rechazo en su
-   * historial (evento LOAN_REJECTED) y avisa a los mismos que un vencimiento (solicitante, jefes del dueño y Control
-   * Interno). Los activos quedan libres: el préstamo rechazado ya no es un préstamo abierto y los ítems de la solicitud
-   * ya se habían liberado al generar.
-   */
   async onLoanRejected(manager: EntityManager, rejected: LoanRejectedEvent): Promise<void> {
     await this.closeByLoan(manager, rejected, 'CLOSED_LOAN_REJECTED', 'LOAN_REJECTED');
   }
 
-  /**
-   * El préstamo programado de una solicitud se canceló antes de entregarse (LoansService.cancel, APPROVED → CANCELLED,
-   * misma transacción): igual que el rechazo, la solicitud pasa de LOAN_SCHEDULED a CLOSED_LOAN_CANCELLED con el motivo
-   * en su historial (evento LOAN_CANCELLED), avisa a solicitante, jefes del dueño y Control Interno, y los activos
-   * quedan libres.
-   */
   async onLoanCancelled(manager: EntityManager, cancelled: LoanCancelledEvent): Promise<void> {
     await this.closeByLoan(manager, cancelled, 'CLOSED_LOAN_CANCELLED', 'LOAN_CANCELLED');
   }
@@ -778,11 +706,6 @@ export class AssetRequestsService {
     await this.notices.send(manager, request.id, kind, ['REQUESTER', 'OWNER_HEADS', 'REVIEWERS'], { reason });
   }
 
-  /**
-   * Aviso del día de inicio: préstamos programados (LOAN_SCHEDULED, préstamo APPROVED) cuya fecha de inicio llegó
-   * (America/Bogota) avisan al solicitante y a los jefes del centro dueño que hoy se entrega. Una sola vez por préstamo
-   * (evento LOAN_START_NOTICE con el loanId); cada uno en su transacción con FOR UPDATE SKIP LOCKED. No entrega nada.
-   */
   async noticeLoanStarts(limit = 200): Promise<number> {
     let sent = 0;
     for (let index = 0; index < limit; index += 1) {
@@ -815,10 +738,6 @@ export class AssetRequestsService {
     return sent;
   }
 
-  /**
-   * El acta del préstamo o del traslado quedó firmada (observador del motor, misma transacción): avisa a ambos centros
-   * con el enlace al acta. Idempotente por documento.
-   */
   async onDocumentSigned(
     manager: EntityManager,
     link: { readonly column: 'loan_id' | 'transfer_id'; readonly entityId: string; readonly documentId: string; readonly number: string },
@@ -846,12 +765,6 @@ export class AssetRequestsService {
     });
   }
 
-  /**
-   * Vencimiento: ACCEPTED (sin resolución de Control Interno) o RETURNED (sin corrección del solicitante) con
-   * expires_at pasado → EXPIRED, activos liberados, aviso a solicitante, dueño y Control Interno. El evento EXPIRED
-   * guarda el estado del que venció y, si venía devuelta, el motivo de la devolución. Cada solicitud en su
-   * transacción, con FOR UPDATE SKIP LOCKED (dos instancias no la vencen dos veces).
-   */
   async expireDue(limit = 50): Promise<number> {
     let expired = 0;
     for (let index = 0; index < limit; index += 1) {
@@ -894,9 +807,6 @@ export class AssetRequestsService {
     return expired;
   }
 
-  // ---------- Activos del dueño ----------
-
-  /** Solo el jefe dueño (y no el solicitante), con la solicitud REQUESTED; cualquier otro usuario: 404. */
   private async ownerOnly(manager: EntityManager, id: string, userId: string): Promise<AssetRequestRow> {
     const request = await this.row(manager, id, false);
     if (
@@ -927,7 +837,6 @@ export class AssetRequestsService {
     )) as EligibleAssetDto[];
   }
 
-  /** QR de la etiqueta: solo el jefe dueño y solo activos del centro dueño; cualquier otro caso 404 sin datos. */
   async resolveScan(id: string, token: string, actor: AuthenticatedUser): Promise<ResolvedScanDto> {
     const manager = this.dataSource.manager;
     const request = await this.ownerOnly(manager, id, actor.id);
@@ -948,8 +857,6 @@ export class AssetRequestsService {
     const { blockers, ...data } = asset;
     return { ...data, eligible: blockers.length === 0, reason: blockers.length > 0 ? `El activo ${blockers.join(', ')}` : null };
   }
-
-  // ---------- Lectura ----------
 
   async list(query: QueryAssetRequestsDto, actor: AuthenticatedUser): Promise<AssetRequestListResponseDto> {
     let where: string;
@@ -1060,8 +967,6 @@ export class AssetRequestsService {
       viewerRoles,
     };
   }
-
-  // ---------- Apoyo ----------
 
   private async setStatus(manager: EntityManager, request: AssetRequestRow, status: AssetRequestStatus, actorId: string): Promise<void> {
     await manager.query(

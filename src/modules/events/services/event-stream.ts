@@ -18,11 +18,8 @@ import type {
 } from '../dto/event.responses.js';
 import { formatSseEvent, SSE_HEADERS, SSE_PING } from '../sse.js';
 
-/** Tope de reposición con Last-Event-ID: se reponen las más recientes y ready.replayTruncated avisa. */
 export const REPLAY_LIMIT = 100;
-/** Ids de notificaciones ya enviadas que se recuerdan para no repetirlas (reposición y en vivo se solapan). */
 const DELIVERED_MEMORY = 256;
-/** Un cliente que no lee (red caída sin FIN) no acumula memoria sin límite: se corta. */
 const MAX_BUFFERED_BYTES = 1024 * 1024;
 
 export interface EventStreamDeps {
@@ -32,18 +29,9 @@ export interface EventStreamDeps {
   readonly metrics: EventsMetrics;
   readonly logger: Logger;
   readonly heartbeatMs: number;
-  /** El registro lo quita al cerrarse. */
   readonly onClosed: (stream: EventStream) => void;
 }
 
-/**
- * Un stream SSE abierto (una conexión). Todo lo que lee la BD o escribe al cliente pasa por una cola en serie: el
- * orden de los eventos es el de llegada y no hay dos consultas del mismo stream a la vez.
- *
- * Ids de evento (SSE `id:`): event_seq de la notificación. El stream mantiene un cursor monótono: una notificación que
- * confirma después de otra con número mayor (transacciones concurrentes) se entrega igual, pero con id = cursor, así el
- * Last-Event-ID del navegador nunca retrocede. Solo `ready` y `notification` llevan id; los demás son estado.
- */
 export class EventStream implements EventSubscriber {
   readonly openedAt = Date.now();
   private cursor = 0n;
@@ -64,7 +52,6 @@ export class EventStream implements EventSubscriber {
     return this.closed;
   }
 
-  /** Escribe las cabeceras y encola la apertura: suscribir, `ready`, reponer y empezar el latido. */
   start(lastEventId: string | null): void {
     this.res.writeHead(200, SSE_HEADERS);
     this.res.flushHeaders();
@@ -97,7 +84,6 @@ export class EventStream implements EventSubscriber {
     });
   }
 
-  /** Cierra el stream (idempotente). finalEvent se escribe antes de cerrar si el cliente sigue ahí. */
   close(reason: StreamCloseReason, finalEvent?: { type: SseEventType; data: unknown }): void {
     if (this.closed) {
       return;
@@ -127,7 +113,6 @@ export class EventStream implements EventSubscriber {
       return;
     }
     this.unsubscribe = unsubscribe;
-    // Suscrito ANTES de fijar el cursor: lo que confirme de aquí en adelante llega por el bus (y se deduplica).
     let replayTruncated = false;
     let rows: NotificationEventView[] = [];
     if (lastEventId === null) {
@@ -149,7 +134,6 @@ export class EventStream implements EventSubscriber {
     this.heartbeat.unref();
   }
 
-  /** Las posteriores al cursor, las más recientes primero hasta el tope, devueltas en orden ascendente. */
   private async pending(): Promise<{ rows: NotificationEventView[]; truncated: boolean }> {
     const rows = await this.deps.notifications.eventsAfter(this.userId, this.cursor.toString(), REPLAY_LIMIT + 1);
     const truncated = rows.length > REPLAY_LIMIT;
@@ -163,13 +147,11 @@ export class EventStream implements EventSubscriber {
     }
   }
 
-  /** Latido: revalida la sesión con la misma regla que el guard JWT; si ya no vale, `session.ended` y cierre. */
   private async beat(): Promise<void> {
     let live: unknown = true;
     try {
       live = await this.deps.sessions.resolve(this.userId, this.sessionId);
     } catch {
-      // BD no disponible: no se decide sobre la sesión; se revalida en el próximo latido.
       this.deps.logger.warn('No se pudo revalidar la sesión de un stream; se reintenta en el próximo latido');
     }
     if (live === null) {
@@ -237,13 +219,11 @@ export class EventStream implements EventSubscriber {
     this.queue = this.queue
       .then(() => (this.closed ? undefined : task()))
       .catch((error: unknown) => {
-        // Sin contenido ni ids: solo el tipo de error.
         this.deps.logger.error(`Error en un stream de eventos: ${error instanceof Error ? error.name : 'desconocido'}`);
       });
   }
 }
 
-/** Evento final al cerrar por reemplazo o apagado. */
 export const streamClosedEvent = (
   reason: StreamClosedEventDataDto['reason'],
 ): { type: SseEventType; data: StreamClosedEventDataDto } => ({ type: 'stream.closed', data: { reason } });

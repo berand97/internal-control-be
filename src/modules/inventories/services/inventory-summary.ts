@@ -1,15 +1,10 @@
 import type { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 
-/** Nombre visible de un usuario: nombres y apellidos de su persona o, si no tiene, su usuario. */
 export const USER_DISPLAY_NAME_SQL = (user: string, person: string): string =>
   `coalesce(nullif(trim(coalesce(${person}.first_name, '') || ' ' || coalesce(${person}.last_name, '')), ''), ${user}.username)`;
 
 export type ResponsibleNames = ReadonlyMap<string, string>;
 
-/**
- * Nombres de los responsables de varias tomas en una consulta. Quien consulta la toma no necesita user:read:global
- * para ver quién la tiene a cargo (la Directora programa tomas sin administrar usuarios).
- */
 export const loadResponsibleNames = async (
   runner: { query(sql: string, parameters?: unknown[]): Promise<unknown> },
   userIds: ReadonlyArray<string | null | undefined>,
@@ -27,7 +22,6 @@ export const loadResponsibleNames = async (
   return new Map(rows.map((row) => [row.id, row.name]));
 };
 
-/** Usuarios citados en el resumen de una toma (responsable y cada `*By`), para resolver sus nombres de una vez. */
 export const inventorySummaryUserIds = (inventory: PhysicalInventory): Array<string | null | undefined> => [
   inventory.responsibleUserId,
   inventory.closedBy,
@@ -40,11 +34,6 @@ export const inventorySummaryUserIds = (inventory: PhysicalInventory): Array<str
 const nameOf = (names: ResponsibleNames, id: string | null | undefined): string | null =>
   id ? (names.get(id) ?? null) : null;
 
-/**
- * Resumen de una toma, igual en listado, detalle, programación, reprogramación y cancelación
- * (InventorySummaryDto en dto/inventory-schedule.responses.ts). "Reprogramada" no es un estado: es
- * rescheduleCount > 0.
- */
 export const inventorySummary = (inventory: PhysicalInventory, names: ResponsibleNames) => ({
   id: inventory.id,
   code: inventory.code,

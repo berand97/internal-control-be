@@ -136,7 +136,6 @@ export class AssetTimelineService {
     options: { readonly page: number; readonly pageSize: number; readonly order: 'asc' | 'desc' },
     scope: ReadableCostCenterScope,
   ): Promise<AssetTimelineResponseDto> {
-    // Fuera de alcance responde igual que inexistente.
     const [asset] = (await this.dataSource.query(
       'SELECT id FROM asset WHERE id = $1 AND ($2::uuid[] IS NULL OR current_cost_center_id = ANY($2::uuid[]))',
       [assetId, costCenterFilter(scope)],

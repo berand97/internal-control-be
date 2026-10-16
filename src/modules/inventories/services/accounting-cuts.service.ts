@@ -16,14 +16,8 @@ const CUT_COLUMNS = `
   (SELECT count(*)::int FROM accounting_cut_line l WHERE l.cut_id = c.id) AS "lineCount",
   (SELECT count(*)::int FROM physical_inventory i WHERE i.accounting_cut_id = c.id) AS "inventoryCount"`;
 
-/** Tomas a las que aún se les puede cambiar el corte: antes de cerrar. */
 const CUT_EDITABLE_STATUSES: ReadonlyArray<InventoryStatus> = [InventoryStatus.Planned, InventoryStatus.InProgress];
 
-/**
- * Cortes contables (fecha y fuente) y su asociación a una toma. Las líneas del corte (valor en libros por activo)
- * entran por el importador cuando Contabilidad defina las columnas de su reporte; mientras tanto un corte MANUAL
- * fija la fecha de valoración y la fuente que la pantalla muestra.
- */
 @Injectable()
 export class AccountingCutsService {
   constructor(
@@ -71,7 +65,6 @@ export class AccountingCutsService {
     return this.get(id);
   }
 
-  /** Asocia o desasocia el corte de una toma PLANNED o IN_PROGRESS; devuelve la base de conciliación resultante. */
   async setForInventory(inventoryId: string, dto: SetInventoryAccountingCutDto, actor: AuthenticatedUser) {
     const cutId = dto.accountingCutId ?? null;
     const inventory = await this.dataSource.transaction(async (manager) => {

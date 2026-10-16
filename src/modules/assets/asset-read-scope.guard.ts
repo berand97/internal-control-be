@@ -20,10 +20,6 @@ export const ASSET_READ_SCOPED = 'asset:read:org_unit';
 
 const CATALOG_KEY = 'assetReadCatalog';
 
-/**
- * Marca un endpoint de catálogo (sin datos de activos): basta con tener
- * cualquiera de los dos permisos de lectura, aunque no alcance ningún centro.
- */
 export const AssetReadCatalog = (): MethodDecorator =>
   SetMetadata(CATALOG_KEY, true);
 
@@ -31,12 +27,6 @@ type ScopedRequest = AuthenticatedRequest & {
   assetReadScope?: ReadableCostCenterScope;
 };
 
-/**
- * Lectura de activos: acepta asset:read:global (sin filtro) o
- * asset:read:org_unit (solo los centros de costo de las asignaciones
- * COST_CENTER vigentes del usuario). Deja el alcance resuelto en el request
- * para que el handler lo reciba con @AssetReadScope().
- */
 @Injectable()
 export class AssetReadScopeGuard implements CanActivate {
   constructor(
@@ -75,7 +65,6 @@ export const AssetReadScope = createParamDecorator(
   (_: unknown, ctx: ExecutionContext): ReadableCostCenterScope => {
     const scope = ctx.switchToHttp().getRequest<ScopedRequest>().assetReadScope;
     if (!scope) {
-      // Sin guard no hay alcance: nunca caer en "ver todo" por omisión.
       throw new ApiException(ErrorCode.InsufficientPermissions);
     }
     return scope;

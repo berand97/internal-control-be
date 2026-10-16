@@ -1,14 +1,3 @@
-/**
- * Bloqueo temporal por cuenta ante intentos fallidos (BE-04). Complementa al throttler por IP (en memoria): este
- * contador vive en la BD (auth_attempt_lockout), así que no se reparte entre IPs ni entre réplicas.
- *
- * PASSWORD (POST /auth/login): 5 intentos dentro de 15 min bloquean 15 min; cada bloqueo seguido dobla la duración
- *   (15 → 30 → 60) con tope de 60 min. Tras 24 h sin fallos el escalón vuelve a cero.
- * MFA (POST /auth/mfa/verify y /auth/mfa/recovery, contador común): 5 intentos dentro de 15 min bloquean 15 min,
- *   doblando hasta 4 h. Quien llega aquí ya tiene la contraseña; con el tope, el ritmo sostenido cae a ~5 intentos
- *   cada 4 h (~30 al día) frente a 10^6 códigos.
- * Ningún bloqueo es permanente, y un inicio correcto borra el contador de ese factor.
- */
 export type AuthFactor = 'PASSWORD' | 'MFA';
 
 export interface LockoutPolicy {
@@ -55,10 +44,6 @@ export const isLocked = (state: LockoutState | null, now: Date): boolean =>
 export const lockDurationMs = (policy: LockoutPolicy, lockLevel: number): number =>
   Math.min(policy.baseLockMs * 2 ** lockLevel, policy.maxLockMs);
 
-/**
- * Estado tras contar un intento más (se cuenta antes de verificar; un acierto borra la fila). `lockedNow` indica
- * que este intento alcanzó el umbral y abrió un bloqueo.
- */
 export const countAttempt = (
   state: LockoutState | null,
   policy: LockoutPolicy,

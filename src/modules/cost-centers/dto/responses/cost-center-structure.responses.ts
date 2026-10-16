@@ -2,17 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import { CostCenterHeadDto } from '../../../persons/dto/cost-center-head.dto.js';
 import { OrgStructureHistoryEventDto } from '../../../organizational-units/dto/responses/org-structure-history.response.dto.js';
 
-/**
- * Respuestas de la estructura de centros de costo (CostCenterPlacementService): ubicación con historial, árbol a una
- * fecha, sugerencia de código y centros cuyo código no cuadra con su unidad. Solo documentan lo que el servicio
- * devuelve: cambiar un shape exige cambiar ambos.
- */
-
-/** AUTO: el conciliador de estructura (StructureReconcilerService). */
 export const PLACEMENT_SOURCES = ['MANUAL', 'IMPORT', 'MIGRATION', 'AUTO'] as const;
 export type PlacementSource = (typeof PLACEMENT_SOURCES)[number];
 
-/** AUTO: la unidad y el padre los decide el código; MANUAL: los fijó una persona y el conciliador no los toca. */
 export const PLACEMENT_MODES = ['AUTO', 'MANUAL'] as const;
 export type PlacementMode = (typeof PLACEMENT_MODES)[number];
 

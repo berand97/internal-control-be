@@ -60,7 +60,6 @@ interface SignerRow {
   signing_link_id: string | null;
 }
 
-/** Columnas de evidencia por método: sesión (usuario y sesión) o enlace (enlace, correo, envío, identidad). */
 const evidenceColumns = (evidence: SignerEvidence) =>
   evidence.method === 'EMAIL_LINK'
     ? {
@@ -283,7 +282,6 @@ export class InternalSignatureProvider implements SignatureProvider {
   }
 
   async void(externalReference: string, manager: EntityManager): Promise<void> {
-    // Un sobre COMPLETED (todas las firmas, acta aún sin cerrar) conserva su estado: la atestación dice VOIDED por el acta.
     await manager.query(
       `UPDATE signature_envelope SET status = 'VOIDED', completed_at = NOW() WHERE id = $1 AND status = 'PENDING'`,
       [externalReference],
@@ -368,10 +366,6 @@ export class InternalSignatureProvider implements SignatureProvider {
     };
   }
 
-  /**
-   * El estado público refleja el acta, no solo el sobre: con todas las firmas pero el acta todavía pendiente (su
-   * proceso falló al aceptarla) no dice COMPLETED sino SIGNATURES_COLLECTED; un acta anulada dice VOIDED.
-   */
   private attestationStatus(envelope: EnvelopeRow['status'], document: string): AttestationStatus {
     if (document === 'VOIDED' || envelope === 'VOIDED') {
       return 'VOIDED';
@@ -424,7 +418,6 @@ export class InternalSignatureProvider implements SignatureProvider {
     return envelope;
   }
 
-  /** Creación del documento del sobre: sus firmas van en la carpeta de ese año (storage-keys.ts). */
   private async documentCreatedAt(manager: EntityManager, documentId: string): Promise<Date> {
     const [row] = (await manager.query('SELECT created_at FROM document WHERE id = $1', [documentId])) as Array<{
       created_at: Date;

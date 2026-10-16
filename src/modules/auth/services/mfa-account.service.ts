@@ -43,14 +43,9 @@ export interface AdminMfaResetOutcome {
   readonly recoveryCodesDeleted: number;
 }
 
-/** Vida del secreto pendiente: tiempo para escanear el QR y teclear el primer código. */
 export const MFA_PENDING_TTL_MS = 15 * 60 * 1000;
 const USER_ENTITY_TYPE = 'USER';
 
-/**
- * Ciclo de vida del segundo factor fuera del login: enrolar o re-enrolar desde sesión, códigos de recuperación,
- * desactivar y reset administrativo. Nunca escribe secretos ni códigos en audit_log ni en mensajes de error.
- */
 @Injectable()
 export class MfaAccountService {
   constructor(
@@ -67,10 +62,6 @@ export class MfaAccountService {
     private readonly sessions: SessionStateService,
   ) {}
 
-  /**
-   * Verifica un TOTP contra el secreto activo del usuario y lo consume (BE-11): el paso de tiempo aceptado queda
-   * registrado y el mismo código (o uno de un paso anterior) ya no sirve, ni en el login ni en me/mfa/*.
-   */
   async acceptTotp(user: AppUser, code: string): Promise<boolean> {
     if (!user.mfaSecret) {
       return false;
@@ -100,10 +91,6 @@ export class MfaAccountService {
     };
   }
 
-  /**
-   * True si el usuario debe tener MFA: rol SUPER_ADMIN vigente o algún permiso efectivo vigente de
-   * MFA_REQUIRED_PERMISSIONS (mfa-policy.ts). Se lee de la BD en cada decisión, sin caché.
-   */
   async requiredFor(userId: string): Promise<boolean> {
     const [roleCodes, permissions] = await Promise.all([
       this.authUsersRepository.findActiveRoleCodes(userId),
@@ -112,10 +99,6 @@ export class MfaAccountService {
     return requiresMfaEnrollment({ roleCodes, permissionCodes: permissions.map((permission) => permission.code) });
   }
 
-  /**
-   * True si la sesión del token (claim sid) sigue activa, se abrió o elevó con segundo factor y el usuario tiene MFA
-   * activo. Es la definición de "sesión con MFA" para acciones sensibles.
-   */
   async isMfaSession(actor: AuthenticatedUser): Promise<boolean> {
     if (!actor.sessionId) {
       return false;
@@ -186,7 +169,6 @@ export class MfaAccountService {
       await this.credentials.lockUser(user.id, manager);
       const current = await this.credentials.findPending(user.id, manager);
       if (current?.secret !== pending.secret) {
-        // Otro inicio de enrolamiento reemplazó el secreto entre la verificación y el bloqueo.
         throw new ApiException(ErrorCode.MfaEnrollmentNotStarted);
       }
       await this.credentials.activate(
@@ -232,10 +214,6 @@ export class MfaAccountService {
     return MfaRecoveryCodesResponseDto.from(codes);
   }
 
-  /**
-   * Cierre del enrolamiento obligatorio (token de setup): activa el secreto ya guardado, emite los códigos y limpia
-   * la marca de enrolamiento pendiente, todo en una transacción.
-   */
   async completeSetupEnrollment(
     user: AppUser,
     secret: string,
@@ -289,11 +267,6 @@ export class MfaAccountService {
     return MfaRecoveryCodesResponseDto.from(codes);
   }
 
-  /**
-   * Solo para quien no tiene un permiso que exija MFA (mfa-policy.ts: MFA_REQUIRED_PERMISSIONS, o SUPER_ADMIN). Quien
-   * firma por Control Interno nunca pasa; cualquier otro que desactive MFA deja de cumplir la condición de sesión con
-   * MFA y no podrá firmar los turnos que la exigen.
-   */
   async disable(
     actor: AuthenticatedUser,
     proof: MfaProofDto,
@@ -382,10 +355,6 @@ export class MfaAccountService {
     return outcome;
   }
 
-  /**
-   * Consume un código de recuperación en el paso de desafío del login. Devuelve los restantes o null si no coincide
-   * ninguno (o ya estaba usado).
-   */
   async consumeForLogin(
     user: AppUser,
     rawCode: string,
@@ -447,7 +416,6 @@ export class MfaAccountService {
     return false;
   }
 
-  /** En serie: cada hash argon2id reserva la memoria configurada (64 MiB por defecto) y en paralelo serían 10×. */
   private async hashCodes(
     codes: ReadonlyArray<string>,
   ): Promise<ReadonlyArray<string>> {

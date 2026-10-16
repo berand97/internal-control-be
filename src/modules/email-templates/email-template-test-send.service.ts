@@ -7,11 +7,6 @@ import { EmailTemplatesService } from './email-templates.service.js';
 
 export const EMAIL_TEMPLATE_TEST_ENTITY = 'email_template_test';
 
-/**
- * Correo de prueba de una plantilla al usuario actual, por el outbox de correo (mismo camino que los envíos
- * reales): se encola con los datos de ejemplo del tipo y la versión elegida, se intenta enviar enseguida y se
- * responde el estado. Sin SMTP queda FAILED con el motivo (y el worker lo reintenta como cualquier otro).
- */
 @Injectable()
 export class EmailTemplateTestSendService {
   constructor(

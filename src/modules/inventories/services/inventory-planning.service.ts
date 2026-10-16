@@ -72,20 +72,14 @@ interface PlannedRow {
 
 const OPEN: ReadonlyArray<InventoryStatus> = [InventoryStatus.Planned, InventoryStatus.InProgress];
 
-/**
- * Unidad organizacional de un centro vigente en un instante (historial de ubicaciones de BE-A, cost_center_placement).
- * `center` y `at` son expresiones SQL. Sin ubicación o sin unidad en ese instante, no hay fila.
- */
 const unitAtSql = (center: string, at: string): string =>
   `SELECT u.code, u.name FROM cost_center_placement p JOIN organizational_unit u ON u.id = p.organizational_unit_id
    WHERE p.cost_center_id = ${center} AND ${validAt(at)}`;
 
-/** Instante de una fecha (columna date): el final de ese día en Colombia, igual que resolveAt de BE-A. */
 const endOfBogotaDay = (column: string): string => `((${column})::text || 'T23:59:59.999-05:00')::timestamptz`;
 
 const unitRef = (code: string | null, name: string | null) => (code === null ? null : { code, name: name ?? '' });
 
-/** Calendario de tomas y cobertura por centro de costo (solo lectura). */
 @Injectable()
 export class InventoryPlanningService {
   constructor(
@@ -178,11 +172,6 @@ export class InventoryPlanningService {
     return { from, to, weeklyThreshold: threshold, items, weekWarnings };
   }
 
-  /**
-   * Cobertura por centro de costo con activos actuales (asset.current_cost_center_id, sin WRITTEN_OFF). La última
-   * toma de un centro es la toma CLOSED/RECONCILED más reciente (closed_at) con ítems esperados de ese centro
-   * (physical_inventory_item.expected_cost_center_id), sea cual sea su alcance.
-   */
   async coverage() {
     const today = bogotaDate(new Date());
     const rows = (await this.dataSource.query(
@@ -281,7 +270,6 @@ export class InventoryPlanningService {
     };
   }
 
-  /** Próxima toma PLANNED con inicio desde hoy que cubre cada centro (por alcance directo o por sus activos). */
   private async nextScheduledByCenter(today: string, centerIds: ReadonlyArray<string>) {
     const planned = (await this.dataSource.query(
       `SELECT id, code, scope_type, scope_id,

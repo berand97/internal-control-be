@@ -8,12 +8,6 @@ import { CONTROL_SIGNER_PERMISSION } from '../domain/signer-separation.js';
 import type { ControlSignerDto } from '../dto/document.responses.js';
 import { DocumentFormatCatalogService } from './document-format-catalog.service.js';
 
-/**
- * Quién tiene hoy un permiso de firma: usuario ACTIVE, persona activa, con el permiso vigente
- * (v_user_effective_permissions: asignaciones sin revocar, dentro de su vigencia, con herencia de roles).
- * Única fuente de la lista: la usan los firmantes del traslado (TransferSignersService, Control Interno y
- * Contabilidad) y la lista neutral de firmantes de Control Interno (GET /documents/control-signers).
- */
 @Injectable()
 export class ControlSignersService {
   constructor(
@@ -35,11 +29,6 @@ export class ControlSignersService {
     return rows as ControlSignerDto[];
   }
 
-  /**
-   * Personas que pueden firmar por Control Interno, para quien genera un acta: cualquier permiso de generación de
-   * un formato vigente del catálogo (asset:update:global, loan:update:global, inventory:execute:global, …) o
-   * asset_request:review:global. Sin ninguno: 403 INSUFFICIENT_PERMISSIONS.
-   */
   async forGenerator(actorId: string): Promise<ControlSignerDto[]> {
     const formats = await this.catalog.currentAll();
     const allowed = [...new Set([...formats.map((format) => format.generatePermission), ASSET_REQUEST_REVIEW])];

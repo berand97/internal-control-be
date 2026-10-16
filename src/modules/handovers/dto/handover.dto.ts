@@ -22,10 +22,7 @@ import { HANDOVER_STATUSES, type HandoverStatus } from '../domain/handover.js';
 
 export const DOCUMENT_GENERATION_STATUSES = ['NONE', 'PENDING', 'FAILED', 'GENERATED', 'CANCELLED'] as const;
 
-/** Tope técnico de activos por acta (tamaño del documento); no es una regla de negocio. */
 export const MAX_HANDOVER_ASSETS = 500;
-
-// ---------- Entrada ----------
 
 export class CreateHandoverAssetDto {
   @ApiProperty({ format: 'uuid' })
@@ -97,8 +94,6 @@ export class QueryHandoversDto {
   @IsIn(HANDOVER_STATUSES)
   readonly status?: HandoverStatus;
 }
-
-// ---------- Salida ----------
 
 export class HandoverPersonDto {
   @ApiProperty({ format: 'uuid' })

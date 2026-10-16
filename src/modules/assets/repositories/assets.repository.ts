@@ -28,12 +28,6 @@ import type {
 
 const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
 
-/**
- * El préstamo retiene el activo: la misma definición con la que LoansService.create bloquea un activo ya
- * comprometido. Préstamo abierto (OPEN_LOAN_STATUSES, parámetro $2, incluye REQUESTED, PENDING_SIGNATURES y
- * PARTIALLY_RETURNED) y el ítem aún no recibido de vuelta (received_at IS NULL): de un PARTIALLY_RETURNED solo
- * cuentan los activos que siguen fuera.
- */
 const HOLDS_ASSET = 'l.status::text = ANY($2) AND i.received_at IS NULL';
 
 const SORT_COLUMNS: Record<string, string> = {
@@ -66,7 +60,6 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
     filters: AssetSearchFilters,
   ): Promise<{ items: ReadonlyArray<Asset>; total: number }> {
     const qb = this.assets.createQueryBuilder('asset');
-    // Alcance de lectura en el WHERE: total y paginación salen del conjunto filtrado.
     if (filters.scopeCostCenterIds) {
       qb.andWhere(
         'asset.current_cost_center_id = ANY(CAST(:scopeCostCenterIds AS uuid[]))',
@@ -190,7 +183,6 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
     const assets = manager?.getRepository(Asset) ?? this.assets;
     await assets.update({ id }, { ...record, updatedAt: new Date() });
   }
-
 
   async nextInternalCode(year: number, manager?: EntityManager): Promise<string> {
    const rows = (await (manager ?? this.dataSource.manager).query(

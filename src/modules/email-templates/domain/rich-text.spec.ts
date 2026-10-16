@@ -16,7 +16,6 @@ const p = (...content: ReadonlyArray<unknown>) => ({ type: 'paragraph', content 
 const doc = (...content: ReadonlyArray<unknown>) => ({ type: 'doc', content });
 const link = (href: string) => ({ type: 'link', attrs: { href } });
 
-/** Lo que produce Tiptap (StarterKit + Underline + Link) para un párrafo con todo lo que admite el esquema. */
 const FULL: RichTextDoc = {
   type: 'doc',
   content: [
@@ -157,7 +156,6 @@ describe('validateRichTextDoc: esquema cerrado', () => {
     const half = 'x'.repeat(RICH_TEXT_LIMITS.maxTextLength / 2);
     expect(fields(doc(p(text(half)), p(text(half))))).toEqual([]);
     expect(fields(doc(p(text(half)), p(text(`${half}y`))))).toEqual(['c']);
-    // Cada párrafo con un texto son 2 nodos.
     const many = Array.from({ length: RICH_TEXT_LIMITS.maxNodes / 2 + 1 }, () => p(text('a')));
     expect(fields(doc(...many))).toEqual(['c']);
     expect(fields(doc(...many.slice(1)))).toEqual([]);

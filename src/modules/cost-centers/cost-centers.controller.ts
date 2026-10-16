@@ -235,7 +235,6 @@ export class CostCentersController {
         reason: dto.reason,
         actorId: user.id,
         source: 'MANUAL',
-        // Unidad o padre fijados por una persona: MANUAL (el conciliador ya no los toca). Solo el movimiento: conserva.
         ...(dto.organizationalUnitId !== undefined || dto.parentId !== undefined ? { mode: 'MANUAL' as const } : {}),
         ...meta(ipAddress, userAgent),
       },

@@ -15,7 +15,6 @@ import {
 import { textToRichText } from './rich-text.js';
 import { urlVariablesAsText } from './url-variables-as-text.js';
 
-// Textos sembrados por 1767225619000 / 1767225622000, como quedan tras 1767225800000 y 1767225820000.
 const SEEDED: Partial<Record<EmailTemplateType, string>> = {
   USER_INVITATION:
     'Se creó su cuenta en {{app.name}}.\n\nRol: {{user.role}}\nCorreo: {{user.email}}\nUsuario: {{user.username}}\nContraseña temporal: {{auth.temporaryPassword}}\n\nInicie sesión en {{auth.loginUrl}} y cambie la contraseña.',
@@ -46,8 +45,6 @@ const link = (text: string, href: string) => ({ type: 'text', text, marks: [{ ty
 
 describe('migración 1767225840000: variables de enlace como texto → enlaces', () => {
   it('su copia de las variables de enlace coincide con el catálogo vivo', () => {
-    // Solo los tipos que existían al escribir la migración: los posteriores (tomas físicas) nacieron con el enlace
-    // como botón y no tienen versiones en BD que convertir.
     for (const type of TYPES_AT_MIGRATION) {
       const live = Object.fromEntries([...urlVariables(type).values()].map((item) => [item.name, item.linkText]));
       expect(LINK_VARIABLES[type] ?? {}).toEqual(live);
@@ -114,7 +111,6 @@ describe('migración 1767225840000: variables de enlace como texto → enlaces',
       expect(validateEmailBlocks(blocks)).toEqual([]);
       expect(urlVariablesAsText(type, blocks)).toEqual([]);
       expect(designPlaceholders({ subject: '', blocks })).toEqual(designPlaceholders({ subject: '', blocks: before }));
-      // Idempotente: la versión convertida no genera otra.
       expect(convertLinkVariables(type, blocks)).toBeNull();
     },
   );
@@ -142,7 +138,6 @@ describe('migración 1767225840000: variables de enlace como texto → enlaces',
   it('un tipo sin variables de enlace o un texto sin ellas no cambia', () => {
     expect(convertLinkVariables('SYSTEM_ALERT', [{ type: 'paragraph', content: textToRichText('{{alert.message}}') }] as never)).toBeNull();
     expect(convertLinkVariables('PASSWORD_RESET', [{ type: 'paragraph', content: textToRichText('Hola {{user.email}}') }] as never)).toBeNull();
-    // Una variable de enlace de OTRO tipo no se convierte (es ajena; lo reporta la validación de variables).
     expect(convertLinkVariables('PASSWORD_RESET', [{ type: 'paragraph', content: textToRichText('{{firma.url}}') }] as never)).toBeNull();
   });
 });

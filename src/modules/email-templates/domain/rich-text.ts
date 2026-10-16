@@ -1,35 +1,10 @@
 import { isAllowedDesignUrl } from './email-url.js';
 
-/**
- * Texto enriquecido del bloque `paragraph`: un documento JSON al estilo ProseMirror, el que produce Tiptap con
- * `editor.getJSON()`, con un esquema CERRADO. Nunca HTML: el backend valida la estructura y el renderizador propio
- * (email-renderer.ts) escribe el único marcado, escapando todo texto.
- *
- * Esquema aceptado (cualquier otro nodo, marca, atributo o propiedad se rechaza con el campo exacto):
- *   doc          { type: 'doc', content: (paragraph | bulletList | orderedList)[1..] }
- *   paragraph    { type: 'paragraph', content?: (text | hardBreak)[] }         sin content = línea vacía
- *   bulletList   { type: 'bulletList', content: listItem[1..] }
- *   orderedList  { type: 'orderedList', content: listItem[1..] }              siempre empieza en 1; sin attrs
- *   listItem     { type: 'listItem', content: paragraph[1..] }                 SIN listas anidadas (un solo nivel)
- *   text         { type: 'text', text: string no vacío, marks?: mark[] }
- *   hardBreak    { type: 'hardBreak', marks?: mark[] }                          las marcas de un salto se ignoran
- *   mark         { type: 'bold' } | { type: 'italic' } | { type: 'underline' } | { type: 'link', attrs: { href } }
- *
- * - `href`: exactamente una variable del catálogo (`{{auth.loginUrl}}`) o un literal https:// (misma regla que el
- *   URL del botón). Los atributos que Tiptap agrega por defecto (link.target, link.rel, link.class,
- *   paragraph.textAlign, orderedList.start / type...) se RECHAZAN: el frontend debe quitarlos antes de enviar.
- * - Una variable no puede quedar partida por un formato o un salto (`{{user.` en negrita y `email}}` sin ella): se
- *   rechaza el texto con `{{` o `}}` sueltos.
- * - Límites: RICH_TEXT_LIMITS (texto total, número de nodos). La profundidad es fija por el propio esquema.
- */
-
 export const RICH_TEXT_MARK_TYPES = ['bold', 'italic', 'underline', 'link'] as const;
 export type RichTextMarkType = (typeof RICH_TEXT_MARK_TYPES)[number];
 
 export const RICH_TEXT_LIMITS = {
-  /** Caracteres de texto sumando todos los nodos text (los saltos no cuentan). */
   maxTextLength: 2000,
-  /** Nodos del documento sin contar doc: párrafos, listas, ítems, textos y saltos. */
   maxNodes: 200,
   hrefMaxLength: 500,
 } as const;
@@ -91,7 +66,6 @@ interface Walk {
   hasVisibleText: boolean;
 }
 
-/** Solo las claves permitidas; `type` siempre lo está. */
 const onlyKeys = (node: Record<string, unknown>, allowed: ReadonlyArray<string>, path: string, walk: Walk): void => {
   for (const key of Object.keys(node)) {
     if (key !== 'type' && !allowed.includes(key)) {
@@ -100,7 +74,6 @@ const onlyKeys = (node: Record<string, unknown>, allowed: ReadonlyArray<string>,
   }
 };
 
-/** Arreglo `content` obligatorio y no vacío. */
 const contentArray = (node: Record<string, unknown>, path: string, walk: Walk): ReadonlyArray<unknown> | null => {
   const content = node['content'];
   if (!Array.isArray(content) || content.length === 0) {
@@ -237,10 +210,6 @@ const checkList = (node: Record<string, unknown>, path: string, walk: Walk): voi
   });
 };
 
-/**
- * Valida un documento contra el esquema cerrado. `path` es el campo del bloque (p. ej. `blocks[2].content`); los
- * problemas llevan la ruta exacta del nodo (`blocks[2].content.content[0].content[1].marks[0].attrs.target`).
- */
 export const validateRichTextDoc = (value: unknown, path: string): ReadonlyArray<RichTextIssue> => {
   const walk: Walk = { issues: [], nodes: 0, textLength: 0, hasVisibleText: false };
   if (!isRecord(value) || value['type'] !== 'doc') {
@@ -288,7 +257,6 @@ const normalizeParagraph = (paragraph: RichTextParagraph): RichTextParagraph => 
   return content.length > 0 ? { type: 'paragraph', content } : { type: 'paragraph' };
 };
 
-/** Copia solo lo del esquema (tras validar): sin marcas vacías ni marcas en los saltos. */
 export const normalizeRichTextDoc = (doc: RichTextDoc): RichTextDoc => ({
   type: 'doc',
   content: doc.content.map((block): RichTextBlock =>
@@ -304,7 +272,6 @@ export const normalizeRichTextDoc = (doc: RichTextDoc): RichTextDoc => ({
 const paragraphsOf = (doc: RichTextDoc): ReadonlyArray<RichTextParagraph> =>
   doc.content.flatMap((block) => (block.type === 'paragraph' ? [block] : block.content.flatMap((item) => item.content)));
 
-/** Textos donde pueden ir variables: cada nodo text y cada href. */
 export const richTextTexts = (doc: RichTextDoc): ReadonlyArray<string> =>
   paragraphsOf(doc).flatMap((paragraph) =>
     (paragraph.content ?? []).flatMap((node) =>
@@ -314,11 +281,6 @@ export const richTextTexts = (doc: RichTextDoc): ReadonlyArray<string> =>
     ),
   );
 
-/**
- * Texto plano → documento, sin pérdida: cada línea en blanco separa párrafos y cada salto simple es un hardBreak.
- * richTextToText(textToRichText(x)) === x para cualquier x (con saltos \n). La misma conversión, copiada, la usa la
- * migración 1767225820000.
- */
 export const textToRichText = (text: string): RichTextDoc => ({
   type: 'doc',
   content: text
@@ -349,10 +311,6 @@ const paragraphText = (paragraph: RichTextParagraph): string =>
     })
     .join('');
 
-/**
- * Documento → texto con las variables sin sustituir (para el down() de la migración). Pierde las marcas; un enlace
- * queda como "texto (href)"; cada ítem de lista es una línea "- " o "1. ".
- */
 export const richTextToText = (doc: RichTextDoc): string =>
   doc.content
     .map((block) =>

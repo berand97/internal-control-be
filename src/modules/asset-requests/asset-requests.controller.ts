@@ -35,8 +35,6 @@ const PARTIES =
 const OWNER_ONLY =
   'Solo un jefe vigente del centro dueño que no sea quien solicitó; cualquier otro caso (otra solicitud, otro centro, token inválido, activo de otro centro) responde 404 RESOURCE_NOT_FOUND sin datos.';
 
-// Sin @RequirePermission: quién puede cada acción depende de la jefatura vigente sobre los centros de la solicitud,
-// que el guard no conoce; lo decide el servicio.
 @ApiTags(OpenApiTag.Loans)
 @ApiBearerAuth()
 @ApiExtraModels(ApiErrorEnvelope, ...ASSET_REQUEST_RESPONSE_MODELS)

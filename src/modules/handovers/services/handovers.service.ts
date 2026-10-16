@@ -33,7 +33,6 @@ import type {
   HandoverListResponseDto,
 } from '../dto/handover.dto.js';
 
-/** Reintentos automáticos del outbox (DocumentEngineService.processPending: attempts < 5). */
 const AUTOMATIC_GENERATION_ATTEMPTS = 5;
 
 interface HandoverRow {
@@ -64,13 +63,6 @@ const ASSET_CODE = `coalesce(
   (SELECT value FROM asset_identifier i WHERE i.asset_id = a.id AND i.identifier_type = 'LEGACY_CODE' AND i.valid_to IS NULL ORDER BY i.created_at LIMIT 1),
   a.internal_code)`;
 
-/**
- * Acta de entrega y asignación (OCI-01-55): el proceso por el que un activo obtiene responsable.
- *
- * Crear la entrega y encolar su acta van en una transacción; la generación es asíncrona (outbox) y un fallo de
- * generación no toca la entrega. Al firmarse el acta (onSigned, en la transacción que la pasa a SIGNED) cada activo
- * queda con el firmante RECIBE final como responsable, con un movimiento ASSIGNMENT enlazado al acta.
- */
 @Injectable()
 export class HandoversService implements OnModuleInit {
   constructor(
@@ -85,7 +77,6 @@ export class HandoversService implements OnModuleInit {
   onModuleInit(): void {
     this.lifecycle.register({
       entityType: HANDOVER_ENTITY_TYPE,
-      // create() asigna RECIBE (responsiblePersonId) y AUDITA (signers); onSigned los lee de signersByRole.
       formats: [{ formatKey: HANDOVER_FORMAT_KEY, process: 'Entregas de activos', signers: { RECIBE: 'RESPONSIBLE', AUDITA: 'REQUEST' } }],
       onGenerated: (manager, event) => this.onGenerated(manager, event),
       onSigned: (manager, event) => this.onSigned(manager, event),
@@ -107,7 +98,6 @@ export class HandoversService implements OnModuleInit {
     try {
       await this.dataSource.transaction(async (manager) => {
         await this.assertPersons(manager, dto);
-        // AUDITA exige act:sign_control:global y nadie firma dos veces: el error sale antes de revisar activos.
         await this.engine.assertSigners(
           manager,
           {
@@ -154,7 +144,6 @@ export class HandoversService implements OnModuleInit {
         );
       });
     } catch (error) {
-      // Dos entregas concurrentes con el mismo activo: la segunda choca con el índice de entregas abiertas.
       if (error instanceof QueryFailedError && (error.driverError as { constraint?: string })?.constraint === 'uq_asset_handover_item_open') {
         throw new ApiException(ErrorCode.HandoverAssetInOpenHandover);
       }
@@ -163,15 +152,6 @@ export class HandoversService implements OnModuleInit {
     return this.detail(handoverId);
   }
 
-  /**
-   * Cancela una entrega antes de que su acta quede firmada, en UNA transacción: voidForEntity cancela la solicitud
-   * del outbox (si no se generó) o anula el acta PENDING_SIGNATURE (VOIDED, con motivo; nadie puede firmarla
-   * después), la entrega queda CANCELLED con motivo y quién, y sus activos se liberan (open = FALSE) sin cambios.
-   * Acta ya firmada: 409 DOCUMENT_ALREADY_SIGNED; entrega SIGNED/REJECTED/CANCELLED: 406 INVALID_STATE.
-   * Regla provisional (quién y cuándo no están definidos): permiso de generación del OCI-01-55 (asset:update:global),
-   * solo antes de SIGNED. Orden de bloqueos: primero el acta (voidForEntity), después la entrega, el mismo orden que
-   * la generación del outbox (fila de la solicitud → onGenerated bloquea la entrega), para no cruzarse con el job.
-   */
   async cancel(id: string, reason: string, actor: AuthenticatedUser): Promise<HandoverDetailDto> {
     const motive = reason.trim();
     if (motive.length < 5) {
@@ -332,8 +312,6 @@ export class HandoversService implements OnModuleInit {
     };
   }
 
-  // ---------- Validaciones de la solicitud ----------
-
   private async assertPersons(manager: EntityManager, dto: CreateHandoverDto): Promise<void> {
     const found = (await manager.query('SELECT id FROM person WHERE id = ANY($1)', [
       [dto.receiverPersonId, dto.auditorPersonId],
@@ -357,7 +335,6 @@ export class HandoversService implements OnModuleInit {
     }
   }
 
-  /** Bloquea los activos (FOR SHARE) hasta el commit: su estado y centro no cambian mientras se crea la entrega. */
   private async assertAssets(manager: EntityManager, assetIds: ReadonlyArray<string>, costCenterId: string): Promise<void> {
     const rows = (await manager.query(
       `SELECT a.id, a.current_cost_center_id, a.operational_status, ${ASSET_CODE} AS code
@@ -394,11 +371,6 @@ export class HandoversService implements OnModuleInit {
     }
   }
 
-  /**
-   * Ningún activo comprometido en otro proceso abierto: préstamo abierto (incluido el APPROVED programado de una
-   * solicitud), reserva de una solicitud de activos aceptada o devuelta, o traslado abierto. Mismas definiciones que
-   * al elegir activos en una solicitud (assets/domain/asset-holds.ts). 409 HANDOVER_ASSET_RESERVED con el motivo por activo.
-   */
   private async assertNotHeld(manager: EntityManager, assetIds: ReadonlyArray<string>): Promise<void> {
     const held = (await manager.query(
       `SELECT a.id, ${ASSET_CODE} AS code, ${holdReasons(HOLD_OPEN_LOAN('$2'), HOLD_REQUEST_RESERVATION(), HOLD_OPEN_TRANSFER)} AS reasons
@@ -429,8 +401,6 @@ export class HandoversService implements OnModuleInit {
     }
   }
 
-  // ---------- Ciclo de vida del acta ----------
-
   private async lockFor(manager: EntityManager, event: DocumentLifecycleEvent): Promise<HandoverRow> {
     if (event.formatKey !== HANDOVER_FORMAT_KEY) {
       throw new Error(`El acta ${event.number} es ${event.formatKey}, no ${HANDOVER_FORMAT_KEY}`);
@@ -449,7 +419,6 @@ export class HandoversService implements OnModuleInit {
     return handover;
   }
 
-  /** Corre en la transacción que inserta el acta: la entrega la adopta solo si todavía no tiene una. */
   private async onGenerated(manager: EntityManager, event: DocumentLifecycleEvent): Promise<void> {
     const handover = await this.lockFor(manager, event);
     if (handover.status !== 'AWAITING_DOCUMENT' || handover.document_id !== null) {
@@ -461,10 +430,6 @@ export class HandoversService implements OnModuleInit {
     ]);
   }
 
-  /**
-   * Corre en la transacción que pasa el acta a SIGNED. El responsable asignado es el firmante RECIBE final (el
-   * turno pudo reasignarse y el acta se re-emitió con ese nombre), nunca el receptor original de la solicitud.
-   */
   private async onSigned(manager: EntityManager, event: DocumentLifecycleEvent): Promise<void> {
     const handover = await this.lockFor(manager, event);
     this.assertExpectedDocument(handover, event);
@@ -472,7 +437,6 @@ export class HandoversService implements OnModuleInit {
     if (!receiver) {
       throw new Error(`El acta ${event.number} no tiene firmante RECIBE`);
     }
-    // Quien autoriza el movimiento es quien firmó por Control Interno (si tiene usuario); si no, quien creó la entrega.
     const auditorPerson = event.signersByRole['AUDITA'] ?? null;
     const [auditorUser] = auditorPerson
       ? ((await manager.query('SELECT id FROM app_user WHERE person_id = $1', [auditorPerson])) as Array<{ id: string }>)
@@ -540,7 +504,6 @@ export class HandoversService implements OnModuleInit {
     );
   }
 
-  /** Corre en la transacción que pasa el acta a REJECTED: la entrega se cierra sin tocar activos. */
   private async onRejected(manager: EntityManager, event: DocumentLifecycleEvent): Promise<void> {
     const handover = await this.lockFor(manager, event);
     this.assertExpectedDocument(handover, event);
@@ -557,7 +520,6 @@ export class HandoversService implements OnModuleInit {
     }
   }
 
-  /** Lo que se validó al crear la entrega sigue valiendo al aplicarla: si cambió, el acta no se aplica y queda visible. */
   private assertStillDeliverable(current: Asset, costCenterId: string): void {
     if (NOT_DELIVERABLE_STATUSES.includes(current.operationalStatus)) {
       throw new ApiException(

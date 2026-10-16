@@ -36,16 +36,6 @@ interface InventoryRow {
 
 const VIEW_COLUMNS = `id, offset_days AS "offsetDays", due_at AS "dueAt", status, sent_at AS "sentAt"`;
 
-/**
- * Recordatorios de una toma (inventory_reminder). Al programar se crea uno por día de anticipación en la revisión
- * vigente (schedule_rev = reschedule_count); los que ya pasaron nacen SKIPPED. Reprogramar deja los PENDING
- * anteriores SUPERSEDED; cancelar los deja CANCELLED.
- *
- * Envío (processDue, llamado por InventoryRemindersJob): cada recordatorio se reclama con FOR UPDATE SKIP LOCKED y,
- * en la MISMA transacción, se encolan correo + notificación y se marca el estado final (SENT, NO_RECIPIENT si no hay
- * jefe con correo, SKIPPED o SUPERSEDED). Un reinicio o un segundo worker no reenvían: o la transacción confirmó
- * todo, o nada. El correo sale luego por el worker del outbox (fuera de transacción).
- */
 @Injectable()
 export class InventoryRemindersService {
   private readonly logger = new Logger(InventoryRemindersService.name);
@@ -73,7 +63,6 @@ export class InventoryRemindersService {
     return this.current(manager, inventoryId, scheduleRev);
   }
 
-  /** Reprogramar: los pendientes de revisiones anteriores ya no se envían. */
   async supersede(manager: EntityManager, inventoryId: string): Promise<void> {
     await manager.query(
       `UPDATE inventory_reminder SET status = 'SUPERSEDED', processed_at = NOW()
@@ -82,7 +71,6 @@ export class InventoryRemindersService {
     );
   }
 
-  /** Cancelar la toma: ningún pendiente se envía. */
   async cancelPending(manager: EntityManager, inventoryId: string): Promise<void> {
     await manager.query(
       `UPDATE inventory_reminder SET status = 'CANCELLED', processed_at = NOW()
@@ -99,7 +87,6 @@ export class InventoryRemindersService {
     )) as ReminderView[];
   }
 
-  /** Procesa hasta `limit` recordatorios vencidos a `now`, uno por transacción. */
   async processDue(limit = 50, now: Date = new Date()): Promise<Record<ReminderOutcome, number>> {
     const totals: Record<ReminderOutcome, number> = { SENT: 0, NO_RECIPIENT: 0, SKIPPED: 0, SUPERSEDED: 0 };
     for (let index = 0; index < limit; index += 1) {
@@ -112,7 +99,6 @@ export class InventoryRemindersService {
     return totals;
   }
 
-  /** Un recordatorio vencido: reclamo, aviso y estado final en una sola transacción. null si no hay ninguno libre. */
   async processOne(now: Date = new Date()): Promise<ReminderOutcome | null> {
     return this.dataSource.transaction(async (manager) => {
       const [claimed] = (await manager.query(
@@ -166,13 +152,11 @@ export class InventoryRemindersService {
     now: Date,
   ): Promise<'SEND' | 'SKIPPED' | 'SUPERSEDED'> {
     if (!inventory || inventory.status !== 'PLANNED' || inventory.start < bogotaDate(now)) {
-      // La toma ya empezó, terminó, se canceló o su inicio pasó sin iniciarla: el recordatorio ya no aplica.
       return 'SKIPPED';
     }
     if (Number(inventory.reschedule_count) !== Number(claimed.schedule_rev)) {
       return 'SUPERSEDED';
     }
-    // Si el worker estuvo detenido y ya venció también un recordatorio más cercano al inicio, solo se envía ese.
     const [closer] = (await manager.query(
       `SELECT 1 FROM inventory_reminder
        WHERE inventory_id = $1 AND schedule_rev = $2 AND status = 'PENDING'

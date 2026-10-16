@@ -1,11 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-/**
- * Esquemas de /events. POST /events/ticket responde con el sobre JSON de siempre; GET /events es text/event-stream y
- * sus clases *EventDataDto documentan el `data` (JSON) de cada tipo de evento para que el frontend genere sus tipos.
- * Cambiar un shape exige cambiar EventStream (src/modules/events/services/event-stream.ts).
- */
-
 export const SSE_EVENT_TYPES = [
   'ready',
   'notification',
@@ -90,5 +84,4 @@ export class StreamClosedEventDataDto {
   readonly reason!: StreamClosedReason;
 }
 
-/** `data` del latido `ping`: objeto vacío. Llega cada heartbeatMs, sin `id` (no mueve Last-Event-ID). */
 export class PingEventDataDto {}

@@ -5,11 +5,6 @@ export interface ScopeSql {
   readonly params: ReadonlyArray<string>;
 }
 
-/**
- * Condición SQL sobre `asset` (alias `alias`) que selecciona los activos de un alcance de toma. Los parámetros
- * empiezan en `$paramIndex`. Un activo pertenece a un centro de costo por asset.current_cost_center_id; una unidad
- * organizacional incluye los centros de toda su subárbol.
- */
 export const scopeSql = (
   alias: string,
   scopeType: InventoryScopeType,

@@ -14,7 +14,6 @@ import {
 } from '../domain/document-formats.js';
 import { DocumentLifecycleRegistry } from '../lifecycle/document-lifecycle.registry.js';
 
-/** Fecha de hoy en Bogotá (AAAA-MM-DD): la vigencia de una versión empieza a la medianoche de Bogotá. */
 export const bogotaToday = (instant: Date = new Date()): string =>
   new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Bogota',
@@ -34,7 +33,6 @@ export interface FormatVersionInput {
   readonly sgcCode: string;
   readonly sgcVersion: string;
   readonly name: string;
-  /** AAAA-MM-DD; por defecto hoy (Bogotá). */
   readonly effectiveFrom?: string;
   readonly signers: ReadonlyArray<SignerSpec>;
   readonly numbering: {
@@ -108,7 +106,6 @@ const VERSION_SELECT = `
   JOIN document_format f ON f.key = v.format_key
 `;
 
-/** La versión que rige en una fecha: la de vigencia más reciente ≤ fecha; en empate, la de número mayor. */
 const EFFECTIVE_ORDER = `coalesce(v.effective_from, '-infinity'::date) DESC, v.version_number DESC`;
 
 const toFormat = (row: VersionRow): DocumentFormat => ({
@@ -138,11 +135,6 @@ const toFormat = (row: VersionRow): DocumentFormat => ({
   pendingDecisions: row.pending_decisions,
 });
 
-/**
- * Catálogo de formatos SGC en BD (ver domain/document-formats.ts: qué es administrable y qué es código).
- * Lectura: la versión vigente de un formato (para generar) y la versión de cada acta (para todo lo demás).
- * Escritura: crear formato y crear versión; una versión nunca se modifica (trigger en BD).
- */
 @Injectable()
 export class DocumentFormatCatalogService {
   constructor(
@@ -150,9 +142,6 @@ export class DocumentFormatCatalogService {
     private readonly lifecycle: DocumentLifecycleRegistry,
   ) {}
 
-  // ---------- Lectura ----------
-
-  /** Versión vigente hoy (Bogotá) del formato. Formato desconocido → 400 VALIDATION_FAILED, como antes. */
   async current(
     key: string,
     manager: EntityManager = this.dataSource.manager,
@@ -182,7 +171,6 @@ export class DocumentFormatCatalogService {
     return row ? toFormat(row) : undefined;
   }
 
-  /** Versión vigente de todos los formatos, por clave. */
   async currentAll(
     manager: EntityManager = this.dataSource.manager,
     date: string = bogotaToday(),
@@ -210,7 +198,6 @@ export class DocumentFormatCatalogService {
     return new Map(rows.map((row) => [row.id, toFormat(row)]));
   }
 
-  /** La versión con la que se emitió el acta: firmantes, etiquetas, título del sobre y verificación salen de aquí. */
   async forDocument(
     documentId: string,
     manager: EntityManager = this.dataSource.manager,
@@ -228,7 +215,6 @@ export class DocumentFormatCatalogService {
     return toFormat(row);
   }
 
-  /** Versión programada (vigencia futura) más próxima, si la hay. */
   async scheduled(
     key: string,
     date: string = bogotaToday(),
@@ -241,7 +227,6 @@ export class DocumentFormatCatalogService {
     return row ? toFormat(row) : undefined;
   }
 
-  /** Historial de versiones, la más reciente primero, con su estado y cuántas actas se emitieron con cada una. */
   async history(key: string): Promise<FormatVersionHistoryItem[]> {
     const current = await this.find(key);
     if (!current) {
@@ -278,9 +263,6 @@ export class DocumentFormatCatalogService {
     return this.lifecycle.bindingFor(key);
   }
 
-  // ---------- Administración ----------
-
-  /** Formato nuevo con su primera versión, en una transacción. Queda generable con POST /documents. */
   async createFormat(
     input: CreateFormatInput,
     actorId: string | null,
@@ -322,7 +304,6 @@ export class DocumentFormatCatalogService {
       );
       this.assertProcess(key, input.signers);
       await this.assertInitialValueApplies(manager, key, null, input.numbering);
-      // ON CONFLICT: dos altas simultáneas de la misma clave; la segunda recibe el mismo 409, no un 500.
       const inserted = (await manager.query(
         `INSERT INTO document_format (key, read_permission, generate_permission, created_by) VALUES ($1, $2, $3, $4)
          ON CONFLICT (key) DO NOTHING RETURNING key`,
@@ -346,10 +327,6 @@ export class DocumentFormatCatalogService {
     });
   }
 
-  /**
-   * Versión nueva de un formato (instantánea completa: lo que no se envía no se hereda). Rige desde effectiveFrom
-   * (hoy por defecto; nunca antes de hoy ni antes de la última versión). Las actas ya emitidas siguen con la suya.
-   */
   async createVersion(
     key: string,
     input: FormatVersionInput,
@@ -366,7 +343,6 @@ export class DocumentFormatCatalogService {
     }
     this.throwIfErrors(errors);
     return this.dataSource.transaction(async (manager) => {
-      // Serializa las versiones del formato: el número es consecutivo por formato.
       const [format] = (await manager.query(
         'SELECT key FROM document_format WHERE key = $1 FOR UPDATE',
         [key],
@@ -584,7 +560,6 @@ export class DocumentFormatCatalogService {
     }
   }
 
-  /** El proceso enchufado al formato (si lo hay) necesita exactamente sus roles con su origen. */
   private assertProcess(key: string, signers: ReadonlyArray<SignerSpec>): void {
     const binding = this.lifecycle.bindingFor(key);
     const violations = binding
@@ -623,18 +598,12 @@ export class DocumentFormatCatalogService {
     }
   }
 
-  /**
-   * El valor inicial (lastIssued/lastIssuedPeriod) solo cuenta mientras el consecutivo de su periodo no existe
-   * (DocumentEngineService.reserve lo usa al crear la fila de document_sequence). Cambiarlo después no tendría
-   * efecto y mentiría: se rechaza. document_sequence no se toca nunca desde aquí.
-   */
   private async assertInitialValueApplies(
     manager: EntityManager,
     key: string,
     previous: DocumentFormat | null,
     numbering: FormatVersionInput['numbering'],
   ): Promise<void> {
-    // Periodo al que se aplica el valor inicial: '' en un consecutivo continuo, el año en uno anual (sin año, a ninguno).
     const period = numbering.perYear
       ? (numbering.lastIssuedPeriod ?? null)
       : '';

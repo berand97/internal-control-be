@@ -28,7 +28,6 @@ export interface SignatureMark {
   readonly documentNumber: string | null;
   readonly signedAt: Date;
   readonly ipAddress: string | null;
-  /** Método de firma en lenguaje claro ("Sesión con verificación en dos pasos", "Enlace de un solo uso..."). */
   readonly methodLabel: string;
 }
 
@@ -108,7 +107,6 @@ export const stampSignature = async (pdf: Buffer, mark: SignatureMark): Promise<
   write(page, font, `Firmó: ${bogota(mark.signedAt)}`, x, y - 54, 8);
   write(page, font, `Desde: ${mark.ipAddress ?? 'sin IP registrada'}`, x, y - 66, 8, GREY);
   write(page, font, `Rol: ${mark.label}`, x, y - 78, 8, GREY);
-  // "Enlace de un solo uso enviado al correo institucional" no cabe en una línea del recuadro.
   const [first, second] = wrap(`Método: ${mark.methodLabel}`, 58);
   write(page, font, first, x, y - 90, 7.5, GREY);
   if (second) {

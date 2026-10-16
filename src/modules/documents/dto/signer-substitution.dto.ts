@@ -10,10 +10,6 @@ import {
 
 export type SignerSubstitutionsInput = Record<string, SignerSubstitution>;
 
-/**
- * signerSubstitutions en las DTO que generan un acta (entregas, préstamos, toma física, traslados y POST /documents).
- * La forma y las reglas las valida el motor (domain/signer-separation.ts) con DOCUMENT_SIGNER_SUBSTITUTE_INVALID.
- */
 export const ApiSignerSubstitutions = () =>
   applyDecorators(
     ApiPropertyOptional({

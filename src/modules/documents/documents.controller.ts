@@ -112,7 +112,6 @@ export class GenerateDocumentDto {
   @IsObject()
   readonly fields?: Record<string, string>;
 
-  /** Sustitutos de turnos de Control Interno (separación de funciones); el motor valida la forma. */
   @IsOptional()
   @IsObject()
   readonly signerSubstitutions?: SignerSubstitutionsInput;
@@ -173,7 +172,6 @@ export class QueryDocumentsDto {
 }
 
 export class UploadTemplateDto {
-  /** Versión SGC impresa en formato.version. Por defecto, la de la versión del formato que regirá con la plantilla. */
   @IsOptional()
   @IsString()
   @MaxLength(10)
@@ -332,7 +330,6 @@ export class DocumentsController {
     return this.engine.generate(dto, actor.id);
   }
 
-  // Antes de ':id': si no, la ruta la toma el detalle y ParseUUIDPipe responde 400.
   @Get('control-signers')
   @ApiOperation({
     summary: 'Quiénes pueden firmar por Control Interno',

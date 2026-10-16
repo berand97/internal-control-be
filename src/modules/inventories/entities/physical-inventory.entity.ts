@@ -61,14 +61,12 @@ export class PhysicalInventory {
   @Column({ name: 'discrepancy_report', type: 'jsonb', nullable: true })
   discrepancyReport!: Record<string, unknown> | null;
 
-  /** Veces que se movieron las fechas; también es la revisión vigente de los recordatorios (schedule_rev). */
   @Column({ name: 'reschedule_count', type: 'integer', default: 0 })
   rescheduleCount!: number;
 
   @Column({ name: 'rescheduled_at', type: 'timestamptz', nullable: true })
   rescheduledAt!: Date | null;
 
-  /** Días antes del inicio en que se envía recordatorio. Vacío en las tomas anteriores a la programación. */
   @Column({ name: 'reminder_offsets_days', type: 'smallint', array: true, default: () => "'{}'" })
   reminderOffsetsDays!: number[];
 
@@ -81,11 +79,9 @@ export class PhysicalInventory {
   @Column({ name: 'cancelled_by', type: 'uuid', nullable: true })
   cancelledBy!: string | null;
 
-  /** Corte contable contra el que se concilia; NULL = contra la foto del sistema. */
   @Column({ name: 'accounting_cut_id', type: 'uuid', nullable: true })
   accountingCutId!: string | null;
 
-  /** Instante en que start() congeló la foto; NULL en tomas iniciadas antes de guardarlo. */
   @Column({ name: 'snapshot_taken_at', type: 'timestamptz', nullable: true })
   snapshotTakenAt!: Date | null;
 

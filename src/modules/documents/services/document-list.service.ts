@@ -202,7 +202,6 @@ export class DocumentListService {
     return readable;
   }
 
-  /** Código y nombre: los de la versión con que se emitió el acta; una solicitud sin acta muestra la vigente. */
   private async toItems(rows: ReadonlyArray<Row>, formats: ReadonlyArray<DocumentFormat>): Promise<DocumentListItem[]> {
     const versions = await this.catalog.byVersionIds(rows.map((row) => row.format_version_id).filter((id): id is string => id !== null));
     const current = new Map(formats.map((format) => [format.key, format]));

@@ -1,26 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
 
-/**
- * Borrado de verdad de centros de costo y unidades organizacionales (DELETE y la acción ELIMINAR del Excel del
- * organigrama).
- *
- * Centro de costo:
- * - con activos no dados de baja o hijos activos → BLOCKED (409 como siempre);
- * - con cualquier referencia histórica → ARCHIVE (is_active=false) con el motivo;
- * - sin nada → DELETE físico: antes borra sus jefaturas (cost_center_head), los roles con alcance en el centro
- *   (user_role scope COST_CENTER), su historial de ubicación y de nombre/código. Las personas quedan sin centro y las
- *   unidades sin centro propio (FK ON DELETE SET NULL).
- *
- * Referencias históricas: TODAS las FK que apuntan a la tabla, leídas del catálogo de PostgreSQL (así una tabla nueva
- * con FK cuenta sola), menos las que se limpian al borrar; más las referencias polimórficas sin FK (alcance de las
- * tomas de inventario, documentos, correos).
- *
- * Unidad: con hijos activos o centros activos → BLOCKED; con hijos o centros inactivos, historial de ubicación de
- * algún centro u otra referencia → ARCHIVE; si no → DELETE (borra los roles con alcance en la unidad y su historial;
- * las personas quedan sin unidad por SET NULL).
- */
-
 export type RemovalDecision = 'DELETE' | 'ARCHIVE' | 'BLOCKED';
 
 export interface ReferenceCount {
@@ -44,11 +24,9 @@ export interface UnitRemovalCheck {
 
 export interface RemovalVerdict {
   readonly decision: RemovalDecision;
-  /** Por qué se archiva o se bloquea (en español); null si se borra. */
   readonly reason: string | null;
 }
 
-/** FK que no son historia: se limpian (o quedan en NULL) al borrar. */
 const CENTER_CLEANUP = new Set([
   'cost_center_head.cost_center_id',
   'cost_center_placement.cost_center_id',
@@ -58,7 +36,6 @@ const CENTER_CLEANUP = new Set([
 
 const UNIT_CLEANUP = new Set(['person.organizational_unit_id']);
 
-/** Referencias polimórficas (sin FK) que también son historia. */
 const POLYMORPHIC: ReadonlyArray<readonly [string, string]> = [
   ['physical_inventory', 'scope_id'],
   ['document', 'entity_id'],
@@ -91,7 +68,6 @@ const quoteIdent = (value: string): string => `"${value.replace(/"/g, '""')}"`;
 const describe = (references: ReadonlyArray<ReferenceCount>): string =>
   references.map((reference) => `${reference.count} ${reference.label}`).join(', ');
 
-/** Motivo para archivar en vez de borrar; null si no hay ninguna referencia histórica. */
 export const historyReason = (references: ReadonlyArray<ReferenceCount>): string | null =>
   references.length > 0 ? `Se archiva porque tiene historia: ${describe(references)}` : null;
 
@@ -156,7 +132,6 @@ export class StructureRemovalService {
     };
   }
 
-  /** Borra el centro y lo que no es historia. Llamar solo con decideCenterRemoval = DELETE, en una transacción. */
   async deleteCostCenter(manager: EntityManager, id: string): Promise<void> {
     await manager.query('DELETE FROM cost_center_head WHERE cost_center_id = $1', [id]);
     await manager.query(`DELETE FROM user_role WHERE scope_type = 'COST_CENTER' AND scope_id = $1`, [id]);
@@ -165,7 +140,6 @@ export class StructureRemovalService {
     await manager.query('DELETE FROM cost_center WHERE id = $1', [id]);
   }
 
-  /** Borra la unidad. Llamar solo con decideUnitRemoval = DELETE, en una transacción. */
   async deleteUnit(manager: EntityManager, id: string): Promise<void> {
     await manager.query(`DELETE FROM user_role WHERE scope_type = 'ORG_UNIT' AND scope_id = $1`, [id]);
     await manager.query(`DELETE FROM org_structure_history WHERE entity_type = 'ORG_UNIT' AND entity_id = $1`, [id]);

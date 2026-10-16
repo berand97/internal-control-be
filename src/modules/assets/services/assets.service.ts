@@ -61,14 +61,11 @@ const ENTITY_TYPE = 'ASSET';
 const MAX_IMPORT_ROWS = 5000;
 const IMPORT_TTL_MS = 30 * 60 * 1000;
 
-/** Cómo queda el movimiento REGISTRATION de un alta hecha por otro proceso (AssetsService.createWithin). */
 export interface AssetRegistration {
   readonly reason: string;
-  /** undefined: el documento de adquisición del activo, como en create(). */
   readonly documentReference?: string | null;
   readonly requestedBy?: string | null;
   readonly metadata?: Record<string, unknown>;
-  /** Se suman a la auditoría ASSET_CREATED (sin datos personales). */
   readonly auditChanges?: Record<string, unknown>;
 }
 
@@ -142,7 +139,6 @@ export class AssetsService {
     };
   }
 
-  /** Fuera de alcance responde igual que inexistente: 404 RESOURCE_NOT_FOUND. */
   async getById(
     id: string,
     scope: ReadableCostCenterScope,
@@ -375,13 +371,6 @@ export class AssetsService {
     return this.toDetail(updated);
   }
 
-  /**
-   * Corrección del precio de compra, en la transacción de la edición: el precio ya quedó escrito (el trigger
-   * trg_asset_price_zero_flag pone o quita PRICE_ZERO) y aquí se quita PRICE_MISSING (el precio ya no falta: alguien lo
-   * fijó con un motivo) y se deja el movimiento CORRECTION con el valor anterior y el nuevo, que el historial muestra.
-   * La clasificación de precio cero (motivo) no se toca: queda como histórico. La depreciación ya calculada no se
-   * recalcula; los cálculos siguientes usan el precio nuevo.
-   */
   private async recordPriceCorrection(
     manager: EntityManager,
     assetId: string,
@@ -419,7 +408,6 @@ export class AssetsService {
     );
   }
 
-  /** photoUrl distinta de la foto principal: pasa a ser la principal; la anterior queda como foto del historial. */
   private async replacePrimaryPhoto(
     manager: EntityManager,
     assetId: string,
@@ -603,12 +591,6 @@ export class AssetsService {
     }
   }
 
-  /**
-   * Alta de un activo dentro de la transacción de quien llama (p. ej. el sobrante de una toma que se vuelve activo):
-   * las mismas validaciones y escrituras que create() (activo, identificadores, campos, foto, movimiento REGISTRATION
-   * y auditoría ASSET_CREATED), con el motivo y la referencia del movimiento que dé el proceso. Si algo falla, lanza y
-   * la transacción del llamador se revierte entera.
-   */
   async createWithin(
     manager: EntityManager,
     dto: CreateAssetDto,
@@ -931,11 +913,6 @@ export class AssetsService {
     return location;
   }
 
-  /**
-   * Un activo retenido por un préstamo abierto (countActiveLoans: misma definición que la solicitud de préstamo,
-   * con REQUESTED, PENDING_SIGNATURES y los pendientes de un PARTIALLY_RETURNED) no se edita, no se da de baja ni
-   * cambia de centro, aunque su estado operacional no sea ON_LOAN.
-   */
   private async assertNoActiveLoan(assetId: string): Promise<void> {
     const count = await this.assetsRepository.countActiveLoans(assetId);
     if (count > 0) {
@@ -1002,10 +979,6 @@ interface PriceChange {
 
 const cents = (value: number | string): number => Math.round(Number(value) * 100);
 
-/**
- * El precio cambia si acquisitionPrice viene y difiere del actual (a dos decimales, la escala de la columna). Un cambio
- * exige priceChangeReason. null: sin cambio (el mismo precio no es una corrección).
- */
 const acquisitionPriceChange = (asset: Asset, dto: UpdateAssetDto): PriceChange | null => {
   if (dto.acquisitionPrice === undefined || cents(dto.acquisitionPrice) === cents(asset.acquisitionPrice)) {
     return null;
@@ -1018,7 +991,6 @@ const acquisitionPriceChange = (asset: Asset, dto: UpdateAssetDto): PriceChange 
   return { from: (cents(asset.acquisitionPrice) / 100).toFixed(2), to: (cents(dto.acquisitionPrice) / 100).toFixed(2) };
 };
 
-/** Tipo y fecha de adquisición no se editan: iguales al actual se aceptan (el formulario los reenvía), distintos no. */
 const assertAcquisitionUnchanged = (asset: Asset, dto: UpdateAssetDto): void => {
   const details: Array<{ field: string; message: string }> = [];
   if (dto.acquisitionTypeId !== undefined && dto.acquisitionTypeId !== asset.acquisitionTypeId) {
@@ -1038,7 +1010,6 @@ const assertAcquisitionUnchanged = (asset: Asset, dto: UpdateAssetDto): void => 
   }
 };
 
-/** Bitácora de la edición: lo enviado, con el precio como { from, to } y sin el texto del motivo (va al historial). */
 const auditChanges = (dto: UpdateAssetDto, priceChange: PriceChange | null): Record<string, unknown> => {
   const { priceChangeReason: _reason, acquisitionPrice: _price, ...rest } = dto;
   return { ...rest, ...(priceChange ? { acquisitionPrice: priceChange } : {}) };

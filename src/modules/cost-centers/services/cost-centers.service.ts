@@ -60,10 +60,6 @@ export class CostCentersService {
     return CostCenterResponseDto.from(await this.requireCenter(id));
   }
 
-  /**
-   * Un centro nuevo con unidad que tiene prefijo de código debe estar en su rango (los existentes nunca se corrigen:
-   * GET /cost-centers/prefix-mismatches los lista). El historial de ubicación se abre en la misma transacción.
-   */
   async create(
     dto: CreateCostCenterDto,
     actor: AuthenticatedUser,
@@ -131,10 +127,6 @@ export class CostCentersService {
     }
   }
 
-  /**
-   * Nombre, aceptación de activos y estado. La unidad y el padre son parte del historial de ubicación: aquí solo se
-   * aceptan iguales a los vigentes; cambiarlos es POST /cost-centers/:id/placement (con motivo).
-   */
   async update(
     id: string,
     dto: UpdateCostCenterDto,
@@ -213,11 +205,6 @@ export class CostCentersService {
     );
   }
 
-  /**
-   * Con activos no dados de baja: 406 como siempre. Con hijos activos: 406 HAS_DEPENDENT_ENTITIES. Si no, se borra de
-   * verdad (con sus jefaturas, roles con alcance en el centro e historial de ubicación) o, si tiene historia
-   * (movimientos, traslados, préstamos, tomas, documentos, solicitudes…), se archiva. StructureRemovalService.
-   */
   async remove(
     id: string,
     actor: AuthenticatedUser,
@@ -269,7 +256,6 @@ export class CostCentersService {
     });
   }
 
-  /** 406 COST_CENTER_HAS_ACTIVE_ASSETS con el número de activos (no dados de baja) en details[activeAssets]. */
   private async assertNoActiveAssets(costCenterId: string): Promise<void> {
     const assets = await this.costCentersRepository.countActiveAssets(costCenterId);
     if (assets > 0) {
@@ -350,7 +336,6 @@ export class CostCentersService {
       }
     }
 
-    // La sincronización CSV no es transaccional: la estructura se concilia al final, completa, en su propia transacción.
     await this.dataSource.transaction((manager) =>
       this.reconciler.reconcileWithin(manager, ALL_SCOPE, {
         actorId: actor.id,

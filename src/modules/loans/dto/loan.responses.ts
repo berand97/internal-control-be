@@ -3,11 +3,6 @@ import { ApiSuccessEnvelope } from '../../../common/swagger/api-envelopes.js';
 import { DOCUMENT_STATUSES } from '../../documents/dto/document.responses.js';
 import { LOAN_RETURN_CONDITIONS, LOAN_STATUSES } from '../enums/loan-status.js';
 
-/**
- * Esquemas de respuesta de /loans. Solo documentan lo que LoansService devuelve: cambiar un shape exige cambiar
- * ambos (test/integration/loans.int-spec.ts compara las llaves).
- */
-
 export const LOAN_DELIVERY_ACT_STATUSES = [
   'NONE',
   'PENDING',
@@ -430,8 +425,6 @@ export class LoanDetailDto extends LoanSummaryDto {
   @ApiProperty({ type: [LoanReturnActDto], description: 'Un acta de devolución por recepción, en orden cronológico' })
   readonly returnActs!: LoanReturnActDto[];
 }
-
-// ---------- GET /loans/:id/delivery-options ----------
 
 export class LoanDeliveryPersonDto {
   @ApiProperty({ format: 'uuid' })

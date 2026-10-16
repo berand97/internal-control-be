@@ -2,21 +2,6 @@ import { createHash } from 'node:crypto';
 import { isDetailCode, parentCandidates } from './code-prefix.js';
 import { resolveCenterParent, resolveCenterUnit } from './org-chart-rules.js';
 
-/**
- * Conciliador de estructura (organigrama ↔ centros de costo), parte pura: compara el estado actual con lo que piden los
- * códigos y devuelve qué cambiar. El código es la fuente de verdad:
- *
- * - Unidad de un centro: la unidad activa con el prefijo más largo con que empieza su código (resolveCenterUnit).
- * - Padre de un centro de 4 dígitos: XYZ0 si existe (resolveCenterParent). Se respeta un padre agrupador (sin
- *   movimiento) que sea un ancestro por código (X000/XY00 de la importación UPDATE_STRUCTURE) cuando la regla no pide
- *   ninguno. Los códigos que no son de 4 dígitos no se re-padrean.
- * - Centro propio de una unidad: se guarda por código; se amarra cuando ese centro existe activo, sigue al centro si lo
- *   recodifican y vuelve a pendiente si lo archivan o lo borran.
- * - Las ubicaciones MANUAL que difieren no se tocan: se listan como excepción.
- *
- * Idempotente: aplicar el plan y volver a planear da un plan vacío (sin relocations/reparents/headLinks/headUnlinks).
- */
-
 export type ReconcileMode = 'AUTO' | 'MANUAL';
 
 export interface ReconcileUnit {
@@ -45,11 +30,6 @@ export interface ReconcileState {
   readonly centers: ReadonlyArray<ReconcileCenter>;
 }
 
-/**
- * ALL: toda la estructura. PARTIAL: los centros cuyo código empieza por alguno de los prefijos, los que hoy están en
- * alguna de las unidades, los centros indicados y sus hijos directos. El centro propio de las unidades se revisa
- * siempre (son pocos cientos).
- */
 export type ReconcileScope =
   | { readonly kind: 'ALL' }
   | {
@@ -91,9 +71,7 @@ export type HeadLinkKind = 'LINKED' | 'RECODED';
 export interface ReconcileHeadLink {
   readonly unit: ReconcileUnitRef;
   readonly kind: HeadLinkKind;
-  /** Código que queda guardado (el del centro). */
   readonly code: string;
-  /** Código guardado antes (RECODED: el viejo; LINKED: el mismo, que estaba pendiente). */
   readonly previousCode: string | null;
   readonly center: ReconcileCenterRef;
 }
@@ -103,7 +81,6 @@ export type HeadUnlinkReason = 'ARCHIVED' | 'MISSING';
 export interface ReconcileHeadUnlink {
   readonly unit: ReconcileUnitRef;
   readonly reason: HeadUnlinkReason;
-  /** Código que queda pendiente. */
   readonly code: string | null;
   readonly center: ReconcileCenterRef | null;
 }
@@ -134,7 +111,6 @@ export interface ReconcilePlan {
   readonly headUnlinks: ReadonlyArray<ReconcileHeadUnlink>;
   readonly manualExceptions: ReadonlyArray<ReconcileManualException>;
   readonly counts: ReconcileCounts;
-  /** Huella de los cambios (no de las excepciones): POST /reconcile con expectedHash solo aplica si coincide. */
   readonly hash: string;
 }
 
@@ -237,7 +213,6 @@ export const planStructureReconcile = (state: ReconcileState, scope: ReconcileSc
     }
   }
 
-  // Un re-padre que cerraría un ciclo (el padre nuevo cuelga del centro por una ubicación MANUAL) no se aplica.
   const finalParent = new Map(state.centers.map((center) => [center.id, center.parentId]));
   for (const reparent of candidates) {
     finalParent.set(reparent.center.id, reparent.toParent?.id ?? null);
@@ -270,7 +245,6 @@ export const planStructureReconcile = (state: ReconcileState, scope: ReconcileSc
     reparents.push(reparent);
   }
 
-  // Centro propio de las unidades activas.
   const headLinks: ReconcileHeadLink[] = [];
   const headUnlinks: ReconcileHeadUnlink[] = [];
   for (const unit of [...state.units].sort((left, right) => left.code.localeCompare(right.code))) {
@@ -331,10 +305,6 @@ export const planStructureReconcile = (state: ReconcileState, scope: ReconcileSc
   return { relocations, reparents, headLinks, headUnlinks, manualExceptions, counts, hash };
 };
 
-/**
- * Ámbito barato para los disparadores: los prefijos tocados (el nuevo y el viejo de una unidad; para un centro de 4
- * dígitos, sus 3 primeros, que cubren su padre XYZ0 y sus hermanos XYZn), las unidades y los centros afectados.
- */
 export const partialScope = (input: {
   readonly prefixes?: ReadonlyArray<string | null | undefined>;
   readonly centerCodes?: ReadonlyArray<string | null | undefined>;
@@ -352,7 +322,6 @@ export const partialScope = (input: {
   };
 };
 
-/** Aplica un plan a un estado en memoria (pruebas y convergencia): lo mismo que escribe el servicio. */
 export const applyReconcilePlanInMemory = (state: ReconcileState, plan: ReconcilePlan): ReconcileState => {
   const toUnit = new Map(plan.relocations.map((item) => [item.center.id, item.toUnit.id]));
   const toParent = new Map(plan.reparents.map((item) => [item.center.id, item.toParent?.id ?? null]));

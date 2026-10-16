@@ -19,10 +19,6 @@ import type { CatalogViewContext } from './inventory-item-view.js';
 const ENTITY_TYPE = 'INVENTORY_CATALOG';
 const OTHER_USAGE_LIMIT = 200;
 
-/**
- * Catálogos de la toma física: categorías de hallazgo (código corto) y causas de faltante. Una opción usada por
- * algún ítem no se borra: se desactiva. La auditoría guarda códigos y etiquetas del catálogo, nunca textos de ítems.
- */
 @Injectable()
 export class InventoryCatalogsService {
   constructor(
@@ -35,7 +31,6 @@ export class InventoryCatalogsService {
     private readonly auditLogs: AuditLogsRepository,
   ) {}
 
-  /** Lo que necesita la serialización de ítems: categorías (para sugerir) y etiquetas de causas. */
   async viewContext(): Promise<CatalogViewContext> {
     const [categories, causes] = await Promise.all([this.categories.find(), this.causes.find()]);
     return {
@@ -44,7 +39,6 @@ export class InventoryCatalogsService {
     };
   }
 
-  /** Categoría asignable a un ítem: existe y está activa. */
   async requireAssignableCategory(code: string): Promise<InventoryFindingCategory> {
     const category = await this.categories.findOne({ where: { code: code.trim().toUpperCase() } });
     if (!category || !category.isActive) {
@@ -61,7 +55,6 @@ export class InventoryCatalogsService {
     return cause;
   }
 
-  /** Un faltante lleva exactamente una causa: del catálogo (activa) u "Otra" en texto (3..500). */
   async resolveMissingCause(
     causeId: string | undefined,
     otherCause: string | undefined,
@@ -80,8 +73,6 @@ export class InventoryCatalogsService {
     }
     return { missingCauseId: null, missingCauseOther: other };
   }
-
-  // ---------- Categorías de hallazgo ----------
 
   async listFindingCategories() {
     const rows = await this.categories.find({ order: { sortOrder: 'ASC', code: 'ASC' } });
@@ -139,8 +130,6 @@ export class InventoryCatalogsService {
     return { deleted: true };
   }
 
-  // ---------- Causas de faltante ----------
-
   async listMissingCauses() {
     const rows = await this.causes.find({ order: { sortOrder: 'ASC', label: 'ASC' } });
     const used = await this.usedCauseIds();
@@ -182,10 +171,6 @@ export class InventoryCatalogsService {
     return { deleted: true };
   }
 
-  /**
-   * Textos de la causa "Otra" agrupados sin distinguir mayúsculas ni espacios repetidos, del más usado al menos, para
-   * que Control Interno convierta los frecuentes en causas del catálogo. Máximo 200 grupos.
-   */
   async otherCauseUsage() {
     const rows = (await this.dataSource.query(
       `
@@ -246,7 +231,6 @@ export class InventoryCatalogsService {
     }
   }
 
-  /** En uso: asignada a un ítem o citada en el historial de correcciones (borrarla dejaría el historial huérfano). */
   private async usedCategoryCodes(): Promise<ReadonlySet<string>> {
     const rows = (await this.dataSource.query(
       `SELECT finding_category_code AS code FROM physical_inventory_item WHERE finding_category_code IS NOT NULL
@@ -258,7 +242,6 @@ export class InventoryCatalogsService {
     return new Set(rows.map((row) => row.code));
   }
 
-  /** En uso: causa de un faltante o citada en el historial de correcciones. */
   private async usedCauseIds(): Promise<ReadonlySet<string>> {
     const rows = (await this.dataSource.query(
       `SELECT missing_cause_id::text AS id FROM physical_inventory_item WHERE missing_cause_id IS NOT NULL
@@ -301,7 +284,6 @@ export class InventoryCatalogsService {
     return this.auditLogs.record({
       action: AuditAction.InventoryCatalogChanged,
       entityType: ENTITY_TYPE,
-      // audit_log.entity_id es UUID: las categorías (PK = código) se registran con el UUID nulo y su código en changes.
       entityId: /^[0-9a-f-]{36}$/i.test(entityKey) ? entityKey : '00000000-0000-0000-0000-000000000000',
       performedBy: actor.id,
       ipAddress: null,

@@ -17,7 +17,6 @@ import {
 } from '../crypto/sign-movement.js';
 import { MovementVerificationLog } from '../entities/movement-verification-log.entity.js';
 
-/** Filas por INSERT en recordInitial: ~23 columnas por fila, lejos del límite de 65.535 parámetros. */
 const INITIAL_INSERT_CHUNK = 1000;
 
 export interface RecordMovementInput extends CreateMovementRecord {
@@ -77,12 +76,6 @@ export class MovementsService {
     return movements.save(this.signed(movements, input, previous?.id ?? null, new Date()));
   }
 
-  /**
-   * Registro inicial por conjuntos: el primer movimiento de cada activo (previous_movement_id NULL), firmado con el
-   * mismo esquema que record() (mismo constructor signed(), mismos campos, misma serialización, SIGNATURE_VERSION) y
-   * escrito con INSERT por lotes. Solo aplica a activos sin movimientos: si alguno ya tiene, lanza sin escribir.
-   * Quien llama debe tener bloqueados los activos (FOR UPDATE), igual que AssetStateService antes de record().
-   */
   async recordInitial(
     inputs: ReadonlyArray<RecordMovementInput>,
     manager: EntityManager,
@@ -205,7 +198,6 @@ export class MovementsService {
       order: { executedAt: 'DESC' },
     });
     const header = 'id,type,executedAt,reason,documentReference,fromStatus,toStatus';
-    // Toda celda pasa por csvCell: motivo y referencia son texto libre y no pueden abrirse como fórmula (BE-10).
     const rows = items.map((item) =>
       [
         item.id,
@@ -305,7 +297,6 @@ export class MovementsService {
     if (movement.metadata?.['signatureVersion'] !== SIGNATURE_VERSION) {
       return 'LEGACY_SCHEME';
     }
-    // La clave actual y, durante una rotación, las de MOVEMENT_SIGNING_SECRET_PREVIOUS (BE-12). Solo se firma con la actual.
     const stored = Buffer.from(movement.eventSignature, 'utf8');
     const matches = this.verificationSecrets().some((secret) => {
       const expected = Buffer.from(this.signatureOf(movement, secret), 'utf8');

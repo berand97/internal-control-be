@@ -101,7 +101,6 @@ describe('resolveSigners (separación de funciones)', () => {
       personId: S,
       substitution: { replacedPersonId: C, reason: 'Aprobó sin el permiso' },
     });
-    // Un rol que no es de Control Interno sigue sin sustituto, aunque se marque como no elegible.
     expect(() =>
       resolveSigners(TRANSFER, payload(signers, B, { CONTABILIDAD: { personId: S, reason: 'Motivo' } }), new Set(['CONTABILIDAD'])),
     ).toThrow(expect.objectContaining({ code: 'DOCUMENT_SIGNER_SUBSTITUTE_INVALID' }));

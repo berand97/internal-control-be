@@ -18,21 +18,13 @@ interface LockoutRow {
 }
 
 export interface AttemptOutcome {
-  /** false: el sujeto está bloqueado; no se debe verificar la credencial. */
   readonly allowed: boolean;
-  /** Este intento alcanzó el umbral: si resulta fallido, queda bloqueado hasta `lockedUntil`. */
   readonly lockedNow: boolean;
   readonly lockedUntil: Date | null;
 }
 
-/** Filas sin fallos en este lapso y sin bloqueo vigente se borran (no se acumulan identificadores inventados). */
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Contador persistente de intentos por cuenta (auth_attempt_lockout). Cada intento se cuenta ANTES de verificar la
- * credencial, dentro de una transacción con la fila bloqueada (FOR UPDATE): peticiones concurrentes desde muchas IP
- * no superan el umbral. Un acierto borra la fila (clear).
- */
 @Injectable()
 export class AuthLockoutService {
   constructor(private readonly dataSource: DataSource) {}
@@ -41,10 +33,6 @@ export class AuthLockoutService {
     return `user:${userId}`;
   }
 
-  /**
-   * Identificador sin cuenta: se cuenta igual que una cuenta real para que el bloqueo no delate cuáles existen. Solo
-   * se guarda un hash del identificador normalizado, nunca el texto.
-   */
   static subjectForUnknownIdentifier(identifier: string): string {
     const digest = createHash('sha256')
       .update(`auth-lockout:${identifier.trim().toLowerCase()}`)

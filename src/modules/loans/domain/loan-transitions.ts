@@ -2,17 +2,6 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { LoanStatus } from '../enums/loan-status.js';
 
-/**
- * Transiciones permitidas (docs/decisiones.md):
- * - APPROVED → PENDING_SIGNATURES: entrega física (POST /loans/:id/deliver).
- * - APPROVED → CANCELLED: el préstamo programado no va a ocurrir (POST /loans/:id/cancel, con motivo), antes de entregar.
- * - PENDING_SIGNATURES → ACTIVE: el acta OCI-01-65 queda firmada (onSigned, misma transacción).
- * - PENDING_SIGNATURES → CANCELLED: se deshace la entrega (POST /loans/:id/undo-delivery).
- * - OVERDUE → ACTIVE: se aprueba una extensión con fecha no vencida.
- * - PENDING_RECEPTION → RETURNED | PARTIALLY_RETURNED | CLOSED_WITH_LOSSES: recepción de la devolución.
- * - PARTIALLY_RETURNED → PENDING_RECEPTION: devolución (o pérdida) de los activos que seguían fuera.
- * - IN_TRANSIT: heredado, ningún endpoint lo produce.
- */
 const ALLOWED: Record<LoanStatus, ReadonlyArray<LoanStatus>> = {
   REQUESTED: ['APPROVED', 'REJECTED', 'CANCELLED'],
   APPROVED: ['PENDING_SIGNATURES', 'IN_TRANSIT', 'REJECTED', 'CANCELLED'],
@@ -39,12 +28,6 @@ export const assertLoanTransition = (
   }
 };
 
-/**
- * Estado del préstamo después de recibir una devolución, a partir de sus activos:
- * - alguno sigue fuera (sin devolución registrada) → PARTIALLY_RETURNED;
- * - todos resueltos y alguno perdido → CLOSED_WITH_LOSSES;
- * - todos devueltos → RETURNED.
- */
 export const statusAfterReception = (
   items: ReadonlyArray<{ readonly received: boolean; readonly lost: boolean }>,
 ): LoanStatus => {

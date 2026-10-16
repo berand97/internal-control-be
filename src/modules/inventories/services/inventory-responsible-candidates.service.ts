@@ -12,21 +12,10 @@ import type {
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { USER_DISPLAY_NAME_SQL } from './inventory-summary.js';
 
-/** Permiso de ruta que exige operar una toma (verificar, reportar, cerrar): sin él, el responsable no puede ejecutarla. */
 const EXECUTE_PERMISSION = 'inventory:execute:global';
 
 const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
 
-/**
- * Usuarios que pueden quedar a cargo de una toma (selector de responsable al programar). Lo usa quien programa
- * (inventory:create:global) sin necesitar user:read:global. Excluye a quien no podría operarla:
- * - usuarios no activos;
- * - sin el permiso efectivo inventory:execute:global (el guard de las rutas de ejecución lo exige también al
- *   responsable);
- * - si se indica el alcance, a quien sería auditado por la toma, con la misma regla de InventoryActorPolicy aplicada
- *   al alcance de hoy: jefe vigente de un centro auditado o custodio (asset.current_responsible_id) de un activo del
- *   alcance. La foto de la toma aún no existe al programar; al ejecutar, la política vuelve a revisar.
- */
 @Injectable()
 export class InventoryResponsibleCandidatesService {
   constructor(private readonly dataSource: DataSource) {}

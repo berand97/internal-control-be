@@ -1,13 +1,3 @@
-/**
- * Sugerencia de categoría de hallazgo a partir del catálogo (inventory_finding_category). Solo sugiere: el auditor
- * fija la categoría. Reglas, todas en datos:
- * - participan las categorías activas;
- * - una categoría aplica si cumple TODOS sus criterios no nulos: el resultado del ítem está en suggestResults y la
- *   condición observada está en suggestConditions; sin ningún criterio, nunca aplica;
- * - si aplican varias, gana la que acierta por condición observada (es más específica que el resultado), luego la
- *   de más criterios y luego la de menor sortOrder / código.
- */
-
 export interface SuggestibleCategory {
   readonly code: string;
   readonly isActive: boolean;

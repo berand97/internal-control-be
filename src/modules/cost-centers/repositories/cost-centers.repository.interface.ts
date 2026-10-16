@@ -10,7 +10,6 @@ export interface CreateCostCenterRecord {
   readonly organizationalUnitId: string | null;
   readonly parentId: string | null;
   readonly acceptsAssets: boolean;
-  /** Omitido: el valor por defecto de la columna (true). */
   readonly hasMovement?: boolean;
   readonly isActive: boolean;
   readonly syncSource: CostCenterSyncSource;
@@ -51,7 +50,6 @@ export interface CostCentersRepository {
   findByExternalCode(externalCode: string): Promise<CostCenter | null>;
   findOrgUnitById(id: string): Promise<OrganizationalUnit | null>;
   findOrgUnitByCode(code: string): Promise<OrganizationalUnit | null>;
-  /** Con manager, dentro de la transacción de quien llama. */
   insert(record: CreateCostCenterRecord, manager?: EntityManager): Promise<CostCenter>;
   update(id: string, record: UpdateCostCenterRecord, manager?: EntityManager): Promise<void>;
   deactivate(id: string): Promise<void>;

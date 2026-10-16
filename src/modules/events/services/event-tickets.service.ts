@@ -14,19 +14,10 @@ export interface EventTicketOwner {
   readonly sessionId: string;
 }
 
-/** 32 bytes aleatorios en base64url (43 caracteres). */
 const TICKET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 const hashTicket = (ticket: string): Buffer => createHash('sha256').update(ticket, 'utf8').digest();
 
-/**
- * Tickets de un solo uso para abrir GET /events: EventSource no puede mandar el Bearer y el JWT nunca va en la URL.
- * - En tabla (event_stream_ticket) y no en memoria: con dos instancias, el ticket emitido en una se consume en la otra;
- *   con una sola cuesta un INSERT y un DELETE por conexión.
- * - Solo se guarda el SHA-256 (clave primaria = búsqueda por índice); el valor en claro vive en la respuesta y la URL.
- * - Consumo atómico: DELETE ... RETURNING. Dos peticiones con el mismo ticket: solo una obtiene la fila.
- * - Los vencidos se purgan al emitir (índice por expires_at): la tabla no crece.
- */
 @Injectable()
 export class EventTicketsService {
   private readonly ttlSeconds: number;
@@ -49,7 +40,6 @@ export class EventTicketsService {
     return { ticket, expiresAt: row?.expiresAt ?? new Date() };
   }
 
-  /** Lo borra y devuelve su dueño; null si no existe, ya se usó o venció (un vencido también se borra). */
   async consume(ticket: string): Promise<EventTicketOwner | null> {
     if (!TICKET_PATTERN.test(ticket)) {
       return null;

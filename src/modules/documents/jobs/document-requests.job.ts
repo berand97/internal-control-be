@@ -18,11 +18,8 @@ export class DocumentRequestsJob {
       return;
     }
     await this.engine.processPending();
-    // Actas con todas sus firmas cuyo proceso falló al aplicar sus efectos: reintentar la transición.
     await this.engine.retryLifecycle();
-    // Actas SIGNED cuyo PDF firmado no se pudo guardar.
     await this.engine.retrySignedPdfs();
-    // Outbox de enlaces de firma por correo: el envío nunca ocurre dentro de una transacción de BD.
     await this.links.dispatchPending();
   }
 }

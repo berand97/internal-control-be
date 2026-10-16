@@ -28,7 +28,6 @@ import type {
   PrefixMismatchReason,
 } from '../dto/responses/cost-center-structure.responses.js';
 
-/** Datos de la petición que van a la auditoría y al historial (patrón de auth.controller.ts: @Ip() + user-agent). */
 export interface RequestMeta {
   readonly ip: string | null;
   readonly userAgent: string | null;
@@ -37,7 +36,6 @@ export interface RequestMeta {
 export const NO_REQUEST: RequestMeta = { ip: null, userAgent: null };
 
 export interface PlacementPatch {
-  /** undefined: no cambia; null: la quita. */
   readonly unitId?: string | null;
   readonly parentId?: string | null;
   readonly hasMovement?: boolean;
@@ -48,10 +46,6 @@ export interface PlacementContext extends RequestMeta {
   readonly actorId: string | null;
   readonly source: Exclude<PlacementSource, 'MIGRATION'>;
   readonly stagingImportId?: string | null;
-  /**
-   * Marca de la fila nueva. Sin indicar: open() abre AUTO y change() conserva la de la fila vigente. MANUAL: cambio de
-   * una persona en la pantalla del centro; AUTO: el conciliador o la vuelta a automático.
-   */
   readonly mode?: PlacementMode;
 }
 
@@ -67,7 +61,6 @@ export interface PlacementChange {
   readonly to: PlacementState;
   readonly fromMode: PlacementMode;
   readonly toMode: PlacementMode;
-  /** El centro quedó agrupador y dejó de aceptar activos. */
   readonly acceptsAssetsCleared: boolean;
 }
 
@@ -132,10 +125,6 @@ const toPlacementDto = (row: PlacementRow): CostCenterPlacementDto => ({
 const sameState = (left: PlacementState, right: PlacementState): boolean =>
   left.unitId === right.unitId && left.parentId === right.parentId && left.hasMovement === right.hasMovement;
 
-/**
- * Instante de una fecha AAAA-MM-DD: el final de ese día en Colombia (UTC-5, sin horario de verano), así los cambios
- * hechos ese día cuentan. Sin fecha, ahora.
- */
 export const resolveAt = (date: string | undefined): Date => {
   if (!date) {
     return new Date();
@@ -147,17 +136,11 @@ export const resolveAt = (date: string | undefined): Date => {
   return at;
 };
 
-/** Descarta fechas que el calendario corre (2026-02-31 → 3 de marzo). */
 const isCalendarDate = (date: string): boolean => {
   const [year, month, day] = date.split('-').map(Number);
   return new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1)).toISOString().slice(0, 10) === date;
 };
 
-/**
- * Ubicación de los centros de costo en el tiempo (unidad, centro padre, movimiento). Único punto que la cambia: cierra
- * la fila vigente y abre la nueva, y actualiza la caché de cost_center (parent_id, organizational_unit_id,
- * has_movement) en la misma transacción. Nunca cambia external_code ni el nombre.
- */
 @Injectable()
 export class CostCenterPlacementService {
   constructor(
@@ -167,10 +150,6 @@ export class CostCenterPlacementService {
     private readonly attributes: OrgStructureHistoryService,
   ) {}
 
-  /**
-   * Abre el historial de un centro recién creado en esta transacción con su estado (desde su created_at). El trigger
-   * trg_cost_center_initial_placement ve la fila al hacer commit y no agrega otra.
-   */
   async open(manager: EntityManager, costCenterId: string, context: PlacementContext): Promise<string> {
     const [row] = (await manager.query(
       `INSERT INTO cost_center_placement (cost_center_id, organizational_unit_id, parent_cost_center_id, has_movement,
@@ -195,7 +174,6 @@ export class CostCenterPlacementService {
     return row.id;
   }
 
-  /** open() para varios centros recién creados en esta transacción (importaciones). */
   async openMany(manager: EntityManager, costCenterIds: ReadonlyArray<string>, context: PlacementContext): Promise<number> {
     if (costCenterIds.length === 0) {
       return 0;
@@ -220,10 +198,6 @@ export class CostCenterPlacementService {
     return rows.length;
   }
 
-  /**
-   * Cambia la ubicación vigente. null si no cambia nada. Bloquea el centro (FOR UPDATE) para que dos cambios
-   * simultáneos se serialicen; el EXCLUDE de la tabla impide solapes aunque alguien escriba por fuera.
-   */
   async change(
     manager: EntityManager,
     costCenterId: string,
@@ -298,8 +272,6 @@ export class CostCenterPlacementService {
     }
 
     const now = new Date();
-    // Un cambio no puede empezar antes que la ubicación vigente (relojes, dos cambios en el mismo milisegundo).
-    // UPDATE … RETURNING vuelve de manager.query como [filas, afectadas].
     const [closedRows] = (await manager.query(
       `UPDATE cost_center_placement SET valid_until = GREATEST($2::timestamptz, valid_from)
        WHERE cost_center_id = $1 AND valid_until IS NULL
@@ -360,7 +332,6 @@ export class CostCenterPlacementService {
     return { placementId, from, to, fromMode, toMode, acceptsAssetsCleared };
   }
 
-  /** Cambio manual (POST /cost-centers/:id/placement): en su propia transacción; sin cambios es un error. */
   async changeManually(
     costCenterId: string,
     patch: PlacementPatch,
@@ -427,10 +398,6 @@ export class CostCenterPlacementService {
     return { costCenter: { id: center.id, externalCode: center.external_code, name: center.name }, events };
   }
 
-  /**
-   * Árbol por centro padre a una fecha: unidad y movimiento de esa fecha; activos directos y estado, de hoy. Por defecto
-   * solo los centros activos (un archivado no aparece; sus hijos activos suben a la raíz); includeArchived los muestra.
-   */
   async tree(at: Date, includeArchived = false): Promise<CostCenterTreeDto> {
     const rows = (await this.dataSource.query(
       `SELECT cc.id, cc.external_code, cc.name, cc.is_active, p.parent_cost_center_id AS parent_id, p.has_movement,
@@ -500,10 +467,6 @@ export class CostCenterPlacementService {
     return { at: at.toISOString(), roots: build(null) };
   }
 
-  /**
-   * Centros activos cuyo código no cuadra con su unidad vigente: sin unidad, unidad sin prefijo o código fuera del
-   * rango (incluye los que se movieron de unidad). Nunca se corrigen: es un listado para revisar.
-   */
   async prefixMismatches(): Promise<CostCenterPrefixMismatchDto[]> {
     const rows = (await this.dataSource.query(
       `SELECT cc.id, cc.external_code, cc.name,
@@ -629,7 +592,6 @@ export class CostCenterPlacementService {
     if (!parent) {
       throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro padre');
     }
-    // Ancestros del nuevo padre (tope de profundidad por si la caché ya tuviera un ciclo).
     const [cycle] = (await manager.query(
       `WITH RECURSIVE up (id, parent_id, depth) AS (
          SELECT id, parent_id, 0 FROM cost_center WHERE id = $1

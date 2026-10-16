@@ -5,12 +5,6 @@ import { LoansService } from '../../loans/services/loans.service.js';
 import { TRANSFER_ENTITY_TYPE, TRANSFER_FORMAT_KEY } from '../../transfers/domain/transfer.js';
 import { AssetRequestsService } from './asset-requests.service.js';
 
-/**
- * «El documento completo llega a ambos centros»: cuando el acta de entrega del préstamo (OCI-01-65, préstamo → ACTIVE)
- * o el acta del traslado (OCI-17-89, traslado → COMPLETED) queda firmada, la solicitud que la originó avisa al
- * solicitante y a los jefes del centro dueño con el enlace al acta. Corre como observador del motor, después del
- * manejador del préstamo o del traslado y en su misma transacción.
- */
 @Injectable()
 export class AssetRequestCompletionObserver implements OnModuleInit {
   constructor(
@@ -20,11 +14,8 @@ export class AssetRequestCompletionObserver implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    // Entregar el préstamo programado de una solicitud la lleva de LOAN_SCHEDULED a DOCUMENT_GENERATED.
     this.loans.onDelivered((manager, event) => this.requests.onLoanDelivered(manager, event));
-    // Rechazar el préstamo programado (antes de entregarlo) cierra la solicitud: CLOSED_LOAN_REJECTED.
     this.loans.onRejected((manager, event) => this.requests.onLoanRejected(manager, event));
-    // Cancelar el préstamo programado (ya aprobado, antes de entregarlo) también la cierra: CLOSED_LOAN_CANCELLED.
     this.loans.onCancelled((manager, event) => this.requests.onLoanCancelled(manager, event));
     this.lifecycle.observe(LOAN_DOCUMENT_ENTITY, 'onSigned', async (manager, event) => {
       if (event.formatKey === LOAN_DELIVERY_FORMAT && event.entityId) {

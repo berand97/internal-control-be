@@ -28,7 +28,6 @@ import { InventoryValuationService } from './inventory-valuation.service.js';
 
 const ENTITY_TYPE = 'INVENTORY';
 
-/** Lo que una corrección guarda del ítem antes y después (sin notas). */
 const snapshot = (item: PhysicalInventoryItem) => ({
   result: item.verificationResult,
   actualCondition: item.actualCondition,
@@ -44,12 +43,6 @@ const snapshot = (item: PhysicalInventoryItem) => ({
 const invalid = (field: string, message: string): ApiException =>
   new ApiException(ErrorCode.ValidationFailed, undefined, [{ field, message }]);
 
-/**
- * Correcciones con evidencia sobre una toma EN CURSO: cambiar el resultado de un ítem esperado, anular un sobrante
- * registrado por error y fijar la categoría de hallazgo. Cada corrección o anulación deja fila en
- * inventory_item_correction (antes, después, motivo, quién y cuándo) en la misma transacción que el ítem y la
- * auditoría; la auditoría guarda solo ids y resultados, nunca el motivo ni textos libres.
- */
 @Injectable()
 export class InventoryCorrectionsService {
   constructor(

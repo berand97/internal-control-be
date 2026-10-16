@@ -18,7 +18,6 @@ import {
 
 export const sha256Hex = (value: string): string => createHash('sha256').update(value).digest('hex');
 
-/** 32 bytes aleatorios en base64url (43 caracteres). Solo su SHA-256 se guarda. */
 export const newSecret = (): string => randomBytes(32).toString('base64url');
 
 export type LinkInvalidation = 'RESENT' | 'ATTEMPTS_EXCEEDED' | 'REASSIGNED' | 'VOIDED' | 'TURN_CHANGED';
@@ -46,7 +45,6 @@ export interface SigningLinkRow {
   created_at: Date;
 }
 
-/** Estado del enlace como lo ve quien administra el proceso (detalle del documento). */
 export type SigningLinkState = 'PENDING_SEND' | 'SENT' | 'SEND_FAILED' | 'EXPIRED' | 'CONSUMED' | 'INVALIDATED';
 
 export const linkState = (link: SigningLinkRow, now = new Date()): SigningLinkState => {
@@ -67,15 +65,6 @@ const OPEN = 'consumed_at IS NULL AND invalidated_at IS NULL';
 const bogotaDateTime = (date: Date): string =>
   new Intl.DateTimeFormat('es-CO', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Bogota' }).format(date);
 
-/**
- * Enlaces de firma por correo (camino EMAIL_LINK) y su outbox.
- *
- * - El enlace se crea (PENDING_SEND) cuando el turno de una persona sin usuario activo pasa a ser el actual, o cuando
- *   quien administra el proceso lo reenvía (invalida el anterior). Crear el enlace nunca envía correo.
- * - dispatchPending (job de cada minuto y, sin esperar al job, justo después de crear el enlace) emite el token en su
- *   propia transacción, envía el correo FUERA de la transacción y registra SENT o FAILED con el error.
- * - El token solo existe en el correo: en BD queda su SHA-256.
- */
 @Injectable()
 export class SigningLinkService {
   private readonly logger = new Logger(SigningLinkService.name);
@@ -123,7 +112,6 @@ export class SigningLinkService {
     return channelFor(role, await this.candidate(manager, personId));
   }
 
-  /** Turno actual del acta: el primer PENDING, si el acta sigue pendiente y nadie rechazó. */
   async currentTurn(
     manager: EntityManager,
     documentId: string,
@@ -141,11 +129,6 @@ export class SigningLinkService {
     return slots.find((slot) => slot.status === 'PENDING') ?? null;
   }
 
-  /**
-   * Deja el enlace del turno actual como corresponde: invalida los enlaces abiertos de turnos que ya no son el actual
-   * y, si el turno actual se firma por enlace y esa persona aún no tiene uno, lo crea. Luego intenta enviarlo.
-   * No crea otro si ya hubo uno para la misma persona y turno (vencido, usado o bloqueado): eso lo decide un reenvío.
-   */
   async refresh(documentId: string): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       await manager.query('SELECT id FROM document WHERE id = $1 FOR UPDATE', [documentId]);
@@ -181,7 +164,6 @@ export class SigningLinkService {
     await this.dispatchPending(20, documentId);
   }
 
-  /** Reenvío por quien administra el proceso: invalida el enlace abierto del turno y crea uno nuevo. */
   async resend(documentId: string, order: number, actorId: string): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       await manager.query('SELECT id FROM document WHERE id = $1 FOR UPDATE', [documentId]);
@@ -219,7 +201,6 @@ export class SigningLinkService {
     );
   }
 
-  /** Outbox del correo: emite token y envía. Un fallo queda en el enlace (FAILED + last_send_error), nunca se pierde. */
   async dispatchPending(limit = 20, documentId?: string): Promise<{ sent: number; failed: number }> {
     const due = (await this.dataSource.query(
       `SELECT id FROM signature_signing_link
@@ -291,7 +272,6 @@ export class SigningLinkService {
       return 'SKIPPED';
     }
     const { link, expiresAt, contact } = claimed;
-    // Código, nombre y etiqueta del rol: los de la versión del formato con que se emitió el acta.
     const format = await this.catalog.forDocument(link.document_id).catch(() => undefined);
     let error: string | null = null;
     try {
@@ -332,7 +312,6 @@ export class SigningLinkService {
     return row ?? null;
   }
 
-  /** Último enlace de cada turno del acta (detalle del documento). */
   async latestByOrder(documentId: string): Promise<Map<number, SigningLinkRow>> {
     const rows = (await this.dataSource.query(
       `SELECT DISTINCT ON (sign_order) * FROM signature_signing_link WHERE document_id = $1

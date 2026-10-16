@@ -52,11 +52,6 @@ import { EmailTemplatesService } from './email-templates.service.js';
 
 const UUID_PIPE = new ParseUUIDPipe({ version: '4' });
 
-/**
- * Plantillas de correo: lectura con email_template:read:global, cambios y correo de prueba con
- * email_template:manage:global. Ambos permisos los tiene por defecto INTERNAL_CONTROL_DIRECTOR, que los delega por
- * la administración de roles en cascada. Bajo el módulo "Correo" (feature mail): si se apaga, esto también.
- */
 @ApiTags(OpenApiTag.Mail)
 @ApiBearerAuth()
 @ApiExtraModels(

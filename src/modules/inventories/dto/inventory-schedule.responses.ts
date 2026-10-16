@@ -3,12 +3,6 @@ import { REMINDER_STATUSES } from '../domain/inventory-schedule.js';
 import { INVENTORY_SCOPE_TYPES, InventoryScopeType } from '../enums/inventory-scope.js';
 import { INVENTORY_STATUSES, InventoryStatus } from '../enums/inventory-status.js';
 
-/**
- * Esquemas de respuesta de la programación de tomas (POST /inventories, /:id/reschedule, /:id/cancel,
- * GET /inventories/calendar y /inventories/coverage). Solo documentan lo que devuelven InventorySchedulesService e
- * InventoryPlanningService: cambiar un shape exige cambiar ambos.
- */
-
 export const INVENTORY_SCHEDULE_WARNING_CODES = [
   'NO_HEAD_WITH_EMAIL',
   'NO_HEAD_FOR_SCOPE',
@@ -31,8 +25,6 @@ const WARNING_DESCRIPTION =
   'alcance no es un centro de costo, así que no hay jefe a quien avisar; SCHEDULE_OVERLAP: otra toma planeada o en ' +
   'curso del mismo alcance o con activos compartidos cruza fechas (ver conflicts); REMINDERS_SKIPPED: algunos ' +
   'recordatorios ya pasaron y no se enviarán; START_IN_PAST: la fecha de inicio ya pasó';
-
-// ---------- Resumen de la toma (común) ----------
 
 export class InventoryResponsibleDto {
   @ApiProperty({ format: 'uuid' })
@@ -154,8 +146,6 @@ export class InventorySummaryDto {
   readonly createdByName!: string | null;
 }
 
-// ---------- Avisos: destinatarios, advertencias, conflictos, recordatorios ----------
-
 export class InventoryScheduleWarningDto {
   @ApiProperty({ enum: INVENTORY_SCHEDULE_WARNING_CODES, enumName: 'InventoryScheduleWarningCode', description: WARNING_DESCRIPTION })
   readonly code!: InventoryScheduleWarningCode;
@@ -236,7 +226,6 @@ export class InventoryReminderDto {
   readonly sentAt!: string | null;
 }
 
-/** POST /inventories y POST /inventories/:id/reschedule. */
 export class InventoryScheduleResponseDto extends InventorySummaryDto {
   @ApiProperty({ type: [InventoryReminderDto], description: 'Recordatorios de la revisión vigente de fechas' })
   readonly reminders!: InventoryReminderDto[];
@@ -251,7 +240,6 @@ export class InventoryScheduleResponseDto extends InventorySummaryDto {
   readonly conflicts!: InventoryConflictDto[];
 }
 
-/** POST /inventories/:id/cancel. */
 export class InventoryCancelResponseDto extends InventorySummaryDto {
   @ApiProperty({ type: [InventoryNoticeRecipientDto] })
   readonly noticeRecipients!: InventoryNoticeRecipientDto[];
@@ -259,8 +247,6 @@ export class InventoryCancelResponseDto extends InventorySummaryDto {
   @ApiProperty({ type: [InventoryScheduleWarningDto] })
   readonly warnings!: InventoryScheduleWarningDto[];
 }
-
-// ---------- GET /inventories/calendar ----------
 
 export class InventoryCostCenterRefDto {
   @ApiProperty({ format: 'uuid' })
@@ -382,8 +368,6 @@ export class InventoryCalendarResponseDto {
   @ApiProperty({ type: [InventoryWeekWarningDto], description: 'Semanas con más tomas que el umbral; [] sin umbral' })
   readonly weekWarnings!: InventoryWeekWarningDto[];
 }
-
-// ---------- GET /inventories/coverage ----------
 
 export class InventoryCoverageLastDto {
   @ApiProperty({ format: 'uuid' })

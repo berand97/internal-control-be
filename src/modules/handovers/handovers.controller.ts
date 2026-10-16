@@ -22,7 +22,6 @@ import {
 } from './dto/handover.dto.js';
 import { HandoversService } from './services/handovers.service.js';
 
-/** Permisos del formato OCI-01-55 (document-formats.ts): generar = asset:update:global, leer = asset:read:global. */
 @ApiTags(OpenApiTag.Assets)
 @ApiBearerAuth()
 @ApiExtraModels(ApiSuccessEnvelope, HandoverDetailDto, HandoverListResponseDto)

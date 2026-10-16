@@ -162,7 +162,6 @@ describe('renderEmailHtml: variables maliciosas', () => {
     const tags = html.match(/<[^>]+>/g) ?? [];
     expect(tags.some((tag) => /\son[a-z]+=/i.test(tag))).toBe(false);
     expect(html).toContain('Ana &lt;b&gt;&quot;Mala&quot;&lt;/b&gt; &amp; &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;');
-    // 6 apariciones: título, h1, párrafo, etiqueta y valor de la lista, nota; más la del botón.
     expect(html.split('&lt;script&gt;').length - 1).toBe(7);
   });
 

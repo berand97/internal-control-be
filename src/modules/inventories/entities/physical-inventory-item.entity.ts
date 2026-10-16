@@ -61,44 +61,33 @@ export class PhysicalInventoryItem {
   @Column({ name: 'photo_url', type: 'text', nullable: true })
   photoUrl!: string | null;
 
-  /** Código del catálogo inventory_finding_category; lo fija el auditor, nunca el sistema. */
   @Column({ name: 'finding_category_code', type: 'varchar', length: 10, nullable: true })
   findingCategoryCode!: string | null;
 
   @Column({ name: 'missing_cause_id', type: 'uuid', nullable: true })
   missingCauseId!: string | null;
 
-  /** Causa "Otra" en texto libre (3..500); excluyente con missingCauseId. */
   @Column({ name: 'missing_cause_other', type: 'text', nullable: true })
   missingCauseOther!: string | null;
 
-  /** El activo tenía la marca BARCODE_TEMP al congelar la foto. NULL en fotos anteriores a esta columna. */
   @Column({ name: 'expected_code_temporary', type: 'boolean', nullable: true })
   expectedCodeTemporary!: boolean | null;
 
-  /** Sobrante de un activo que estaba LOST: la conciliación no lo recupera. */
   @Column({ name: 'was_lost', type: 'boolean', default: false })
   wasLost!: boolean;
 
-  /** Sobrante anulado por error (queda en el historial de correcciones). */
   @Column({ name: 'voided_at', type: 'timestamptz', nullable: true })
   voidedAt!: Date | null;
 
-  /** Qué se decidió con un sobrante sin activo con la toma cerrada (CREATE_ASSET o LEAVE_UNRESOLVED). */
   @Column({ name: 'surplus_resolution', type: 'varchar', length: 20, nullable: true })
   surplusResolution!: SurplusResolution | null;
 
   @Column({ name: 'surplus_resolution_reason', type: 'text', nullable: true })
   surplusResolutionReason!: string | null;
 
-  /**
-   * Centro de costo al que pertenece un sobrante sin activo, en tomas que no son de un centro (PUT
-   * /inventories/:id/items/:itemId/surplus-center o al dejarlo sin resolver): define en qué acta aparece.
-   */
   @Column({ name: 'surplus_cost_center_id', type: 'uuid', nullable: true })
   surplusCostCenterId!: string | null;
 
-  /** Activo creado a partir del sobrante (solo CREATE_ASSET). */
   @Column({ name: 'resolved_asset_id', type: 'uuid', nullable: true })
   resolvedAssetId!: string | null;
 

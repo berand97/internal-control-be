@@ -78,7 +78,6 @@ describe('processEmailImage', () => {
     expect(after.icc).toBeUndefined();
     expect(after.xmp).toBeUndefined();
     expect(result.content.toString('latin1')).not.toContain('Modelo secreto');
-    // Orientation 6 = rotar 90°: la imagen guardada ya viene girada.
     expect(result).toMatchObject({ width: 30, height: 60 });
   });
 
@@ -115,8 +114,6 @@ describe('processEmailImage', () => {
   it('sin ancho ni alto legibles (PNG con IHDR 0 × 0): UNREADABLE, no un mensaje de tamaño', async () => {
     const good = await png(40, 20);
     const zero = Buffer.from(good);
-    // IHDR: firma (8) + longitud (4) + "IHDR" (4) → ancho en 16..19 y alto en 20..23 (el CRC deja de cuadrar:
-    // sharp no la lee, y si la leyera sin ancho/alto también sería UNREADABLE).
     zero.writeUInt32BE(0, 16);
     zero.writeUInt32BE(0, 20);
     expect(await rejection(zero)).toBe('UNREADABLE');
@@ -127,7 +124,6 @@ describe('processEmailImage', () => {
     expect(await rejection(good.subarray(0, 40))).toBe('UNREADABLE');
     const fake = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from('<svg></svg>')]);
     expect(await rejection(fake)).toBe('UNREADABLE');
-    // Firma PNG delante de un JPEG real: el formato real no coincide.
     const disguised = Buffer.concat([good.subarray(0, 8), (await jpeg()).subarray(8)]);
     expect(['UNREADABLE', 'NOT_PNG_OR_JPEG']).toContain(await rejection(disguised));
   });

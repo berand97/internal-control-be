@@ -11,16 +11,8 @@ import { NotificationsService } from '../../notifications/services/notifications
 import { EventStream, streamClosedEvent } from './event-stream.js';
 import { EventTicketsService } from './event-tickets.service.js';
 
-/**
- * Streams simultáneos por usuario. El frontend abre uno por navegador (pestaña líder): 3 cubre PC, portátil y móvil.
- * Al abrir el 4.º se cierra el MÁS VIEJO con `stream.closed` REPLACED en vez de rechazar el nuevo con 429: el más
- * viejo es el que con más probabilidad está muerto sin saberlo (portátil suspendido, red caída sin FIN, que el proxy
- * aún no cortó); rechazar dejaría al usuario sin tiempo real hasta que esas conexiones zombi venzan. El reemplazado
- * no debe reconectar solo (el frontend cae a su sondeo lento), así dos dispositivos no se expulsan en bucle.
- */
 export const MAX_STREAMS_PER_USER = 3;
 
-/** Registro de los streams SSE de esta instancia: límites, apertura y cierre ordenado al apagar. */
 @Injectable()
 export class EventStreamsService implements OnModuleDestroy {
   private readonly logger = new Logger('EventStreams');
@@ -42,10 +34,6 @@ export class EventStreamsService implements OnModuleDestroy {
     this.heartbeatMs = config.getOrThrow('events.heartbeatMs', { infer: true });
   }
 
-  /**
-   * Consume el ticket y abre el stream. Antes de escribir cabeceras lanza (JSON de error de siempre):
-   * 401 EVENTS_TICKET_INVALID, 401 SESSION_REVOKED, 503 EVENTS_CAPACITY_REACHED.
-   */
   async open(ticket: string, lastEventId: string | null, res: Response): Promise<void> {
     const owner = await this.tickets.consume(ticket);
     if (!owner) {
@@ -79,7 +67,6 @@ export class EventStreamsService implements OnModuleDestroy {
     this.logger.debug(`Stream abierto (${this.total} en la instancia)`);
   }
 
-  /** Streams abiertos de un usuario en esta instancia (pruebas y diagnóstico). */
   openFor(userId: string): number {
     return this.byUser.get(userId)?.length ?? 0;
   }

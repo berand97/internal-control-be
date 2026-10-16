@@ -27,17 +27,13 @@ export type AssetRequestNoticeKind =
   | 'EXPIRED'
   | 'COMPLETED';
 
-/** A quién va cada aviso: el solicitante, los jefes vigentes del centro dueño y Control Interno (revisores). */
 export type AssetRequestAudience = 'REQUESTER' | 'OWNER_HEADS' | 'REVIEWERS';
 
 export interface AssetRequestNoticeExtra {
   readonly reason?: string;
-  /** Corrección: a quién pasa (centro dueño o Control Interno). */
   readonly nextReviewer?: string;
   readonly expiredOn?: string;
-  /** Vencimiento de una solicitud devuelta: el motivo con que Control Interno la devolvió. */
   readonly returnReason?: string;
-  /** Préstamo programado: fecha de inicio (desde la que se entrega), en texto largo. */
   readonly startDate?: string;
   readonly assetCount?: number;
   readonly document?: { readonly kind: string; readonly number?: string; readonly documentId?: string };
@@ -94,11 +90,6 @@ const TITLE: Record<AssetRequestNoticeKind, string> = {
   COMPLETED: 'Acta de la solicitud firmada',
 };
 
-/**
- * Avisos de la solicitud de activos: notificación en la aplicación (usuarios activos) y correo por mail_outbox
- * (personas con correo), ambos en la transacción del hecho. Un mismo destinatario recibe un solo aviso aunque tenga
- * dos papeles. Sin segundo mecanismo: mismos servicios que los avisos de tomas físicas.
- */
 @Injectable()
 export class AssetRequestNoticesService {
   constructor(

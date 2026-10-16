@@ -45,7 +45,6 @@ import { inventorySummary, inventorySummaryUserIds, loadResponsibleNames } from 
 
 const ENTITY_TYPE = 'INVENTORY';
 
-/** Marca de importación de un activo cuyo código de barras era "TEMP" (excel-import.service.ts, insertAssets). */
 const TEMPORARY_CODE_FLAG = 'BARCODE_TEMP';
 
 interface ScopeAssetRow {
@@ -349,13 +348,6 @@ export class InventoriesService {
     };
   }
 
-  /**
-   * Cierra la toma: los ítems que siguen PENDING pasan a NOT_VERIFIED (no son faltantes y la conciliación no los
-   * toca) y se congela el reporte. Se crea un acta por centro de costo presente en los ítems, con quién la firma como
-   * ENCARGADO (jefe vigente de ese centro, InventorySignerHeadService) y quién atendió por el área. Todo en una
-   * transacción. Un centro sin jefe no bloquea el cierre ni las demás actas: la respuesta trae su aviso
-   * ACT_CANNOT_BE_ISSUED.
-   */
   async close(id: string, dto: CloseInventoryDto, actor: AuthenticatedUser) {
     const inventory = await this.requireInventory(id);
     assertInventoryTransition(inventory.status, InventoryStatus.Closed);
@@ -390,7 +382,6 @@ export class InventoriesService {
       inventory.discrepancyReport = report;
       const acts = await this.signerHead.applyOnClose(manager, inventory, dto, actor);
       await manager.getRepository(PhysicalInventory).save(inventory);
-      // Solo conteos: el reporte completo (con notas y causas en texto libre) queda en la toma, no en la auditoría.
       await this.auditLogsRepository.record(
         {
           action: AuditAction.InventoryClosed,
@@ -423,10 +414,6 @@ export class InventoriesService {
     };
   }
 
-  /**
-   * Con la toma cerrada prevalece lo congelado al cerrar; los campos que no existían entonces, la valoración y la
-   * resolución de sobrantes salen en vivo (mergeFrozenReport).
-   */
   private frozenOrLiveReport(
     inventory: PhysicalInventory,
     items: ReadonlyArray<PhysicalInventoryItem>,
@@ -468,7 +455,6 @@ export class InventoriesService {
     }
     const items = await this.items.find({ where: { inventoryId: inventory.id } });
     await this.dataSource.transaction(async (manager) => {
-      // Dentro de la transacción: un sobrante sin centro no llega a ninguna acta.
       await this.signerHead.assertNoUnassignedSurplus(inventory, manager);
       for (const item of items) {
         if (!item.assetId) {
@@ -480,7 +466,6 @@ export class InventoriesService {
         if (item.verificationResult === VerificationResult.Missing) {
           await this.applyLost(inventory, item, actor, manager);
         }
-        // NOT_VERIFIED y los sobrantes no cambian nada: no verificar no es un faltante.
         if (
           (item.verificationResult === VerificationResult.Found ||
             item.verificationResult === VerificationResult.Misplaced) &&
@@ -494,7 +479,6 @@ export class InventoriesService {
       inventory.status = InventoryStatus.Reconciled;
       inventory.reconcileApprovedAt = new Date();
       inventory.reconcileApprovedBy = actor.id;
-      // Un acta OCI-21-37 por centro se encola aquí; la que no se pueda queda con su motivo y la conciliación sigue.
       await this.act.enqueueOnApproval(manager, inventory, actor);
       await manager.getRepository(PhysicalInventory).save(inventory);
       await this.auditLogsRepository.record(
@@ -616,7 +600,6 @@ export class InventoriesService {
     return asset;
   }
 
-  /** Programar (InventorySchedulesService): GLOBAL sin scopeId; los demás alcances con scopeId. */
   assertScope(
     scope: InventoryScopeType,
     scopeId: string | undefined,
@@ -662,10 +645,6 @@ export class InventoriesService {
     }
   }
 
-  /**
-   * Bloqueo duro al iniciar: dos tomas EN CURSO no pueden compartir activos. Las PLANNED no bloquean: programar dos
-   * tomas del mismo alcance en fechas distintas es válido y, si las fechas se cruzan, programar solo advierte.
-   */
   private async assertNoRunningOverlap(
     scopeType: InventoryScopeType,
     scopeId: string | null,
@@ -747,7 +726,6 @@ export class InventoriesService {
     return rows as ScopeAssetRow[];
   }
 
-  /** Código correlativo TF-<año>-NNN. Con `manager`, dentro de la transacción que crea la toma. */
   async nextCode(manager?: EntityManager): Promise<string> {
     const year = new Date().getFullYear();
     const rows: unknown = await (manager ?? this.dataSource).query(
@@ -775,7 +753,6 @@ export class InventoriesService {
     return `${prefix}${year}-${String(value).padStart(padding, '0')}`;
   }
 
-  /** La toma o 404 (para quien lee un dato de ella, como los jefes elegibles). */
   requireById(id: string): Promise<PhysicalInventory> {
     return this.requireInventory(id);
   }

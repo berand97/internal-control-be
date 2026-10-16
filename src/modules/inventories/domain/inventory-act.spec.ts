@@ -109,7 +109,6 @@ describe('buildInventoryActContent', () => {
       input([item('a', { findingCategoryCode: 'AU' })], new Map([['a', valuationOf(0, null, null)]])),
     );
     expect(zero.tables['hallazgos']?.map((row) => row['porcentaje'])).toEqual([NO_DATA, NO_DATA, NO_DATA]);
-    // Sin bienes con categoría el total es 0: tampoco hay porcentaje que afirmar.
     const empty = buildInventoryActContent(input([], new Map()));
     expect(empty.tables['hallazgos']?.map((row) => row['porcentaje'])).toEqual([NO_DATA, NO_DATA, NO_DATA]);
   });

@@ -49,7 +49,6 @@ export enum AuditAction {
   CostCenterArchived = 'COST_CTR_ARCHIVED',
   OrgUnitArchived = 'ORG_UNIT_ARCHIVED',
   OrgChartImported = 'ORG_CHART_IMPORTED',
-  /** Conciliador de estructura: conteos de reubicaciones, re-padres y amarres; sin datos personales. */
   StructureReconciled = 'STRUCTURE_RECONCILED',
   CategoryCreated = 'CATEGORY_CREATED',
   CategoryUpdated = 'CATEGORY_UPDATED',
@@ -107,8 +106,6 @@ export enum AuditAction {
   PriceZeroReasonSet = 'PRICE_ZERO_REASON',
   AccountingCutCreated = 'ACC_CUT_CREATED',
   DepreciationCalculated = 'DEPR_CALCULATED',
-  /** Circuito de un módulo abierto por errores internos (sin actor; changes: código, conteo, ventana, espera). */
   FeatureCircuitOpened = 'FEATURE_CIRCUIT_OPEN',
-  /** Módulo reactivado solo tras una petición de prueba exitosa (sin actor; changes: código, minutos caído). */
   FeatureCircuitRecovered = 'FEATURE_RECOVERED',
 }

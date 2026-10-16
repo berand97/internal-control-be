@@ -60,7 +60,6 @@ const STREAM_DESCRIPTION = `Server-Sent Events del usuario del ticket. Un solo s
 Ids: número decimal creciente (event_seq de la notificación). Al reconectar mande el último con la cabecera Last-Event-ID o \`lastEventId\`: se reponen hasta 100 notificaciones posteriores (las más recientes) antes de seguir en vivo.
 No cuenta contra el límite de peticiones; el ticket sí.`;
 
-/** Canal de eventos en tiempo real del usuario autenticado (SSE). */
 @ApiTags(OpenApiTag.Auth)
 @ApiExtraModels(
   ApiSuccessEnvelope,

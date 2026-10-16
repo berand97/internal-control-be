@@ -14,7 +14,6 @@ import {
 } from './dto/document.responses.js';
 import { DocumentEngineService } from './services/document-engine.service.js';
 
-/** El token del enlace: 32 bytes en base64url. */
 export class SigningLinkParams {
   @Matches(/^[A-Za-z0-9_-]{43}$/)
   readonly token!: string;
@@ -48,11 +47,6 @@ const READ_THROTTLE = { default: { limit: 30, ttl: 60_000 } } as const;
 const IDENTITY_THROTTLE = { default: { limit: 10, ttl: 900_000 } } as const;
 const ACTION_THROTTLE = { default: { limit: 10, ttl: 60_000 } } as const;
 
-/**
- * Firma sin sesión por enlace de un solo uso (página pública /firmar/:token del frontend). Solo expone el acta del
- * enlace, y solo mientras el enlace está vigente. El token y el número de documento nunca vuelven en una respuesta
- * ni se registran.
- */
 @ApiTags(OpenApiTag.DocumentTemplates)
 @ApiExtraModels(ApiSuccessEnvelope, SigningLinkViewResponseDto, SigningLinkIdentityResponseDto, SigningLinkResultResponseDto)
 @Feature('document-templates')

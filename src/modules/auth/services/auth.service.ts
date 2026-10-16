@@ -105,7 +105,6 @@ export class AuthService {
   ): Promise<LoginOutcome> {
     const user = await this.findUserForLogin(dto.username);
 
-    // Cuenta inexistente: se cuenta y bloquea igual que una real (misma respuesta, mismo trabajo).
     const lockSubject = user
       ? AuthLockoutService.subjectForUser(user.id)
       : AuthLockoutService.subjectForUnknownIdentifier(dto.username);
@@ -137,8 +136,6 @@ export class AuthService {
       throw new ApiException(ErrorCode.InvalidCredentials);
     }
 
-    // BE-13: el estado de la cuenta (suspendida, inactiva, invitación vencida) solo se revela a quien demostró la
-    // contraseña. Con contraseña errónea, cualquier cuenta responde INVALID_CREDENTIALS, exista o no.
     const passwordMatches = await this.hashService.verify(
       user.passwordHash,
       dto.password,
@@ -225,10 +222,6 @@ export class AuthService {
     return this.issueSession(user, context, 'TOTP');
   }
 
-  /**
-   * Alternativa a POST /auth/mfa/verify cuando no se tiene el dispositivo: consume un código de recuperación del
-   * usuario del desafío. El código queda usado aunque la sesión se cierre enseguida.
-   */
   async verifyRecoveryCode(
     dto: VerifyRecoveryCodeDto,
     authorizationHeader: string | undefined,
@@ -484,8 +477,6 @@ export class AuthService {
     if (!user) {
       return null;
     }
-    // BE-13: la respuesta sale sin esperar el token ni el SMTP (conexión, STARTTLS, AUTH), que delataban por tiempo
-    // los correos registrados. El trabajo sigue en segundo plano; un fallo solo se registra (sin correo ni token).
     void this.deliverPasswordReset(user, dto.email, context).catch(
       (error: unknown) => {
         this.logger.error(
@@ -714,7 +705,6 @@ export class AuthService {
     ) {
       throw new ApiException(ErrorCode.UserInactive);
     }
-    // BE-14: la contraseña temporal de una invitación vence; el reenvío genera otra y renueva el plazo.
     if (
       user.mustChangePassword &&
       isInvitationExpired(user.invitationExpiresAt ?? null, new Date())
@@ -729,7 +719,6 @@ export class AuthService {
     );
   }
 
-  /** TOTP y códigos de recuperación comparten el contador MFA de la cuenta, sea cual sea el desafío o la IP. */
   private async registerMfaAttempt(
     userId: string,
     context: AuthRequestContext,
@@ -748,7 +737,6 @@ export class AuthService {
     return attempt;
   }
 
-  /** Auditoría del bloqueo recién abierto: factor y vencimiento; nunca la credencial ni el identificador tecleado. */
   private async auditLockIfOpened(
     attempt: AttemptOutcome,
     userId: string | null,

@@ -64,7 +64,6 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
       OrganizationalUnit,
     ]),
   ],
-  // El de catálogos va primero: sus rutas fijas (/inventories/catalogs/...) no deben caer en /inventories/:id.
   controllers: [InventoryCatalogsController, InventoriesController, AccountingCutsController],
   providers: [
     InventoriesService,

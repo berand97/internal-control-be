@@ -24,7 +24,6 @@ export class AssetRequestCostCenterDto {
   readonly name!: string;
 }
 
-/** Centros para armar o corregir una solicitud: solo id, código y nombre (sin jefes, conteos ni activos). */
 export class AssetRequestCentersDto {
   @ApiProperty({
     type: [AssetRequestCostCenterDto],

@@ -27,7 +27,6 @@ import { type OrgHistoryEntry, OrgStructureHistoryService } from './org-structur
 
 export interface ReconcileContext extends RequestMeta {
   readonly actorId: string | null;
-  /** Motivo legible: «Se creó la unidad 43», «Se creó el centro 1510», «Recalcular estructura». */
   readonly reason: string;
 }
 
@@ -37,14 +36,6 @@ const USER_AGENT_MAX = 500;
 const headLabel = (code: string | null, pending: boolean): string | null =>
   code ? (pending ? `${code} (pendiente)` : code) : null;
 
-/**
- * Mantiene al día la estructura según los códigos (ver domain/structure-reconcile.ts): reubica y re-padrea los centros
- * AUTO, amarra/desamarra el centro propio de las unidades. Cada flujo que crea o cambia unidades o centros lo llama en
- * su MISMA transacción con un ámbito acotado (reconcileWithin); «Recalcular estructura» lo aplica completo.
- *
- * Historial: cada reubicación es una fila de cost_center_placement (source AUTO, mode AUTO, con el motivo) y cada
- * amarre un evento HEAD_COST_CENTER en org_structure_history (source AUTO). Auditoría STRUCTURE_RECONCILED con conteos.
- */
 @Injectable()
 export class StructureReconcilerService {
   constructor(
@@ -75,10 +66,6 @@ export class StructureReconcilerService {
     return planStructureReconcile(await this.loadState(manager), scope);
   }
 
-  /**
-   * Escribe el plan en la transacción de quien llama. Primero los re-padres hacia «sin padre» (así un cambio intermedio
-   * no cierra un ciclo), después el resto; luego los centros propios.
-   */
   async apply(manager: EntityManager, plan: ReconcilePlan, context: ReconcileContext): Promise<ReconcileCounts> {
     const patches = new Map<string, { -readonly [K in keyof PlacementPatch]: PlacementPatch[K] }>();
     for (const item of plan.relocations) {
@@ -135,9 +122,6 @@ export class StructureReconcilerService {
     return plan.counts;
   }
 
-  /**
-   * Planea y aplica en la transacción de quien llama (disparadores). Audita solo si cambió algo. Devuelve los conteos.
-   */
   async reconcileWithin(manager: EntityManager, scope: ReconcileScope, context: ReconcileContext): Promise<ReconcileCounts> {
     const plan = await this.plan(manager, scope);
     if (changeCount(plan.counts) === 0) {
@@ -152,7 +136,6 @@ export class StructureReconcilerService {
     return this.plan(this.dataSource.manager);
   }
 
-  /** «Recalcular estructura»: todo, en su propia transacción. 409 STRUCTURE_RECONCILE_STALE si el plan cambió. */
   async reconcileAll(
     actorId: string,
     expectedHash: string | undefined,
@@ -189,7 +172,6 @@ export class StructureReconcilerService {
     };
   }
 
-  /** Devuelve un centro a ubicación automática (fila nueva AUTO con el mismo estado) y lo concilia. */
   async backToAuto(costCenterId: string, actorId: string, request: RequestMeta = NO_REQUEST): Promise<StructureReconcileResultDto> {
     return this.dataSource.transaction(async (manager) => {
       const [center] = (await manager.query('SELECT external_code FROM cost_center WHERE id = $1', [costCenterId])) as Array<{

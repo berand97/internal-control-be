@@ -30,7 +30,6 @@ import { envelopedArraySchema } from './dto/email-template.responses.js';
 import { EmailAssetUploadsService, type EmailAssetUpload } from './email-asset-uploads.service.js';
 import { EmailAssetsService } from './email-assets.service.js';
 
-/** Imágenes de las plantillas de correo: subir (manage) y listar para el selector (read). Bajo el módulo Correo. */
 @ApiTags(OpenApiTag.Mail)
 @ApiBearerAuth()
 @ApiExtraModels(ApiSuccessEnvelope, ApiErrorEnvelope, EmailAssetResponseDto)

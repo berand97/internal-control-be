@@ -1,18 +1,3 @@
-/**
- * Diseño de una plantilla de correo como lista de bloques de un catálogo CERRADO (al estilo React Email, sin
- * dependencias): el administrador compone el contenido, el sistema pone la identidad (layout en email-layout.ts) y
- * el HTML lo genera siempre el renderizador propio (email-renderer.ts). Ningún bloque admite marcado: todo texto,
- * literal o de una variable, se escapa al renderizar.
- *
- * Los textos admiten variables `{{token}}` del catálogo del tipo (email-template-catalog.ts). El URL de un botón, de
- * un enlace del párrafo y de una imagen es una sola variable (`{{auth.resetUrl}}`) o un literal `https://`
- * (email-url.ts); el valor de la variable se valida como http(s) al renderizar.
- *
- * El párrafo es texto enriquecido (rich-text.ts: documento Tiptap/ProseMirror de esquema cerrado, nunca HTML). La
- * imagen apunta a un asset subido (email_asset) por su id; que exista lo comprueba el servicio al guardar y al
- * previsualizar.
- */
-
 import { isAllowedDesignUrl } from './email-url.js';
 import {
   RICH_TEXT_LIMITS,
@@ -53,7 +38,6 @@ export interface HeadingBlock {
 
 export interface ParagraphBlock {
   readonly type: 'paragraph';
-  /** Documento de texto enriquecido (rich-text.ts). */
   readonly content: RichTextDoc;
 }
 
@@ -90,14 +74,10 @@ export interface SpacerBlock {
 
 export interface ImageBlock {
   readonly type: 'image';
-  /** Id de email_asset (imagen subida). */
   readonly assetId: string;
-  /** Texto alternativo; admite variables. */
   readonly alt: string;
-  /** Ancho en px (imageMinWidth..imageMaxWidth). Sin él: el ancho natural, limitado a imageMaxWidth. */
   readonly width?: number;
   readonly align: ImageAlign;
-  /** Enlace opcional: variable del catálogo o https://. */
   readonly href?: string;
 }
 
@@ -116,9 +96,7 @@ export const EMAIL_DESIGN_LIMITS = {
   minBlocks: 1,
   maxBlocks: 40,
   headingMaxLength: 200,
-  /** Párrafo: caracteres de texto sumando todo el documento. */
   paragraphMaxLength: RICH_TEXT_LIMITS.maxTextLength,
-  /** Párrafo: nodos del documento (párrafos, listas, ítems, textos y saltos). */
   paragraphMaxNodes: RICH_TEXT_LIMITS.maxNodes,
   buttonLabelMaxLength: 60,
   urlMaxLength: 500,
@@ -133,23 +111,16 @@ export const EMAIL_DESIGN_LIMITS = {
   maxImages: 10,
 } as const;
 
-/** Campo editable de un bloque, para que el frontend arme el formulario sin duplicar reglas. */
 export interface EmailBlockFieldSpec {
   readonly name: string;
   readonly label: string;
-  /**
-   * richText: documento Tiptap (rich-text.ts), maxLength = texto total. image: id de un asset subido (selector de
-   * GET /email-templates/assets). integer: número entre minValue y maxValue.
-   */
   readonly kind: 'text' | 'multiline' | 'url' | 'enum' | 'items' | 'richText' | 'image' | 'integer';
   readonly required: boolean;
   readonly maxLength: number | null;
   readonly allowsVariables: boolean;
   readonly options: ReadonlyArray<string> | null;
-  /** Solo kind = items: mínimo y máximo de filas; cada fila tiene label y value. */
   readonly minItems: number | null;
   readonly maxItems: number | null;
-  /** Solo kind = integer. */
   readonly minValue: number | null;
   readonly maxValue: number | null;
 }
@@ -333,7 +304,6 @@ const integer =
     }
   };
 
-/** Campo opcional: ausente es válido; presente (incluido null) se valida con `check`. */
 const optional =
   (check: FieldCheck): FieldCheck =>
   (value, path, issues) => {
@@ -362,11 +332,6 @@ const BLOCK_FIELDS: Record<EmailBlockType, Record<string, FieldCheck>> = {
 const isBlockType = (value: unknown): value is EmailBlockType =>
   typeof value === 'string' && (EMAIL_BLOCK_TYPES as ReadonlyArray<string>).includes(value);
 
-/**
- * Validación estricta de la estructura (no de las variables: eso depende del tipo, ver email-template-catalog.ts;
- * ni de que las imágenes existan: eso lo comprueba el servicio). Rechaza tipos desconocidos, campos de más o de
- * menos, longitudes, número de bloques y de imágenes fuera de límite.
- */
 export const validateEmailBlocks = (blocks: unknown): ReadonlyArray<EmailDesignIssue> => {
   const issues: EmailDesignIssue[] = [];
   if (!Array.isArray(blocks)) {
@@ -398,7 +363,6 @@ export const validateEmailBlocks = (blocks: unknown): ReadonlyArray<EmailDesignI
   return issues;
 };
 
-/** Textos del bloque donde pueden ir variables (incluye los URL de botón, enlaces e imagen). */
 export const blockTexts = (block: EmailBlock): ReadonlyArray<string> => {
   switch (block.type) {
     case 'heading':
@@ -418,7 +382,6 @@ export const blockTexts = (block: EmailBlock): ReadonlyArray<string> => {
   }
 };
 
-/** Copia solo los campos conocidos (tras validar): lo que se guarda en BD es exactamente el catálogo. */
 export const normalizeEmailBlocks = (blocks: ReadonlyArray<EmailBlock>): ReadonlyArray<EmailBlock> =>
   blocks.map((block): EmailBlock => {
     switch (block.type) {
@@ -448,7 +411,6 @@ export const normalizeEmailBlocks = (blocks: ReadonlyArray<EmailBlock>): Readonl
     }
   });
 
-/** Ids de las imágenes del diseño (en minúsculas), sin repetir. */
 export const imageAssetIds = (blocks: ReadonlyArray<EmailBlock>): ReadonlyArray<string> => [
   ...new Set(blocks.flatMap((block) => (block.type === 'image' ? [block.assetId.toLowerCase()] : []))),
 ];

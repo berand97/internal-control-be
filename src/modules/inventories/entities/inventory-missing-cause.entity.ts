@@ -1,6 +1,5 @@
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
-/** Causa de faltante (catálogo administrable; nace vacío). */
 @Entity('inventory_missing_cause')
 export class InventoryMissingCause {
   @PrimaryGeneratedColumn('uuid')

@@ -4,7 +4,6 @@ export enum VerificationResult {
   Missing = 'MISSING',
   Surplus = 'SURPLUS',
   Misplaced = 'MISPLACED',
-  /** Seguía PENDING al cerrar la toma. No es un faltante: la conciliación no lo toca. */
   NotVerified = 'NOT_VERIFIED',
 }
 
@@ -17,7 +16,6 @@ export const VERIFICATION_RESULTS = [
   VerificationResult.NotVerified,
 ] as const;
 
-/** Resultados que puede fijar una corrección (un sobrante solo se anula). */
 export const CORRECTABLE_RESULTS = [
   VerificationResult.Found,
   VerificationResult.Missing,

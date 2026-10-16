@@ -5,11 +5,6 @@ import {
   CostCenterUnitRefDto,
 } from './cost-center-structure.responses.js';
 
-/**
- * Respuestas del conciliador de estructura (StructureReconcilerService): vista previa, aplicación y pendientes. Solo
- * códigos y nombres de la estructura; ningún dato personal.
- */
-
 export const HEAD_LINK_KINDS = ['LINKED', 'RECODED'] as const;
 export const HEAD_UNLINK_REASONS = ['ARCHIVED', 'MISSING'] as const;
 export const MANUAL_EXCEPTION_REASONS = ['MANUAL', 'CYCLE'] as const;

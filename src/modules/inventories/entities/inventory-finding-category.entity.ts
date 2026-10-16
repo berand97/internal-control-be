@@ -1,9 +1,5 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 
-/**
- * Categoría de hallazgo de la toma física (catálogo configurable). La sugerencia sale de suggestResults y
- * suggestConditions (ver domain/finding-suggestion.ts); ningún código del sistema depende del código de la categoría.
- */
 @Entity('inventory_finding_category')
 export class InventoryFindingCategory {
   @PrimaryColumn({ name: 'code', type: 'varchar', length: 10 })

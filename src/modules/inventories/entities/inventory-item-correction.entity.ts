@@ -3,7 +3,6 @@ import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 export const INVENTORY_CORRECTION_KINDS = ['CORRECT', 'VOID'] as const;
 export type InventoryCorrectionKind = (typeof INVENTORY_CORRECTION_KINDS)[number];
 
-/** Corrección (o anulación de un sobrante) de un ítem de toma, con el antes y el después. */
 @Entity('inventory_item_correction')
 export class InventoryItemCorrection {
   @PrimaryGeneratedColumn('uuid')

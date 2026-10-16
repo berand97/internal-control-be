@@ -23,7 +23,6 @@ const TEMPLATE: Record<InventoryNoticeKind, EmailTemplateType> = {
   CANCELLED: 'INVENTORY_CANCELLED',
 };
 
-/** Lo que el aviso necesita de la toma (entidad o fila cruda). */
 export interface NoticeInventory {
   readonly id: string;
   readonly code: string;
@@ -39,7 +38,6 @@ export interface NoticeExtra {
   readonly reason?: string;
   readonly previousStartDate?: string;
   readonly previousEndDate?: string;
-  /** Recordatorio: días que faltan para el inicio (hoy en Bogotá → inicio). */
   readonly daysUntilStart?: number;
 }
 
@@ -47,10 +45,8 @@ interface Recipient {
   readonly personId: string;
   readonly name: string;
   readonly role: InventoryNoticeRole;
-  /** Solo en memoria para decidir si hay correo; nunca sale en respuestas, logs ni auditoría. */
   readonly hasEmail: boolean;
   readonly emailMasked: string | null;
-  /** Usuario activo de la persona; null si no tiene o no está activo. */
   readonly userId: string | null;
 }
 
@@ -75,7 +71,6 @@ export interface NoticeAudience {
   readonly responsibleName: string | null;
   readonly recipients: ReadonlyArray<NoticeRecipientView>;
   readonly warnings: ReadonlyArray<NoticeWarning>;
-  /** Internos: a quién se encola correo (personas) y a quién notificación (usuarios). */
   readonly emailPersonIds: ReadonlyArray<string>;
   readonly inAppUserIds: ReadonlyArray<string>;
 }
@@ -92,7 +87,6 @@ interface HeadRow {
   user_id: string | null;
 }
 
-/** "19 de octubre de 2026" (fecha calendario, sin corrimiento de zona). */
 export const formatDay = (date: string): string => {
   const [year, month, day] = date.slice(0, 10).split('-').map(Number);
   return new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(
@@ -100,16 +94,8 @@ export const formatDay = (date: string): string => {
   );
 };
 
-/** hoy / mañana / en N días. */
 export const whenText = (days: number): string => (days <= 0 ? 'hoy' : days === 1 ? 'mañana' : `en ${days} días`);
 
-/**
- * A quién avisar de una toma y cómo. Jefes VIGENTES del centro (todos si hay varios; cost_center_head, vigencia al
- * momento del aviso): correo por mail_outbox dirigido a la persona (recipient_person_id: el jefe puede no tener
- * usuario) y notificación en la aplicación si tiene usuario activo. Responsable de la toma: solo notificación en la
- * aplicación. Otros alcances (GLOBAL, ubicación, unidad) no tienen jefe de centro: solo el responsable.
- * Todo dentro de la transacción del hecho (programar, reprogramar, cancelar o marcar el recordatorio enviado).
- */
 @Injectable()
 export class InventoryNoticesService {
   constructor(
@@ -192,7 +178,6 @@ export class InventoryNoticesService {
     };
   }
 
-  /** Encola los correos y crea las notificaciones del aviso, en la transacción de `manager`. */
   async send(
     manager: EntityManager,
     inventory: NoticeInventory,
