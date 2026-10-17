@@ -6,7 +6,6 @@ export interface TemplateSample {
 }
 
 export interface LeftoverOptions {
-  /** También busca nombres del ejemplo en docProps (autor, último editor). */
   readonly metadata?: boolean;
 }
 

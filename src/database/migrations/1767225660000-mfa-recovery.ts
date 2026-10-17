@@ -1,16 +1,6 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * MFA desde sesión, códigos de recuperación y reset administrativo.
- *
- * - app_user.mfa_pending_secret / mfa_pending_created_at: secreto TOTP en enrolamiento. No reemplaza a mfa_secret
- *   hasta que el usuario confirma con un código del nuevo secreto.
- * - app_user.mfa_enrollment_required: el siguiente login exige enrolar (flujo de setup existente) aunque el rol no
- *   lo exija. Lo activa el reset administrativo.
- * - refresh_token_family.mfa_verified_at: la sesión se abrió (o se elevó) con segundo factor. NULL en sesiones
- *   abiertas solo con contraseña y en todas las existentes al migrar.
- * - mfa_recovery_code: hash argon2id de cada código de un solo uso; nunca el código.
- */
+
 export class MfaRecovery1767225660000 implements MigrationInterface {
   name = 'MfaRecovery1767225660000';
 

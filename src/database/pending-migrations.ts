@@ -3,7 +3,6 @@ import { MIGRATIONS } from './migration-list.js';
 
 type MigrationClass = new () => MigrationInterface;
 
-/** Tabla de control de TypeORM (data-source.ts no cambia el nombre por defecto). */
 const MIGRATIONS_TABLE = 'migrations';
 
 export interface PendingMigrationsLogger {
@@ -11,13 +10,8 @@ export interface PendingMigrationsLogger {
   error(message: string): void;
 }
 
-/** Nombre con el que TypeORM registra la migración: su propiedad `name` o, si no tiene, el de la clase. */
 const migrationName = (migration: MigrationClass): string => new migration().name ?? migration.name;
 
-/**
- * Migraciones del código que la BD aún no tiene. Solo lee: no crea la tabla de control (a diferencia de
- * `showMigrations` de TypeORM) y no requiere que la DataSource de la app tenga las migraciones cargadas.
- */
 export const findPendingMigrations = async (
   dataSource: DataSource,
   migrations: ReadonlyArray<MigrationClass> = MIGRATIONS,
@@ -35,11 +29,6 @@ export const findPendingMigrations = async (
   return migrations.map(migrationName).filter((name) => !executed.has(name));
 };
 
-/**
- * Revisión de arranque del proceso HTTP (main.ts). Con migraciones pendientes la app arranca a medias: las consultas a
- * columnas o tablas nuevas dan 500 y el circuito apaga módulos enteros. Fuera de producción avisa fuerte; en producción
- * (NODE_ENV=production) se niega a arrancar. No la usan el CLI, el exportador de OpenAPI ni las pruebas.
- */
 export const assertMigrationsApplied = async (
   dataSource: DataSource,
   options: { readonly production: boolean; readonly logger: PendingMigrationsLogger },

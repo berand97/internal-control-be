@@ -1,12 +1,6 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Importación asíncrona sobre el patrón outbox (como document_request):
- * - staging_import_job: un trabajo por importación confirmada; un worker lo toma con FOR UPDATE SKIP LOCKED y un
- *   arrendamiento (lease_id + heartbeat_at) para que dos instancias no lo procesen a la vez.
- * - mail_outbox: correos que se envían fuera de la transacción que los encola; sin SMTP quedan FAILED y visibles.
- * - notification (ya existía, sin uso): índice para listar todas las del usuario, no solo las no leídas.
- */
+
 export class ImportJobsAndMailOutbox1767225720000 implements MigrationInterface {
   name = 'ImportJobsAndMailOutbox1767225720000';
 

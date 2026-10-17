@@ -1,30 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Plantillas de correo: párrafo enriquecido e imágenes subidas.
- *
- * - email_template.blocks: en TODAS las versiones, cada `paragraph { text }` pasa a `paragraph { content }`, un
- *   documento Tiptap/ProseMirror (src/modules/email-templates/domain/rich-text.ts). Cada línea en blanco separa
- *   párrafos y cada salto simple es un `hardBreak`; texto y variables {{...}} quedan intactos (sin pérdida: la vuelta
- *   da el mismo texto). Los demás bloques no cambian.
- * - email_asset: metadatos de las imágenes PNG/JPEG subidas desde el editor. Los bytes NO están en la BD: van al
- *   bucket público del proveedor S3 (clave email-assets/<uuid>.<png|jpg>) y el correo usa public_url. Sin borrado
- *   desde la aplicación: los correos ya enviados siguen apuntando a ellas. sha256 único: la misma imagen devuelve la
- *   existente.
- * - storage_settings.s3_public_assets_bucket y s3_public_assets_base_url: bucket público (distinto del de
- *   documentos, que sigue privado) y su URL pública base. Mismo endpoint y credenciales del proveedor S3; sin
- *   secretos nuevos.
- *
- * down() (con pérdida, documentado): cada `paragraph { content }` vuelve a `paragraph { text }` sin marcas (negrita,
- * cursiva, subrayado); cada ítem de lista queda como una línea "- " o "1. " y cada enlace como "texto (href)". Cada
- * bloque `image` pasa a un párrafo "[Imagen: alt]" (el diseño anterior no conoce imágenes); la tabla email_asset y
- * las dos columnas de storage_settings se eliminan. Los objetos del bucket público NO se borran (down() no toca el
- * almacenamiento): los correos ya enviados siguen mostrando sus imágenes.
- *
- * Las conversiones están copiadas aquí (una migración no importa código vivo); rich-text.spec.ts prueba las vivas y
- * legacy-text-migration.spec.ts estas. TypeORM corre cada migración en una transacción (CLI: 'all'; tests: 'each').
- */
-
 interface StoredBlock {
   readonly type: string;
 }
@@ -38,7 +13,6 @@ interface DocNode {
   readonly marks?: ReadonlyArray<{ readonly type: string; readonly attrs?: { readonly href?: string } }>;
 }
 
-/** Texto → documento: línea en blanco = párrafo nuevo, salto simple = hardBreak. Sin pérdida. */
 export const textToDoc = (text: string): DocNode => ({
   type: 'doc',
   content: text
@@ -70,23 +44,21 @@ const paragraphToText = (paragraph: DocNode): string =>
     })
     .join('');
 
-/** Documento → texto con las variables sin sustituir; pierde las marcas. */
 export const docToText = (doc: DocNode): string =>
   (doc.content ?? [])
     .map((block) =>
       block.type === 'paragraph'
         ? paragraphToText(block)
         : (block.content ?? [])
-            .map(
-              (item, index) =>
-                `${block.type === 'orderedList' ? `${index + 1}.` : '-'} ` +
-                (item.content ?? []).map(paragraphToText).join('\n'),
-            )
-            .join('\n'),
+          .map(
+            (item, index) =>
+              `${block.type === 'orderedList' ? `${index + 1}.` : '-'} ` +
+              (item.content ?? []).map(paragraphToText).join('\n'),
+          )
+          .join('\n'),
     )
     .join('\n\n');
 
-/** up(): paragraph { text } → paragraph { content }. Lo que ya tiene content no se toca (idempotente). */
 export const upgradeBlocks = (blocks: ReadonlyArray<StoredBlock>): ReadonlyArray<StoredBlock> =>
   blocks.map((block) =>
     block.type === 'paragraph' && typeof field(block, 'text') === 'string'
@@ -94,7 +66,6 @@ export const upgradeBlocks = (blocks: ReadonlyArray<StoredBlock>): ReadonlyArray
       : block,
   );
 
-/** down(): paragraph { content } → paragraph { text }; image → paragraph "[Imagen: alt]". */
 export const downgradeBlocks = (blocks: ReadonlyArray<StoredBlock>): ReadonlyArray<StoredBlock> =>
   blocks.map((block) => {
     const content = field(block, 'content');

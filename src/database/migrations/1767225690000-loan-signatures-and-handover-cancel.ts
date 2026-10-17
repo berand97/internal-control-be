@@ -1,22 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Préstamos gobernados por las firmas del acta y entregas cancelables (decisiones en docs/decisiones.md):
- *
- * - loan_status gana PENDING_SIGNATURES (entregado físicamente, acta OCI-01-65 sin todas sus firmas) y
- *   CLOSED_WITH_LOSSES (todos los activos resueltos, alguno perdido). El tipo se recrea en vez de
- *   ALTER TYPE … ADD VALUE para poder usar los valores nuevos en esta misma transacción (reclasificación) y para
- *   que down() pueda quitarlos. Dependientes del tipo (pg_depend): la columna asset_loan.status y su DEFAULT,
- *   el índice parcial idx_loan_expected_return y la vista v_overdue_loans; se recrean idénticos.
- * - Reclasificación: un préstamo ACTIVE/OVERDUE cuya acta OCI-01-65 existe (solicitud o documento) y no está
- *   firmada pasa a PENDING_SIGNATURES. Sin acta (entregas anteriores al motor) se quedan como están: no hay
- *   firmas que esperar. down() devuelve PENDING_SIGNATURES → ACTIVE (lo que habrían sido con la regla anterior)
- *   y CLOSED_WITH_LOSSES → PARTIALLY_RETURNED (la regla anterior: LOST contaba como no devuelto).
- * - asset_loan_item.received_at: cuándo se recibió (receive-return) la devolución del activo, para distinguir los
- *   activos resueltos de los que siguen fuera en un préstamo PARTIALLY_RETURNED. Se rellena con el movimiento
- *   RETURN del activo en ese préstamo (metadata.loanId).
- * - asset_handover: estado CANCELLED con motivo y quién (cancelación antes de SIGNED).
- */
 export class LoanSignaturesAndHandoverCancel1767225690000 implements MigrationInterface {
   name = 'LoanSignaturesAndHandoverCancel1767225690000';
 
@@ -125,7 +108,6 @@ export class LoanSignaturesAndHandoverCancel1767225690000 implements MigrationIn
     ]);
   }
 
-  /** Recrea loan_status con `values` (en ese orden) y sus dependientes, idénticos a como estaban. */
   private async recreateLoanStatus(queryRunner: QueryRunner, values: ReadonlyArray<string>): Promise<void> {
     await queryRunner.query('DROP VIEW v_overdue_loans');
     await queryRunner.query('DROP INDEX idx_loan_expected_return');

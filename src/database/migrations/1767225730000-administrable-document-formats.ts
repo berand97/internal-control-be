@@ -1,23 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Formatos SGC administrables y versionados (antes vivían en src/modules/documents/domain/document-formats.ts):
- *
- * - document_format: la identidad estable del formato (clave interna, permisos de lectura y generación). La clave
- *   es la que usan los procesos enchufados en código (OCI-01-55 → entregas, OCI-01-65 → préstamos, LOAN_RETURN →
- *   devolución) y el consecutivo (document_sequence.format_key): no cambia nunca.
- * - document_format_version: lo administrable (código y versión SGC, nombre, forma y valor inicial del consecutivo,
- *   decisiones pendientes) con su fecha de vigencia. Nunca se sobrescribe (trigger): cada cambio es una versión
- *   nueva. effective_from NULL solo en la versión 1 sembrada aquí: vigente desde siempre (el catálogo en código no
- *   tenía fecha).
- * - document_format_signer: firmantes de cada versión (orden, rol, etiqueta, origen RESPONSIBLE/REQUEST).
- * - document.format_version_id: la versión con la que se emitió cada acta. Las existentes quedan enlazadas a la
- *   versión 1 de su formato (la única que existía). Firmantes, etiquetas y verificación salen de aquí.
- *
- * La semilla copia literalmente el catálogo de document-formats.ts en el commit anterior (mismos códigos, versiones,
- * firmantes, numeración, lastIssued y pendingDecisions). document_sequence no se toca.
- */
-
 interface SeedSigner {
   readonly order: number;
   readonly role: string;

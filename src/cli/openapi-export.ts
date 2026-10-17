@@ -1,21 +1,3 @@
-/**
- * Exporta el documento OpenAPI a un archivo SIN levantar el servidor (no llama a listen ni ocupa puertos):
- *
- *   DATABASE_URL=postgres://postgres:postgres@localhost:5432/<bd_de_pruebas> pnpm openapi:export [ruta]
- *
- * - `ruta` por defecto: dist/openapi.json (relativa al directorio del backend). Para regenerar el contrato del
- *   frontend: `pnpm openapi:export ../frontend/openapi/openapi.json` y luego `pnpm api:types` en el frontend.
- * - Crea la aplicación Nest completa (AppModule) porque el documento se construye escaneando sus controladores, y
- *   TypeORM abre la conexión al crearla: necesita una BD local YA MIGRADA. Use una BD de pruebas (p.ej. una copia
- *   de control_interno_staging), nunca `internal_control` (la del desarrollador) ni la desplegada. El exportador
- *   solo lee: no ejecuta los ganchos de arranque (onModuleInit, cron), no migra y no escribe.
- * - DATABASE_URL es obligatoria en el entorno del proceso: no se toma de .env, para que un .env de desarrollo no
- *   decida a qué BD se conecta. Solo se aceptan hosts locales.
- * - Los secretos JWT no intervienen en el documento; si faltan se rellenan con un valor inerte solo para este proceso.
- * - El documento es el mismo que sirve GET /api/openapi.json: ambos salen de createOpenApiDocument
- *   (src/common/swagger/openapi-document.ts) con el mismo prefijo global, y se escribe con la misma serialización
- *   que usa el frontend para su copia (tools/api-types.mts).
- */
 import 'reflect-metadata';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';

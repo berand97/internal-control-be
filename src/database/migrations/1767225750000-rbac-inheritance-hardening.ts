@@ -1,16 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Herencia de roles (parent_role_id) sin atajos (hallazgos BE-02 y BE-03).
- *
- * - v_user_effective_permissions ignora los roles borrados (deleted_at): un rol borrado no aporta permisos ni
- *   directamente ni como ancestro de otro rol. Mismas columnas que la vista de 1767225601000.
- * - fn_role_lineage(rol): el rol y sus ancestros vivos por parent_role_id (UNION: termina aunque hubiera ciclo).
- * - fn_check_sod_violation evalúa la separación de funciones ESTÁTICA sobre los roles efectivos (con herencia) del
- *   usuario, no solo sobre los directos. Mismo mensaje, que la aplicación reconoce (isSodViolation).
- * - trg_role_sod_inheritance: al crear un rol o cambiar su parent_role_id, rechaza que el linaje del rol reúna los
- *   dos lados de una regla y que algún titular del rol o de sus herederos quede en conflicto.
- */
 export class RbacInheritanceHardening1767225750000 implements MigrationInterface {
   name = 'RbacInheritanceHardening1767225750000';
 

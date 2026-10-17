@@ -1,12 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Decisión del desarrollador: SUPER_ADMIN también administra las plantillas de correo. La migración 1767225800000
- * sembró email_template:read:global y email_template:manage:global solo a INTERNAL_CONTROL_DIRECTOR y puede estar ya
- * aplicada, así que no se edita: aquí se otorgan ambos permisos a SUPER_ADMIN (idempotente, ON CONFLICT DO NOTHING).
- * down() los retira solo de SUPER_ADMIN; el director conserva los suyos. TypeORM corre cada migración en una
- * transacción (CLI: 'all'; tests: 'each').
- */
 
 const PERMISSION_CODES = ['email_template:read:global', 'email_template:manage:global'] as const;
 

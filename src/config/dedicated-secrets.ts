@@ -1,14 +1,3 @@
-/**
- * Claves propias de cada propósito (BE-12). Antes, si faltaban, las tres caían en JWT_ACCESS_SECRET: una sola
- * fuga comprometía la autenticación, la integridad de los movimientos, los QR impresos y los secretos cifrados,
- * y rotar el secreto JWT rompía todo lo anterior.
- *
- * - Fuera de producción se conserva el valor por defecto (JWT_ACCESS_SECRET) para no romper entornos locales.
- * - En producción las tres son obligatorias, no pueden ser iguales a JWT_ACCESS_SECRET ni a JWT_REFRESH_SECRET ni
- *   quedar con el texto de ejemplo. El backend no arranca si no se cumple (igual que SIGNATURE_VERIFY_URL).
- * - MOVEMENT_SIGNING_SECRET_PREVIOUS y SETTINGS_ENCRYPTION_KEY_PREVIOUS (lista separada por comas) permiten rotar:
- *   con la anterior se siguen verificando firmas y descifrando secretos ya guardados. Ver docs/DEPLOY.md.
- */
 export interface DedicatedSecrets {
   readonly qrSecret: string;
   readonly movementSigningSecret: string;
@@ -92,10 +81,6 @@ export const resolveDedicatedSecrets = (env: Env): DedicatedSecrets => {
   };
 };
 
-/**
- * Advertencias de producción que no impiden arrancar: una instalación existente puede tener las tres claves con el
- * mismo valor heredado (el antiguo JWT_ACCESS_SECRET) hasta completar la rotación documentada.
- */
 export const dedicatedSecretWarnings = (env: Env): ReadonlyArray<string> => {
   if (env['NODE_ENV'] !== 'production') {
     return [];

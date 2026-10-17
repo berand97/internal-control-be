@@ -1,12 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Acta de entrega y asignación (OCI-01-55): el proceso por el que un activo obtiene responsable.
- * - asset_handover: la entrega (quién recibe, centro de costo, quién firma por Control Interno), la solicitud del
- *   outbox que genera su acta, el acta generada y, al firmarse, el responsable asignado (firmante RECIBE final).
- * - asset_handover_item: cada activo entregado, su observación en el acta y el movimiento ASSIGNMENT que lo aplicó.
- *   uq_asset_handover_item_open impide que un activo esté en dos entregas abiertas (dos actas asignándolo).
- */
 export class AssetHandover1767225640000 implements MigrationInterface {
   name = 'AssetHandover1767225640000';
 

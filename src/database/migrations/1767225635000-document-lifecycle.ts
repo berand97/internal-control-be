@@ -1,11 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Soporte del gancho de completitud (DocumentLifecycleRegistry):
- * - document.lifecycle_*: el último fallo del manejador del proceso al pasar el acta a SIGNED o REJECTED.
- *   Mientras lifecycle_error no sea NULL el acta sigue en PENDING_SIGNATURE y el job la reintenta.
- * - idx_document_request_entity: consultar las solicitudes del outbox de una entidad (payload.entityType/entityId).
- */
 export class DocumentLifecycle1767225635000 implements MigrationInterface {
   name = 'DocumentLifecycle1767225635000';
 

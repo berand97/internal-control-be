@@ -6,10 +6,6 @@ import { IsString, Length } from 'class-validator';
 export const AUDIT_REASON_MIN = 3;
 export const AUDIT_REASON_MAX = 500;
 
-/**
- * Motivo obligatorio de un cambio auditado (3..500 caracteres tras recortar espacios). Queda en la bitácora: no
- * debe llevar números de documento, contraseñas, tokens ni otros secretos.
- */
 export const AuditReason = (description: string): PropertyDecorator =>
   applyDecorators(
     ApiProperty({

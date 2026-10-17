@@ -67,9 +67,7 @@ export interface StorageConfig {
     readonly accessKey: string | null;
     readonly secretKey: string | null;
     readonly forcePathStyle: boolean;
-    /** Bucket público de imágenes de correo (shared/storage/public-assets.ts); null = no configurado. */
     readonly publicAssetsBucket: string | null;
-    /** URL pública base de ese bucket; null = no configurada. */
     readonly publicAssetsBaseUrl: string | null;
   };
   readonly google: {
@@ -93,7 +91,6 @@ export interface AppConfig {
   readonly apiPublicUrl: string;
   readonly apiDocsEnabled: boolean;
   readonly trustProxy: TrustProxySetting;
-  /** Límite general de peticiones autenticadas por usuario y ruta en 60 s (THROTTLE_USER_LIMIT, 300 por defecto). */
   readonly throttleUserLimit: number;
   readonly database: DatabaseConfig;
   readonly jwt: JwtConfig;
@@ -102,39 +99,28 @@ export interface AppConfig {
   readonly cors: CorsConfig;
   readonly storage: StorageConfig;
   readonly movementSigningSecret: string;
-  /** Claves anteriores de firma de movimientos: solo verifican (rotación, BE-12). */
   readonly movementSigningPreviousSecrets: ReadonlyArray<string>;
   readonly settingsEncryptionKey: string;
-  /** Claves anteriores de cifrado de ajustes: solo descifran (rotación, BE-12). */
   readonly settingsEncryptionPreviousKeys: ReadonlyArray<string>;
   readonly outbound: OutboundConfig;
   readonly features: FeaturesConfig;
   readonly documents: DocumentsConfig;
   readonly emailBrand: EmailBrandConfig;
   readonly inventories: InventoriesConfig;
-  /** Canal de eventos en tiempo real (src/modules/events). */
   readonly events: EventsConfig;
 }
 
-/** Programación de tomas físicas. */
 export interface InventoriesConfig {
-  /**
-   * Alerta de concentración semanal del calendario: tomas por semana ISO por encima de las cuales se avisa.
-   * Sin valor (INVENTORY_WEEKLY_CONCENTRATION_THRESHOLD vacía) no se evalúa: el número lo define Control Interno.
-   */
   readonly weeklyConcentrationThreshold: number | null;
 }
 
-/** Destinos salientes configurables (SMTP, S3): ver src/shared/net/outbound-destination.ts (BE-16). */
 export interface OutboundConfig {
   readonly allowPrivateNetworks: boolean;
   readonly allowedHosts: ReadonlyArray<string>;
 }
 
-/** Identidad de los correos (layout de src/modules/email-templates/domain/email-layout.ts). */
 export interface EmailBrandConfig {
   readonly name: string;
-  /** https, PNG o JPG (Gmail y Outlook no muestran SVG). Un valor que no sea https se ignora con un aviso. */
   readonly logoUrl: string | null;
 }
 
@@ -194,7 +180,6 @@ const readNumber = (key: string, fallback: number): number => {
   return parsed;
 };
 
-/** Entero >= 1 o null si la variable no está definida. Cualquier otro valor detiene el arranque. */
 const readOptionalPositiveInteger = (key: string): number | null => {
   const raw = process.env[key]?.trim();
   if (raw === undefined || raw === '') {
@@ -264,7 +249,6 @@ const readList = (key: string): ReadonlyArray<string> =>
     .map((item) => item.trim())
     .filter((item) => item !== '');
 
-// Se validan al arrancar: un valor inválido detiene el backend con el motivo (como SIGNATURE_VERIFY_URL).
 const readPublicAssetsBucket = (): string | null => {
   const raw = readString('STORAGE_S3_PUBLIC_ASSETS_BUCKET', '').trim();
   return raw === '' ? null : normalizePublicAssetsBucket(raw);
@@ -285,18 +269,14 @@ const readBrandLogoUrl = (): string | null => {
       return raw;
     }
   } catch {
-    // se ignora abajo
   }
   new Logger('Config').warn('MAIL_BRAND_LOGO_URL no es un URL https válido; los correos muestran el nombre de la marca');
   return null;
 };
 
 const configuration = (): AppConfig => {
-  // SIGNATURE_VERIFY_URL se valida antes que GOTENBERG_URL y que las claves propias (BE-12): si faltan varias en
-  // producción, el primer error es el de la URL que queda impresa en las actas.
   const signatureVerifyUrl = resolveSignatureVerifyUrl(process.env);
   const gotenbergUrl = resolveGotenbergUrl(process.env);
-  // Sin claves propias en producción el backend no arranca (BE-12).
   const secrets = resolveDedicatedSecrets(process.env);
   for (const warning of dedicatedSecretWarnings(process.env)) {
     new Logger('Config').warn(warning);
@@ -309,7 +289,6 @@ const configuration = (): AppConfig => {
     trustProxy: parseTrustProxy(readString('TRUST_PROXY', DEFAULT_TRUST_PROXY)),
     throttleUserLimit: readOptionalPositiveInteger('THROTTLE_USER_LIMIT') ?? DEFAULT_THROTTLE_USER_LIMIT,
     database: {
-      // Fuera de producción solo hosts locales (ver database-host-guard.ts).
       url: guardDatabaseUrl(readRequiredString('DATABASE_URL'), process.env, (message) =>
         new Logger('Database').warn(message),
       ),

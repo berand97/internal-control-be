@@ -1,11 +1,6 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Enlace préstamo ↔ acta de entrega (OCI-01-65):
- * - asset_loan.delivery_document_id: el acta que generó el outbox para la entrega. Lo escribe el manejador
- *   onGenerated del préstamo (DocumentLifecycleRegistry), dentro de la transacción que inserta el documento.
- * - Un acta pertenece a lo sumo a un préstamo.
- */
+
 export class LoanDeliveryDocument1767225650000 implements MigrationInterface {
   name = 'LoanDeliveryDocument1767225650000';
 

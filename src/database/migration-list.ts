@@ -81,10 +81,6 @@ import { OrgUnitTypesEstructuraOrganica1767226080000 } from './migrations/176722
 
 type MigrationClass = new () => MigrationInterface;
 
-/**
- * Migraciones en orden de ejecución. La usan el CLI de TypeORM (data-source.ts) y la revisión de arranque
- * (pending-migrations.ts): una migración nueva se agrega aquí, al final.
- */
 export const MIGRATIONS: ReadonlyArray<MigrationClass> = [
   InitialSchema1767225600000,
   RbacExtended1767225601000,

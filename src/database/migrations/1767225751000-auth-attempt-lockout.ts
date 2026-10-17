@@ -1,18 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Bloqueo temporal por cuenta ante intentos fallidos de autenticación (hallazgo BE-04).
- *
- * Una fila por (sujeto, factor):
- * - subject: 'user:<uuid>' para cuentas existentes; 'id:<sha256 hex>' del identificador normalizado cuando la
- *   cuenta no existe, para que una cuenta inexistente se comporte igual que una real (sin enumeración). Nunca se
- *   guarda la contraseña, el código ni el identificador en claro.
- * - factor: PASSWORD (POST /auth/login) o MFA (TOTP y códigos de recuperación del desafío).
- * - failed_count / window_started_at: fallos dentro de la ventana vigente.
- * - lock_level: bloqueos consecutivos (duración con backoff); se olvida tras un periodo sin fallos.
- * - locked_until: fin del bloqueo temporal. Nunca es permanente.
- * Los valores (umbral, ventana, duración y tope) viven en src/modules/auth/services/auth-lockout.policy.ts.
- */
 export class AuthAttemptLockout1767225751000 implements MigrationInterface {
   name = 'AuthAttemptLockout1767225751000';
 

@@ -1,20 +1,6 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Plantillas Excel de importación (src/modules/staging/templates/import-template.ts):
- *
- * - import_template: historial de cada archivo generado. version = identificador de la definición de campos
- *   (cambia solo si cambia la definición); content_hash = definición + catálogos (un archivo por contenido). El
- *   archivo vive en el storage del sistema (storage_driver, storage_key) y se sirve desde ahí; se regenera solo
- *   cuando aparece un content_hash nuevo.
- * - staging_import.template_version: versión de la plantilla detectada en el archivo subido (NULL si el archivo no
- *   viene de una plantilla). Texto, sin FK: un archivo descargado en otro entorno trae una versión válida aunque
- *   este entorno no la haya generado.
- * - staging_import.template_example_rows: filas del archivo idénticas a la fila de ejemplo de la plantilla; la
- *   clasificación las ignora.
- *
- * Aditiva: down() borra la tabla y las columnas nuevas.
- */
+
 export class ImportTemplates1767225710000 implements MigrationInterface {
   name = 'ImportTemplates1767225710000';
 

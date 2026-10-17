@@ -1,23 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Plantillas de correo por bloques, como módulo propio (src/modules/email-templates).
- *
- * - email_template.blocks (JSONB, NOT NULL): cada versión existente (texto) se convierte en bloques `paragraph`, uno
- *   por párrafo (separados por una línea en blanco), preservando las variables {{...}} y los saltos de línea
- *   internos. La columna `body` se conserva, ahora nullable y sin mapear, con el texto original: down() lo devuelve
- *   intacto. Las versiones creadas después de up() no tienen body; down() se lo arma desde los bloques.
- * - activated_at / activated_by: quién activó la versión (antes activar sobrescribía created_by).
- * - uq_email_template_active: una sola versión activa por tipo. Si hubiera varias activas (guardados concurrentes
- *   de antes), queda activa la de mayor versión.
- * - mail_outbox.template_version_id: correo de prueba de una versión concreta.
- * - Permisos email_template:read:global y email_template:manage:global ("Plantillas de correo" en la matriz de
- *   Roles y permisos), otorgados solo a INTERNAL_CONTROL_DIRECTOR, que los delega. SUPER_ADMIN no los recibe.
- * - Menú: "Plantillas de correo" (/email-templates, email_template:read, ícono `mail`), id fijo y ON CONFLICT (path)
- *   DO NOTHING; down() borra por ese id y nunca toca una fila creada a mano.
- *
- * La conversión texto → bloques está copiada aquí (una migración no importa código vivo).
- */
 
 const NAV_ID = '6f1d2c3a-7b4e-4a1f-9c2d-000000018001';
 const PERMISSION_CODES = ['email_template:read:global', 'email_template:manage:global'] as const;
@@ -32,7 +14,6 @@ interface MigratedBlock {
   readonly items?: ReadonlyArray<{ readonly label: string; readonly value: string }>;
 }
 
-/** Texto de la plantilla anterior → un `paragraph` por párrafo. Unir los textos con "\n\n" devuelve el original. */
 export const legacyBodyToBlocks = (body: string): ReadonlyArray<MigratedBlock> =>
   body
     .replace(/\r\n|\r/g, '\n')
@@ -40,7 +21,6 @@ export const legacyBodyToBlocks = (body: string): ReadonlyArray<MigratedBlock> =
     .filter((paragraph) => paragraph.trim() !== '')
     .map((text) => ({ type: 'paragraph', text }));
 
-/** Bloques → texto con las variables sin sustituir (solo para down() de versiones creadas después de up()). */
 export const blocksToLegacyBody = (blocks: ReadonlyArray<MigratedBlock>): string =>
   blocks
     .map((block) => {

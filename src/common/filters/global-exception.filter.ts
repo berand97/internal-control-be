@@ -49,7 +49,6 @@ const isValidationResponseBody = (
   'message' in value &&
   Array.isArray((value as { message: unknown }).message);
 
-/** Segundos de espera que trae una ApiException de bloqueo (p. ej. AccountLockedException); null si no trae. */
 const retryAfterSecondsOf = (exception: unknown): number | null => {
   if (!(exception instanceof ApiException) || !('retryAfterSeconds' in exception)) {
     return null;

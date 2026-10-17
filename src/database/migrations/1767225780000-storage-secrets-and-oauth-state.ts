@@ -2,16 +2,7 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
 import { resolveDedicatedSecrets } from '../../config/dedicated-secrets.js';
 import { isSealedSecret, openSecret, sealSecret } from '../../shared/crypto/secret-cipher.service.js';
 
-/**
- * BE-11: las credenciales de almacenamiento (s3_secret_key, google_client_secret, google_refresh_token,
- * onedrive_client_secret, onedrive_refresh_token) pasan a guardarse cifradas con SETTINGS_ENCRYPTION_KEY
- * (AES-256-GCM, mismo formato `enc.v1.` que la configuración SMTP). up() cifra las que estén en claro; down()
- * las devuelve a texto plano. La clave es la misma que usa la aplicación (SETTINGS_ENCRYPTION_KEY o, fuera de
- * producción, JWT_ACCESS_SECRET): la migración corre en el mismo contenedor, con el mismo entorno.
- *
- * BE-15: storage_oauth_state guarda el `state` OAuth de un solo uso (solo su hash SHA-256), el hash de la cookie
- * que lo liga al navegador, el usuario, el proveedor, la caducidad y cuándo se consumió.
- */
+
 const SECRET_COLUMNS = [
   's3_secret_key',
   'google_client_secret',

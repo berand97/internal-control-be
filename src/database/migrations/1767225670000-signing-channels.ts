@@ -1,18 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Tres caminos de firma con el método como evidencia, y anulación de actas por su proceso.
- *
- * - signature_signing_link: enlace de un solo uso para firmar sin sesión (persona sin usuario activo). Solo guarda el
- *   SHA-256 del token; delivery_status es el outbox del correo (PENDING_SEND → SENT | FAILED).
- * - signature_envelope_signer.method: SESSION_MFA | SESSION | EMAIL_LINK, con la evidencia del enlace. El CHECK de
- *   evidencia pasa a depender del método (antes exigía usuario y sesión a toda firma).
- * - document.status VOIDED (anulada por su proceso) con motivo, quién y cuándo; document_request.status CANCELLED;
- *   signature_envelope.status VOIDED.
- *
- * down() se niega si hay datos que no caben en el esquema anterior (firmas por enlace, enlaces emitidos, actas
- * anuladas, solicitudes canceladas): revertir los perdería.
- */
 export class SigningChannels1767225670000 implements MigrationInterface {
   name = 'SigningChannels1767225670000';
 

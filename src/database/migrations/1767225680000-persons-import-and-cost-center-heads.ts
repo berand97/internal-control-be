@@ -1,19 +1,11 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-// Copia fija del catálogo (src/common/identity/identity-document-types.ts) al momento de esta migración.
 const DOCUMENT_TYPES = ['CC', 'CE', 'PA', 'PEP', 'PPT', 'TI'];
 const PERSON_FLAGS = ['DOCUMENT_TYPE_UNKNOWN', 'NAME_NOT_SPLIT'];
 const PREVIOUS_TARGETS = ['ASSETS', 'COST_CENTERS'];
 
 const list = (values: ReadonlyArray<string>): string => values.map((value) => `'${value}'`).join(', ');
 
-/**
- * - Destino PERSONS en la importación de Excel y el origen de cada persona importada.
- * - person.data_quality_flags (como asset) y el catálogo de tipos de documento.
- * - Protección de números de documento sin tipo: con document_type NULL la unicidad (tipo, número) no aplica
- *   (NULL no es igual a NULL), así que un índice único parcial impide dos personas sin tipo con el mismo número.
- * - cost_center_head: quién dirige cada centro de costo (HU 1.0.14), a nivel de persona y con vigencia.
- */
 export class PersonsImportAndCostCenterHeads1767225680000 implements MigrationInterface {
   name = 'PersonsImportAndCostCenterHeads1767225680000';
 
@@ -31,8 +23,6 @@ export class PersonsImportAndCostCenterHeads1767225680000 implements MigrationIn
           CHECK (data_quality_flags <@ ARRAY[${list(PERSON_FLAGS)}]::VARCHAR(40)[])
     `);
 
-    // Tipos fuera del catálogo que ya existan no se tocan: la restricción queda NOT VALID (aplica a lo nuevo) y
-    // la migración lo dice. En staging (restauración de producción) no hay ninguno.
     const [invalid] = (await queryRunner.query(
       `SELECT count(*)::int AS total FROM person WHERE document_type IS NOT NULL AND document_type NOT IN (${list(DOCUMENT_TYPES)})`,
     )) as Array<{ total: number }>;

@@ -6,17 +6,7 @@ import {
 } from 'node:crypto';
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * BE-11: cifra en reposo las semillas TOTP existentes (app_user.mfa_secret y mfa_pending_secret) con el mismo
- * formato y la misma clave que SecretCipherService (src/shared/crypto/secret-cipher.service.ts): AES-256-GCM,
- * IV aleatorio de 12 bytes, clave = SHA-256 de SETTINGS_ENCRYPTION_KEY, o de JWT_ACCESS_SECRET si aquella no está
- * definida (el mismo respaldo que src/config/configuration.ts). Formato: enc.v1.<iv>.<tag>.<dato> en base64url.
- *
- * La lógica se copia aquí a propósito: una migración no debe cambiar de comportamiento si el servicio cambia.
- * Es idempotente (lo ya cifrado no se toca) y reversible: down() descifra con la misma clave.
- * Si hay semillas que procesar y no hay clave en el entorno, falla sin tocar nada (nunca cifra con una clave
- * distinta de la que usará la aplicación).
- */
+
 const PREFIX = 'enc.v1.';
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;

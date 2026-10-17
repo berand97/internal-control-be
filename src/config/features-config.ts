@@ -1,23 +1,9 @@
-/**
- * Módulos del sistema (src/modules/features). Se valida al arrancar: un valor fuera de rango detiene el backend con el
- * motivo.
- */
+
 export interface FeaturesConfig {
-  /** Errores internos (5xx) dentro de la ventana que abren el circuito de un módulo (FEATURE_CIRCUIT_THRESHOLD). */
   readonly circuitThreshold: number;
-  /** Ventana deslizante en la que se cuentan esos errores (FEATURE_CIRCUIT_WINDOW_SECONDS). */
   readonly circuitWindowMs: number;
-  /**
-   * Espera con el circuito abierto antes de dejar pasar una petición de prueba (FEATURE_CIRCUIT_COOLDOWN_SECONDS). Si
-   * la prueba sale bien el módulo se reactiva; si falla, la espera vuelve a empezar.
-   */
   readonly circuitCooldownMs: number;
-  /**
-   * Cada cuánto la caché de módulos se relee completa desde la BD, además del NOTIFY (FEATURE_FLAGS_RELOAD_SECONDS;
-   * 0 = solo NOTIFY). Solo en el proceso HTTP.
-   */
   readonly reloadIntervalMs: number;
-  /** FEATURE_<CODIGO>=true|false fija un módulo por entorno. */
   readonly overrides: Readonly<Record<string, boolean>>;
 }
 
@@ -27,7 +13,6 @@ export const DEFAULT_FEATURE_CIRCUIT_COOLDOWN_SECONDS = 300;
 export const DEFAULT_FEATURE_FLAGS_RELOAD_SECONDS = 30;
 
 const FEATURE_ENV_PREFIX = 'FEATURE_';
-/** Variables FEATURE_* que son ajustes y no kill-switch de un módulo. */
 const RESERVED_FEATURE_ENV = new Set([
   'FEATURE_CIRCUIT_THRESHOLD',
   'FEATURE_CIRCUIT_WINDOW_SECONDS',

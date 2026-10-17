@@ -1,17 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * El ícono del menú pasa a ser dato y el menú sembrado alcanza las pantallas nuevas.
- *
- * - navigation_item.icon: nullable, restringida por CHECK al catálogo cerrado de
- *   src/common/authorization/navigation-icons.ts (copiado aquí literalmente: una migración no importa código vivo).
- * - Relleno: cada ítem existente recibe el ícono que el sidebar le mostraba, deducido de su recurso (RESOURCE_ICONS
- *   del frontend); un recurso sin ícono mostraba `circle` y así queda (hoy: /mail).
- * - /document-templates "Plantillas" pasa a /documents "Documentos" (la ruta vieja solo redirige a /documents),
- *   conservando recurso y acción, solo si el ítem sigue con los valores sembrados y nadie creó ya /documents.
- * - /imports y /handovers se insertan con id fijo y ON CONFLICT (path) DO NOTHING: si un administrador ya creó
- *   esa ruta, se respeta la suya. El down() borra por ese id, así que nunca toca una fila creada a mano.
- */
 
 const ICONS = [
   'users',
@@ -36,7 +24,6 @@ const ICONS = [
   'hand-helping',
 ] as const;
 
-/** RESOURCE_ICONS de frontend/src/app/core/layout/sidebar/sidebar.component.ts:35-50 (master c68e560). */
 const RESOURCE_ICONS: ReadonlyArray<readonly [string, string]> = [
   ['user', 'users'],
   ['role', 'shield'],

@@ -56,7 +56,6 @@ export interface VoidForEntityResult {
   readonly voidedDocumentIds: ReadonlyArray<string>;
 }
 
-/** Estado público de un enlace de firma (GET /public/signing-links/:token). */
 export type PublicLinkStatus = 'ACTIVE' | 'EXPIRED' | 'CONSUMED' | 'INVALIDATED';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -73,7 +72,6 @@ export const CONDITION_LABELS: Record<string, string> = {
 
 export const UNVERIFIED_CONDITION = 'Sin verificar';
 
-/** Reintentos automáticos (job) de la transición de un acta cuyo proceso falló; el sync manual no tiene tope. */
 export const MAX_AUTOMATIC_LIFECYCLE_ATTEMPTS = 5;
 
 const conditionLabel = (condition: string | null, flags: ReadonlyArray<string>): string =>
@@ -92,18 +90,8 @@ export interface DocumentRequestPayload {
   readonly signers?: Record<string, string>;
   readonly assetNotes?: Record<string, string>;
   readonly fields?: Record<string, string>;
-  /** Campos por activo: la plantilla los lee como activos[].campos.<nombre> ({} si el activo no trae). */
   readonly assetFields?: Record<string, Record<string, string>>;
-  /**
-   * Tablas adicionales: la plantilla las recorre como {{#tablas.<nombre>}}…{{/tablas.<nombre>}} y lee cada columna
-   * por su nombre. Solo texto; nombres de tabla y columna como identificadores (assertPayloadTables acota la forma).
-   */
   readonly tables?: Record<string, ReadonlyArray<Record<string, string>>>;
-  /**
-   * Sustitutos de turnos de Control Interno cuando el designado ocupa otra firma del acta o no tiene el permiso
-   * act:sign_control:global vigente (domain/signer-separation.ts): rol → { personId, reason }. Solo AUDITA y
-   * CONTROL_INTERNO.
-   */
   readonly signerSubstitutions?: Record<string, SignerSubstitution>;
 }
 
@@ -113,7 +101,6 @@ export const MAX_PAYLOAD_TABLE_ROWS = 20_000;
 const MAX_PAYLOAD_TABLE_COLUMNS = 30;
 const MAX_PAYLOAD_CELL_LENGTH = 2_000;
 
-/** Forma de payload.tables; lanza VALIDATION_FAILED con el primer problema. */
 export const assertPayloadTables = (tables: unknown): void => {
   if (tables === undefined) {
     return;
@@ -186,7 +173,6 @@ interface ActSigner extends ActParty {
   rol: string;
   etiqueta: string;
   personId: string | null;
-  /** Solo en un turno sustituido al emitir (separación de funciones): a quién reemplaza el firmante y en qué turno. */
   sustituye?: { nombre: string; rol: string };
   motivoSustitucion?: string;
 }
@@ -218,21 +204,6 @@ interface PersonRow {
   email: string | null;
 }
 
-/**
- * Cada firmante por su rol, para que la plantilla lo nombre donde corresponde: {{firmante.recibe.nombre}},
- * {{firmante.entrega.cargo}}, {{firmante.audita.documento}}, {{firmante.recibe.tipoDocumento}}... (rol en
- * minúsculas: recibe, entrega, audita, responsable, control_interno, contabilidad). Contrato fijo con las
- * plantillas. tipoDocumento es la abreviatura del catálogo (C.C., C.E., …) o '' si el tipo se desconoce: el acta
- * imprime entonces solo el número, nunca un tipo supuesto.
- *
- * Turno sustituido al emitir (separación de funciones, domain/signer-separation.ts): además
- *   firmante.<rol>.sustitucion.nombre   persona designada a la que reemplaza el firmante
- *   firmante.<rol>.sustitucion.rol      turno en que la reemplaza (etiqueta del formato)
- *   firmante.<rol>.sustitucion.motivo   motivo de la sustitución
- * y la tabla {{#tablas.sustituciones}}{{rol}} {{sustituto}} {{sustituido}} {{conflicto}} {{motivo}}{{/tablas.sustituciones}}
- * (conflicto: las otras firmas que ocupa el sustituido). Sin sustitución, firmante.<rol>.sustitucion no existe y la
- * tabla no se imprime (el renderizador deja '' en lo que falta).
- */
 const signersByRole = (
   signers: ReadonlyArray<ActSigner & { readonly tipoDocumento?: string }>,
 ): Record<string, ActParty & { tipoDocumento: string; sustitucion?: { nombre: string; rol: string; motivo: string } }> =>
@@ -279,10 +250,6 @@ export class DocumentEngineService {
     private readonly catalog: DocumentFormatCatalogService,
   ) {}
 
-  /**
-   * Si el motor puede generar el formato hoy: su versión vigente tiene código SGC y firmantes. Los procesos lo
-   * consultan antes de encolar para no romperse cuando el formato institucional aún no existe (acta de devolución).
-   */
   async formatReadiness(
     formatKey: string,
     manager: EntityManager = this.dataSource.manager,
@@ -302,7 +269,6 @@ export class DocumentEngineService {
     }
   }
 
-  /** Versión vigente de cada formato, ordenados por código SGC (sin código al final), con plantilla y consecutivo. */
   async formats() {
     const formats = (await this.catalog.currentAll()).sort(
       (a, b) =>
@@ -317,7 +283,6 @@ export class DocumentEngineService {
     return result;
   }
 
-  /** Un formato con su versión vigente, como en GET /documents/formats. */
   async formatSummary(format: DocumentFormat) {
     const today = new Date().toISOString().slice(0, 10);
     const template = await this.activeTemplate(format.key, today, this.dataSource.manager);
@@ -358,11 +323,6 @@ export class DocumentEngineService {
     };
   }
 
-  /**
-   * Plantilla Word del formato con su fecha de vigencia. Se registra con el código SGC de la versión del formato que
-   * regirá cuando la plantilla empiece a usarse (la de su fecha de vigencia, o la vigente hoy si la fecha ya pasó).
-   * sgcVersion (versión impresa en formato.version) por defecto es la de esa versión del formato.
-   */
   async uploadTemplate(
     formatKey: string,
     file: { readonly buffer: Buffer; readonly originalname: string },
@@ -372,11 +332,9 @@ export class DocumentEngineService {
     const today = bogotaToday();
     const format = await this.catalog.current(formatKey, this.dataSource.manager, meta.effectiveDate > today ? meta.effectiveDate : today);
     if (!format.sgcCode) {
-      // La plantilla se registra con su código SGC (document_template_version.sgc_code NOT NULL).
       throw new ApiException(ErrorCode.DocumentFormatNotReady, `El formato ${format.key} aún no tiene código SGC institucional`);
     }
     const sgcVersion = meta.sgcVersion?.trim() || format.version || '';
-    // BE-17: la versión va en la clave; se valida aunque venga del catálogo (filas anteriores a la regla).
     if (!SGC_VERSION_PATTERN.test(sgcVersion)) {
       throw new ApiException(ErrorCode.ValidationFailed, undefined, [
         {
@@ -387,7 +345,6 @@ export class DocumentEngineService {
     }
     const placeholders = readDocxPlaceholders(file.buffer);
     const stored = await this.storage.put({
-      // El sufijo lo genera el servidor: dos cargas con la misma fecha y versión ya no se pisan el archivo.
       key: documentTemplateKey({ formatKey: format.key, effectiveDate: meta.effectiveDate, version: sgcVersion, id: randomUUID() }),
       body: file.buffer,
       contentType: DOCX_MIME,
@@ -412,13 +369,6 @@ export class DocumentEngineService {
     return { id: row?.id, formatKey: format.key, placeholders };
   }
 
-  /**
-   * Firmantes del acta con la regla del firmante de Control Interno y la separación de funciones aplicadas
-   * (domain/signer-separation.ts): todo turno AUDITA/CONTROL_INTERNO lo ocupa alguien con act:sign_control:global
-   * vigente, y nadie ocupa dos firmas salvo sustituto de Control Interno. Lo usan assertSigners (cada proceso, antes de
-   * tocar nada), enqueue (el proceso recibe el error al crear, no el outbox después) y generateWithin (autoridad: el
-   * permiso se vuelve a comprobar al generar).
-   */
   private async signersFor(
     manager: EntityManager,
     format: DocumentFormat,
@@ -434,7 +384,6 @@ export class DocumentEngineService {
     const ineligible = designated.filter((signer) => !allowed.has(signer.personId));
     const resolved = resolveSigners(format.signers, payload, new Set(ineligible.map((signer) => signer.spec.role)));
     const substitutes = resolved.filter((signer) => signer.substitution);
-    // Designado de Control Interno sin el permiso y sin sustituto: el turno no se puede emitir así.
     const unresolved = ineligible.filter((signer) => !substitutes.some((item) => item.spec.role === signer.spec.role));
     if (unresolved.length > 0) {
       throw new ApiException(
@@ -466,12 +415,6 @@ export class DocumentEngineService {
     return resolved;
   }
 
-  /**
-   * De las personas dadas, las que hoy pueden firmar por Control Interno: persona activa con usuario ACTIVE y el
-   * permiso vigente act:sign_control:global (v_user_effective_permissions: asignaciones sin revocar, dentro de su
-   * vigencia, roles no borrados, con herencia), en cualquier alcance. Mismo criterio que ControlSignersService.holders.
-   * Decide el permiso, no el nombre del rol.
-   */
   private async controlSignersAmong(manager: EntityManager, personIds: ReadonlyArray<string>): Promise<Set<string>> {
     const ids = [...new Set(personIds)];
     if (ids.length === 0) {
@@ -487,11 +430,6 @@ export class DocumentEngineService {
     return new Set(rows.map((row) => row.person_id));
   }
 
-  /**
-   * Validación temprana de los firmantes de un proceso (préstamo, entrega, …) ANTES de tocar activos o estados:
-   * misma regla que enqueue, para que el error claro (DOCUMENT_SIGNER_NOT_ELIGIBLE, DOCUMENT_SIGNER_DUPLICATED,
-   * DOCUMENT_SIGNER_SUBSTITUTE_INVALID) salga antes de encolar. enqueue lo vuelve a comprobar.
-   */
   async assertSigners(
     manager: EntityManager,
     payload: Pick<DocumentRequestPayload, 'formatKey' | 'responsiblePersonId' | 'signers' | 'signerSubstitutions'>,
@@ -525,7 +463,6 @@ export class DocumentEngineService {
     for (const { id } of pending) {
       try {
         const document = await this.dataSource.transaction(async (manager) => {
-          // CANCELLED (voidForEntity) y GENERATED quedan fuera: nunca se generan.
           const [request] = (await manager.query(
             `SELECT payload, requested_by, created_at FROM document_request
              WHERE id = $1 AND status IN ('PENDING', 'FAILED') FOR UPDATE SKIP LOCKED`,
@@ -534,7 +471,6 @@ export class DocumentEngineService {
           if (!request) {
             return null;
           }
-          // El acta lleva la fecha del proceso (la de la solicitud), no la del intento que por fin la genera.
           const created = await this.generateWithin(manager, request.payload, request.requested_by, {
             documentDate: new Date(request.created_at),
           });
@@ -569,7 +505,6 @@ export class DocumentEngineService {
     return document;
   }
 
-  /** Pide las firmas y, si el primer turno se firma por enlace, lo emite. Nada de esto deshace el acta. */
   private async afterGeneration(documentId: string): Promise<void> {
     await this.requestSignatures(documentId).catch((error: unknown) => {
       this.logger.error(`No se pudo pedir las firmas del acta ${documentId}`, error instanceof Error ? error.stack : String(error));
@@ -586,19 +521,13 @@ export class DocumentEngineService {
     });
   }
 
-  /**
-   * options.documentDate: fecha del acta (documento.fecha). Por defecto hoy; el outbox pasa la fecha de la solicitud
-   * para que un reintento días después no separe el acta de la fecha real del proceso. El consecutivo (periodo) y la
-   * plantilla vigente se toman del momento de generar.
-   */
   async generateWithin(
     manager: EntityManager,
     payload: DocumentRequestPayload,
     actorId: string | null,
     options: { readonly documentDate?: Date } = {},
   ): Promise<GeneratedDocument> {
-    // La versión vigente al generar queda enlazada al acta (format_version_id): firmantes y etiquetas salen de ella.
-    const format = await this.catalog.current(payload.formatKey, manager);
+   const format = await this.catalog.current(payload.formatKey, manager);
     this.assertReady(format);
     assertPayloadTables(payload.tables);
     const resolved = await this.signersFor(manager, format, payload, actorId);
@@ -617,7 +546,6 @@ export class DocumentEngineService {
 
     const docx = renderDocx(source, data);
     const pdf = await this.pdf.toPdf(docx, `${format.key}-${number}.docx`);
-    // created_at explícito (no el NOW() de la transacción): la carpeta del acta es el año de este instante.
     const keyInput = { createdAt: now, formatKey: format.key, number };
     const storedDocx = await this.storage.put({
       key: documentFileKey({ ...keyInput, extension: 'docx' }),
@@ -672,8 +600,6 @@ export class DocumentEngineService {
         [documentId, signer.orden, signer.rol, signer.personId, signer.nombre || null, signer.documento || null],
       );
     }
-    // Sustituciones al emitir: misma bitácora que las reasignaciones posteriores (source = 'AT_ISSUE'), con el PDF que
-    // ya las imprime. reassigned_by es quien generó el acta (signersFor exige usuario si hay sustitución).
     for (const signer of resolved.filter((item) => item.substitution)) {
       await manager.query(
         `INSERT INTO document_signature_reassignment (document_id, sign_order, role, from_person_id, to_person_id, reason,
@@ -691,7 +617,6 @@ export class DocumentEngineService {
         ],
       );
     }
-    // Dentro de la transacción del llamador: si el proceso no acepta el acta, no queda documento (ni consecutivo).
     await this.lifecycle.dispatch(manager, 'onGenerated', documentId);
     return {
       id: documentId,
@@ -736,7 +661,6 @@ export class DocumentEngineService {
       signer_document: string | null;
       email: string | null;
     }>;
-    // La versión con que se emitió el acta, no la vigente: el sobre y la hoja de firmas describen sus reglas.
     const format = await this.catalog.forDocument(document.id, manager);
     return {
       documentId: document.id,
@@ -785,9 +709,7 @@ export class DocumentEngineService {
       const target = (counts?.rejected ?? 0) > 0 ? 'REJECTED' : counts?.unsigned === 0 ? 'SIGNED' : 'PENDING_SIGNATURE';
       if (locked?.status !== 'PENDING_SIGNATURE' || target === 'PENDING_SIGNATURE') {
         return null;
-      }
-      // La transición y el efecto del proceso van juntos: si el manejador falla se deshacen ambos (savepoint) y
-      // quedan confirmadas solo las firmas y el error. El acta sigue PENDING_SIGNATURE y un sync posterior reintenta.
+      } 
       await manager.query('SAVEPOINT document_lifecycle');
       try {
         await manager.query(
@@ -816,19 +738,16 @@ export class DocumentEngineService {
         failure.error instanceof Error ? failure.error.stack : String(failure.error),
       );
     }
-    // Un fallo al guardar el PDF firmado no deshace la firma ya capturada: el job lo reintenta (retrySignedPdfs).
     await this.storeSignedPdf(documentId).catch((error: unknown) => {
       this.logger.error(
         `No se pudo guardar el PDF firmado del acta ${documentId}; se reintentará`,
         error instanceof Error ? error.stack : String(error),
       );
     });
-    // El turno pudo avanzar: si el siguiente firma por enlace, se emite (y se invalidan los de turnos pasados).
     await this.refreshSigningLink(documentId);
     return this.detail(documentId);
   }
 
-  /** Actas SIGNED sin PDF firmado guardado (falló storeSignedPdf): el job las reintenta. */
   async retrySignedPdfs(limit = 20): Promise<{ retried: number; stillMissing: number }> {
     if (!this.signatures.signedDocument) {
       return { retried: 0, stillMissing: 0 };
@@ -851,7 +770,6 @@ export class DocumentEngineService {
     return { retried: missing.length, stillMissing };
   }
 
-  /** Reintenta la transición de las actas cuyo proceso falló al completarlas (lo llama el job). */
   async retryLifecycle(limit = 20): Promise<{ retried: number; stillFailing: number }> {
     const stalled = (await this.dataSource.query(
       `SELECT id FROM document
@@ -930,30 +848,18 @@ export class DocumentEngineService {
     return attestation;
   }
 
-  /** Reenvía el enlace de firma del turno actual (invalida el anterior). Permiso de generación del formato. */
   async resendSigningLink(documentId: string, order: number, actor: AuthenticatedUser) {
     await this.assertPermission(actor.id, (await this.catalog.forDocument(documentId)).generatePermission);
     await this.links.resend(documentId, order, actor.id);
     return this.detail(documentId, actor);
   }
 
-  /**
-   * Anula las actas de una entidad cuyo proceso se canceló, dentro de la transacción del proceso (manager):
-   * - solicitudes PENDING/FAILED del outbox → CANCELLED (el job ya no las genera);
-   * - actas PENDING_SIGNATURE → VOIDED con motivo, quién y cuándo; su sobre queda cerrado y sus enlaces invalidados;
-   *   nadie puede firmarlas después;
-   * - un acta SIGNED no se anula: DOCUMENT_ALREADY_SIGNED y el llamador revierte su transacción;
-   * - REJECTED y VOIDED se dejan como están.
-   * No dispara onRejected: quien anula es el propio proceso, que ya sabe por qué. El llamador debe tener bloqueada su
-   * entidad; si el job está generando el acta en ese momento, este UPDATE espera y luego la encuentra como documento.
-   */
+
   async voidForEntity(manager: EntityManager, input: VoidForEntityInput): Promise<VoidForEntityResult> {
     const reason = input.reason.trim();
     if (!input.entityType.trim() || !input.entityId.trim() || !reason) {
       throw new ApiException(ErrorCode.ValidationFailed, 'Anular exige entityType, entityId y motivo');
     }
-    // Primero el outbox: si el job está generando una solicitud (fila bloqueada) se espera a que termine, y el SELECT
-    // de documentos que sigue (nueva instantánea en READ COMMITTED) ya ve el acta que produjo.
     const cancelled = (await manager.query(
       `WITH cancelled AS (
          UPDATE document_request SET status = 'CANCELLED', cancelled_at = NOW(), cancelled_by = $3, cancel_reason = $4
@@ -993,12 +899,7 @@ export class DocumentEngineService {
     return { cancelledRequestIds: cancelled.map((row) => row.id), voidedDocumentIds: voided };
   }
 
-  // ---------- Firma por enlace de un solo uso (páginas públicas /firmar/:token) ----------
 
-  /**
-   * Enlace utilizable: existe, no se consumió ni invalidó, no venció, y sigue siendo el turno actual de esa persona
-   * en un acta pendiente (y no es un turno de Control Interno, que siempre firma con sesión y MFA).
-   */
   private async linkContext(manager: EntityManager, token: string, lock: boolean) {
     const link = await this.links.findByToken(manager, token, lock);
     if (!link) {
@@ -1027,11 +928,6 @@ export class DocumentEngineService {
     return { ...context, current: context.current };
   }
 
-  /**
-   * Vista pública del enlace (Ley 1581, dato mínimo): solo lo que la pantalla necesita para firmar ESTE turno —estado
-   * del enlace, vencimiento, intentos, formato y número del acta y el rol del propio turno—. Nada de firmantes (ni
-   * nombres, ni siquiera enmascarados, ni el propio), nada de otros turnos y ningún enlace o ruta del sistema.
-   */
   async signingLinkView(token: string) {
     const { link, document, current, status } = await this.linkContext(this.dataSource.manager, token, false);
     const active = status === 'ACTIVE';
@@ -1063,10 +959,6 @@ export class DocumentEngineService {
     };
   }
 
-  /**
-   * Confirma la identidad con los últimos 4 dígitos del documento de la persona designada. Devuelve una autorización
-   * de pocos minutos para firmar o rechazar. Cada fallo cuenta; al quinto el enlace queda invalidado.
-   */
   async confirmSigningLinkIdentity(token: string, last4: string) {
     const outcome = await this.dataSource.transaction(async (manager) => {
       const { link } = await this.activeLink(manager, token);
@@ -1099,7 +991,6 @@ export class DocumentEngineService {
       )) as Array<{ authorization_expires_at: Date }>;
       return { kind: 'CONFIRMED' as const, identityToken, expiresAt: row?.authorization_expires_at ?? new Date() };
     });
-    // Los errores se lanzan fuera de la transacción: el intento fallido queda contado.
     switch (outcome.kind) {
       case 'NO_IDENTITY':
         throw new ApiException(ErrorCode.SignatureNoIdentityCheck);
@@ -1174,7 +1065,6 @@ export class DocumentEngineService {
     };
   }
 
-  /** Firma o rechazo por enlace: la acción y el consumo del enlace van en la misma transacción (un solo uso). */
   private async actByLink(
     token: string,
     identityToken: string,
@@ -1237,7 +1127,6 @@ export class DocumentEngineService {
         [documentId, order],
       )) as Array<{ role: string }>;
       if (targetSlot) {
-        // La persona debe poder firmar este turno por algún camino (ver domain/signing-channel.ts).
         const channel = await this.links.channel(manager, targetSlot.role, personId);
         if (channel.blockedBy) {
           throw new ApiException(
@@ -1248,7 +1137,6 @@ export class DocumentEngineService {
             [{ field: 'personId', message: channel.blockedBy }],
           );
         }
-        // Regla del firmante de Control Interno (domain/signer-separation.ts): la misma que al emitir.
         if (requiresControlSigner(targetSlot.role) && !(await this.controlSignersAmong(manager, [personId])).has(personId)) {
           throw new ApiException(
             ErrorCode.DocumentSignerNotEligible,
@@ -1291,7 +1179,6 @@ export class DocumentEngineService {
       if (slot.signer_person_id === personId) {
         throw new ApiException(ErrorCode.ValidationFailed, 'La persona ya está asignada a ese turno');
       }
-      // Separación de funciones: la reasignación no puede dejar a una persona en dos firmas del acta.
       const taken = slots.filter((item) => item.sign_order !== order && item.signer_person_id === personId);
       if (taken.length > 0) {
         const label = (role: string) => format.signers.find((spec) => spec.role === role)?.label ?? role;
@@ -1301,7 +1188,6 @@ export class DocumentEngineService {
           [
             { field: 'personId', message: `Ya firma como ${taken.map((item) => item.role).join(', ')}` },
             ...taken.map((item) => ({ field: `signers.${item.role}`, message: `Misma persona que ${label(slot.role)} (${slot.role})` })),
-            // Conflicto con un turno de Control Interno: se resuelve reasignando ese turno a un sustituto con el permiso.
             ...[slot, ...taken]
               .filter((item) => requiresControlSigner(item.role))
               .map((item) => ({
@@ -1459,7 +1345,6 @@ export class DocumentEngineService {
       nextOrder: next?.sign_order ?? null,
       canSign: blocker !== null && blocker.code === null,
       blockedBy: blocker?.code ?? null,
-      // Tras la primera firma (o un rechazo) reasignar alteraría lo que otros firmaron: reassignSigner lo rechaza.
       canReassign:
         document.status === 'PENDING_SIGNATURE' && slots.every((slot) => slot.status === 'PENDING') && administers,
       canResendLink: administers && currentTurnChannel === 'EMAIL_LINK',
@@ -1509,10 +1394,7 @@ export class DocumentEngineService {
     if (!actor.sessionId || !session) {
       return blocked(ErrorCode.SignatureSessionInvalid);
     }
-    // "Sesión con MFA" = sesión abierta o elevada con segundo factor (MfaAccountService.isMfaSession), no el
-    // mfa_enabled del usuario: quien tiene MFA pero entró solo con contraseña firma como SESSION.
     const mfaSession = await this.mfaAccount.isMfaSession(actor);
-    // MFA obligatorio solo en los turnos de Control Interno; en los demás basta la sesión vigente.
     if (requiresMfa(slot.role) && !mfaSession) {
       return blocked(ErrorCode.SignatureMfaRequired);
     }
@@ -1577,7 +1459,6 @@ export class DocumentEngineService {
       methodLabel: slot.status === 'PENDING' ? null : methodLabel(slot.method),
       signingLink: this.linkSummary(links.get(slot.sign_order)),
     }));
-    // Con una firma rechazada no hay turno, aunque el acta siga PENDING_SIGNATURE porque su proceso falló (lifecycleError).
     const pending =
       document.status === 'PENDING_SIGNATURE' && !slots.some((slot) => slot.status === 'REJECTED')
         ? slots.find((slot) => slot.status === 'PENDING')
@@ -1637,7 +1518,6 @@ export class DocumentEngineService {
     };
   }
 
-  /** Estado del enlace de firma para quien administra el proceso. Nunca incluye el token ni su hash. */
   private linkSummary(link: SigningLinkRow | undefined) {
     if (!link) {
       return null;
@@ -1695,7 +1575,6 @@ export class DocumentEngineService {
     return Number(row.current_value);
   }
 
-  /** Si el formato tiene plantilla vigente hoy (sin ella, la solicitud del outbox falla con TEMPLATE_NOT_ACTIVE). */
   async hasActiveTemplate(formatKey: string, manager: EntityManager = this.dataSource.manager): Promise<boolean> {
     return (await this.activeTemplate(formatKey, new Date().toISOString().slice(0, 10), manager)) !== undefined;
   }
@@ -1734,7 +1613,6 @@ export class DocumentEngineService {
           [personIds],
         )) as Array<PersonRow & { document_type: string | null }>)
       : [];
-    // Abreviatura del tipo solo si hay número; tipo desconocido → '' (el acta imprime solo el número).
     const documentType = (person: (typeof persons)[number] | undefined): string =>
       person?.document_number ? identityDocumentAbbreviation(person.document_type) : '';
     const byId = new Map(persons.map((person) => [person.id, person]));
@@ -1750,8 +1628,6 @@ export class DocumentEngineService {
     if (payload.costCenterId && !costCenter) {
       throw new ApiException(ErrorCode.ResourceNotFound, 'Centro de costo inexistente');
     }
-    // Unidad del centro vigente a la fecha del acta (no la de hoy): queda en el snapshot document.data y un re-render
-    // posterior (firma, reasignación) sigue mostrando la de la emisión aunque el centro se mueva de unidad.
     const costCenterUnit = payload.costCenterId ? await unitAt(manager, payload.costCenterId, now) : null;
     const assetIds = payload.assetIds ?? [];
     const assets = assetIds.length
@@ -1800,7 +1676,6 @@ export class DocumentEngineService {
           : {}),
       };
     });
-    // Las otras firmas que ocupaba cada designado sustituido: por qué no pudo firmar el turno de Control Interno.
     const substitutions = resolved
       .filter((signer) => signer.substitution)
       .map((signer) => ({
@@ -1860,12 +1735,10 @@ export class DocumentEngineService {
         unidades: 1,
         observacion: payload.assetNotes?.[asset.id] ?? '',
         estado: conditionLabel(asset.physical_condition, asset.data_quality_flags),
-        // Solo con assetFields: las actas que no los usan conservan su data tal cual.
         ...(payload.assetFields ? { campos: payload.assetFields[asset.id] ?? {} } : {}),
       })),
       totalElementos: ordered.length,
       campos: payload.fields ?? {},
-      // Solo con tables (o sustituciones): las actas que no las usan conservan su data tal cual.
       ...(tables ? { tablas: tables } : {}),
     };
   }

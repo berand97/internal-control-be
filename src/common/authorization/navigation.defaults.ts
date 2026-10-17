@@ -1,10 +1,5 @@
 import type { NavigationDefinition } from './navigation.registry.js';
 
-/**
- * Menú sembrado por las migraciones, tal como queda tras 1767225740000 (íconos, /imports, /handovers y
- * /document-templates → /documents). La app no lo lee: el menú real vive en navigation_item. Solo sirve de catálogo
- * de fixture a los specs de autorización, que deben describir el menú que existe.
- */
 export const DEFAULT_NAVIGATION_ITEMS: ReadonlyArray<NavigationDefinition> = [
   {
     module: 'USER',
