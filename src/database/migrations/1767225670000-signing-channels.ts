@@ -44,7 +44,6 @@ export class SigningChannels1767225670000 implements MigrationInterface {
     await queryRunner.query(
       'CREATE UNIQUE INDEX uq_signing_link_token ON signature_signing_link (token_hash) WHERE token_hash IS NOT NULL',
     );
-    // Un solo enlace abierto (sin consumir ni invalidar) por turno.
     await queryRunner.query(
       `CREATE UNIQUE INDEX uq_signing_link_open ON signature_signing_link (document_id, sign_order)
        WHERE consumed_at IS NULL AND invalidated_at IS NULL`,
@@ -62,7 +61,6 @@ export class SigningChannels1767225670000 implements MigrationInterface {
         ADD COLUMN link_sent_at           TIMESTAMPTZ,
         ADD COLUMN identity_confirmed_at  TIMESTAMPTZ
     `);
-    // Antes de esta migración toda firma y todo rechazo exigían sesión con MFA (SIGNATURE_MFA_REQUIRED).
     await queryRunner.query(`
       UPDATE signature_envelope_signer
       SET method = CASE WHEN mfa_enabled IS FALSE THEN 'SESSION' ELSE 'SESSION_MFA' END

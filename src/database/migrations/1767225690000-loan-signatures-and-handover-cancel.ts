@@ -89,7 +89,6 @@ export class LoanSignaturesAndHandoverCancel1767225690000 implements MigrationIn
           CHECK ((status IN ('SIGNED', 'REJECTED')) = (closed_at IS NOT NULL))
     `);
 
-    // received_at se reconstruye desde los movimientos RETURN (up lo rellena igual).
     await queryRunner.query('ALTER TABLE asset_loan_item DROP COLUMN received_at');
 
     await queryRunner.query(`UPDATE asset_loan SET status = 'ACTIVE' WHERE status = 'PENDING_SIGNATURES'`);

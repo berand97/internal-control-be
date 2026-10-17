@@ -87,7 +87,6 @@ export class RbacInheritanceHardening1767225750000 implements MigrationInterface
       $$
     `);
 
-    // Mismo nombre y firma: trg_check_sod (BEFORE INSERT OR UPDATE ON user_role) la sigue usando.
     await queryRunner.query(`
       CREATE OR REPLACE FUNCTION fn_check_sod_violation()
       RETURNS TRIGGER AS $$
@@ -182,7 +181,6 @@ export class RbacInheritanceHardening1767225750000 implements MigrationInterface
       $$ LANGUAGE plpgsql
     `);
 
-    // AFTER: el linaje ya ve la fila nueva o el padre nuevo. El error aborta la sentencia igual que BEFORE.
     await queryRunner.query(`
       CREATE TRIGGER trg_role_sod_inheritance
           AFTER INSERT OR UPDATE OF parent_role_id ON role

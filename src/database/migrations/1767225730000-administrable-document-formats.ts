@@ -232,7 +232,6 @@ export class AdministrableDocumentFormats1767225730000 implements MigrationInter
         CONSTRAINT chk_document_format_signer_source CHECK (source IN ('RESPONSIBLE', 'REQUEST'))
       )
     `);
-    // Una versión emitida no se reescribe: editar es crear otra (las actas describen las reglas con que se emitieron).
     await queryRunner.query(`
       CREATE FUNCTION fn_prevent_document_format_version_update() RETURNS trigger AS $$
       BEGIN

@@ -1,6 +1,5 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-
 export class LoanDeliveryDocument1767225650000 implements MigrationInterface {
   name = 'LoanDeliveryDocument1767225650000';
 
@@ -15,7 +14,6 @@ export class LoanDeliveryDocument1767225650000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    // El enlace se puede reconstruir desde document.entity_type = 'LOAN' / entity_id: bajarlo no pierde evidencia.
     await queryRunner.query('DROP INDEX uq_asset_loan_delivery_document');
     await queryRunner.query('ALTER TABLE asset_loan DROP COLUMN delivery_document_id');
   }

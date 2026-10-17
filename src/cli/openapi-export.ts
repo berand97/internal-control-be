@@ -31,7 +31,6 @@ const checkDatabaseUrl = async (raw: string | undefined): Promise<void> => {
 };
 
 const main = async (): Promise<void> => {
-  // Antes de importar la aplicación: data-source.ts carga .env y no debe decidir la BD.
   await checkDatabaseUrl(process.env['DATABASE_URL']);
   process.env['JWT_ACCESS_SECRET'] ||= INERT_SECRET;
   process.env['JWT_REFRESH_SECRET'] ||= INERT_SECRET;

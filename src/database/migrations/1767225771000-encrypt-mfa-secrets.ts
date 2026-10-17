@@ -6,7 +6,6 @@ import {
 } from 'node:crypto';
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 
-
 const PREFIX = 'enc.v1.';
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
@@ -86,7 +85,6 @@ export class EncryptMfaSecrets1767225771000 implements MigrationInterface {
     queryRunner: QueryRunner,
     direction: 'encrypt' | 'decrypt',
   ): Promise<void> {
-    // encrypt: filas con alguna semilla en claro; decrypt: filas con alguna semilla cifrada.
     const matches = direction === 'encrypt' ? 'NOT LIKE' : 'LIKE';
     const rows = (await queryRunner.query(
       `SELECT id, mfa_secret, mfa_pending_secret FROM app_user

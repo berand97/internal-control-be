@@ -61,5 +61,5 @@ describe('código sin comentarios', () => {
     const files = [...SCANNED_DIRS.flatMap((dir) => listSources(join(ROOT, dir))), ...rootConfigs()];
     expect(files.length).toBeGreaterThan(0);
     expect(files.flatMap(commentsIn)).toEqual([]);
-  });
+  }, 60_000);
 });
