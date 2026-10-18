@@ -20,6 +20,13 @@ type Cell = string | number | null;
 
 const AGENT = 'it-estructura/1.0';
 
+const binaryParser = (res: request.Response, callback: (error: Error | null, body: Buffer) => void): void => {
+  const stream = res as unknown as NodeJS.ReadableStream;
+  const chunks: Buffer[] = [];
+  stream.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+  stream.on('end', () => callback(null, Buffer.concat(chunks)));
+};
+
 describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
@@ -480,6 +487,32 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(roots.find((node) => node.id === ids['c7100'])?.organizationalUnit?.id).toBe(ids['u7']);
     expect(roots.some((node) => node.id === ids['c7200'])).toBe(false);
     expect(root).toMatchObject({ acceptsAssets: false });
+
+    const exported = await http()
+      .get('/api/v1/cost-centers/export')
+      .query({ at: '2026-10-18', includeArchived: 'true' })
+      .set(auth('viewer'))
+      .buffer(true)
+      .parse(binaryParser);
+    expect(exported.status).toBe(200);
+    expect(exported.headers['content-type']).toContain('spreadsheetml');
+    expect(exported.headers['content-disposition']).toBe('attachment; filename="centros-de-costo-2026-10-18.xlsx"');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(exported.body as ArrayBuffer);
+    const sheet = workbook.getWorksheet('Centros de costo');
+    const rows: string[][] = [];
+    sheet?.eachRow((row) => rows.push((row.values as unknown[]).slice(1).map((value) => String(value ?? ''))));
+    expect(rows[0]).toEqual(['Código', 'Nombre', 'Tipo', 'Centro padre', 'Dependencia', 'Jefe(s) vigente(s)', 'Activos (directos)', 'Estado']);
+    const byCode = new Map(rows.map((row) => [row[0], row]));
+    const viewerName = await scalar<string>(dataSource, `SELECT trim(first_name || ' ' || last_name) FROM person WHERE id = $1`, [viewer.personId]);
+    expect(byCode.get('7200')).toEqual(['7200', expect.any(String), 'Agrupador', '', expect.any(String), viewerName, '0', 'Activo']);
+    expect(byCode.get('7210')?.slice(2, 4)).toEqual(['Con movimiento', `7200 · ${byCode.get('7200')?.[1]}`]);
+    expect(byCode.get('7210')?.[6]).toBe('1');
+    const order = rows.map((row) => row[0]);
+    expect(order.indexOf('7200')).toBeLessThan(order.indexOf('7210'));
+
+    const denied = await http().get('/api/v1/cost-centers/export').set({ Authorization: 'Bearer x' });
+    expect(denied.status).toBe(401);
   });
 
   describe('reconstrucción por la importación (UPDATE_STRUCTURE) con la forma de la hoja 2025', () => {

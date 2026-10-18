@@ -12,15 +12,18 @@ import {
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
@@ -52,6 +55,12 @@ import { QueryCostCentersDto } from './dto/query-cost-centers.dto.js';
 import { CostCenterResponseDto } from './dto/responses/cost-center.response.dto.js';
 import { StructureRemovalResultDto } from './dto/responses/structure-removal.response.dto.js';
 import { UpdateCostCenterDto } from './dto/update-cost-center.dto.js';
+import {
+  bogotaDate,
+  buildCostCenterExportWorkbook,
+  costCenterExportRows,
+  XLSX_MIME,
+} from './export/cost-center-export.js';
 import {
   CostCenterPlacementService,
   type RequestMeta,
@@ -136,6 +145,28 @@ export class CostCentersController {
   @ApiOkResponse({ schema: envelopedArraySchema(CostCenterPrefixMismatchDto) })
   prefixMismatches(): Promise<CostCenterPrefixMismatchDto[]> {
     return this.placements.prefixMismatches();
+  }
+
+  @Get('export')
+  @RequirePermission('cost_center:read:global')
+  @ApiProduces(XLSX_MIME)
+  @ApiOkResponse({
+    description: 'Archivo .xlsx (Content-Disposition: attachment; filename=centros-de-costo-AAAA-MM-DD.xlsx)',
+    content: { [XLSX_MIME]: { schema: { type: 'string', format: 'binary' } } },
+  })
+  @ApiOperation({
+    summary: 'Exportar los centros de costo a Excel a una fecha',
+    description:
+      'Hoja «Centros de costo», una fila por centro en el orden del árbol (cada padre antes de sus hijos): Código, Nombre, Tipo (Con movimiento / Agrupador), Centro padre (código · nombre), Dependencia, Jefe(s) vigente(s) (separados por «; »), Activos (directos) y Estado (Activo / Archivado). Ubicación y jefes a la fecha pedida (?at=AAAA-MM-DD, por defecto hoy); los activos son los que hoy apuntan directamente al centro. Por defecto solo centros activos; ?includeArchived=true incluye los archivados. El nombre del archivo lleva la fecha pedida.',
+  })
+  async export(@Query() query: CostCenterTreeQueryDto, @Res() response: Response): Promise<void> {
+    const at = resolveAt(query.at);
+    const tree = await this.placements.tree(at, query.includeArchived ?? false);
+    const body = await buildCostCenterExportWorkbook(costCenterExportRows(tree.roots));
+    response.setHeader('Content-Type', XLSX_MIME);
+    response.setHeader('Content-Disposition', `attachment; filename="centros-de-costo-${query.at ?? bogotaDate()}.xlsx"`);
+    response.setHeader('Cache-Control', 'no-store');
+    response.send(body);
   }
 
   @Get(':id/history')
