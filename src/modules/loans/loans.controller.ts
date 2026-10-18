@@ -118,6 +118,7 @@ export class LoansController {
       'El préstamo se otorga a la dependencia de destino (targetCostCenterId); contactPerson es quien recibe y firma, no el nuevo responsable. ' +
       'La disponibilidad se valida dentro de la transacción con las filas de los activos bloqueadas: un activo que ya está en un préstamo abierto ' +
       '(incluida otra solicitud) responde 406 ASSET_ALREADY_LOANED. Origen = destino: 400 LOAN_SAME_COST_CENTER. ' +
+      'El centro de destino debe tener jefe vigente: 409 COST_CENTER_WITHOUT_HEAD (details[field=targetCostCenterId]). ' +
       'Alcance: el usuario debe alcanzar el centro de ORIGEN de todos los activos (asset:read:global, o asset:read:org_unit por asignación COST_CENTER o jefatura vigente); ' +
       'si alguno es de otro centro responde 404 RESOURCE_NOT_FOUND sin datos, igual que un activo inexistente. Para pedir activos a otro centro: POST /asset-requests.',
   })

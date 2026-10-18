@@ -14,7 +14,7 @@ import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js'
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { bogotaDate, longSpanishDate } from '../../src/modules/loans/domain/loan-dates.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
-import { scalar, useSharedStorage } from './helpers.js';
+import { assignTestHead, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 
 const FORMAT = 'LOAN_RETURN';
@@ -159,6 +159,7 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     centerB = await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ($1, 'AULA DESTINO PRUEBA') RETURNING id`, [
       `DB-${tag}`,
     ]);
+    await assignTestHead(dataSource, [centerA, centerB]);
     categoryId = await scalar<string>(dataSource, `INSERT INTO asset_category (code, name) VALUES ($1, 'Devoluciones') RETURNING id`, [
       `DEV-${tag}`,
     ]);

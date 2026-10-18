@@ -5,7 +5,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
-import { bootModules, createActor, scalar } from './helpers.js';
+import { assignTestHeadByCodes, bootModules, createActor, scalar } from './helpers.js';
 
 type Cell = string | number | Date | null;
 
@@ -76,6 +76,7 @@ describe('Importación de Excel como funcionalidad (PostgreSQL real)', () => {
     const preview = await imports.preview(upload.batchId, { sheet: 'Centros', target: 'COST_CENTERS', mapping: { code: 'A', name: 'B' } }, actor.id);
     expect(preview.summary).toMatchObject({ rowsRead: 2, toInsert: 2, alreadyPresent: 0 });
     expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 2, skippedAlreadyPresent: 0 });
+    await assignTestHeadByCodes(dataSource, ['100', '200']);
   });
 
   it('previsualiza sin escribir, confirma con cuarentena y banderas, y no duplica al repetir', async () => {
@@ -162,10 +163,11 @@ describe('Importación de Excel como funcionalidad (PostgreSQL real)', () => {
     ).toBe('Portátil');
   });
 
-  it('con la política create, crea el centro inexistente y marca el activo', async () => {
+  it('con la política create ya no crea el centro inexistente: la fila va a cuarentena porque no tendría jefe', async () => {
     const file = await workbook('Hoja1', {
       1: ['Id', 'Codigo', 'Descripcion', 'Centro', 'Fecha compra', 'Precio'],
       2: [50, 'C-050', 'En centro nuevo', '8888', new Date('2021-01-01'), 1000],
+      3: [51, 'C-051', 'En centro con jefe', '100', new Date('2021-01-01'), 1000],
     });
     const upload = await imports.upload(file, 'centro-nuevo.xlsx', actor.id);
     const preview = await imports.preview(
@@ -173,15 +175,37 @@ describe('Importación de Excel como funcionalidad (PostgreSQL real)', () => {
       { sheet: 'Hoja1', target: 'ASSETS', mapping: ASSET_MAPPING, unknownCostCenters: 'create' },
       actor.id,
     );
-    expect(preview.summary).toMatchObject({ toInsert: 1, quarantined: {} });
+    expect(preview.summary).toMatchObject({ toInsert: 1, quarantined: { COST_CENTER_WITHOUT_HEAD: 1 } });
+    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 1, costCentersCreated: 0 });
     expect(await count(`SELECT count(*) FROM cost_center WHERE external_code = '8888'`)).toBe(0);
-    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 1, costCentersCreated: 1 });
-    expect(
-      await scalar<boolean>(
-        dataSource,
-        `SELECT 'COST_CENTER_NOT_IN_CATALOG' = ANY(a.data_quality_flags) FROM asset a JOIN asset_import_origin o ON o.asset_id = a.id WHERE o.legacy_asset_id = '50'`,
-      ),
-    ).toBe(true);
+    expect(await imports.quarantine(preview.importId)).toEqual([
+      expect.objectContaining({
+        rowNumber: 2,
+        legacyAssetId: '50',
+        reason: 'COST_CENTER_WITHOUT_HEAD',
+        detail: 'El centro 8888 no está en el catálogo y no tiene jefe vigente. Créelo y asígnele un jefe antes de importar sus activos.',
+      }),
+    ]);
+  });
+
+  it('una fila cuyo centro no tiene jefe vigente va a cuarentena; las demás se importan', async () => {
+    await dataSource.query(`INSERT INTO cost_center (external_code, name) VALUES ('300', 'Centro sin jefe')`);
+    const file = await workbook('Hoja1', {
+      1: ['Id', 'Codigo', 'Descripcion', 'Centro', 'Fecha compra', 'Precio'],
+      2: [60, 'H-060', 'En centro sin jefe', '300', new Date('2021-01-01'), 1000],
+      3: [61, 'H-061', 'En centro con jefe', '200', new Date('2021-01-01'), 1000],
+    });
+    const upload = await imports.upload(file, 'centro-sin-jefe.xlsx', actor.id);
+    const preview = await imports.preview(upload.batchId, { sheet: 'Hoja1', target: 'ASSETS', mapping: ASSET_MAPPING }, actor.id);
+    expect(preview.summary).toMatchObject({ toInsert: 1, quarantined: { COST_CENTER_WITHOUT_HEAD: 1 } });
+    expect(await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id)).toMatchObject({ inserted: 1 });
+    expect(await imports.quarantine(preview.importId)).toEqual([
+      expect.objectContaining({
+        rowNumber: 2,
+        reason: 'COST_CENTER_WITHOUT_HEAD',
+        detail: 'El centro 300 · Centro sin jefe no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.',
+      }),
+    ]);
   });
 
   it('rechaza un mapeo sin campos obligatorios o con campos desconocidos', async () => {

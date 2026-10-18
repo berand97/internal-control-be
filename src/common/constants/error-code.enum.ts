@@ -199,6 +199,7 @@ export enum ErrorCode {
   CostCenterPlacementRequired = 'COST_CENTER_PLACEMENT_REQUIRED',
   CostCenterGroupingHasAssets = 'COST_CENTER_GROUPING_HAS_ASSETS',
   CostCenterCodeOutOfUnitRange = 'COST_CENTER_CODE_OUT_OF_UNIT_RANGE',
+  CostCenterWithoutHead = 'COST_CENTER_WITHOUT_HEAD',
   CostCenterInactive = 'COST_CENTER_INACTIVE',
   CostCenterParentInactive = 'COST_CENTER_PARENT_INACTIVE',
   CostCenterOrgUnitInactive = 'COST_CENTER_ORG_UNIT_INACTIVE',

@@ -8,7 +8,7 @@ import { MovementType } from '../../src/modules/assets/enums/movement-type.enum.
 import { OperationalStatus } from '../../src/modules/assets/enums/operational-status.enum.js';
 import { AssetStateService } from '../../src/modules/assets/services/asset-state.service.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
-import { bootModules, createActor, scalar } from './helpers.js';
+import { assignTestHead, bootModules, createActor, scalar } from './helpers.js';
 
 describe('Camino único de escritura del activo (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
@@ -40,6 +40,7 @@ describe('Camino único de escritura del activo (PostgreSQL real)', () => {
         `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`,
       ),
     };
+    await assignTestHead(dataSource, base.costCenterId);
   });
 
   afterAll(async () => {

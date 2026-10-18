@@ -23,7 +23,7 @@ import {
 } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import { SAMPLE } from '../../scripts/formats/build-oci-21-37-template.mjs';
 import { findLeftovers } from '../../scripts/formats/template-leftovers.mjs';
-import { openTestSession, scalar, useSharedStorage } from './helpers.js';
+import { openTestSession, scalar, useSharedStorage, withTemporaryHead } from './helpers.js';
 import { pdfText, sampleLeftovers, squash } from './pdf-text.js';
 
 const ACT_FORMAT = 'OCI-21-37';
@@ -137,17 +137,19 @@ describe
         price: number,
       ) =>
         (
-          await app.get(AssetsService).create(
-            {
-              categoryId: base.categoryId,
-              costCenterId,
-              acquisitionTypeId: base.acquisitionTypeId,
-              description,
-              acquisitionDate: '2021-03-15',
-              acquisitionPrice: price,
-              locationId: base.room,
-            },
-            director.actor,
+          await withTemporaryHead(dataSource, costCenterId, () =>
+            app.get(AssetsService).create(
+              {
+                categoryId: base.categoryId,
+                costCenterId,
+                acquisitionTypeId: base.acquisitionTypeId,
+                description,
+                acquisitionDate: '2021-03-15',
+                acquisitionPrice: price,
+                locationId: base.room,
+              },
+              director.actor,
+            ),
           )
         ).id;
 

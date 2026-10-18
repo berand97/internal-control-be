@@ -8,7 +8,7 @@ import { AssetsService } from '../../src/modules/assets/services/assets.service.
 import { InventoriesModule } from '../../src/modules/inventories/inventories.module.js';
 import { InventoriesService } from '../../src/modules/inventories/services/inventories.service.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
-import { bootModules, createActor, discardInventoryActRequests, scalar } from './helpers.js';
+import { assignTestHead, bootModules, createActor, discardInventoryActRequests, scalar } from './helpers.js';
 
 describe('Toma física sobre el camino único de escritura (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
@@ -43,6 +43,7 @@ describe('Toma física sobre el camino único de escritura (PostgreSQL real)', (
         `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`,
       ),
     };
+    await assignTestHead(dataSource, base.costCenterId);
     const campus = await scalar<string>(
       dataSource,
       `INSERT INTO campus (code, name) VALUES ('IT-C', 'Sede prueba') RETURNING id`,

@@ -17,7 +17,7 @@ import { formatMoney } from '../../src/modules/inventories/domain/inventory-act.
 import { addDays, bogotaDate } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import type { StorageDriver } from '../../src/config/configuration.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
-import { createPermissionRole, openTestSession, scalar, useSharedStorage } from './helpers.js';
+import { assignTestHead, createPermissionRole, openTestSession, scalar, useSharedStorage, withTemporaryHead } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 import { conform, type Schema } from './openapi-conform.js';
 
@@ -150,7 +150,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
   };
 
   const newAsset = async (costCenterId: string, price: number) => {
-    const asset = await app.get(AssetsService).create(
+    const asset = await withTemporaryHead(dataSource, costCenterId, () => app.get(AssetsService).create(
       {
         categoryId: base.categoryId,
         costCenterId,
@@ -161,7 +161,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
         locationId: base.roomA,
       },
       director.actor,
-    );
+    ));
     return asset.id;
   };
 
@@ -463,6 +463,10 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(left.body.data).toMatchObject({ surplusResolution: 'LEAVE_UNRESOLVED', resolvedAssetId: null, assetCode: null, surplusCostCenterId: null });
     const ownCenter = await http().put(`/api/v1/inventories/${id}/items/${surplusId}/surplus-center`).set(as(director)).send({ costCenterId: await center('Centro elegido') });
     expect([ownCenter.status, ownCenter.body.error.code]).toEqual([406, 'INVALID_STATE']);
+
+    const headless = await post(director, `/${id}/items/${surplusId}/resolve-surplus`, { action: 'CREATE_ASSET', reason: 'Sin jefe', asset });
+    expect([headless.status, errorCode(headless)]).toEqual([409, 'COST_CENTER_WITHOUT_HEAD']);
+    await assignTestHead(dataSource, centerId);
 
     await dataSource.query(`
       CREATE FUNCTION it_fail_surplus() RETURNS trigger AS $$

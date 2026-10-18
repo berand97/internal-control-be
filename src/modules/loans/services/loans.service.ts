@@ -13,6 +13,7 @@ import { OperationalStatus } from '../../assets/enums/operational-status.enum.js
 import { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
 import { AssetStateService } from '../../assets/services/asset-state.service.js';
 import type { UpdateAssetRecord } from '../../assets/repositories/assets.repository.interface.js';
+import { assertCostCenterHasHead } from '../../cost-centers/domain/cost-center-head-rule.js';
 import { CostCenter } from '../../cost-centers/entities/cost-center.entity.js';
 import { CONTROL_SIGNER_PERMISSION } from '../../documents/domain/signer-separation.js';
 import { DocumentLifecycleRegistry } from '../../documents/lifecycle/document-lifecycle.registry.js';
@@ -395,6 +396,7 @@ export class LoansService {
       if (!target) {
         throw new ApiException(ErrorCode.ResourceNotFound);
       }
+      await assertCostCenterHasHead(manager, target.id, new Date(), 'targetCostCenterId');
       const contact = await manager.findOne(Person, { where: { id: input.contactPersonId } });
       if (!contact) {
         throw new ApiException(ErrorCode.ResourceNotFound);

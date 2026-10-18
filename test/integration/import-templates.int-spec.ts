@@ -16,7 +16,7 @@ import {
   templateVersion,
 } from '../../src/modules/staging/templates/import-template.js';
 import { ImportTemplateService } from '../../src/modules/staging/templates/import-template.service.js';
-import { bootModules, createActor, scalar, useSharedStorage } from './helpers.js';
+import { assignTestHeadByCodes, bootModules, createActor, scalar, useSharedStorage } from './helpers.js';
 
 type Cell = string | number | Date | null;
 
@@ -87,6 +87,7 @@ describe('Plantillas Excel de importación (PostgreSQL real)', () => {
       `INSERT INTO cost_center (external_code, name) VALUES ($1, 'DEPARTAMENTO DE FINANZAS ESTUDIANTILES'), ($2, 'OTRO')`,
       [center, otherCenter],
     );
+    await assignTestHeadByCodes(dataSource, [center, otherCenter]);
     await dataSource.query(
       `INSERT INTO asset_category (code, name) VALUES ('TPL_COMPUTO', 'Equipo de cómputo') ON CONFLICT (code) DO NOTHING`,
     );

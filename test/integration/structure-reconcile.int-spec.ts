@@ -228,10 +228,17 @@ describe('Conciliador de estructura (HTTP real + PostgreSQL real)', () => {
   });
 
   it('archivar el centro propio deja la unidad pendiente; structure-pending la lista', async () => {
+    const withChild = await http().patch(`/api/v1/cost-centers/${ids['5410']}`).set(auth('admin')).send({ isActive: false });
+    expect(withChild.status).toBe(406);
+    expect(withChild.body.error).toMatchObject({ code: 'HAS_DEPENDENT_ENTITIES', details: [{ field: 'activeChildren', message: '1' }] });
+    const child = await http().patch(`/api/v1/cost-centers/${ids['5411']}`).set(auth('admin')).send({ isActive: false });
+    expect(child.status, JSON.stringify(child.body)).toBe(200);
     const archived = await http().patch(`/api/v1/cost-centers/${ids['5410']}`).set(auth('admin')).send({ isActive: false });
     expect(archived.status, JSON.stringify(archived.body)).toBe(200);
     expect(await unitRow('u54')).toEqual({ head_cost_center_id: null, head_cost_center_code: '5410' });
-    expect(await center('5411')).toMatchObject({ parent_id: null });
+    const orphan = await http().patch(`/api/v1/cost-centers/${ids['5411']}`).set(auth('admin')).send({ isActive: true });
+    expect(orphan.status).toBe(409);
+    expect(orphan.body.error.code).toBe('COST_CENTER_PARENT_INACTIVE');
     const pendingList = await http().get('/api/v1/organizational-units/structure-pending').set(auth('admin'));
     expect(pendingList.body.data.pendingHeadCenters).toContainEqual({
       unitId: ids['u54'],
@@ -242,6 +249,8 @@ describe('Conciliador de estructura (HTTP real + PostgreSQL real)', () => {
     const reactivated = await http().patch(`/api/v1/cost-centers/${ids['5410']}`).set(auth('admin')).send({ isActive: true });
     expect(reactivated.status).toBe(200);
     expect(await unitRow('u54')).toEqual({ head_cost_center_id: ids['5410'], head_cost_center_code: '5410' });
+    const childBack = await http().patch(`/api/v1/cost-centers/${ids['5411']}`).set(auth('admin')).send({ isActive: true });
+    expect(childBack.status, JSON.stringify(childBack.body)).toBe(200);
     expect(await center('5411')).toMatchObject({ parent_id: ids['5410'] });
   });
 });

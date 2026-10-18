@@ -22,7 +22,7 @@ import { ExcelImportService } from '../../src/modules/staging/services/excel-imp
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
-import { createActor, scalar, useSharedStorage } from './helpers.js';
+import { assignTestHeadByCodes, createActor, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 const FORMAT = 'OCI-17-90-INFORME';
@@ -114,6 +114,7 @@ describe('El acta no afirma un estado físico que nadie verificó (PostgreSQL re
     const upload = await imports.upload(Buffer.from(await book.xlsx.writeBuffer()), 'estado.xlsx', director.id);
     const centersPreview = await imports.preview(upload.batchId, { sheet: 'Centros', target: 'COST_CENTERS', mapping: { code: 'A', name: 'B' } }, director.id);
     await moduleRef.get(ImportJobsService).runNow(centersPreview.importId, director.id);
+    await assignTestHeadByCodes(dataSource, ['EST-1']);
     const assetsPreview = await imports.preview(
       upload.batchId,
       { sheet: 'Activos', target: 'ASSETS', mapping: { legacyAssetId: 'A', legacyCode: 'B', description: 'C', costCenterCode: 'D', acquisitionDate: 'E' } },

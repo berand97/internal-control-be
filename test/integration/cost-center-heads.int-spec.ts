@@ -7,7 +7,7 @@ import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { createActor, scalar, openTestSession } from './helpers.js';
+import { assignTestHead, createActor, openTestSession, scalar } from './helpers.js';
 
 describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
@@ -57,6 +57,7 @@ describe('Jefes de centro de costo y permisos :own (HTTP real + PostgreSQL real)
       `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Centro ajeno') RETURNING id`,
       [`HEAD-B-${tag}`],
     );
+    await assignTestHead(dataSource, centerB);
     const categoryId = await scalar<string>(
       dataSource,
       `INSERT INTO asset_category (code, name) VALUES ($1, 'Jefaturas') RETURNING id`,

@@ -989,6 +989,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El código no está en el rango de la unidad',
   },
+  [ErrorCode.CostCenterWithoutHead]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El centro de costo no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.',
+  },
   [ErrorCode.CostCenterInactive]: {
     httpStatus: 409,
     action: 'CANCEL',

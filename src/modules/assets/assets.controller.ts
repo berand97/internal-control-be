@@ -219,7 +219,10 @@ export class AssetsController {
 
   @Post()
   @RequirePermission('asset:create:global')
-  @ApiOperation({ summary: 'Registrar activo' })
+  @ApiOperation({
+    summary: 'Registrar activo',
+    description: 'El centro de costo debe estar activo, admitir activos y tener jefe vigente: si no tiene, 409 COST_CENTER_WITHOUT_HEAD («El centro 4310 · Contabilidad no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.», details[field=costCenterId]).',
+  })
   @ApiResponse({ status: 201, schema: envelopedSchema(AssetResponseDto) })
   create(
     @Body() dto: CreateAssetDto,
@@ -230,7 +233,10 @@ export class AssetsController {
 
   @Post('bulk')
   @RequirePermission('asset:create:global')
-  @ApiOperation({ summary: 'Alta masiva JSON' })
+  @ApiOperation({
+    summary: 'Alta masiva JSON',
+    description: 'Cada ítem sigue las reglas de POST /assets: un centro sin jefe vigente da el error COST_CENTER_WITHOUT_HEAD en esa fila.',
+  })
   @ApiResponse({
     status: 201,
     schema: envelopedSchema(AssetBulkResultResponseDto),
@@ -262,7 +268,7 @@ export class AssetsController {
   @ApiOperation({
     summary: 'Previsualizar importación CSV',
     description:
-      'Columnas: description, category_code, cost_center_code, acquisition_type_code, acquisition_date. Opcionales: internal_code, location_code, serial_number, barcode, model, photo_url, notes, acquisition_price y códigos de campos dinámicos.',
+      'Columnas: description, category_code, cost_center_code, acquisition_type_code, acquisition_date. Opcionales: internal_code, location_code, serial_number, barcode, model, photo_url, notes, acquisition_price y códigos de campos dinámicos. Una fila cuyo centro no tiene jefe vigente queda con el error COST_CENTER_WITHOUT_HEAD.',
   })
   previewImport(
     @UploadedFile() file: CsvUpload | undefined,

@@ -18,7 +18,7 @@ import { NotificationsService } from '../../src/modules/notifications/services/n
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { MailOutboxService } from '../../src/shared/mail/mail-outbox.service.js';
-import { createActor, scalar, openTestSession } from './helpers.js';
+import { assignTestHeadByCodes, createActor, openTestSession, scalar } from './helpers.js';
 
 type Cell = string | number | Date | null;
 
@@ -124,6 +124,7 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     expect(queued).toMatchObject({ status: 'QUEUED', target: 'COST_CENTERS' });
     expect(await jobs.processJob(queued.id)).toBe('SUCCEEDED');
     expect((await jobs.find(queued.id)).result).toMatchObject({ inserted: 2, skippedAlreadyPresent: 0, registrationMovements: 0 });
+    await assignTestHeadByCodes(dataSource, [center, `${center}-B`]);
   });
 
   afterAll(async () => {

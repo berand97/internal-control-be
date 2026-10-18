@@ -15,7 +15,7 @@ import { InventoriesService } from '../../src/modules/inventories/services/inven
 import { InventoryRemindersService } from '../../src/modules/inventories/services/inventory-reminders.service.js';
 import { MailOutboxService } from '../../src/shared/mail/mail-outbox.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
-import { openTestSession, scalar } from './helpers.js';
+import { openTestSession, scalar, withTemporaryHead } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
 
 interface Who {
@@ -104,7 +104,7 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     );
 
   const newAsset = (costCenterId: string, locationId: string) =>
-    app.get(AssetsService).create(
+    withTemporaryHead(dataSource, costCenterId, () => app.get(AssetsService).create(
       {
         categoryId: base.categoryId,
         costCenterId,
@@ -114,7 +114,7 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
         locationId,
       },
       directorActor,
-    );
+    ));
 
   const schedule = async (body: Record<string, unknown>) => {
     const response = await http()

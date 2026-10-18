@@ -22,7 +22,7 @@ import { ExcelImportService } from '../../src/modules/staging/services/excel-imp
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
-import { createActor, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
+import { assignTestHead, createActor, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 
@@ -74,6 +74,7 @@ describe('Historia del activo (PostgreSQL real)', () => {
       from: await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ('TL-1', 'Bodega') RETURNING id`),
       to: await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ('TL-2', 'Laboratorio') RETURNING id`),
     };
+    await assignTestHead(dataSource, [costCenters.from, costCenters.to]);
     personId = await scalar<string>(
       dataSource,
       `INSERT INTO person (first_name, last_name, email, document_type, document_number)

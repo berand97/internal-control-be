@@ -53,6 +53,57 @@ export const createActor = async (
   };
 };
 
+export const assignTestHead = async (
+  dataSource: DataSource,
+  costCenterIds: string | ReadonlyArray<string>,
+  personId?: string,
+): Promise<string> => {
+  const tag = randomUUID().slice(0, 8);
+  const head =
+    personId ??
+    (
+      (await dataSource.query(
+        `INSERT INTO person (first_name, last_name, email) VALUES ('Jefe', $1, $2) RETURNING id`,
+        [`de prueba ${tag}`, `jefe.${tag}@unac.edu.co`],
+      )) as Array<{ id: string }>
+    )[0]?.id ??
+    '';
+  await dataSource.query(
+    `INSERT INTO cost_center_head (person_id, cost_center_id, valid_from, reason)
+     SELECT $1, id, '2000-01-01', 'Jefe de la prueba de integración' FROM unnest($2::uuid[]) AS id`,
+    [head, typeof costCenterIds === 'string' ? [costCenterIds] : [...costCenterIds]],
+  );
+  return head;
+};
+
+export const assignTestHeadByCodes = async (dataSource: DataSource, codes: ReadonlyArray<string>): Promise<string> => {
+  const rows = (await dataSource.query('SELECT id FROM cost_center WHERE external_code = ANY($1)', [[...codes]])) as Array<{ id: string }>;
+  return assignTestHead(
+    dataSource,
+    rows.map((row) => row.id),
+  );
+};
+
+export const withTemporaryHead = async <T>(
+  dataSource: DataSource,
+  costCenterId: string,
+  work: () => Promise<T>,
+): Promise<T> => {
+  const [current] = (await dataSource.query(
+    `SELECT 1 FROM cost_center_head WHERE cost_center_id = $1 AND valid_from <= NOW() AND (valid_until IS NULL OR valid_until > NOW())`,
+    [costCenterId],
+  )) as unknown[];
+  if (current) {
+    return work();
+  }
+  const personId = await assignTestHead(dataSource, costCenterId);
+  try {
+    return await work();
+  } finally {
+    await dataSource.query('DELETE FROM cost_center_head WHERE cost_center_id = $1 AND person_id = $2', [costCenterId, personId]);
+  }
+};
+
 export const scalar = async <T>(
   dataSource: DataSource,
   sql: string,

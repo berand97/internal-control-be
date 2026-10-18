@@ -374,6 +374,43 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(reactivated.status).toBe(200);
   });
 
+  it('no se agregan activos a un centro sin jefe vigente; con jefe sí, y los que ya estaban se quedan', async () => {
+    const tag = randomUUID().slice(0, 4).toUpperCase();
+    const centerId = await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Contabilidad sin jefe') RETURNING id`, [
+      `SJ-${tag}`,
+    ]);
+    const legacy = await insertAsset(`CCS-SJ-${tag}`, centerId);
+    const body = {
+      description: 'Escritorio nuevo',
+      categoryId,
+      costCenterId: centerId,
+      acquisitionTypeId: await scalar<string>(dataSource, `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`),
+      acquisitionDate: '2026-01-15',
+    };
+    const refused = await http().post('/api/v1/assets').set(auth('admin')).send(body);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toEqual({
+      code: 'COST_CENTER_WITHOUT_HEAD',
+      message: `El centro SJ-${tag} · Contabilidad sin jefe no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.`,
+      details: [
+        {
+          field: 'costCenterId',
+          message: `El centro SJ-${tag} · Contabilidad sin jefe no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.`,
+        },
+      ],
+    });
+    expect(await scalar<string>(dataSource, 'SELECT current_cost_center_id FROM asset WHERE id = $1', [legacy])).toBe(centerId);
+
+    const person = await createActor(dataSource);
+    const head = await http()
+      .post('/api/v1/cost-center-heads')
+      .set(auth('admin'))
+      .send({ personId: person.personId, costCenterId: centerId, reason: 'Jefe de Contabilidad' });
+    expect(head.status).toBe(201);
+    const created = await http().post('/api/v1/assets').set(auth('admin')).send(body);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+  });
+
   it('lista los centros cuyo código no cuadra con su unidad, con el motivo', async () => {
     const response = await http().get('/api/v1/cost-centers/prefix-mismatches').set(auth('viewer'));
     expect(response.status).toBe(200);

@@ -10,7 +10,7 @@ import { GLOBAL_COST_CENTER_SCOPE } from '../../src/modules/roles/services/cost-
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { StagingModule } from '../../src/modules/staging/staging.module.js';
-import { bootModules, createActor } from './helpers.js';
+import { assignTestHeadByCodes, bootModules, createActor } from './helpers.js';
 
 const REAL_ASSETS = process.env['REAL_ASSET_WORKBOOK'] ?? 'docs/7.1 informe control activos julio 2026.xlsx';
 const REAL_COST_CENTERS = process.env['REAL_COST_CENTER_WORKBOOK'] ?? 'docs/centros de costo.xlsx';
@@ -61,6 +61,7 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
       actor.id,
     );
     await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id);
+    await assignTestHeadByCodes(dataSource, ['SRCH-1']);
 
     const rows = await workbook('Busqueda', [
       ['Id', 'Codigo', 'Descripcion', 'Centro', 'Fecha compra', 'Precio'],
@@ -173,6 +174,10 @@ describe('Búsqueda de activos por identificador y calidad de datos (PostgreSQL 
         actor.id,
       );
       await moduleRef.get(ImportJobsService).runNow(centersPreview.importId, actor.id);
+      await assignTestHeadByCodes(
+        dataSource,
+        ((await dataSource.query('SELECT external_code FROM cost_center')) as Array<{ external_code: string }>).map((row) => row.external_code),
+      );
       const result = await importAssets(readFileSync(REAL_ASSETS), 'ACTIVOS', {
         legacyAssetId: 'A',
         legacyCode: 'B',

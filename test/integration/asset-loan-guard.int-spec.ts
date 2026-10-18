@@ -10,7 +10,7 @@ import { GLOBAL_COST_CENTER_SCOPE } from '../../src/modules/roles/services/cost-
 import { TransfersService } from '../../src/modules/transfers/services/transfers.service.js';
 import { TransfersModule } from '../../src/modules/transfers/transfers.module.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
-import { bootModules, createActor, scalar } from './helpers.js';
+import { assignTestHead, bootModules, createActor, scalar } from './helpers.js';
 
 describe('Guardas del activo frente a préstamos abiertos (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
@@ -48,6 +48,7 @@ describe('Guardas del activo frente a préstamos abiertos (PostgreSQL real)', ()
       `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Centro destino guardas') RETURNING id`,
       [`IT-LG-B-${tag}`],
     );
+    await assignTestHead(dataSource, [base.costCenterId, targetCenter]);
   });
 
   afterAll(async () => {

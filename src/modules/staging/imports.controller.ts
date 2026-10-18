@@ -89,7 +89,12 @@ export class PreviewImportDto {
   @IsObject()
   readonly mapping!: Record<string, string>;
 
-  @ApiPropertyOptional({ enum: UNKNOWN_COST_CENTER_POLICIES, enumName: 'UnknownCostCenterPolicy' })
+  @ApiPropertyOptional({
+    enum: UNKNOWN_COST_CENTER_POLICIES,
+    enumName: 'UnknownCostCenterPolicy',
+    description:
+      'Solo ASSETS. quarantine (por defecto): una fila con un centro que no está en el catálogo va a cuarentena con COST_CENTER_UNKNOWN. create: el centro ya no se crea (no tendría jefe vigente); la fila va a cuarentena con COST_CENTER_WITHOUT_HEAD. En ambos casos una fila cuyo centro existe pero no tiene jefe vigente va a cuarentena con COST_CENTER_WITHOUT_HEAD',
+  })
   @IsOptional()
   @IsIn(UNKNOWN_COST_CENTER_POLICIES)
   readonly unknownCostCenters?: UnknownCostCenterPolicy;

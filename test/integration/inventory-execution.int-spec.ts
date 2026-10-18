@@ -11,7 +11,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { addDays, bogotaDate } from '../../src/modules/inventories/domain/inventory-schedule.js';
-import { discardInventoryActRequests, openTestSession, scalar } from './helpers.js';
+import { discardInventoryActRequests, openTestSession, scalar, withTemporaryHead } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
 
 interface Who {
@@ -107,7 +107,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     );
 
   const newAsset = async (costCenterId: string, extra: { responsibleId?: string } = {}) => {
-    const asset = await app.get(AssetsService).create(
+    const asset = await withTemporaryHead(dataSource, costCenterId, () => app.get(AssetsService).create(
       {
         categoryId: base.categoryId,
         costCenterId,
@@ -118,7 +118,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
         ...extra,
       },
       director.actor,
-    );
+    ));
     return asset.id;
   };
 

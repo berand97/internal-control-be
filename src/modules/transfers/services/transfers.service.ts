@@ -6,6 +6,7 @@ import type { AuthenticatedUser } from '../../../common/types/authenticated-user
 import type { ErrorDetail } from '../../../common/types/response-envelope.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
+import { assertCostCenterHasHead } from '../../cost-centers/domain/cost-center-head-rule.js';
 import { unitAt } from '../../cost-centers/domain/placement-at.js';
 import { DocumentLifecycleRegistry } from '../../documents/lifecycle/document-lifecycle.registry.js';
 import {
@@ -375,6 +376,7 @@ export class TransfersService {
         throw new ApiException(ErrorCode.ValidationFailed, 'El traslado no tiene activos');
       }
       await this.assertItems(manager, items, transfer.source_cost_center_id, id);
+      await assertCostCenterHasHead(manager, transfer.target_cost_center_id, new Date(), 'targetCostCenterId');
       const control = await this.signers.resolve('CONTROL', dto.controlSignerPersonId, manager);
       const accounting = await this.signers.resolve('ACCOUNTING', dto.accountingSignerPersonId, manager);
       const payload = await this.actPayload(manager, transfer, control, accounting, dto);
@@ -568,6 +570,7 @@ export class TransfersService {
         { field: 'targetCostCenterId', message: 'Centro de destino no disponible' },
       ]);
     }
+    await assertCostCenterHasHead(manager, targetId, new Date(), 'targetCostCenterId');
   }
 
   async assertItems(

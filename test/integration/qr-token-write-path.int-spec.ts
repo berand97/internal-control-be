@@ -5,7 +5,7 @@ import { AssetsModule } from '../../src/modules/assets/assets.module.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { QrTokensModule } from '../../src/modules/qr-tokens/qr-tokens.module.js';
 import { QrTokensService } from '../../src/modules/qr-tokens/services/qr-tokens.service.js';
-import { bootModules, createActor, scalar } from './helpers.js';
+import { assignTestHead, bootModules, createActor, scalar } from './helpers.js';
 
 describe('QR sobre el camino único de escritura (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
@@ -36,6 +36,7 @@ describe('QR sobre el camino único de escritura (PostgreSQL real)', () => {
         `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`,
       ),
     };
+    await assignTestHead(dataSource, base.costCenterId);
   });
 
   afterAll(async () => {

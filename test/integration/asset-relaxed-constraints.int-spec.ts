@@ -5,7 +5,7 @@ import { AssetsModule } from '../../src/modules/assets/assets.module.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { CategoriesModule } from '../../src/modules/categories/categories.module.js';
 import { CategoriesService } from '../../src/modules/categories/services/categories.service.js';
-import { bootModules, createActor, scalar } from './helpers.js';
+import { assignTestHead, bootModules, createActor, scalar } from './helpers.js';
 
 describe('Restricciones relajadas para datos reales (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
@@ -28,6 +28,7 @@ describe('Restricciones relajadas para datos reales (PostgreSQL real)', () => {
       `INSERT INTO cost_center (external_code, name)
        VALUES ('IT-RELAX', 'Centro restricciones') RETURNING id`,
     );
+    await assignTestHead(dataSource, costCenterId);
     acquisitionTypeId = await scalar<string>(
       dataSource,
       `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`,

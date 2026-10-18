@@ -16,7 +16,7 @@ import { AssetsService } from '../../src/modules/assets/services/assets.service.
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { MovementsService } from '../../src/modules/movements/services/movements.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
-import { createActor, openTestSession, scalar, SHARED_STORAGE_DIR, useSharedStorage } from './helpers.js';
+import { assignTestHead, createActor, openTestSession, scalar, SHARED_STORAGE_DIR, useSharedStorage } from './helpers.js';
 
 const PREVIOUS_MOVEMENT_SECRET = 'integration-previous-movement-secret';
 
@@ -85,6 +85,7 @@ describe('Endurecimiento BE-10/11/12/15/16/17 (HTTP real + PostgreSQL real)', ()
       `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Centro CSV') RETURNING id`,
       [`IT-CSV-${randomUUID().slice(0, 6)}`],
     );
+    await assignTestHead(dataSource, costCenterId);
     const acquisitionTypeId = await scalar<string>(dataSource, `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`);
     const asset = await app
       .get(AssetsService)

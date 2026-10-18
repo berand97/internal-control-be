@@ -127,7 +127,7 @@ export class TransfersController {
   @RequirePermission(TRANSFER_MANAGE)
   @ApiOperation({
     summary: 'Crear un traslado en DRAFT',
-    description: `Activos del mismo centro de origen hacia otro centro activo que admita activos (400 TRANSFER_SAME_COST_CENTER si es el mismo). ${GUARDS} La respuesta trae controlSignerAvailable, accountingSignerAvailable y warnings.`,
+    description: `Activos del mismo centro de origen hacia otro centro activo que admita activos (400 TRANSFER_SAME_COST_CENTER si es el mismo) y con jefe vigente (409 COST_CENTER_WITHOUT_HEAD, details[field=targetCostCenterId]). ${GUARDS} La respuesta trae controlSignerAvailable, accountingSignerAvailable y warnings.`,
   })
   @ApiCreatedResponse({ schema: envelopedSchema(TransferDetailDto) })
   create(@Body() dto: CreateTransferDto, @CurrentUser() actor: AuthenticatedUser) {
@@ -152,7 +152,7 @@ export class TransfersController {
     summary: 'Generar el acta OCI-17-89 (DRAFT → PENDING_SIGNATURES)',
     description:
       'Encola el acta en la misma transacción (outbox; document.generation dice PENDING/FAILED/GENERATED). Firmantes: ENTREGA = requester, RECIBE = owner, CONTROL_INTERNO y CONTABILIDAD = la única persona elegible o la indicada (controlSignerPersonId / accountingSignerPersonId). ' +
-      'Errores: 409 TRANSFER_NO_CONTROL_SIGNER / TRANSFER_NO_ACCOUNTING_SIGNER (nadie puede firmar ese turno), 400 TRANSFER_SIGNER_REQUIRED (hay varios: indique cuál), 400 TRANSFER_SIGNER_NOT_ELIGIBLE, 409 DOCUMENT_SIGNER_DUPLICATED (una persona en dos firmas; si una es CONTROL_INTERNO, signerSubstitutions.CONTROL_INTERNO la resuelve), 400 DOCUMENT_SIGNER_SUBSTITUTE_INVALID, 409 DOCUMENT_FORMAT_NOT_READY, 406 TRANSFER_INVALID_STATE_TRANSITION, y las guardas de los activos. ' +
+      'Errores: 409 TRANSFER_NO_CONTROL_SIGNER / TRANSFER_NO_ACCOUNTING_SIGNER (nadie puede firmar ese turno), 400 TRANSFER_SIGNER_REQUIRED (hay varios: indique cuál), 400 TRANSFER_SIGNER_NOT_ELIGIBLE, 409 DOCUMENT_SIGNER_DUPLICATED (una persona en dos firmas; si una es CONTROL_INTERNO, signerSubstitutions.CONTROL_INTERNO la resuelve), 400 DOCUMENT_SIGNER_SUBSTITUTE_INVALID, 409 DOCUMENT_FORMAT_NOT_READY, 406 TRANSFER_INVALID_STATE_TRANSITION, 409 COST_CENTER_WITHOUT_HEAD si el centro de destino ya no tiene jefe vigente, y las guardas de los activos. ' +
       'Al firmarse las cuatro firmas, cada activo pasa al centro de destino con un movimiento TRANSFER enlazado al acta y el traslado queda COMPLETED; un rechazo lo deja REJECTED sin mover activos.',
   })
   @ApiOkResponse({ schema: envelopedSchema(TransferDetailDto) })

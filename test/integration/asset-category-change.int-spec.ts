@@ -3,7 +3,7 @@ import { DataSource } from 'typeorm';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { AssetsModule } from '../../src/modules/assets/assets.module.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
-import { bootModules, createActor, scalar } from './helpers.js';
+import { assignTestHead, bootModules, createActor, scalar } from './helpers.js';
 
 describe('Cambio de categoría del activo (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
@@ -45,6 +45,7 @@ describe('Cambio de categoría del activo (PostgreSQL real)', () => {
       dataSource,
       `INSERT INTO cost_center (external_code, name) VALUES ('IT-CAT', 'Centro categorías') RETURNING id`,
     );
+    await assignTestHead(dataSource, costCenterId);
     acquisitionTypeId = await scalar<string>(
       dataSource,
       `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`,

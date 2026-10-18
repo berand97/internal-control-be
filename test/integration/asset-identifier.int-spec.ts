@@ -5,7 +5,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import { AssetIdentifier1767225624000 } from '../../src/database/migrations/1767225624000-asset-identifier.js';
 import { AssetsModule } from '../../src/modules/assets/assets.module.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
-import { bootModules, createActor, scalar } from './helpers.js';
+import { assignTestHead, bootModules, createActor, scalar } from './helpers.js';
 
 describe('Identificadores de activo (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
@@ -31,6 +31,7 @@ describe('Identificadores de activo (PostgreSQL real)', () => {
       `INSERT INTO cost_center (external_code, name)
        VALUES ('IT-IDENT', 'Centro identificadores') RETURNING id`,
     );
+    await assignTestHead(dataSource, costCenterId);
     acquisitionTypeId = await scalar<string>(
       dataSource,
       `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`,

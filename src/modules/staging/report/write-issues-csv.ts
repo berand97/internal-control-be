@@ -21,6 +21,7 @@ export const ISSUE_DESCRIPTIONS: Record<string, string> = {
   PRICE_NOT_A_NUMBER: 'El precio de compra no es un número',
   PRICE_ZERO: 'Precio de compra en 0',
   COST_CENTER_UNKNOWN: 'El centro de costo no existe en el catálogo',
+  COST_CENTER_WITHOUT_HEAD: 'El centro de costo no tiene jefe vigente: asígnele un jefe antes de importar sus activos',
 };
 
 const SEPARATOR = ';';

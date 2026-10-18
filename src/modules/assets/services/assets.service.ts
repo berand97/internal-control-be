@@ -15,6 +15,7 @@ import {
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import type { CategoriesRepository } from '../../categories/repositories/categories.repository.interface.js';
+import { assertCostCenterHasHead } from '../../cost-centers/domain/cost-center-head-rule.js';
 import type { CostCentersRepository } from '../../cost-centers/repositories/cost-centers.repository.interface.js';
 import type { DynamicFieldResponseDto } from '../../dynamic-fields/dto/responses/dynamic-field.response.dto.js';
 import { DynamicFieldsService } from '../../dynamic-fields/services/dynamic-fields.service.js';
@@ -621,6 +622,7 @@ export class AssetsService {
   private async prepareNew(dto: CreateAssetDto) {
     const category = await this.requireCategory(dto.categoryId);
     await this.requireCostCenter(dto.costCenterId);
+    await assertCostCenterHasHead(this.dataSource, dto.costCenterId);
     if (dto.locationId) {
       await this.requireLocation(dto.locationId);
     }
@@ -797,6 +799,7 @@ export class AssetsService {
     if (!category || !costCenter || !acquisitionType) {
       throw new ApiException(ErrorCode.ResourceNotFound);
     }
+    await assertCostCenterHasHead(this.dataSource, costCenter.id);
     let locationId: string | undefined;
     if (row.locationCode) {
       const location = await this.assetsRepository.findLocationByCode(

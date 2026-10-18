@@ -123,6 +123,7 @@ describe('AssetsService', () => {
   let movementsService: Pick<MovementsService, 'record'>;
   let manager: { getRepository: () => { findOne: ReturnType<typeof vi.fn> } };
   let service: AssetsService;
+  let headlessCenters: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     assetsRepository = {
@@ -219,9 +220,11 @@ describe('AssetsService', () => {
     manager = {
       getRepository: () => ({ findOne: vi.fn().mockResolvedValue(asset()) }),
     };
+    headlessCenters = vi.fn().mockResolvedValue([]);
     const dataSource = {
       transaction: (work: (manager: unknown) => Promise<unknown>) =>
         work(manager),
+      query: headlessCenters,
     } as unknown as DataSource;
     service = new AssetsService(
       assetsRepository,
@@ -257,6 +260,29 @@ describe('AssetsService', () => {
     );
     expect(result.internalCode).toBe('A2026-0001');
     expect(assetsRepository.replaceCustomValues).toHaveBeenCalled();
+  });
+
+  it('no agrega activos a un centro sin jefe vigente', async () => {
+    headlessCenters.mockResolvedValue([{ id: 'cc-1', code: '4310', name: 'Contabilidad' }]);
+    await expect(
+      service.create(
+        {
+          description: 'Portátil Dell',
+          categoryId: 'cat-1',
+          costCenterId: 'cc-1',
+          acquisitionTypeId: 'acq-1',
+          acquisitionDate: '2026-03-15',
+          serialNumber: 'SN-1',
+          customValues: { ramGB: 16 },
+        },
+        actor,
+      ),
+    ).rejects.toMatchObject({
+      code: ErrorCode.CostCenterWithoutHead,
+      message: 'El centro 4310 · Contabilidad no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.',
+      details: [{ field: 'costCenterId' }],
+    });
+    expect(assetsRepository.insert).not.toHaveBeenCalled();
   });
 
   it('rechaza el alta si falta un campo dinámico requerido', async () => {

@@ -9,7 +9,7 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { createActor, openTestSession, scalar } from './helpers.js';
+import { assignTestHead, createActor, openTestSession, scalar } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
 
 interface PriceZeroRow {
@@ -96,6 +96,7 @@ describe('Activos con precio cero: marca, catálogo de motivos y lista de trabaj
     centerB = await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Centro B') RETURNING id`, [
       `PZB-${tag}`,
     ]);
+    await assignTestHead(dataSource, [centerA, centerB]);
     categoryId = await scalar<string>(
       dataSource,
       `INSERT INTO asset_category (code, name, requires_photo) VALUES ($1, 'Categoría precio cero', FALSE) RETURNING id`,

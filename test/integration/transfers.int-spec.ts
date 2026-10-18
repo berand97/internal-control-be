@@ -18,7 +18,7 @@ import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js'
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { GLOBAL_COST_CENTER_SCOPE } from '../../src/modules/roles/services/cost-center-scope.js';
 import { conform, type Schema } from './openapi-conform.js';
-import { createPermissionRole, scalar, useSharedStorage } from './helpers.js';
+import { assignTestHead, createPermissionRole, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 
 const FORMAT = 'OCI-17-89';
@@ -188,6 +188,7 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     source = await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Tesorería de Traslados') RETURNING id`, [`T1${tag}`]);
     target = await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Compras de Traslados') RETURNING id`, [`T2${tag}`]);
     other = await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Otro centro de Traslados') RETURNING id`, [`T3${tag}`]);
+    await assignTestHead(dataSource, [source, target, other]);
     categoryId = await scalar<string>(
       dataSource,
       `INSERT INTO asset_category (code, name, requires_photo) VALUES ($1, 'Muebles de traslado', FALSE) RETURNING id`,
@@ -407,6 +408,32 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     await http().post(`/api/v1/transfers/${reuse.body.data.id}/cancel`).set(auth(director)).send({ reason: 'Prueba terminada' }).expect(200);
     const denied = await create([assetId], {}, outsider);
     expect(denied.status).toBe(403);
+  });
+
+  it('el destino debe tener jefe vigente al crear y al generar el acta: 409 COST_CENTER_WITHOUT_HEAD', async () => {
+    const tag = randomUUID().slice(0, 6).toUpperCase();
+    const headless = await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Destino sin jefe') RETURNING id`, [
+      `T4${tag}`,
+    ]);
+    const assetId = await asset();
+    const refused = await create([assetId], { targetCostCenterId: headless });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatchObject({
+      code: 'COST_CENTER_WITHOUT_HEAD',
+      message: `El centro T4${tag} · Destino sin jefe no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.`,
+      details: [{ field: 'targetCostCenterId' }],
+    });
+
+    const headPerson = await assignTestHead(dataSource, headless);
+    const draft = (await create([assetId], { targetCostCenterId: headless }).expect(201)).body.data;
+    await dataSource.query(
+      `UPDATE cost_center_head SET valid_until = NOW(), ended_at = NOW(), end_reason = 'Se retiró' WHERE cost_center_id = $1 AND person_id = $2`,
+      [headless, headPerson],
+    );
+    const late = await generate(draft.id);
+    expect([late.status, late.body.error.code]).toEqual([409, 'COST_CENTER_WITHOUT_HEAD']);
+    expect((await detail(draft.id)).status).toBe('DRAFT');
+    await http().post(`/api/v1/transfers/${draft.id}/cancel`).set(auth(director)).send({ reason: 'Destino sin jefe' }).expect(200);
   });
 
   it('separación de funciones: quien recibe no firma por Control Interno salvo sustituto con el permiso vigente, y queda impreso en el acta', async () => {

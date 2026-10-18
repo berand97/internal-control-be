@@ -552,7 +552,7 @@ export class InventoriesController {
     description:
       `${ACTOR_RULE} CREATE_ASSET exige además asset:create:global y los datos del activo: se crea en el centro de la ` +
       'toma (alcance COST_CENTER) o en costCenterId (otros alcances), con movimiento REGISTRATION que cita la toma, y ' +
-      'se enlaza al ítem en una transacción. LEAVE_UNRESOLVED deja el motivo y admite cambiar luego a CREATE_ASSET; fuera del alcance COST_CENTER ' +
+      'se enlaza al ítem en una transacción; si ese centro no tiene jefe vigente responde 409 COST_CENTER_WITHOUT_HEAD. LEAVE_UNRESOLVED deja el motivo y admite cambiar luego a CREATE_ASSET; fuera del alcance COST_CENTER ' +
       'también exige el centro (costCenterId o el ya elegido con PUT …/surplus-center), cuya acta lo lista como sobrante sin resolver. ' +
       'Un sobrante de un activo LOST responde 406 INVENTORY_SURPLUS_WAS_LOST; uno con activo registrado, anulado o ya ' +
       'creado, 406 INVENTORY_SURPLUS_NOT_RESOLVABLE.',

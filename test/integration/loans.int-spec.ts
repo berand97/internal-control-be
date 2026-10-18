@@ -15,7 +15,7 @@ import { DocumentEngineService } from '../../src/modules/documents/services/docu
 import { bogotaDate, longSpanishDate, usageBetween } from '../../src/modules/loans/domain/loan-dates.js';
 import { LoansService } from '../../src/modules/loans/services/loans.service.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
-import { grantControlSigner, scalar, useSharedStorage } from './helpers.js';
+import { assignTestHead, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 
 const FORMAT = 'OCI-01-65';
@@ -317,6 +317,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       `INSERT INTO cost_center (external_code, name) VALUES ($1, 'FACULTAD DESTINO PRUEBA') RETURNING id`,
       [`LB-${tag}`],
     );
+    await assignTestHead(dataSource, [centerA, centerB]);
     categoryId = await scalar<string>(
       dataSource,
       `INSERT INTO asset_category (code, name) VALUES ($1, 'Préstamos') RETURNING id`,
@@ -342,6 +343,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       `INSERT INTO cost_center (external_code, name) VALUES ($1, 'CENTRO AJENO PRUEBA') RETURNING id`,
       [`LC-${tag}`],
     );
+    await assignTestHead(dataSource, centerC);
     await user('jefeC', 'JefeAjeno', 'Jefe', [{ role: 'DEPARTMENT_HEAD', scopeType: 'COST_CENTER', scopeId: centerC }]);
   });
 
@@ -371,6 +373,32 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       ]);
     }
     await app.close();
+  });
+
+  it('el centro de destino debe tener jefe vigente: 409 COST_CENTER_WITHOUT_HEAD y no se crea el préstamo', async () => {
+    const code = `LD-${randomUUID().slice(0, 6)}`;
+    const headless = await scalar<string>(dataSource, `INSERT INTO cost_center (external_code, name) VALUES ($1, 'DESTINO SIN JEFE') RETURNING id`, [
+      code,
+    ]);
+    const assetId = await asset(`PRE-SINJEFE-${code}`, 'Equipo hacia un centro sin jefe');
+    const before = await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_loan');
+    const response = await http()
+      .post('/api/v1/loans')
+      .set(auth('solicitante'))
+      .send({
+        assets: [assetId],
+        targetCostCenterId: headless,
+        expectedReturnDate: '2030-12-01',
+        justification: 'Préstamo hacia un centro sin jefe',
+        contactPerson: users['recibe']?.personId,
+      });
+    expect(response.status).toBe(409);
+    expect(response.body.error).toMatchObject({
+      code: 'COST_CENTER_WITHOUT_HEAD',
+      message: `El centro ${code} · DESTINO SIN JEFE no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.`,
+      details: [{ field: 'targetCostCenterId' }],
+    });
+    expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_loan')).toBe(before);
   });
 
   it('aprobación: director (global) y jefe del centro de ORIGEN aprueban; jefe de otro centro 404; solicitante 403; sin centros 403', async () => {

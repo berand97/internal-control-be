@@ -15,6 +15,7 @@ import type { PhysicalCondition } from '../../assets/enums/physical-condition.en
 import { CostCenterPlacementService, type PlacementContext } from '../../cost-centers/services/cost-center-placement.service.js';
 import { StructureReconcilerService } from '../../cost-centers/services/structure-reconciler.service.js';
 import { ALL_SCOPE } from '../../cost-centers/domain/structure-reconcile.js';
+import { currentHeadExistsSql } from '../../cost-centers/domain/cost-center-head-rule.js';
 import { MovementsService } from '../../movements/services/movements.service.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import {
@@ -596,7 +597,7 @@ export class ExcelImportService {
     let plan: StructurePlan | null = null;
     try {
       await this.dataSource.transaction(async (manager) => {
-        await this.prepareCatalogs(manager, job, actorId);
+        await this.prepareCatalogs(manager, job);
         classified = await this.classify(manager, job);
         transformed = await this.transformations(manager, job);
         plan = await this.structurePlan(manager, job);
@@ -777,7 +778,7 @@ export class ExcelImportService {
   async writeRows(manager: EntityManager, importId: string, actorId: string): Promise<ImportRowsResult> {
     const job = await this.importRow(importId);
     const rowsStart = process.hrtime.bigint();
-    const costCentersCreated = await this.prepareCatalogs(manager, job, actorId);
+    await this.prepareCatalogs(manager, job);
     const classified = await this.classify(manager, job);
     await manager.query('DELETE FROM staging_quarantine WHERE import_id = $1', [importId]);
     await manager.query(
@@ -787,7 +788,7 @@ export class ExcelImportService {
       [importId, job.sheet_name, JSON.stringify(classified.reasons)],
     );
     const centers = job.target === 'COST_CENTERS' ? await this.writeCostCenters(manager, job, actorId) : null;
-    if (job.target === 'COST_CENTERS' || costCentersCreated > 0) {
+    if (job.target === 'COST_CENTERS') {
       await this.reconciler.reconcileWithin(manager, ALL_SCOPE, {
         actorId,
         reason: `Importación de centros de costo (importación ${job.id})`,
@@ -814,7 +815,7 @@ export class ExcelImportService {
       inserted,
       skippedAlreadyPresent: classified.alreadyPresent,
       quarantined: classified.quarantined,
-      costCentersCreated,
+      costCentersCreated: 0,
       pendingMovements: pending?.count ?? 0,
       seconds: seconds(rowsStart),
       costCenterStructure: centers?.structure ?? null,
@@ -992,13 +993,9 @@ export class ExcelImportService {
     return row;
   }
 
-  private async prepareCatalogs(
-    manager: EntityManager,
-    job: ImportRow,
-    actorId: string | null,
-  ): Promise<number> {
+  private async prepareCatalogs(manager: EntityManager, job: ImportRow): Promise<void> {
     if (job.target !== 'ASSETS') {
-      return 0;
+      return;
     }
     await manager.query(
       `INSERT INTO asset_category (code, name, description, requires_photo, hierarchy_path)
@@ -1010,30 +1007,6 @@ export class ExcelImportService {
       `INSERT INTO acquisition_type (code, name) VALUES ($1, 'No registrado') ON CONFLICT (code) DO NOTHING`,
       [PLACEHOLDER_ACQUISITION_TYPE],
     );
-    if (job.options.unknownCostCenters !== 'create') {
-      return 0;
-    }
-    const centerCode = catalogCodeSql(col(job.mapping, 'costCenterCode'));
-    const created = (await manager.query(
-      `INSERT INTO cost_center (external_code, name, accepts_assets, is_active, sync_source, last_synced_at, external_metadata)
-       SELECT DISTINCT ${centerCode},
-              'Centro ' || ${centerCode} || ' (no está en el catálogo)',
-              TRUE, TRUE, 'IMPORT_EXCEL', NOW(),
-              jsonb_build_object('notInCatalog', true, 'importId', $4::text, 'createdBy', $5::text)
-       FROM staging_row r
-       WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 ${notExampleRow(job)}
-         AND ${col(job.mapping, 'legacyAssetId')} IS NOT NULL
-         AND ${centerCode} IS NOT NULL
-       ON CONFLICT (external_code) DO NOTHING
-       RETURNING id`,
-      [job.batch_id, job.sheet_name, job.header_row, job.id, actorId],
-    )) as Array<{ id: string }>;
-    await this.placements.openMany(
-      manager,
-      created.map((row) => row.id),
-      this.importPlacementContext(job, actorId, 'Alta por importación de activos (centro que no estaba en el catálogo)'),
-    );
-    return created.length;
   }
 
   private async classify(manager: EntityManager, job: ImportRow): Promise<Classified> {
@@ -1083,6 +1056,7 @@ export class ExcelImportService {
        FROM staging_row r WHERE r.batch_id = $1 AND r.sheet_name = $2 AND r.row_number > $3 ${notExampleRow(job)}`,
       [job.batch_id, job.sheet_name, job.header_row],
     );
+    const createUnknown = job.options.unknownCostCenters === 'create' ? 'TRUE' : 'FALSE';
     await manager.query(`
       UPDATE import_src s SET barcode_dup = TRUE FROM (
         SELECT barcode FROM import_src
@@ -1098,8 +1072,11 @@ export class ExcelImportService {
             WHEN count(*) OVER (PARTITION BY legacy_id) > 1 THEN 'ASSET_ID_DUPLICATED'
             WHEN description IS NULL THEN 'REQUIRED_FIELD_MISSING'
             WHEN center_code IS NULL
-              OR NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = import_src.center_code)
+              OR (NOT ${createUnknown} AND NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = import_src.center_code))
               THEN 'COST_CENTER_UNKNOWN'
+            WHEN NOT EXISTS (SELECT 1 FROM cost_center cc
+                WHERE cc.external_code = import_src.center_code AND ${currentHeadExistsSql('cc.id', 'NOW()')})
+              THEN 'COST_CENTER_WITHOUT_HEAD'
             WHEN category_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM asset_category ac
                 WHERE ac.code = import_src.category_code AND ac.is_active)
               THEN 'CATEGORY_UNKNOWN'
@@ -1107,9 +1084,17 @@ export class ExcelImportService {
               THEN 'PHYSICAL_CONDITION_INVALID'
           END AS reason,
           CASE
+            WHEN center_code IS NOT NULL AND ${createUnknown}
+              AND NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = import_src.center_code)
+              THEN 'El centro ' || center_code || ' no está en el catálogo y no tiene jefe vigente. Créelo y asígnele un jefe antes de importar sus activos.'
             WHEN center_code IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = import_src.center_code)
               THEN 'Centro de costo ' || center_code
+            WHEN center_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM cost_center cc
+                WHERE cc.external_code = import_src.center_code AND ${currentHeadExistsSql('cc.id', 'NOW()')})
+              THEN (SELECT 'El centro ' || cc.external_code || ' · ' || cc.name
+                      || ' no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.'
+                    FROM cost_center cc WHERE cc.external_code = import_src.center_code)
             WHEN category_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM asset_category ac
                 WHERE ac.code = import_src.category_code AND ac.is_active)
               THEN 'Categoría ' || left(category_code, 40)

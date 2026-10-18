@@ -4,7 +4,7 @@ import { DataSource } from 'typeorm';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { AssetsModule } from '../../src/modules/assets/assets.module.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
-import { bootModules, createActor, scalar } from './helpers.js';
+import { assignTestHead, bootModules, createActor, scalar } from './helpers.js';
 
 describe('Código interno de activo (PostgreSQL real)', () => {
   let moduleRef: TestingModule;
@@ -45,6 +45,7 @@ describe('Código interno de activo (PostgreSQL real)', () => {
         `SELECT id FROM acquisition_type WHERE code = 'PURCHASE'`,
       ),
     };
+    await assignTestHead(dataSource, base.costCenterId);
   });
 
   afterAll(async () => {

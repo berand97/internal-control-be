@@ -352,7 +352,10 @@ const FIELDS_BY_TARGET: Record<ImportTarget, Record<string, ImportField>> = {
 export const fieldsFor = (target: ImportTarget): Record<string, ImportField> => FIELDS_BY_TARGET[target];
 
 export const TARGET_RULES: Record<ImportTarget, ReadonlyArray<string>> = {
-  ASSETS: [],
+  ASSETS: [
+    'Centro de costo sin jefe vigente: la fila va a cuarentena (COST_CENTER_WITHOUT_HEAD); asigne el jefe y vuelva a importar',
+    'Centro de costo que no está en el catálogo: cuarentena (COST_CENTER_UNKNOWN); con unknownCostCenters=create ya no se crea, porque no tendría jefe, y la fila va a cuarentena con COST_CENTER_WITHOUT_HEAD',
+  ],
   COST_CENTERS: [
     'Modo (structureMode): INSERT_ONLY (por defecto) solo inserta los códigos nuevos; UPDATE_STRUCTURE además actualiza padre, unidad y movimiento de los existentes (requiere cost_center:manage:global). Nunca cambia código ni nombre de un existente (un nombre distinto se lista, NAME_DIFFERS) ni desactiva los que no vienen',
     'Padre (UPDATE_STRUCTURE): se deriva del código, el primero que exista en el archivo o en el sistema entre XYZ0 (si es agrupador y no es el propio código), XY00, X000 y X; no se usan los nombres',

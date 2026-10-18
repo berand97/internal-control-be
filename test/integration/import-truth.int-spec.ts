@@ -13,7 +13,7 @@ import { ExcelImportService } from '../../src/modules/staging/services/excel-imp
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { DATA_SHEET_NAME } from '../../src/modules/staging/templates/import-template.js';
 import { ImportTemplateService } from '../../src/modules/staging/templates/import-template.service.js';
-import { createActor, openTestSession, scalar, useSharedStorage } from './helpers.js';
+import { assignTestHeadByCodes, createActor, openTestSession, scalar, useSharedStorage } from './helpers.js';
 
 type Cell = string | number | Date | null;
 
@@ -71,6 +71,7 @@ describe('La importación dice la verdad antes de escribir (HTTP real + PostgreS
     }
     center = `TR${tag().slice(0, 6)}`;
     await dataSource.query(`INSERT INTO cost_center (external_code, name) VALUES ($1, 'Centro de la prueba')`, [center]);
+    await assignTestHeadByCodes(dataSource, [center]);
     await dataSource.query(
       `INSERT INTO asset_category (code, name) VALUES ('TRUTH_CAT', 'Categoría de la prueba') ON CONFLICT (code) DO NOTHING`,
     );
