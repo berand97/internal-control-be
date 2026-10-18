@@ -12,13 +12,9 @@ import {
   Patch,
   Post,
   Query,
-  UploadedFile,
-  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiBody,
-  ApiConsumes,
   ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
@@ -36,7 +32,6 @@ import {
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
-import { BoundedFileInterceptor, UPLOAD_LIMITS } from '../../shared/storage/uploads/bounded-file.interceptor.js';
 import { envelopedArraySchema } from '../documents/dto/document.responses.js';
 import {
   ChangeCostCenterPlacementDto,
@@ -54,7 +49,6 @@ import {
   CostCenterTreeDto,
 } from './dto/responses/cost-center-structure.responses.js';
 import { QueryCostCentersDto } from './dto/query-cost-centers.dto.js';
-import { CostCenterSyncResponseDto } from './dto/responses/cost-center-sync.response.dto.js';
 import { CostCenterResponseDto } from './dto/responses/cost-center.response.dto.js';
 import { StructureRemovalResultDto } from './dto/responses/structure-removal.response.dto.js';
 import { UpdateCostCenterDto } from './dto/update-cost-center.dto.js';
@@ -63,10 +57,7 @@ import {
   type RequestMeta,
   resolveAt,
 } from './services/cost-center-placement.service.js';
-import {
-  CostCentersService,
-  type CsvUpload,
-} from './services/cost-centers.service.js';
+import { CostCentersService } from './services/cost-centers.service.js';
 import { StructureReconcilerService } from './services/structure-reconciler.service.js';
 import { StructureReconcileResultDto } from './dto/responses/structure-reconcile.responses.js';
 
@@ -84,7 +75,6 @@ const STRUCTURE_NOTE =
   ApiSuccessEnvelope,
   ApiErrorEnvelope,
   CostCenterResponseDto,
-  CostCenterSyncResponseDto,
   CostCenterPlacementDto,
   CostCenterPlacementAtDto,
   CostCenterHistoryDto,
@@ -111,40 +101,6 @@ export class CostCentersController {
     @Query() query: QueryCostCentersDto,
   ): Promise<ReadonlyArray<CostCenterResponseDto>> {
     return this.costCentersService.list(query);
-  }
-
-  @Post('sync')
-  @RequirePermission('cost_center:manage:global')
-  @UseInterceptors(BoundedFileInterceptor('file', UPLOAD_LIMITS.COST_CENTER_CSV))
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['file'],
-      properties: {
-        file: {
-          type: 'string',
-          format: 'binary',
-          description:
-            'CSV con encabezado external_code,name,organizational_unit_code,accepts_assets',
-        },
-      },
-    },
-  })
-  @ApiOperation({
-    summary: 'Sincronizar centros de costo desde CSV',
-    description:
-      'Formato: external_code,name,organizational_unit_code,accepts_assets. El archivo es la autoridad: crea, actualiza, reactiva y desactiva los ausentes.',
-  })
-  @ApiResponse({
-    status: 201,
-    schema: envelopedSchema(CostCenterSyncResponseDto),
-  })
-  sync(
-    @UploadedFile() file: CsvUpload | undefined,
-    @CurrentUser() user: AuthenticatedUser,
-  ): Promise<CostCenterSyncResponseDto> {
-    return this.costCentersService.sync(file, user);
   }
 
   @Get('tree')

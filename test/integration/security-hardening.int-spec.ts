@@ -101,7 +101,6 @@ describe('Endurecimiento BE-01 / BE-05 / BE-06 (HTTP real + PostgreSQL real)', (
     it.each([
       ['/api/v1/imports', UPLOAD_LIMITS.EXCEL_IMPORT.maxFileBytes, 'grande.xlsx', 25],
       ['/api/v1/assets/import', UPLOAD_LIMITS.ASSET_CSV.maxFileBytes, 'grande.csv', 5],
-      ['/api/v1/cost-centers/sync', UPLOAD_LIMITS.COST_CENTER_CSV.maxFileBytes, 'grande.csv', 1],
       ['/api/v1/document-templates?documentType=ACTA_BAJA', UPLOAD_LIMITS.DOCX_TEMPLATE.maxFileBytes, 'grande.docx', 10],
       ['/api/v1/documents/formats/OCI-01-55/templates', UPLOAD_LIMITS.DOCX_TEMPLATE.maxFileBytes, 'grande.docx', 10],
       ['/api/v1/email-templates/assets', UPLOAD_LIMITS.EMAIL_IMAGE.maxFileBytes, 'grande.png', 1],

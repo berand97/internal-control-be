@@ -6,11 +6,9 @@ import { isUniqueViolation } from '../../../common/exceptions/postgres-error.js'
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
-import { parseCostCenterCsv } from '../csv/parse-cost-center-csv.js';
 import { codeMatchesPrefix, prefixRangeMessage } from '../domain/code-prefix.js';
 import { CreateCostCenterDto } from '../dto/create-cost-center.dto.js';
 import { QueryCostCentersDto } from '../dto/query-cost-centers.dto.js';
-import { CostCenterSyncResponseDto } from '../dto/responses/cost-center-sync.response.dto.js';
 import { CostCenterResponseDto } from '../dto/responses/cost-center.response.dto.js';
 import { UpdateCostCenterDto } from '../dto/update-cost-center.dto.js';
 import { CostCenterSyncSource } from '../enums/cost-center-sync-source.enum.js';
@@ -20,14 +18,9 @@ import { CostCenterPlacementService, NO_REQUEST, type RequestMeta } from './cost
 import { OrgStructureHistoryService } from './org-structure-history.service.js';
 import { decideCenterRemoval, StructureRemovalService } from './structure-removal.service.js';
 import { StructureReconcilerService } from './structure-reconciler.service.js';
-import { ALL_SCOPE, partialScope } from '../domain/structure-reconcile.js';
+import { partialScope } from '../domain/structure-reconcile.js';
 
 const COST_CENTER_ENTITY_TYPE = 'COST_CENTER';
-
-export interface CsvUpload {
-  readonly buffer: Buffer;
-  readonly originalname: string;
-}
 
 @Injectable()
 export class CostCentersService {
@@ -263,112 +256,6 @@ export class CostCentersService {
         { field: 'activeAssets', message: String(assets) },
       ]);
     }
-  }
-
-  async sync(
-    file: CsvUpload | undefined,
-    actor: AuthenticatedUser,
-  ): Promise<CostCenterSyncResponseDto> {
-    if (!file || file.buffer.length === 0) {
-      throw new ApiException(ErrorCode.InvalidCsv);
-    }
-    const rows = parseCostCenterCsv(file.buffer.toString('utf8'));
-    if (rows.length === 0) {
-      throw new ApiException(ErrorCode.InvalidCsv);
-    }
-
-    const syncedAt = new Date();
-    let created = 0;
-    let updated = 0;
-    let reactivated = 0;
-    const incomingCodes = new Set<string>();
-
-    for (const row of rows) {
-      incomingCodes.add(row.externalCode);
-      let organizationalUnitId: string | null = null;
-      if (row.organizationalUnitCode) {
-        const unit = await this.costCentersRepository.findOrgUnitByCode(
-          row.organizationalUnitCode,
-        );
-        if (!unit) {
-          throw new ApiException(ErrorCode.ResourceNotFound);
-        }
-        organizationalUnitId = unit.id;
-      }
-      const existing = await this.costCentersRepository.findByExternalCode(
-        row.externalCode,
-      );
-      if (!existing) {
-        await this.costCentersRepository.insert({
-          externalCode: row.externalCode,
-          name: row.name,
-          organizationalUnitId,
-          parentId: null,
-          acceptsAssets: row.acceptsAssets,
-          isActive: true,
-          syncSource: CostCenterSyncSource.ImportExcel,
-          lastSyncedAt: syncedAt,
-        });
-        created += 1;
-        continue;
-      }
-      const wasInactive = !existing.isActive;
-      await this.costCentersRepository.update(existing.id, {
-        name: row.name,
-        organizationalUnitId,
-        acceptsAssets: row.acceptsAssets,
-        isActive: true,
-        syncSource: CostCenterSyncSource.ImportExcel,
-        lastSyncedAt: syncedAt,
-      });
-      updated += 1;
-      if (wasInactive) {
-        reactivated += 1;
-      }
-    }
-
-    const current = await this.costCentersRepository.findAll({});
-    let deactivated = 0;
-    for (const center of current) {
-      if (center.isActive && !incomingCodes.has(center.externalCode)) {
-        await this.costCentersRepository.deactivate(center.id);
-        deactivated += 1;
-      }
-    }
-
-    await this.dataSource.transaction((manager) =>
-      this.reconciler.reconcileWithin(manager, ALL_SCOPE, {
-        actorId: actor.id,
-        reason: 'Sincronización de centros de costo',
-        ip: null,
-        userAgent: null,
-      }),
-    );
-    const log = await this.costCentersRepository.insertSyncLog({
-      filename: file.originalname,
-      createdCount: created,
-      updatedCount: updated,
-      deactivatedCount: deactivated,
-      reactivatedCount: reactivated,
-      performedBy: actor.id,
-    });
-    await this.auditLogsRepository.record({
-      action: AuditAction.CostCenterSynced,
-      entityType: COST_CENTER_ENTITY_TYPE,
-      entityId: log.id,
-      performedBy: actor.id,
-      ipAddress: null,
-      userAgent: null,
-      changes: { created, updated, deactivated, reactivated },
-    });
-    return {
-      id: log.id,
-      filename: log.filename,
-      created,
-      updated,
-      deactivated,
-      reactivated,
-    };
   }
 
   private async requireCenter(id: string) {

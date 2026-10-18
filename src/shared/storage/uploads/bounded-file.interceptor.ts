@@ -21,7 +21,6 @@ export interface UploadLimits {
 export const UPLOAD_LIMITS = {
   EXCEL_IMPORT: { maxFileBytes: 25 * MIB },
   ASSET_CSV: { maxFileBytes: 5 * MIB },
-  COST_CENTER_CSV: { maxFileBytes: 1 * MIB },
   DOCX_TEMPLATE: { maxFileBytes: 10 * MIB },
   EMAIL_IMAGE: { maxFileBytes: 1 * MIB },
 } as const satisfies Record<string, UploadLimits>;

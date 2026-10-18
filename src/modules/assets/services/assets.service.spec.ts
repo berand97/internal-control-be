@@ -178,14 +178,10 @@ describe('AssetsService', () => {
       findAll: vi.fn(),
       findById: vi.fn(),
       findActiveById: vi.fn().mockResolvedValue(center()),
-      findByExternalCode: vi.fn(),
       findOrgUnitById: vi.fn(),
-      findOrgUnitByCode: vi.fn(),
       insert: vi.fn(),
       update: vi.fn(),
-      deactivate: vi.fn(),
       countActiveAssets: vi.fn(),
-      insertSyncLog: vi.fn(),
     };
     locationsRepository = {
       findByBuilding: vi.fn(),

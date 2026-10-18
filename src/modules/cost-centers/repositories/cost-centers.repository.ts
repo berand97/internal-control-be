@@ -3,12 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, type EntityManager, Repository } from 'typeorm';
 import { OrganizationalUnit } from '../../organizational-units/entities/organizational-unit.entity.js';
 import { CostCenter } from '../entities/cost-center.entity.js';
-import { CostCenterSyncLog } from '../entities/cost-center-sync-log.entity.js';
 import type {
   CostCenterSearchFilters,
   CostCentersRepository,
   CreateCostCenterRecord,
-  CreateSyncLogRecord,
   UpdateCostCenterRecord,
 } from './cost-centers.repository.interface.js';
 
@@ -17,8 +15,6 @@ export class TypeOrmCostCentersRepository implements CostCentersRepository {
   constructor(
     @InjectRepository(CostCenter)
     private readonly costCenters: Repository<CostCenter>,
-    @InjectRepository(CostCenterSyncLog)
-    private readonly syncLogs: Repository<CostCenterSyncLog>,
     @InjectRepository(OrganizationalUnit)
     private readonly orgUnits: Repository<OrganizationalUnit>,
     private readonly dataSource: DataSource,
@@ -54,16 +50,8 @@ export class TypeOrmCostCentersRepository implements CostCentersRepository {
     return this.costCenters.findOne({ where: { id, isActive: true } });
   }
 
-  findByExternalCode(externalCode: string): Promise<CostCenter | null> {
-    return this.costCenters.findOne({ where: { externalCode } });
-  }
-
   findOrgUnitById(id: string): Promise<OrganizationalUnit | null> {
     return this.orgUnits.findOne({ where: { id } });
-  }
-
-  findOrgUnitByCode(code: string): Promise<OrganizationalUnit | null> {
-    return this.orgUnits.findOne({ where: { code } });
   }
 
   insert(record: CreateCostCenterRecord, manager?: EntityManager): Promise<CostCenter> {
@@ -83,13 +71,6 @@ export class TypeOrmCostCentersRepository implements CostCentersRepository {
     await repository.update({ id }, { ...record, updatedAt: new Date() });
   }
 
-  async deactivate(id: string): Promise<void> {
-    await this.costCenters.update(
-      { id },
-      { isActive: false, updatedAt: new Date() },
-    );
-  }
-
   async countActiveAssets(costCenterId: string): Promise<number> {
     const rows: unknown = await this.dataSource.query(
       `
@@ -105,13 +86,5 @@ export class TypeOrmCostCentersRepository implements CostCentersRepository {
       return typeof row.count === 'number' ? row.count : 0;
     }
     return 0;
-  }
-
-  insertSyncLog(record: CreateSyncLogRecord): Promise<CostCenterSyncLog> {
-    const entity = this.syncLogs.create({
-      ...record,
-      createdAt: new Date(),
-    });
-    return this.syncLogs.save(entity);
   }
 }
