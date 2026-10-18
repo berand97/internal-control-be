@@ -10,7 +10,6 @@ import request from 'supertest';
 import { SAMPLE as OCI_01_65_SAMPLE } from '../../scripts/formats/build-oci-01-65-template.mjs';
 import { findLeftovers, OCI_01_55_SAMPLE } from '../../scripts/formats/template-leftovers.mjs';
 import { pdfText, sampleLeftovers, squash } from './pdf-text.js';
-import { assignTestHead } from './helpers.js';
 import { DataSource } from 'typeorm';
 
 const GOTENBERG = process.env['GOTENBERG_URL'];
@@ -471,6 +470,7 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
       `INSERT INTO cost_center (external_code, name) VALUES ('E2E-BIB', 'BIBLIOTECA CENTRAL E2E') RETURNING id`,
     )) as Array<{ id: string }>;
     loanState.targetCostCenterId = target?.id ?? '';
+    const { assignTestHead } = await import('./helpers.js');
     await assignTestHead(dataSource, loanState.targetCostCenterId);
     const [category] = (await dataSource.query(`SELECT category_id FROM asset WHERE id = $1`, [state.assetId])) as Array<{ category_id: string }>;
     const [loanAsset] = (await dataSource.query(
