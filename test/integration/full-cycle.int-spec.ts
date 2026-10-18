@@ -200,6 +200,8 @@ describe.runIf(Boolean(GOTENBERG)).sequential('Ciclo completo: plantilla → act
     };
     const { ImportJobsService } = await import('../../src/modules/staging/services/import-jobs.service.js');
     const centers = await importSheet(await workbook('2026', [['', 'Codigo', 'Nombre'], [null, ...REAL_CENTER]]), 'centros de costo.xlsx', '2026', 'COST_CENTERS', { code: 'B', name: 'C' });
+    const { assignTestHeadByCodes } = await import('./helpers.js');
+    await assignTestHeadByCodes(dataSource, [String(REAL_CENTER[0])]);
     const assets = await importSheet(await workbook('ACTIVOS', [ASSET_HEADER, REAL_ASSET_ROW]), 'informe activos.xlsx', 'ACTIVOS', 'ASSETS', {
       legacyAssetId: 'A',
       legacyCode: 'B',
