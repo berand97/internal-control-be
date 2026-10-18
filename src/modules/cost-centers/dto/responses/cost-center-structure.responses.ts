@@ -165,6 +165,9 @@ export class CostCenterTreeNodeDto {
   @ApiProperty({ description: 'A la fecha pedida' })
   readonly hasMovement!: boolean;
 
+  @ApiProperty({ description: 'Si hoy admite activos (estado actual; un agrupador nunca los admite)' })
+  readonly acceptsAssets!: boolean;
+
   @ApiProperty({ type: CostCenterUnitRefDto, nullable: true, description: 'Unidad a la fecha pedida' })
   readonly organizationalUnit!: CostCenterUnitRefDto | null;
 

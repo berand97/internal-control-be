@@ -400,7 +400,7 @@ export class CostCenterPlacementService {
 
   async tree(at: Date, includeArchived = false): Promise<CostCenterTreeDto> {
     const rows = (await this.dataSource.query(
-      `SELECT cc.id, cc.external_code, cc.name, cc.is_active, p.parent_cost_center_id AS parent_id, p.has_movement,
+      `SELECT cc.id, cc.external_code, cc.name, cc.is_active, cc.accepts_assets, p.parent_cost_center_id AS parent_id, p.has_movement,
               u.id AS unit_id, u.code AS unit_code, u.name AS unit_name, u.code_prefix AS unit_prefix,
               coalesce(a.count, 0)::int AS direct_assets
        FROM cost_center_placement p
@@ -417,6 +417,7 @@ export class CostCenterPlacementService {
       external_code: string;
       name: string;
       is_active: boolean;
+      accepts_assets: boolean;
       parent_id: string | null;
       has_movement: boolean;
       unit_id: string | null;
@@ -458,6 +459,7 @@ export class CostCenterPlacementService {
             name: row.name,
             isActive: row.is_active,
             hasMovement: row.has_movement,
+            acceptsAssets: row.accepts_assets,
             organizationalUnit: unitRef(row.unit_id, row.unit_code, row.unit_name, row.unit_prefix),
             directAssets: row.direct_assets,
             heads: headsOf.get(row.id) ?? [],

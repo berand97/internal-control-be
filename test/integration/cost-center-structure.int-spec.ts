@@ -479,6 +479,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     const roots = february.body.data.roots as Array<{ id: string; organizationalUnit: { id: string } | null }>;
     expect(roots.find((node) => node.id === ids['c7100'])?.organizationalUnit?.id).toBe(ids['u7']);
     expect(roots.some((node) => node.id === ids['c7200'])).toBe(false);
+    expect(root).toMatchObject({ acceptsAssets: false });
   });
 
   describe('reconstrucción por la importación (UPDATE_STRUCTURE) con la forma de la hoja 2025', () => {
