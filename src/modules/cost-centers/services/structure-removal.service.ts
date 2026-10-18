@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
+import { ErrorCode } from '../../../common/constants/error-code.enum.js';
+import { ApiException } from '../../../common/exceptions/api.exception.js';
 
 export type RemovalDecision = 'DELETE' | 'ARCHIVE' | 'BLOCKED';
 
@@ -83,6 +85,21 @@ export const decideCenterRemoval = (check: CenterRemovalCheck): RemovalVerdict =
     return { decision: 'ARCHIVE', reason: history };
   }
   return { decision: 'DELETE', reason: null };
+};
+
+export const assertCenterRemovable = (check: CenterRemovalCheck): RemovalVerdict => {
+  if (check.activeAssets > 0) {
+    throw new ApiException(ErrorCode.CostCenterHasActiveAssets, undefined, [
+      { field: 'activeAssets', message: String(check.activeAssets) },
+    ]);
+  }
+  const verdict = decideCenterRemoval(check);
+  if (verdict.decision === 'BLOCKED') {
+    throw new ApiException(ErrorCode.HasDependentEntities, verdict.reason ?? undefined, [
+      { field: 'activeChildren', message: String(check.activeChildren) },
+    ]);
+  }
+  return verdict;
 };
 
 export const decideUnitRemoval = (check: UnitRemovalCheck): RemovalVerdict => {

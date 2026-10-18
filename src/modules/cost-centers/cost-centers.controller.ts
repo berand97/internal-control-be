@@ -248,7 +248,7 @@ export class CostCentersController {
   @ApiOperation({
     summary: 'Actualizar centro de costo',
     description:
-      'Nombre, aceptación de activos y estado. La unidad y el padre solo se aceptan iguales a los vigentes (400 COST_CENTER_PLACEMENT_REQUIRED): se cambian con POST /cost-centers/{id}/placement. Desactivar con activos: 406 COST_CENTER_HAS_ACTIVE_ASSETS con details[{field:"activeAssets", message:"<n>"}].',
+      'Nombre, aceptación de activos y estado. La unidad y el padre solo se aceptan iguales a los vigentes (400 COST_CENTER_PLACEMENT_REQUIRED): se cambian con POST /cost-centers/{id}/placement. Desactivar (isActive=false) aplica las mismas reglas que DELETE: con activos 406 COST_CENTER_HAS_ACTIVE_ASSETS con details[{field:"activeAssets", message:"<n>"}]; con centros hijos activos 406 HAS_DEPENDENT_ENTITIES con details[{field:"activeChildren", message:"<n>"}]. Reactivar (isActive=true) exige que su centro padre vigente esté activo (409 COST_CENTER_PARENT_INACTIVE) y que su dependencia esté activa (409 COST_CENTER_ORG_UNIT_INACTIVE).',
   })
   @ApiResponse({ status: 200, schema: envelopedSchema(CostCenterResponseDto) })
   update(
@@ -267,7 +267,7 @@ export class CostCentersController {
   @ApiOperation({
     summary: 'Eliminar (o archivar) un centro de costo',
     description:
-      'Se rechaza si tiene activos no dados de baja: 406 COST_CENTER_HAS_ACTIVE_ASSETS («No puede desactivarse: tiene activos asignados») con details[{field:"activeAssets", message:"<n>"}]; con centros hijos activos: 406 HAS_DEPENDENT_ENTITIES. Sin historia se borra de verdad (deleted=true: también sus jefaturas, roles con alcance en el centro e historial de ubicación; las personas quedan sin centro). Con historia (activos dados de baja, movimientos, traslados, préstamos, tomas/actas, documentos, solicitudes…) se archiva: archived=true y reason.',
+      'Se rechaza si tiene activos no dados de baja: 406 COST_CENTER_HAS_ACTIVE_ASSETS («No puede desactivarse: tiene activos asignados») con details[{field:"activeAssets", message:"<n>"}]; con centros hijos activos: 406 HAS_DEPENDENT_ENTITIES con details[{field:"activeChildren", message:"<n>"}]. Sin historia se borra de verdad (deleted=true: también sus jefaturas, roles con alcance en el centro e historial de ubicación; las personas quedan sin centro). Con historia (activos dados de baja, movimientos, traslados, préstamos, tomas/actas, documentos, solicitudes…) se archiva: archived=true y reason.',
   })
   @ApiResponse({ status: 200, schema: envelopedSchema(StructureRemovalResultDto) })
   @ApiResponse({ status: 406, schema: errorEnvelopeSchema() })

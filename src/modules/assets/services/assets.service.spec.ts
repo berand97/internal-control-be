@@ -181,7 +181,6 @@ describe('AssetsService', () => {
       findOrgUnitById: vi.fn(),
       insert: vi.fn(),
       update: vi.fn(),
-      countActiveAssets: vi.fn(),
     };
     locationsRepository = {
       findByBuilding: vi.fn(),

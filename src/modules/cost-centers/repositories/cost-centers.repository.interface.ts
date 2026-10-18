@@ -40,5 +40,4 @@ export interface CostCentersRepository {
   findOrgUnitById(id: string): Promise<OrganizationalUnit | null>;
   insert(record: CreateCostCenterRecord, manager?: EntityManager): Promise<CostCenter>;
   update(id: string, record: UpdateCostCenterRecord, manager?: EntityManager): Promise<void>;
-  countActiveAssets(costCenterId: string): Promise<number>;
 }

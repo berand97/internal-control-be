@@ -316,6 +316,64 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     );
   });
 
+  it('archivar por PATCH sigue las reglas de eliminar; reactivar exige padre y dependencia activos; un archivado no recibe jefe', async () => {
+    const tag = randomUUID().slice(0, 4).toUpperCase();
+    const unitId = await scalar<string>(
+      dataSource,
+      `INSERT INTO organizational_unit (code, name, unit_type, is_active) VALUES ($1, 'Unidad cerrada', 'DEPENDENCY', FALSE) RETURNING id`,
+      [`IT_CERRADA_${tag}`],
+    );
+    const parentId = await scalar<string>(
+      dataSource,
+      `INSERT INTO cost_center (external_code, name) VALUES ($1, 'Padre de prueba') RETURNING id`,
+      [`RP-${tag}`],
+    );
+    const childId = await scalar<string>(
+      dataSource,
+      `INSERT INTO cost_center (external_code, name, parent_id) VALUES ($1, 'Hijo de prueba', $2) RETURNING id`,
+      [`RH-${tag}`, parentId],
+    );
+    const blocked = await http().patch(`/api/v1/cost-centers/${parentId}`).set(auth('admin')).send({ isActive: false });
+    expect(blocked.status).toBe(406);
+    expect(blocked.body.error).toMatchObject({
+      code: 'HAS_DEPENDENT_ENTITIES',
+      message: 'Tiene 1 centros hijos activos',
+      details: [{ field: 'activeChildren', message: '1' }],
+    });
+    expect(await scalar<boolean>(dataSource, 'SELECT is_active FROM cost_center WHERE id = $1', [parentId])).toBe(true);
+
+    await dataSource.query('UPDATE cost_center SET is_active = FALSE WHERE id = ANY($1)', [[parentId, childId]]);
+    const orphan = await http().patch(`/api/v1/cost-centers/${childId}`).set(auth('admin')).send({ isActive: true });
+    expect(orphan.status).toBe(409);
+    expect(orphan.body.error).toMatchObject({
+      code: 'COST_CENTER_PARENT_INACTIVE',
+      message: `No puede reactivarse: su centro padre RP-${tag} · Padre de prueba está archivado. Reactive primero el centro padre.`,
+    });
+
+    await dataSource.query('UPDATE cost_center SET parent_id = NULL, organizational_unit_id = $2 WHERE id = $1', [childId, unitId]);
+    const closedUnit = await http().patch(`/api/v1/cost-centers/${childId}`).set(auth('admin')).send({ isActive: true });
+    expect(closedUnit.status).toBe(409);
+    expect(closedUnit.body.error).toMatchObject({
+      code: 'COST_CENTER_ORG_UNIT_INACTIVE',
+      message: 'No puede reactivarse: su dependencia Unidad cerrada está inactiva. Reactive primero la dependencia o cambie la ubicación del centro.',
+    });
+    expect(await scalar<boolean>(dataSource, 'SELECT is_active FROM cost_center WHERE id = $1', [childId])).toBe(false);
+
+    const person = await createActor(dataSource);
+    const head = await http()
+      .post('/api/v1/cost-center-heads')
+      .set(auth('admin'))
+      .send({ personId: person.personId, costCenterId: parentId, reason: 'Jefe de un centro archivado' });
+    expect(head.status).toBe(409);
+    expect(head.body.error).toMatchObject({
+      code: 'COST_CENTER_INACTIVE',
+      message: `El centro RP-${tag} · Padre de prueba está archivado. Reactívelo antes de asignarle un jefe.`,
+    });
+
+    const reactivated = await http().patch(`/api/v1/cost-centers/${parentId}`).set(auth('admin')).send({ isActive: true });
+    expect(reactivated.status).toBe(200);
+  });
+
   it('lista los centros cuyo código no cuadra con su unidad, con el motivo', async () => {
     const response = await http().get('/api/v1/cost-centers/prefix-mismatches').set(auth('viewer'));
     expect(response.status).toBe(200);

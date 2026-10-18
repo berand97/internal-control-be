@@ -64,11 +64,16 @@ export class CostCenterHeadsService {
       ]);
     }
     const id = await this.dataSource.transaction(async (manager) => {
-      const [center] = (await manager.query('SELECT id FROM cost_center WHERE id = $1 FOR UPDATE', [
-        dto.costCenterId,
-      ])) as Array<{ id: string }>;
+      const [center] = (await manager.query(
+        'SELECT id, external_code AS code, name, is_active AS "isActive" FROM cost_center WHERE id = $1 FOR UPDATE',
+        [dto.costCenterId],
+      )) as Array<{ id: string; code: string; name: string; isActive: boolean }>;
       if (!center) {
         throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo');
+      }
+      if (!center.isActive) {
+        const message = `El centro ${center.code} · ${center.name} está archivado. Reactívelo antes de asignarle un jefe.`;
+        throw new ApiException(ErrorCode.CostCenterInactive, message, [{ field: 'costCenterId', message }]);
       }
       const [person] = (await manager.query('SELECT id FROM person WHERE id = $1 AND is_active', [
         dto.personId,

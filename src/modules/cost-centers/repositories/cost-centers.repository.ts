@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, type EntityManager, Repository } from 'typeorm';
+import { type EntityManager, Repository } from 'typeorm';
 import { OrganizationalUnit } from '../../organizational-units/entities/organizational-unit.entity.js';
 import { CostCenter } from '../entities/cost-center.entity.js';
 import type {
@@ -17,7 +17,6 @@ export class TypeOrmCostCentersRepository implements CostCentersRepository {
     private readonly costCenters: Repository<CostCenter>,
     @InjectRepository(OrganizationalUnit)
     private readonly orgUnits: Repository<OrganizationalUnit>,
-    private readonly dataSource: DataSource,
   ) {}
 
   findAll(
@@ -69,22 +68,5 @@ export class TypeOrmCostCentersRepository implements CostCentersRepository {
   async update(id: string, record: UpdateCostCenterRecord, manager?: EntityManager): Promise<void> {
     const repository = manager ? manager.getRepository(CostCenter) : this.costCenters;
     await repository.update({ id }, { ...record, updatedAt: new Date() });
-  }
-
-  async countActiveAssets(costCenterId: string): Promise<number> {
-    const rows: unknown = await this.dataSource.query(
-      `
-      SELECT COUNT(*)::int AS count
-      FROM asset
-      WHERE current_cost_center_id = $1
-        AND operational_status <> 'WRITTEN_OFF'
-      `,
-      [costCenterId],
-    );
-    if (Array.isArray(rows) && rows[0] && typeof rows[0] === 'object') {
-      const row = rows[0] as { count?: number };
-      return typeof row.count === 'number' ? row.count : 0;
-    }
-    return 0;
   }
 }

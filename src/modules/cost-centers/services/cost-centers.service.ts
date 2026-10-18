@@ -16,7 +16,7 @@ import type { CostCentersRepository } from '../repositories/cost-centers.reposit
 import type { StructureRemovalResultDto } from '../dto/responses/structure-removal.response.dto.js';
 import { CostCenterPlacementService, NO_REQUEST, type RequestMeta } from './cost-center-placement.service.js';
 import { OrgStructureHistoryService } from './org-structure-history.service.js';
-import { decideCenterRemoval, StructureRemovalService } from './structure-removal.service.js';
+import { assertCenterRemovable, StructureRemovalService } from './structure-removal.service.js';
 import { StructureReconcilerService } from './structure-reconciler.service.js';
 import { partialScope } from '../domain/structure-reconcile.js';
 
@@ -138,10 +138,15 @@ export class CostCentersService {
     if (structural.length > 0) {
       throw new ApiException(ErrorCode.CostCenterPlacementRequired, undefined, structural);
     }
-    if (dto.isActive === false && center.isActive) {
-      await this.assertNoActiveAssets(center.id);
+    const deactivating = dto.isActive === false && center.isActive;
+    if (dto.isActive === true && !center.isActive) {
+      await this.assertCanReactivate(center);
     }
     await this.dataSource.transaction(async (manager) => {
+      if (deactivating) {
+        await manager.query('SELECT id FROM cost_center WHERE id = $1 FOR UPDATE', [center.id]);
+        assertCenterRemovable(await this.removal.inspectCostCenter(manager, center.id));
+      }
       await this.costCentersRepository.update(
         center.id,
         {
@@ -204,12 +209,9 @@ export class CostCentersService {
     request: RequestMeta = NO_REQUEST,
   ): Promise<StructureRemovalResultDto> {
     const center = await this.requireCenter(id);
-    await this.assertNoActiveAssets(center.id);
     return this.dataSource.transaction(async (manager) => {
-      const verdict = decideCenterRemoval(await this.removal.inspectCostCenter(manager, center.id));
-      if (verdict.decision === 'BLOCKED') {
-        throw new ApiException(ErrorCode.HasDependentEntities, verdict.reason ?? undefined);
-      }
+      await manager.query('SELECT id FROM cost_center WHERE id = $1 FOR UPDATE', [center.id]);
+      const verdict = assertCenterRemovable(await this.removal.inspectCostCenter(manager, center.id));
       if (verdict.decision === 'DELETE') {
         await this.removal.deleteCostCenter(manager, center.id);
       } else {
@@ -249,12 +251,23 @@ export class CostCentersService {
     });
   }
 
-  private async assertNoActiveAssets(costCenterId: string): Promise<void> {
-    const assets = await this.costCentersRepository.countActiveAssets(costCenterId);
-    if (assets > 0) {
-      throw new ApiException(ErrorCode.CostCenterHasActiveAssets, undefined, [
-        { field: 'activeAssets', message: String(assets) },
-      ]);
+  private async assertCanReactivate(center: {
+    readonly parentId: string | null;
+    readonly organizationalUnitId: string | null;
+  }): Promise<void> {
+    if (center.parentId) {
+      const parent = await this.costCentersRepository.findById(center.parentId);
+      if (parent && !parent.isActive) {
+        const message = `No puede reactivarse: su centro padre ${parent.externalCode} · ${parent.name} está archivado. Reactive primero el centro padre.`;
+        throw new ApiException(ErrorCode.CostCenterParentInactive, message, [{ field: 'parentId', message }]);
+      }
+    }
+    if (center.organizationalUnitId) {
+      const unit = await this.costCentersRepository.findOrgUnitById(center.organizationalUnitId);
+      if (unit && !unit.isActive) {
+        const message = `No puede reactivarse: su dependencia ${unit.name} está inactiva. Reactive primero la dependencia o cambie la ubicación del centro.`;
+        throw new ApiException(ErrorCode.CostCenterOrgUnitInactive, message, [{ field: 'organizationalUnitId', message }]);
+      }
     }
   }
 

@@ -35,7 +35,7 @@ export class CostCenterHeadsController {
   @RequirePermission(COST_CENTER_HEAD_PERMISSION)
   @ApiOperation({
     summary: 'Asignar a una persona como jefe de un centro de costo',
-    description: `${SCOPE_NOTE} Motivo obligatorio (3..500). Nadie se designa jefe a sí mismo: 403 ROLE_SELF_ASSIGNMENT_FORBIDDEN. Queda en la bitácora con IP y user-agent y en GET /cost-centers/:id/history.`,
+    description: `${SCOPE_NOTE} Motivo obligatorio (3..500). Nadie se designa jefe a sí mismo: 403 ROLE_SELF_ASSIGNMENT_FORBIDDEN. Un centro archivado no recibe jefe: 409 COST_CENTER_INACTIVE (los agrupadores activos sí). Queda en la bitácora con IP y user-agent y en GET /cost-centers/:id/history.`,
   })
   @ApiCreatedResponse({ schema: envelopedSchema(CostCenterHeadDto) })
   assign(

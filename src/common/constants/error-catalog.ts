@@ -989,6 +989,21 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El código no está en el rango de la unidad',
   },
+  [ErrorCode.CostCenterInactive]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El centro de costo está archivado. Reactívelo antes de continuar.',
+  },
+  [ErrorCode.CostCenterParentInactive]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'No puede reactivarse: su centro padre está archivado. Reactive primero el centro padre.',
+  },
+  [ErrorCode.CostCenterOrgUnitInactive]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'No puede reactivarse: su dependencia está inactiva. Reactive primero la dependencia.',
+  },
   [ErrorCode.OrgUnitCodePrefixExists]: {
     httpStatus: 409,
     action: 'CANCEL',
