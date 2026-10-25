@@ -41,6 +41,8 @@ export interface OrganizationalUnitsRepository {
   findChildren(parentId: string): Promise<ReadonlyArray<OrganizationalUnit>>;
   countActiveChildren(parentId: string): Promise<number>;
   countActiveCostCenters(orgUnitId: string): Promise<number>;
+  countArchivedChildren(parentId: string): Promise<number>;
+  countArchivedCostCenters(orgUnitId: string): Promise<number>;
   costCenterExists(id: string): Promise<boolean>;
   costCenterCode(id: string): Promise<string | null>;
   findCostCenterByCode(code: string): Promise<{ readonly id: string; readonly isActive: boolean } | null>;

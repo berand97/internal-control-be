@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { OrganizationalUnit } from '../../entities/organizational-unit.entity.js';
 import {
   ORG_RELATION_TYPE_LABELS,
@@ -111,4 +111,19 @@ export class OrganizationalUnitSaveResponseDto extends OrganizationalUnitRespons
     example: ['Centro propio 1510 pendiente: el centro aún no existe; se amarrará solo cuando se cree'],
   })
   readonly warnings!: ReadonlyArray<string>;
+
+  @ApiPropertyOptional({
+    type: 'integer',
+    minimum: 0,
+    description:
+      'Solo al reactivar (isActive de false a true): unidades hijas directas que siguen archivadas. Reactivar no reactiva hijas ni centros.',
+  })
+  readonly archivedChildUnits?: number;
+
+  @ApiPropertyOptional({
+    type: 'integer',
+    minimum: 0,
+    description: 'Solo al reactivar (isActive de false a true): centros de costo de la unidad que siguen archivados.',
+  })
+  readonly archivedCostCenters?: number;
 }

@@ -61,6 +61,16 @@ export class TypeOrmOrganizationalUnitsRepository
     });
   }
 
+  countArchivedChildren(parentId: string): Promise<number> {
+    return this.units.count({ where: { parentId, isActive: false } });
+  }
+
+  countArchivedCostCenters(orgUnitId: string): Promise<number> {
+    return this.costCenters.count({
+      where: { organizationalUnitId: orgUnitId, isActive: false },
+    });
+  }
+
   costCenterExists(id: string): Promise<boolean> {
     return this.costCenters.exists({ where: { id } });
   }

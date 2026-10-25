@@ -55,6 +55,8 @@ describe('OrganizationalUnitsService', () => {
       findChildren: vi.fn(),
       countActiveChildren: vi.fn().mockResolvedValue(0),
       countActiveCostCenters: vi.fn().mockResolvedValue(0),
+      countArchivedChildren: vi.fn().mockResolvedValue(0),
+      countArchivedCostCenters: vi.fn().mockResolvedValue(0),
       costCenterExists: vi.fn().mockResolvedValue(true),
       costCenterCode: vi.fn().mockResolvedValue('4010'),
       findCostCenterByCode: vi.fn().mockResolvedValue(null),
@@ -462,5 +464,105 @@ describe('OrganizationalUnitsService', () => {
       expect.objectContaining({ unitType: OrgUnitType.Committee, codePrefix: null }),
       expect.anything(),
     );
+  });
+
+  describe('unidades archivadas', () => {
+    const archivedParent = () => {
+      const parent = unit('1', 'VF', null, 0);
+      parent.hierarchyPath = '/vf';
+      parent.name = 'Vicerrectoría Financiera';
+      parent.isActive = false;
+      return parent;
+    };
+    const byId = (...items: OrganizationalUnit[]) =>
+      vi.mocked(unitsRepository.findById).mockImplementation(async (id) => items.find((item) => item.id === id) ?? null);
+    const parentArchived = {
+      code: ErrorCode.OrgUnitParentArchived,
+      message: 'La dependencia «Vicerrectoría Financiera» está archivada. Reactívela primero o elija otro padre.',
+      details: [{ field: 'parentId', message: '1' }],
+    };
+
+    it('no crea una unidad bajo un padre archivado', async () => {
+      byId(archivedParent());
+      await expect(
+        service.create({ code: 'CONT', name: 'Contabilidad', type: OrgUnitType.Department, parentId: '1' }, actor),
+      ).rejects.toMatchObject(parentArchived);
+      expect(unitsRepository.insert).not.toHaveBeenCalled();
+    });
+
+    it('no mueve una unidad bajo un padre archivado; a la raíz sí', async () => {
+      const cont = unit('2', 'CONT', null, 0);
+      cont.hierarchyPath = '/cont';
+      byId(archivedParent(), cont);
+      await expect(service.update('2', { parentId: '1' }, actor)).rejects.toMatchObject(parentArchived);
+      expect(unitsRepository.update).not.toHaveBeenCalled();
+      await expect(service.update('2', { parentId: null }, actor)).resolves.toMatchObject({ id: '2' });
+    });
+
+    it('no reactiva una unidad cuyo padre está archivado', async () => {
+      const cont = unit('2', 'CONT', '1', 1);
+      cont.isActive = false;
+      byId(archivedParent(), cont);
+      await expect(service.update('2', { isActive: true }, actor)).rejects.toMatchObject(parentArchived);
+      expect(unitsRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('editar sin mover una unidad activa que ya colgaba de un padre archivado no falla', async () => {
+      const cont = unit('2', 'CONT', '1', 1);
+      cont.hierarchyPath = '/vf/cont';
+      byId(archivedParent(), cont);
+      await expect(service.update('2', { name: 'Contabilidad General', parentId: '1' }, actor)).resolves.toMatchObject({ id: '2' });
+    });
+
+    it('archivar por PATCH con hijas activas: ORG_UNIT_HAS_CHILDREN con el conteo', async () => {
+      byId(unit('1', 'REC', null, 0));
+      vi.mocked(unitsRepository.countActiveChildren).mockResolvedValue(2);
+      await expect(service.update('1', { isActive: false }, actor)).rejects.toMatchObject({
+        code: ErrorCode.OrgUnitHasChildren,
+        details: [{ field: 'activeChildren', message: '2' }],
+      });
+      expect(unitsRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('archivar por PATCH con centros activos: HAS_DEPENDENT_ENTITIES con el conteo', async () => {
+      byId(unit('1', 'REC', null, 0));
+      vi.mocked(unitsRepository.countActiveCostCenters).mockResolvedValue(1);
+      await expect(service.update('1', { isActive: false }, actor)).rejects.toMatchObject({
+        code: ErrorCode.HasDependentEntities,
+        details: [{ field: 'activeCostCenters', message: '1' }],
+      });
+      expect(unitsRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('reactivar reactiva solo la unidad y dice cuántas hijas y centros siguen archivados', async () => {
+      const rec = unit('1', 'REC', null, 0);
+      rec.hierarchyPath = '/rec';
+      rec.isActive = false;
+      vi.mocked(unitsRepository.findById).mockImplementation(async () => rec);
+      vi.mocked(unitsRepository.update).mockImplementation(async (_id, record) => {
+        Object.assign(rec, record);
+      });
+      vi.mocked(unitsRepository.countArchivedChildren).mockResolvedValue(2);
+      vi.mocked(unitsRepository.countArchivedCostCenters).mockResolvedValue(3);
+      const saved = await service.update('1', { isActive: true }, actor);
+      expect(saved).toMatchObject({ isActive: true, archivedChildUnits: 2, archivedCostCenters: 3 });
+      expect(saved.warnings).toContain(
+        'Se reactivó solo esta unidad; quedan sin reactivar 2 unidades hijas y 3 centros de costo. Reactívelos por separado si los necesita.',
+      );
+      expect(unitsRepository.update).toHaveBeenCalledTimes(1);
+      expect(unitsRepository.update).toHaveBeenCalledWith('1', { isActive: true }, expect.anything());
+    });
+
+    it('reactivar sin nada archivado debajo: conteos en cero y sin advertencia; editar sin reactivar no los trae', async () => {
+      const rec = unit('1', 'REC', null, 0);
+      rec.hierarchyPath = '/rec';
+      rec.isActive = false;
+      vi.mocked(unitsRepository.findById).mockImplementation(async () => rec);
+      const saved = await service.update('1', { isActive: true }, actor);
+      expect(saved).toMatchObject({ archivedChildUnits: 0, archivedCostCenters: 0, warnings: [] });
+      const edited = await service.update('1', { name: 'Rectoría' }, actor);
+      expect(edited).not.toHaveProperty('archivedChildUnits');
+      expect(edited).not.toHaveProperty('archivedCostCenters');
+    });
   });
 });

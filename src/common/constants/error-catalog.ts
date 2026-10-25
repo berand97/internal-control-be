@@ -1014,6 +1014,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Otra unidad activa ya usa ese prefijo de código',
   },
+  [ErrorCode.OrgUnitParentArchived]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'La dependencia padre está archivada. Reactívela primero o elija otro padre.',
+  },
   [ErrorCode.OrgUnitPrefixOutOfParent]: {
     httpStatus: 400,
     action: 'CANCEL',

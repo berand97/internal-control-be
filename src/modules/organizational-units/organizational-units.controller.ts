@@ -235,7 +235,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Pendientes de la estructura',
     description:
-      'pendingHeadCenters: unidades activas con centro propio escrito por código que aún no existe (o está archivado); centersWithoutUnit: centros activos cuyo código no empieza por el prefijo de ninguna unidad activa; mismatches: lo mismo que GET /cost-centers/prefix-mismatches; manualExceptions: ubicaciones MANUAL que no coinciden con la regla.',
+      'pendingHeadCenters: unidades activas con centro propio escrito por código que aún no existe (o está archivado); centersWithoutUnit: centros activos cuyo código no empieza por el prefijo de ninguna unidad activa; mismatches: lo mismo que GET /cost-centers/prefix-mismatches; manualExceptions: ubicaciones MANUAL que no coinciden con la regla; unitsUnderArchivedParent: unidades activas cuyo padre está archivado; centersInArchivedUnit: centros activos cuya unidad está archivada (las dos últimas son datos anteriores a la regla «una unidad archivada no puede ser padre»: no se corrigen solos).',
   })
   @ApiOkResponse({ schema: envelopedSchema(StructurePendingDto) })
   structurePending(): Promise<StructurePendingDto> {
@@ -318,12 +318,13 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Crear unidad organizacional',
     description:
-      'headCostCenterCode con un código que aún no existe se guarda como centro propio pendiente (warnings) y se amarra solo cuando el centro se crea. Un prefijo que no empieza por el del jefe es solo una advertencia (warnings); el mismo prefijo del jefe: 400 ORG_UNIT_PREFIX_OUT_OF_PARENT; el de otra unidad activa: 409 ORG_UNIT_CODE_PREFIX_EXISTS. Otra unidad activa con el mismo nombre (sin tildes ni mayúsculas) bajo el mismo jefe es solo una advertencia (warnings): los nombres no son únicos. En la misma transacción concilia los centros del prefijo (unidad por prefijo más largo). color (#RRGGBB, opcional) es el color base de la rama en el organigrama; sin él la unidad hereda el de su jefe.',
+      'parentId de una unidad archivada: 409 ORG_UNIT_PARENT_ARCHIVED (details[{field:"parentId", message:"<id del padre>"}]). headCostCenterCode con un código que aún no existe se guarda como centro propio pendiente (warnings) y se amarra solo cuando el centro se crea. Un prefijo que no empieza por el del jefe es solo una advertencia (warnings); el mismo prefijo del jefe: 400 ORG_UNIT_PREFIX_OUT_OF_PARENT; el de otra unidad activa: 409 ORG_UNIT_CODE_PREFIX_EXISTS. Otra unidad activa con el mismo nombre (sin tildes ni mayúsculas) bajo el mismo jefe es solo una advertencia (warnings): los nombres no son únicos. En la misma transacción concilia los centros del prefijo (unidad por prefijo más largo). color (#RRGGBB, opcional) es el color base de la rama en el organigrama; sin él la unidad hereda el de su jefe.',
   })
   @ApiResponse({
     status: 201,
     schema: envelopedSchema(OrganizationalUnitSaveResponseDto),
   })
+  @ApiResponse({ status: 409, schema: errorEnvelopeSchema() })
   create(
     @Body() dto: CreateOrganizationalUnitDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -336,12 +337,14 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Actualizar o mover una unidad organizacional',
     description:
-      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio. headCostCenterCode con un código que aún no existe queda pendiente (warnings). Un prefijo que no empieza por el del jefe (unidad movida a otro jefe) es solo una advertencia y la unidad conserva sus centros. Si cambia el nombre o el jefe y otra unidad activa con el mismo nombre (sin tildes ni mayúsculas) queda bajo el mismo jefe: advertencia (warnings), no error. Si cambian el prefijo, el padre o el estado, concilia los centros del prefijo viejo y del nuevo en la misma transacción. color: #RRGGBB lo cambia, null lo quita (hereda el de su jefe), omitido no lo toca; el cambio queda en el historial (campo COLOR).',
+      'Cambia nombre, código, tipo y/o dependencia. `parentId` con el UUID de otra unidad mueve esta y todo su subárbol. `parentId: null` la deja como raíz. No se puede colgar de un descendiente propio. headCostCenterCode con un código que aún no existe queda pendiente (warnings). Un prefijo que no empieza por el del jefe (unidad movida a otro jefe) es solo una advertencia y la unidad conserva sus centros. Si cambia el nombre o el jefe y otra unidad activa con el mismo nombre (sin tildes ni mayúsculas) queda bajo el mismo jefe: advertencia (warnings), no error. Si cambian el prefijo, el padre o el estado, concilia los centros del prefijo viejo y del nuevo en la misma transacción. color: #RRGGBB lo cambia, null lo quita (hereda el de su jefe), omitido no lo toca; el cambio queda en el historial (campo COLOR). Mover bajo una unidad archivada: 409 ORG_UNIT_PARENT_ARCHIVED. Reactivar (isActive=true) con el padre archivado: 409 ORG_UNIT_PARENT_ARCHIVED. Archivar (isActive=false) aplica las mismas reglas que DELETE: con unidades hijas activas 406 ORG_UNIT_HAS_CHILDREN (details activeChildren); con centros activos 406 HAS_DEPENDENT_ENTITIES (details activeCostCenters). Reactivar reactiva solo esta unidad: sus hijas y centros archivados siguen archivados; la respuesta trae archivedChildUnits y archivedCostCenters (solo al reactivar) y una advertencia si alguno es mayor que cero.',
   })
   @ApiResponse({
     status: 200,
     schema: envelopedSchema(OrganizationalUnitSaveResponseDto),
   })
+  @ApiResponse({ status: 406, schema: errorEnvelopeSchema() })
+  @ApiResponse({ status: 409, schema: errorEnvelopeSchema() })
   update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateOrganizationalUnitDto,

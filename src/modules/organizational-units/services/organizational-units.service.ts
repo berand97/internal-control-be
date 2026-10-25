@@ -134,6 +134,7 @@ export class OrganizationalUnitsService {
     const parent = dto.parentId
       ? await this.requireUnit(dto.parentId)
       : null;
+    this.assertParentActive(parent);
     this.assertCollegiateBodyRules(dto.type, dto.codePrefix ?? null, dto);
     const prefixWarning = dto.codePrefix ? await this.assertPrefixInParent(dto.codePrefix, dto.name, parent, null) : null;
     if (dto.codePrefix && (dto.isActive ?? true)) {
@@ -218,6 +219,13 @@ export class OrganizationalUnitsService {
         parentId = null;
       }
     }
+    const reactivating = dto.isActive === true && !unit.isActive;
+    if (parentId !== unit.parentId || reactivating) {
+      this.assertParentActive(parent);
+    }
+    if (dto.isActive === false && unit.isActive) {
+      await this.assertArchivable(unit);
+    }
 
     const nextPrefix = dto.codePrefix !== undefined ? dto.codePrefix : unit.codePrefix;
     this.assertCollegiateBodyRules(dto.type ?? unit.unitType, nextPrefix, dto);
@@ -301,7 +309,16 @@ export class OrganizationalUnitsService {
       throw error;
     }
     const updated = await this.requireUnit(id);
-    return { ...OrganizationalUnitResponseDto.from(updated), warnings };
+    if (!reactivating) {
+      return { ...OrganizationalUnitResponseDto.from(updated), warnings };
+    }
+    const notice = await this.reactivationNotice(updated);
+    return {
+      ...OrganizationalUnitResponseDto.from(updated),
+      warnings: notice.warning ? [...warnings, notice.warning] : warnings,
+      archivedChildUnits: notice.archivedChildUnits,
+      archivedCostCenters: notice.archivedCostCenters,
+    };
   }
 
   private async recordHistory(
@@ -428,24 +445,7 @@ export class OrganizationalUnitsService {
 
   async remove(id: string, actor: AuthenticatedUser): Promise<StructureRemovalResultDto> {
     const unit = await this.requireUnit(id);
-    const children = await this.unitsRepository.countActiveChildren(unit.id);
-    if (children > 0) {
-      throw new ApiException(
-        ErrorCode.OrgUnitHasChildren,
-        children === 1 ? 'La unidad tiene 1 unidad hija activa' : `La unidad tiene ${children} unidades hijas activas`,
-        [{ field: 'activeChildren', message: String(children) }],
-      );
-    }
-    const activeCenters = await this.unitsRepository.countActiveCostCenters(unit.id);
-    if (activeCenters > 0) {
-      throw new ApiException(
-        ErrorCode.HasDependentEntities,
-        activeCenters === 1
-          ? 'La unidad tiene 1 centro de costo activo: muévalo a otra unidad o desactívelo antes de desactivar la unidad'
-          : `La unidad tiene ${activeCenters} centros de costo activos: muévalos a otra unidad o desactívelos antes de desactivar la unidad`,
-        [{ field: 'activeCostCenters', message: String(activeCenters) }],
-      );
-    }
+    await this.assertArchivable(unit);
     return this.dataSource.transaction(async (manager) => {
       const verdict = decideUnitRemoval(await this.removal.inspectUnit(manager, unit.id));
       if (verdict.decision === 'BLOCKED') {
@@ -497,6 +497,59 @@ export class OrganizationalUnitsService {
         reason: verdict.reason,
       };
     });
+  }
+
+  private assertParentActive(parent: OrganizationalUnit | null): void {
+    if (parent && !parent.isActive) {
+      throw new ApiException(
+        ErrorCode.OrgUnitParentArchived,
+        `La dependencia «${parent.name}» está archivada. Reactívela primero o elija otro padre.`,
+        [{ field: 'parentId', message: parent.id }],
+      );
+    }
+  }
+
+  private async reactivationNotice(unit: OrganizationalUnit): Promise<{
+    readonly archivedChildUnits: number;
+    readonly archivedCostCenters: number;
+    readonly warning: string | null;
+  }> {
+    const archivedChildUnits = await this.unitsRepository.countArchivedChildren(unit.id);
+    const archivedCostCenters = await this.unitsRepository.countArchivedCostCenters(unit.id);
+    const parts = [
+      ...(archivedChildUnits > 0
+        ? [archivedChildUnits === 1 ? '1 unidad hija' : `${archivedChildUnits} unidades hijas`]
+        : []),
+      ...(archivedCostCenters > 0
+        ? [archivedCostCenters === 1 ? '1 centro de costo' : `${archivedCostCenters} centros de costo`]
+        : []),
+    ];
+    const warning =
+      parts.length > 0
+        ? `Se reactivó solo esta unidad; ${archivedChildUnits + archivedCostCenters === 1 ? 'queda' : 'quedan'} sin reactivar ${parts.join(' y ')}. Reactívelos por separado si los necesita.`
+        : null;
+    return { archivedChildUnits, archivedCostCenters, warning };
+  }
+
+  private async assertArchivable(unit: OrganizationalUnit): Promise<void> {
+    const children = await this.unitsRepository.countActiveChildren(unit.id);
+    if (children > 0) {
+      throw new ApiException(
+        ErrorCode.OrgUnitHasChildren,
+        children === 1 ? 'La unidad tiene 1 unidad hija activa' : `La unidad tiene ${children} unidades hijas activas`,
+        [{ field: 'activeChildren', message: String(children) }],
+      );
+    }
+    const activeCenters = await this.unitsRepository.countActiveCostCenters(unit.id);
+    if (activeCenters > 0) {
+      throw new ApiException(
+        ErrorCode.HasDependentEntities,
+        activeCenters === 1
+          ? 'La unidad tiene 1 centro de costo activo: muévalo a otra unidad o desactívelo antes de desactivar la unidad'
+          : `La unidad tiene ${activeCenters} centros de costo activos: muévalos a otra unidad o desactívelos antes de desactivar la unidad`,
+        [{ field: 'activeCostCenters', message: String(activeCenters) }],
+      );
+    }
   }
 
   private async assertPrefixFree(codePrefix: string, unitId: string | null): Promise<void> {
