@@ -167,6 +167,43 @@ export class StructureCenterWithoutUnitDto {
   readonly name!: string;
 }
 
+export class StructureUnitUnderArchivedParentDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly id!: string;
+
+  @ApiProperty()
+  readonly code!: string;
+
+  @ApiProperty()
+  readonly name!: string;
+
+  @ApiProperty({ type: 'string', nullable: true })
+  readonly codePrefix!: string | null;
+
+  @ApiProperty({ format: 'uuid', description: 'Unidad padre archivada' })
+  readonly parentId!: string;
+
+  @ApiProperty({ description: 'Nombre de la unidad padre archivada' })
+  readonly parentName!: string;
+}
+
+export class StructureCenterInArchivedUnitDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly id!: string;
+
+  @ApiProperty({ description: 'Código externo del centro' })
+  readonly code!: string;
+
+  @ApiProperty()
+  readonly name!: string;
+
+  @ApiProperty({ format: 'uuid', description: 'Unidad archivada a la que pertenece' })
+  readonly unitId!: string;
+
+  @ApiProperty({ description: 'Nombre de la unidad archivada' })
+  readonly unitName!: string;
+}
+
 export class StructurePendingDto {
   @ApiProperty({ type: [StructurePendingHeadDto], description: 'Unidades con centro propio pendiente' })
   readonly pendingHeadCenters!: ReadonlyArray<StructurePendingHeadDto>;
@@ -182,4 +219,16 @@ export class StructurePendingDto {
 
   @ApiProperty({ type: [StructureManualExceptionDto] })
   readonly manualExceptions!: ReadonlyArray<StructureManualExceptionDto>;
+
+  @ApiProperty({
+    type: [StructureUnitUnderArchivedParentDto],
+    description: 'Unidades activas cuyo padre está archivado (datos anteriores a la regla): reactive el padre o mueva la unidad',
+  })
+  readonly unitsUnderArchivedParent!: ReadonlyArray<StructureUnitUnderArchivedParentDto>;
+
+  @ApiProperty({
+    type: [StructureCenterInArchivedUnitDto],
+    description: 'Centros activos cuya unidad está archivada (datos anteriores a la regla): reactive la unidad, reubique o archive el centro',
+  })
+  readonly centersInArchivedUnit!: ReadonlyArray<StructureCenterInArchivedUnitDto>;
 }

@@ -18,9 +18,11 @@ import {
   type ReconcileUnit,
 } from '../domain/structure-reconcile.js';
 import type {
+  StructureCenterInArchivedUnitDto,
   StructurePendingDto,
   StructureReconcilePreviewDto,
   StructureReconcileResultDto,
+  StructureUnitUnderArchivedParentDto,
 } from '../dto/responses/structure-reconcile.responses.js';
 import { CostCenterPlacementService, NO_REQUEST, type PlacementPatch, type RequestMeta } from './cost-center-placement.service.js';
 import { type OrgHistoryEntry, OrgStructureHistoryService } from './org-structure-history.service.js';
@@ -169,6 +171,20 @@ export class StructureReconcilerService {
         .map((center) => ({ id: center.id, code: center.code, name: center.name })),
       mismatches: await this.placements.prefixMismatches(),
       manualExceptions: plan.manualExceptions,
+      unitsUnderArchivedParent: (await manager.query(
+        `SELECT u.id, u.code, u.name, u.code_prefix AS "codePrefix", p.id AS "parentId", p.name AS "parentName"
+         FROM organizational_unit u
+         JOIN organizational_unit p ON p.id = u.parent_id
+         WHERE u.is_active AND NOT p.is_active
+         ORDER BY u.code`,
+      )) as StructureUnitUnderArchivedParentDto[],
+      centersInArchivedUnit: (await manager.query(
+        `SELECT cc.id, cc.external_code AS code, cc.name, u.id AS "unitId", u.name AS "unitName"
+         FROM cost_center cc
+         JOIN organizational_unit u ON u.id = cc.organizational_unit_id
+         WHERE cc.is_active AND NOT u.is_active
+         ORDER BY cc.external_code`,
+      )) as StructureCenterInArchivedUnitDto[],
     };
   }
 
