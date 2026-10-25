@@ -15,8 +15,20 @@ export const existingSiblingText = (
   return `Ya existe «${sibling.name}» ${unitPlace(parentName)}${details.length > 0 ? ` (${details.join(', ')})` : ''}`;
 };
 
-export const duplicateSiblingWarning = (
+export const DUPLICATE_SIBLING_HINT = 'Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.';
+
+export const duplicateSiblingError = (
   sibling: { readonly name: string; readonly codePrefix: string | null },
   parentName: string | null,
-): string =>
-  `${existingSiblingText(sibling, parentName)}. ¿Es otra unidad? Si es así, use un nombre que las distinga.`;
+): string => `${existingSiblingText(sibling, parentName)}. ${DUPLICATE_SIBLING_HINT}`;
+
+export const duplicateSiblingGroups = <T extends { readonly code: string; readonly name: string; readonly parentId: string | null }>(
+  units: ReadonlyArray<T>,
+): ReadonlyArray<ReadonlyArray<T>> => {
+  const groups = new Map<string, T[]>();
+  for (const unit of [...units].sort((left, right) => (left.code < right.code ? -1 : left.code > right.code ? 1 : 0))) {
+    const key = `${unit.parentId ?? ''}|${normalizeText(unit.name)}`;
+    groups.set(key, [...(groups.get(key) ?? []), unit]);
+  }
+  return [...groups.values()].filter((group) => group.length > 1);
+};

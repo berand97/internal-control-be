@@ -302,7 +302,7 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     expect(elsewhere.plan.changes.map((change) => change.kind)).toEqual(['CREATED']);
   });
 
-  it('dos «Calidad» bajo la Rectoría (102 y 103): una fila nueva sin prefijo es un error; con prefijo nuevo, solo advertencia', () => {
+  it('dos «Calidad» bajo la Rectoría (102 y 103): una fila nueva con ese nombre es un error, con o sin prefijo', () => {
     const rectoria = unit('u1', 'U1', 'Rectoría', '1', null, OrgUnitType.Rectorate);
     const now = [rectoria, unit('u102', 'U102', 'Calidad', '102', 'u1'), unit('u103', 'U103', 'Calidad', '103', 'u1')];
     const row: UnitRowInput = { rowNumber: 2, prefix: null, name: 'CALIDAD', type: 'Oficina', parent: '1', relation: null, headCenter: null, status: null, action: null, code: null };
@@ -313,14 +313,14 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
       'Ya existe «Calidad» bajo Rectoría (prefijo 102). Si es la misma, copie su Código interno (U102) en la fila; si es otra, escriba su prefijo o un nombre distinto.',
     ]);
     const withPrefix = run(now, { ...input, units: [{ ...row, prefix: '104' }] });
-    expect(withPrefix.errors).toEqual([]);
-    expect(withPrefix.plan.changes.map((change) => change.kind)).toEqual(['CREATED']);
-    expect(withPrefix.warnings).toContainEqual({
-      sheet: 'Organigrama',
-      rowNumber: 2,
-      column: 'Nombre',
-      message: 'Ya existe «Calidad» bajo Rectoría (prefijo 102). ¿Es otra unidad? Si es así, use un nombre que las distinga.',
-    });
+    expect(withPrefix.errors).toEqual([
+      {
+        sheet: 'Organigrama',
+        rowNumber: 2,
+        column: 'Nombre',
+        message: 'Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+      },
+    ]);
     const sameUnit = run(now, { ...input, units: [{ ...row, prefix: '103', name: 'Calidad', type: 'Departamento' }] });
     expect(sameUnit.errors).toEqual([]);
     expect(sameUnit.plan.changes).toEqual([]);

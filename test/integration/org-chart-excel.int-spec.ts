@@ -689,7 +689,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
   });
 
   describe('unidades con el mismo nombre', () => {
-    const SAME = '¿Es otra unidad? Si es así, use un nombre que las distinga.';
+    const HINT = 'Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.';
     const create = (body: Record<string, unknown>) => http().post('/api/v1/organizational-units').set(auth('admin')).send(body);
 
     const stamplessFile = async (rows: ReadonlyArray<ReadonlyArray<string | null>>): Promise<Buffer> => {
@@ -710,7 +710,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       return Buffer.from(await workbook.xlsx.writeBuffer());
     };
 
-    it('POST/PATCH: el nombre de una hermana activa (sin tildes ni mayúsculas) es solo una advertencia', async () => {
+    it('POST/PATCH: el nombre de una hermana activa (sin tildes ni mayúsculas) es 409; una repetida de antes se puede editar', async () => {
       const rectorate = await create({ code: 'IT_OC_DIR', name: 'Dirección Excel', type: 'DEPARTMENT' });
       expect(rectorate.status, JSON.stringify(rectorate.body)).toBe(201);
       ids['dir'] = rectorate.body.data.id as string;
@@ -718,11 +718,18 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expect(first.status, JSON.stringify(first.body)).toBe(201);
       expect(first.body.data.warnings).toEqual([]);
 
-      const second = await create({ code: 'IT_OC_CAL_972', name: '  CALIDÁD ', type: 'OFFICE', parentId: ids['dir'], codePrefix: '972' });
+      const rejected = await create({ code: 'IT_OC_CAL_972', name: '  CALIDÁD ', type: 'OFFICE', parentId: ids['dir'], codePrefix: '972' });
+      expect(rejected.status).toBe(409);
+      expect(rejected.body.error).toMatchObject({
+        code: 'ORG_UNIT_NAME_DUPLICATE',
+        message: `Ya existe «Calidad» bajo Dirección Excel (prefijo 971). ${HINT}`,
+        details: [{ field: 'name', message: first.body.data.id }],
+      });
+
+      const second = await create({ code: 'IT_OC_CAL_972', name: 'Calidad Dos', type: 'OFFICE', parentId: ids['dir'], codePrefix: '972' });
       expect(second.status, JSON.stringify(second.body)).toBe(201);
-      expectConforms('post', '/api/v1/organizational-units', 201, second.body);
-      expect(second.body.data.warnings).toEqual([`Ya existe «Calidad» bajo Dirección Excel (prefijo 971). ${SAME}`]);
       ids['u33'] = second.body.data.id as string;
+      await dataSource.query(`UPDATE organizational_unit SET name = 'CALIDÁD' WHERE id = $1`, [ids['u33']]);
       expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM organizational_unit WHERE parent_id = $1', [ids['dir']])).toBe(2);
 
       const recolored = await http().patch(`/api/v1/organizational-units/${ids['u33']}`).set(auth('admin')).send({ color: '#29B1B2' });
@@ -732,15 +739,16 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expect(planning.body.data.warnings).toEqual([]);
       const planningId = planning.body.data.id as string;
       const renamed = await http().patch(`/api/v1/organizational-units/${planningId}`).set(auth('admin')).send({ name: 'calidad' });
-      expect(renamed.status).toBe(200);
-      expectConforms('patch', '/api/v1/organizational-units/{id}', 200, renamed.body);
-      expect(renamed.body.data.warnings).toEqual([`Ya existe «Calidad» bajo Dirección Excel (prefijo 971). ${SAME}`]);
-      const back = await http().patch(`/api/v1/organizational-units/${planningId}`).set(auth('admin')).send({ name: 'Planeación' });
-      expect(back.body.data.warnings).toEqual([]);
+      expect(renamed.status).toBe(409);
+      expect(renamed.body.error).toMatchObject({ code: 'ORG_UNIT_NAME_DUPLICATE', details: [{ field: 'name' }] });
+      const kept = await http().patch(`/api/v1/organizational-units/${planningId}`).set(auth('admin')).send({ name: 'Planeación' });
+      expect(kept.status).toBe(200);
+      expect(kept.body.data.warnings).toEqual([]);
     });
 
-    it('Excel: fila nueva sin prefijo con el nombre de una hermana es error de fila; con prefijo nuevo, advertencia', async () => {
+    it('Excel: fila nueva con el nombre de una hermana (con o sin prefijo) o una unidad renombrada a ese nombre es error de fila', async () => {
       const file = await editExport(await exportFile(), (sheet) => {
+        rowByPrefix(sheet, '973').getCell(2).value = 'CALIDAD';
         sheet.getRow(sheet.rowCount + 1).values = ['', 'calidad', 'Oficina', 'IT_OC_DIR'];
         sheet.getRow(sheet.rowCount + 1).values = ['974', 'Calidad', 'Oficina', 'IT_OC_DIR'];
       });
@@ -749,19 +757,25 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expectConforms('post', '/api/v1/organizational-units/import/preview', 201, previewed.body);
       const data = previewed.body.data;
       expect(data.canConfirm).toBe(false);
-      expect(data.errors).toEqual([
+      const errors = data.errors as Array<{ rowNumber: number; column: string; message: string }>;
+      expect(data.errors).toHaveLength(3);
+      expect(data.errors).toContainEqual(
         expect.objectContaining({
           column: 'Nombre',
           message: expect.stringMatching(
             /^Ya existe «Calidad» bajo Dirección Excel \(prefijo 971, creada el \d{2}\/\d{2}\/\d{4}[^)]*\)\. Si es la misma, copie su Código interno \(IT_OC_CAL_971\) en la fila; si es otra, escriba su prefijo o un nombre distinto\./,
           ),
         }),
-      ]);
-      expect(data.warnings).toContainEqual(
-        expect.objectContaining({ column: 'Nombre', message: `Ya existe «Calidad» bajo Dirección Excel (prefijo 971). ${SAME}` }),
       );
-      expect(data.changes).toEqual([expect.objectContaining({ kind: 'CREATED', code: '974' })]);
+      const duplicates = errors.filter((error) => error.message.endsWith(HINT));
+      expect(duplicates).toHaveLength(2);
+      for (const error of duplicates) {
+        expect(error).toMatchObject({ sheet: 'Organigrama', column: 'Nombre' });
+        expect(error.message).toMatch(/^Ya existe «(Calidad|CALIDÁD)» bajo Dirección Excel \(prefijo 97[12]\)\. /);
+      }
+      expect(data.warnings.filter((warning: { message: string }) => warning.message.includes('¿Es otra unidad?'))).toEqual([]);
       expect((await confirm(data.previewId as string)).status).toBe(422);
+      expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM organizational_unit WHERE code_prefix = '974'`)).toBe(0);
     });
 
     it('Excel sin sello subido dos veces con una fila nueva sin prefijo: la segunda vez es error, no duplica', async () => {

@@ -1019,6 +1019,11 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'La dependencia padre está archivada. Reactívela primero o elija otro padre.',
   },
+  [ErrorCode.OrgUnitNameDuplicate]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Ya existe otra unidad activa con ese nombre bajo la misma dependencia: use un nombre que las distinga.',
+  },
   [ErrorCode.OrgUnitPrefixOutOfParent]: {
     httpStatus: 400,
     action: 'CANCEL',

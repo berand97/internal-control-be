@@ -8,7 +8,8 @@ import {
   resolveCenterUnit,
 } from '../../cost-centers/domain/org-chart-rules.js';
 import { parseUnitColor } from '../domain/unit-color.js';
-import { duplicateSiblingWarning, sameUnitName, unitPlace } from '../domain/unit-name.js';
+import { DUPLICATE_SIBLING_HINT, duplicateSiblingError, sameUnitName, unitPlace } from '../domain/unit-name.js';
+import { HEAD_CENTER_CODE_PATTERN, UNIT_CODE_MAX, UNIT_CODE_PATTERN } from '../domain/unit-code.js';
 import {
   isCollegiateBody,
   ORG_RELATION_TYPE_LABELS,
@@ -148,10 +149,7 @@ export interface OrgChartPlan {
 
 const NEW = 'new:';
 const PREFIX_PATTERN = /^[0-9]{1,4}$/;
-const UNIT_CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/;
-const UNIT_CODE_MAX = 20;
 const CENTER_CODE_PATTERN = /^[0-9]{1,10}$/;
-const HEAD_CODE_PATTERN = /^[0-9]{1,20}$/;
 const NAME_MAX = 200;
 const MAX_DEPTH = 64;
 
@@ -561,11 +559,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
     const head = liveCenterByCode.get(unit.headCenterText);
     if (!head || !isLiveCenter(head)) {
-      if (!HEAD_CODE_PATTERN.test(unit.headCenterText)) {
+      if (!HEAD_CENTER_CODE_PATTERN.test(unit.headCenterText)) {
         headIssues.push({
           error: true,
           row: unit.rowNumber,
-          message: `El centro propio debe ser un código de centro de costo (solo dígitos): ${unit.headCenterText}`,
+          message: `El centro propio debe ser un código de centro de costo de 1 a 20 dígitos: ${unit.headCenterText}`,
         });
         continue;
       }
@@ -727,34 +725,33 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     unitWarning(unit.rowNumber, UNIT_HEADERS.name, `${own} tiene el mismo nombre que su jefe ${head}; ¿es su Centro propio?`);
   }
 
-  const newSeen: FinalUnit[] = [];
+  const keepsPlace = (unit: FinalUnit): boolean => {
+    const before = unit.existingId ? snapshotUnits.get(unit.existingId) : undefined;
+    return Boolean(before && sameUnitName(before.name, unit.name) && before.parentId === unit.parentKey && before.isActive);
+  };
   for (const unit of units.values()) {
-    if (unit.rowNumber === null || unit.existingId !== null || !isLiveUnit(unit)) {
+    if (unit.rowNumber === null || !isLiveUnit(unit) || keepsPlace(unit)) {
       continue;
     }
     if (unit.parentText && !isRootText(unit.parentText) && unit.parentKey === null) {
       continue;
     }
-    const parentName = unit.parentKey ? (units.get(unit.parentKey)?.name ?? null) : null;
-    const sibling = [...units.values()].find(
+    const siblings = [...units.values()].filter(
       (other) =>
-        other.existingId !== null &&
-        other.key !== unit.key &&
-        isLiveUnit(other) &&
-        other.parentKey === unit.parentKey &&
-        sameUnitName(other.name, unit.name),
+        other.key !== unit.key && isLiveUnit(other) && other.parentKey === unit.parentKey && sameUnitName(other.name, unit.name),
     );
-    const earlier = newSeen.find((other) => other.parentKey === unit.parentKey && sameUnitName(other.name, unit.name));
-    newSeen.push(unit);
-    if (sibling) {
-      unitWarning(unit.rowNumber, UNIT_HEADERS.name, duplicateSiblingWarning(sibling, parentName));
-    } else if (earlier) {
-      unitWarning(
-        unit.rowNumber,
-        UNIT_HEADERS.name,
-        `La fila ${earlier.rowNumber ?? ''} también crea «${earlier.name}» ${unitPlace(parentName)}. ¿Es otra unidad? Si es así, use un nombre que las distinga.`,
-      );
+    const sibling = siblings.find(keepsPlace) ?? siblings[0];
+    if (!sibling) {
+      continue;
     }
+    const parentName = unit.parentKey ? (units.get(unit.parentKey)?.name ?? null) : null;
+    unitError(
+      unit.rowNumber,
+      UNIT_HEADERS.name,
+      keepsPlace(sibling) || sibling.rowNumber === null
+        ? duplicateSiblingError(sibling, parentName)
+        : `La fila ${sibling.rowNumber} también deja «${sibling.name}» ${unitPlace(parentName)}. ${DUPLICATE_SIBLING_HINT}`,
+    );
   }
 
   const cyclic = new Set<string>();

@@ -152,10 +152,13 @@ describe('Unidades archivadas: nunca son padre (HTTP real + PostgreSQL real)', (
     const reactivated = await patchUnit('vf', { isActive: true });
     expect(reactivated.status, JSON.stringify(reactivated.body)).toBe(200);
     expectConforms('patch', '/api/v1/organizational-units/{id}', 200, reactivated.body);
-    expect(reactivated.body.data).toMatchObject({ isActive: true, archivedChildUnits: 1, archivedCostCenters: 1 });
-    expect(reactivated.body.data.warnings).toContain(
-      'Se reactivó solo esta unidad; quedan sin reactivar 1 unidad hija y 1 centro de costo. Reactívelos por separado si los necesita.',
-    );
+    expect(reactivated.body.data).toMatchObject({
+      isActive: true,
+      archivedChildUnits: 1,
+      archivedCostCenters: 1,
+      warnings: [],
+      warningDetails: [],
+    });
     expect(await isActive('cont')).toBe(false);
     const [center] = (await dataSource.query('SELECT is_active FROM cost_center WHERE id = $1', [ids['9710']])) as Array<{
       is_active: boolean;

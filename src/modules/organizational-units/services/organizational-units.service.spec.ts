@@ -268,6 +268,13 @@ describe('OrganizationalUnitsService', () => {
     ).resolves.toMatchObject({
       codePrefix: '53',
       warnings: ['Servicios (53) depende de VF (4) pero conserva los códigos 53… de VB'],
+      warningDetails: [
+        {
+          field: 'codePrefix',
+          code: 'ORG_UNIT_PREFIX_OUTSIDE_PARENT',
+          message: 'Servicios (53) depende de VF (4) pero conserva los códigos 53… de VB',
+        },
+      ],
     });
     const contabilidad = unit('43', 'CONT', '1', 1);
     contabilidad.codePrefix = '43';
@@ -281,7 +288,23 @@ describe('OrganizationalUnitsService', () => {
     ).resolves.toMatchObject({ codePrefix: '43', parentId: '1' });
     await expect(
       service.create({ code: 'LOG', name: 'Logística', type: OrgUnitType.Department, parentId: '1', codePrefix: '4115' }, actor),
-    ).resolves.toMatchObject({ codePrefix: '4115', parentId: '1' });
+    ).resolves.toMatchObject({ codePrefix: '4115', parentId: '1', warnings: [], warningDetails: [] });
+  });
+
+  it('centro propio pendiente: advertencia con campo headCostCenterCode', async () => {
+    vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
+    await expect(
+      service.create({ code: 'VF', name: 'Vicerrectoría Financiera', type: OrgUnitType.Vicerectorate, headCostCenterCode: '1510' }, actor),
+    ).resolves.toMatchObject({
+      headCostCenterCode: '1510',
+      warningDetails: [
+        {
+          field: 'headCostCenterCode',
+          code: 'ORG_UNIT_HEAD_CENTER_PENDING',
+          message: 'Centro propio 1510 pendiente: el centro aún no existe; se amarrará solo cuando se cree',
+        },
+      ],
+    });
   });
 
   it('árbol: color propio y effectiveColor heredado del ancestro más cercano con color', async () => {
@@ -354,7 +377,7 @@ describe('OrganizationalUnitsService', () => {
     ).resolves.toMatchObject({ color: null });
   });
 
-  it('mismo nombre que una hermana activa (sin tildes ni mayúsculas): advertencia, nunca error', async () => {
+  it('crear con el nombre de una hermana activa (sin tildes ni mayúsculas): 409 ORG_UNIT_NAME_DUPLICATE', async () => {
     const rec = unit('1', 'REC', null, 0);
     rec.name = 'Rectoría';
     const calidad = unit('2', 'CAL', '1', 1);
@@ -368,50 +391,95 @@ describe('OrganizationalUnitsService', () => {
     vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
     await expect(
       service.create({ code: 'CAL2', name: '  CALIDÁD ', type: OrgUnitType.Department, parentId: '1' }, actor),
-    ).resolves.toMatchObject({
-      warnings: ['Ya existe «Calidad» bajo Rectoría (prefijo 102). ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
+    ).rejects.toMatchObject({
+      code: ErrorCode.OrgUnitNameDuplicate,
+      message:
+        'Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+      details: [{ field: 'name', message: '2' }],
     });
-    calidad.codePrefix = null;
+    expect(unitsRepository.insert).not.toHaveBeenCalled();
     await expect(
-      service.create({ code: 'CAL3', name: 'Calidad', type: OrgUnitType.Department, parentId: '1' }, actor),
-    ).resolves.toMatchObject({
-      warnings: ['Ya existe «Calidad» bajo Rectoría. ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
-    });
+      service.create({ code: 'CAL3', name: 'Calidad', type: OrgUnitType.Department, parentId: '1', isActive: false }, actor),
+    ).resolves.toMatchObject({ warnings: [] });
     await expect(service.create({ code: 'CAL4', name: 'Calidad', type: OrgUnitType.Department }, actor)).resolves.toMatchObject({
       warnings: [],
-    });
-    archivada.isActive = true;
-    await expect(service.create({ code: 'CAL5', name: 'Calidad', type: OrgUnitType.Department }, actor)).resolves.toMatchObject({
-      warnings: ['Ya existe «Calidad» en el primer nivel. ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
+      warningDetails: [],
     });
   });
 
-  it('editar: avisa el nombre repetido solo si cambia el nombre o el jefe', async () => {
-    const rec = unit('1', 'REC', null, 0);
-    rec.name = 'Rectoría';
-    rec.hierarchyPath = '/rec';
-    const calidad = unit('2', 'CAL', '1', 1);
+  it('en el primer nivel las unidades sin padre son hermanas entre sí', async () => {
+    const calidad = unit('3', 'CAL_ROOT', null, 0);
     calidad.name = 'Calidad';
-    calidad.codePrefix = '102';
-    const otra = unit('3', 'CAL2', '1', 1);
-    otra.name = 'Calidad';
-    otra.hierarchyPath = '/rec/cal2';
-    const vf = unit('4', 'VF', '1', 1);
-    vf.name = 'Vicerrectoría Financiera';
-    const gestion = unit('5', 'GES', '4', 2);
-    gestion.name = 'Calidad';
-    const byId = new Map([rec, calidad, otra, vf, gestion].map((item) => [item.id, item]));
-    vi.mocked(unitsRepository.findById).mockImplementation(async (id) => byId.get(id) ?? null);
-    vi.mocked(unitsRepository.findAll).mockResolvedValue([rec, calidad, otra, vf, gestion]);
-    await expect(service.update('3', { color: '#de9927' }, actor)).resolves.toMatchObject({ warnings: [] });
-    await expect(service.update('3', { name: 'CALIDAD' }, actor)).resolves.toMatchObject({ warnings: [] });
-    await expect(service.update('3', { parentId: '4' }, actor)).resolves.toMatchObject({
-      warnings: ['Ya existe «Calidad» bajo Vicerrectoría Financiera. ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
+    vi.mocked(unitsRepository.findAll).mockResolvedValue([calidad]);
+    vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
+    await expect(service.create({ code: 'CAL5', name: 'calidad', type: OrgUnitType.Department }, actor)).rejects.toMatchObject({
+      code: ErrorCode.OrgUnitNameDuplicate,
+      message:
+        'Ya existe «Calidad» en el primer nivel. Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+      details: [{ field: 'name', message: '3' }],
     });
-    await expect(service.update('4', { name: 'Calidad' }, actor)).resolves.toMatchObject({
-      warnings: ['Ya existe «Calidad» bajo Rectoría (prefijo 102). ¿Es otra unidad? Si es así, use un nombre que las distinga.'],
+  });
+
+  describe('editar con el nombre de una hermana activa', () => {
+    let calidad: OrganizationalUnit;
+    let otra: OrganizationalUnit;
+
+    beforeEach(() => {
+      const rec = unit('1', 'REC', null, 0);
+      rec.name = 'Rectoría';
+      rec.hierarchyPath = '/rec';
+      calidad = unit('2', 'CAL', '1', 1);
+      calidad.name = 'Calidad';
+      calidad.codePrefix = '102';
+      otra = unit('3', 'CAL2', '1', 1);
+      otra.name = 'Calidad';
+      otra.hierarchyPath = '/rec/cal2';
+      const vf = unit('4', 'VF', '1', 1);
+      vf.name = 'Vicerrectoría Financiera';
+      const gestion = unit('5', 'GES', '4', 2);
+      gestion.name = 'Calidad';
+      const byId = new Map([rec, calidad, otra, vf, gestion].map((item) => [item.id, item]));
+      vi.mocked(unitsRepository.findById).mockImplementation(async (id) => byId.get(id) ?? null);
+      vi.mocked(unitsRepository.findAll).mockResolvedValue([rec, calidad, otra, vf, gestion]);
     });
-    await expect(service.update('5', { name: 'Calidad y Mejora' }, actor)).resolves.toMatchObject({ warnings: [] });
+
+    it('editar otros campos de una unidad que ya estaba repetida sí se guarda', async () => {
+      await expect(service.update('3', { color: '#de9927', code: 'CAL_DOS' }, actor)).resolves.toMatchObject({ warnings: [] });
+      await expect(service.update('3', { name: 'CALIDAD' }, actor)).resolves.toMatchObject({ warnings: [] });
+      expect(unitsRepository.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('renombrar: 409 con el id de la hermana', async () => {
+      await expect(service.update('4', { name: 'Calidád' }, actor)).rejects.toMatchObject({
+        code: ErrorCode.OrgUnitNameDuplicate,
+        message:
+          'Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+        details: [{ field: 'name', message: '2' }],
+      });
+      expect(unitsRepository.update).not.toHaveBeenCalled();
+      await expect(service.update('5', { name: 'Calidad y Mejora' }, actor)).resolves.toMatchObject({ warnings: [] });
+    });
+
+    it('mover bajo otra dependencia donde ya hay una con ese nombre: 409', async () => {
+      await expect(service.update('3', { parentId: '4' }, actor)).rejects.toMatchObject({
+        code: ErrorCode.OrgUnitNameDuplicate,
+        message:
+          'Ya existe «Calidad» bajo Vicerrectoría Financiera. Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+        details: [{ field: 'name', message: '5' }],
+      });
+      expect(unitsRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('reactivar una unidad cuyo nombre ya usa una hermana activa: 409', async () => {
+      otra.isActive = false;
+      await expect(service.update('3', { isActive: true }, actor)).rejects.toMatchObject({
+        code: ErrorCode.OrgUnitNameDuplicate,
+        details: [{ field: 'name', message: '2' }],
+      });
+      expect(unitsRepository.update).not.toHaveBeenCalled();
+      calidad.isActive = false;
+      await expect(service.update('3', { isActive: true }, actor)).resolves.toMatchObject({ archivedChildUnits: 0 });
+    });
   });
 
   it('un consejo no lleva prefijo', async () => {
@@ -545,10 +613,7 @@ describe('OrganizationalUnitsService', () => {
       vi.mocked(unitsRepository.countArchivedChildren).mockResolvedValue(2);
       vi.mocked(unitsRepository.countArchivedCostCenters).mockResolvedValue(3);
       const saved = await service.update('1', { isActive: true }, actor);
-      expect(saved).toMatchObject({ isActive: true, archivedChildUnits: 2, archivedCostCenters: 3 });
-      expect(saved.warnings).toContain(
-        'Se reactivó solo esta unidad; quedan sin reactivar 2 unidades hijas y 3 centros de costo. Reactívelos por separado si los necesita.',
-      );
+      expect(saved).toMatchObject({ isActive: true, archivedChildUnits: 2, archivedCostCenters: 3, warnings: [], warningDetails: [] });
       expect(unitsRepository.update).toHaveBeenCalledTimes(1);
       expect(unitsRepository.update).toHaveBeenCalledWith('1', { isActive: true }, expect.anything());
     });

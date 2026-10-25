@@ -21,13 +21,15 @@ import { StructureReconcilerService } from '../../cost-centers/services/structur
 import { partialScope } from '../../cost-centers/domain/structure-reconcile.js';
 import { isCollegiateBody, ORG_UNIT_TYPE_LABELS, OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { effectiveUnitColor } from '../domain/unit-color.js';
-import { duplicateSiblingWarning, sameUnitName } from '../domain/unit-name.js';
+import { duplicateSiblingError, sameUnitName } from '../domain/unit-name.js';
 import { CreateOrganizationalUnitDto } from '../dto/create-organizational-unit.dto.js';
 import { QueryOrganizationalUnitsDto } from '../dto/query-organizational-units.dto.js';
 import { OrganizationalUnitTreeResponseDto } from '../dto/responses/organizational-unit-tree.response.dto.js';
 import {
   OrganizationalUnitResponseDto,
   OrganizationalUnitSaveResponseDto,
+  OrgUnitWarningCode,
+  type OrgUnitWarningDetailDto,
 } from '../dto/responses/organizational-unit.response.dto.js';
 import { UpdateOrganizationalUnitDto } from '../dto/update-organizational-unit.dto.js';
 import type { OrganizationalUnit } from '../entities/organizational-unit.entity.js';
@@ -49,8 +51,20 @@ const childPath = (parentPath: string | null, code: string): string =>
 interface HeadCenterChoice {
   readonly headCostCenterId: string | null;
   readonly headCostCenterCode: string | null;
-  readonly warning: string | null;
+  readonly warning: OrgUnitWarningDetailDto | null;
 }
+
+const savedResponse = (
+  unit: OrganizationalUnit,
+  details: ReadonlyArray<OrgUnitWarningDetailDto | null>,
+): OrganizationalUnitSaveResponseDto => {
+  const warningDetails = details.filter((item): item is OrgUnitWarningDetailDto => item !== null);
+  return {
+    ...OrganizationalUnitResponseDto.from(unit),
+    warnings: warningDetails.map((item) => item.message),
+    warningDetails,
+  };
+};
 
 const buildTree = (
   units: ReadonlyArray<OrganizationalUnit>,
@@ -140,9 +154,11 @@ export class OrganizationalUnitsService {
     if (dto.codePrefix && (dto.isActive ?? true)) {
       await this.assertPrefixFree(dto.codePrefix, null);
     }
-    const nameWarning = (dto.isActive ?? true) ? await this.duplicateNameWarning(dto.name, parent, null) : null;
+    if (dto.isActive ?? true) {
+      await this.assertNameFree(dto.name, parent, null);
+    }
     const head = await this.chooseHeadCenter(dto);
-    const warnings = [prefixWarning, nameWarning, head?.warning ?? null].filter((item): item is string => item !== null);
+    const warnings = [prefixWarning, head?.warning ?? null];
     try {
       const unit = await this.dataSource.transaction(async (manager) => {
         const created = await this.unitsRepository.insert(
@@ -181,7 +197,7 @@ export class OrganizationalUnitsService {
         );
         return created;
       });
-      return { ...OrganizationalUnitResponseDto.from(unit), warnings };
+      return savedResponse(unit, warnings);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ApiException(ErrorCode.OrgUnitCodeAlreadyExists);
@@ -238,13 +254,12 @@ export class OrganizationalUnitsService {
     }
     const previousParent = unit.parentId ? await this.unitsRepository.findById(unit.parentId) : null;
     const nextName = dto.name ?? unit.name;
-    const nameWarning =
-      (dto.isActive ?? unit.isActive) && (!sameUnitName(nextName, unit.name) || parentId !== unit.parentId)
-        ? await this.duplicateNameWarning(nextName, parent, unit.id)
-        : null;
+    if ((dto.isActive ?? unit.isActive) && (!sameUnitName(nextName, unit.name) || parentId !== unit.parentId || reactivating)) {
+      await this.assertNameFree(nextName, parent, unit.id);
+    }
 
     const head = await this.chooseHeadCenter(dto);
-    const warnings = [prefixWarning, nameWarning, head?.warning ?? null].filter((item): item is string => item !== null);
+    const warnings = [prefixWarning, head?.warning ?? null];
 
     const nextCode = dto.code ?? unit.code;
     const nextPath = childPath(parent?.hierarchyPath ?? null, nextCode);
@@ -310,14 +325,12 @@ export class OrganizationalUnitsService {
     }
     const updated = await this.requireUnit(id);
     if (!reactivating) {
-      return { ...OrganizationalUnitResponseDto.from(updated), warnings };
+      return savedResponse(updated, warnings);
     }
-    const notice = await this.reactivationNotice(updated);
     return {
-      ...OrganizationalUnitResponseDto.from(updated),
-      warnings: notice.warning ? [...warnings, notice.warning] : warnings,
-      archivedChildUnits: notice.archivedChildUnits,
-      archivedCostCenters: notice.archivedCostCenters,
+      ...savedResponse(updated, warnings),
+      archivedChildUnits: await this.unitsRepository.countArchivedChildren(updated.id),
+      archivedCostCenters: await this.unitsRepository.countArchivedCostCenters(updated.id),
     };
   }
 
@@ -405,7 +418,7 @@ export class OrganizationalUnitsService {
     unitName: string,
     parent: OrganizationalUnit | null,
     unitId: string | null,
-  ): Promise<string | null> {
+  ): Promise<OrgUnitWarningDetailDto | null> {
     let ancestor: OrganizationalUnit | null = null;
     const chain = new Set<string>();
     let current = parent;
@@ -428,19 +441,21 @@ export class OrganizationalUnitsService {
         { field: 'codePrefix', message: `${expected ?? ''}…` },
       ]);
     }
-    return check.level === 'WARNING' ? check.message : null;
+    return check.level === 'WARNING' && check.message
+      ? { field: 'codePrefix', code: OrgUnitWarningCode.PrefixOutsideParent, message: check.message }
+      : null;
   }
 
-  private async duplicateNameWarning(
-    name: string,
-    parent: OrganizationalUnit | null,
-    unitId: string | null,
-  ): Promise<string | null> {
+  private async assertNameFree(name: string, parent: OrganizationalUnit | null, unitId: string | null): Promise<void> {
     const parentId = parent?.id ?? null;
     const sibling = (await this.unitsRepository.findAll(true)).find(
       (other) => other.id !== unitId && other.isActive && other.parentId === parentId && sameUnitName(other.name, name),
     );
-    return sibling ? duplicateSiblingWarning(sibling, parent?.name ?? null) : null;
+    if (sibling) {
+      throw new ApiException(ErrorCode.OrgUnitNameDuplicate, duplicateSiblingError(sibling, parent?.name ?? null), [
+        { field: 'name', message: sibling.id },
+      ]);
+    }
   }
 
   async remove(id: string, actor: AuthenticatedUser): Promise<StructureRemovalResultDto> {
@@ -509,28 +524,6 @@ export class OrganizationalUnitsService {
     }
   }
 
-  private async reactivationNotice(unit: OrganizationalUnit): Promise<{
-    readonly archivedChildUnits: number;
-    readonly archivedCostCenters: number;
-    readonly warning: string | null;
-  }> {
-    const archivedChildUnits = await this.unitsRepository.countArchivedChildren(unit.id);
-    const archivedCostCenters = await this.unitsRepository.countArchivedCostCenters(unit.id);
-    const parts = [
-      ...(archivedChildUnits > 0
-        ? [archivedChildUnits === 1 ? '1 unidad hija' : `${archivedChildUnits} unidades hijas`]
-        : []),
-      ...(archivedCostCenters > 0
-        ? [archivedCostCenters === 1 ? '1 centro de costo' : `${archivedCostCenters} centros de costo`]
-        : []),
-    ];
-    const warning =
-      parts.length > 0
-        ? `Se reactivó solo esta unidad; ${archivedChildUnits + archivedCostCenters === 1 ? 'queda' : 'quedan'} sin reactivar ${parts.join(' y ')}. Reactívelos por separado si los necesita.`
-        : null;
-    return { archivedChildUnits, archivedCostCenters, warning };
-  }
-
   private async assertArchivable(unit: OrganizationalUnit): Promise<void> {
     const children = await this.unitsRepository.countActiveChildren(unit.id);
     if (children > 0) {
@@ -577,7 +570,11 @@ export class OrganizationalUnitsService {
         : {
             headCostCenterId: null,
             headCostCenterCode: dto.headCostCenterCode,
-            warning: pendingHeadCenterMessage(dto.headCostCenterCode, Boolean(center)),
+            warning: {
+              field: 'headCostCenterCode',
+              code: OrgUnitWarningCode.HeadCenterPending,
+              message: pendingHeadCenterMessage(dto.headCostCenterCode, Boolean(center)),
+            },
           };
     }
     if (dto.headCostCenterId === undefined) {

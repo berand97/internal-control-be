@@ -206,6 +206,7 @@ export enum ErrorCode {
   OrgUnitCodePrefixExists = 'ORG_UNIT_CODE_PREFIX_EXISTS',
   OrgUnitPrefixOutOfParent = 'ORG_UNIT_PREFIX_OUT_OF_PARENT',
   OrgUnitParentArchived = 'ORG_UNIT_PARENT_ARCHIVED',
+  OrgUnitNameDuplicate = 'ORG_UNIT_NAME_DUPLICATE',
   OrgChartImportHasErrors = 'ORG_CHART_IMPORT_HAS_ERRORS',
   OrgChartImportStale = 'ORG_CHART_IMPORT_STALE',
   OrgChartImportConflict = 'ORG_CHART_IMPORT_CONFLICT',

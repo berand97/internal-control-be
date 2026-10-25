@@ -104,13 +104,48 @@ export class OrganizationalUnitResponseDto {
   }
 }
 
+export const ORG_UNIT_WARNING_FIELDS = ['codePrefix', 'headCostCenterCode'] as const;
+export type OrgUnitWarningField = (typeof ORG_UNIT_WARNING_FIELDS)[number];
+
+export enum OrgUnitWarningCode {
+  PrefixOutsideParent = 'ORG_UNIT_PREFIX_OUTSIDE_PARENT',
+  HeadCenterPending = 'ORG_UNIT_HEAD_CENTER_PENDING',
+}
+
+export class OrgUnitWarningDetailDto {
+  @ApiProperty({
+    enum: ORG_UNIT_WARNING_FIELDS,
+    enumName: 'OrgUnitWarningField',
+    description: 'Campo del formulario al que se refiere la advertencia',
+  })
+  readonly field!: OrgUnitWarningField;
+
+  @ApiProperty({
+    enum: OrgUnitWarningCode,
+    enumName: 'OrgUnitWarningCode',
+    description:
+      'ORG_UNIT_PREFIX_OUTSIDE_PARENT: el prefijo no empieza por el de su jefe (codePrefix). ORG_UNIT_HEAD_CENTER_PENDING: el centro propio aún no existe o está archivado y queda pendiente (headCostCenterCode).',
+  })
+  readonly code!: OrgUnitWarningCode;
+
+  @ApiProperty({ description: 'El mismo texto que aparece en warnings' })
+  readonly message!: string;
+}
+
 export class OrganizationalUnitSaveResponseDto extends OrganizationalUnitResponseDto {
   @ApiProperty({
     type: [String],
-    description: 'Advertencias en español llano; vacío si no hay ninguna. No impiden guardar.',
+    description:
+      'Advertencias en español llano; vacío si no hay ninguna. No impiden guardar. Son los mismos textos de warningDetails, en el mismo orden.',
     example: ['Centro propio 1510 pendiente: el centro aún no existe; se amarrará solo cuando se cree'],
   })
   readonly warnings!: ReadonlyArray<string>;
+
+  @ApiProperty({
+    type: [OrgUnitWarningDetailDto],
+    description: 'Las mismas advertencias de warnings con el campo y un código estable, para mostrarlas junto al campo. Vacío si no hay ninguna.',
+  })
+  readonly warningDetails!: ReadonlyArray<OrgUnitWarningDetailDto>;
 
   @ApiPropertyOptional({
     type: 'integer',
