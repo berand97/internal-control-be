@@ -18,16 +18,24 @@ import {
   OrgUnitType,
 } from '../enums/org-unit-type.enum.js';
 import { normalizeUnitColorInput, UNIT_COLOR_MESSAGE, UNIT_COLOR_PATTERN } from '../domain/unit-color.js';
+import {
+  HEAD_CENTER_CODE_MESSAGE,
+  HEAD_CENTER_CODE_PATTERN,
+  UNIT_CODE_LENGTH_MESSAGE,
+  UNIT_CODE_MAX,
+  UNIT_CODE_MESSAGE,
+  UNIT_CODE_PATTERN,
+  UNIT_CODE_REQUIRED_MESSAGE,
+  UNIT_CODE_TEXT_MESSAGE,
+} from '../domain/unit-code.js';
 
 export class UpdateOrganizationalUnitDto {
-  @ApiPropertyOptional({ example: 'DCI', maxLength: 20 })
+  @ApiPropertyOptional({ example: 'DCI', maxLength: 20, pattern: '^[A-Z][A-Z0-9_]*$', description: UNIT_CODE_MESSAGE })
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(20)
-  @Matches(/^[A-Z][A-Z0-9_]*$/, {
-    message: 'El código debe ser SCREAMING_SNAKE_CASE',
-  })
+  @IsString({ message: UNIT_CODE_TEXT_MESSAGE })
+  @IsNotEmpty({ message: UNIT_CODE_REQUIRED_MESSAGE })
+  @MaxLength(UNIT_CODE_MAX, { message: UNIT_CODE_LENGTH_MESSAGE })
+  @Matches(UNIT_CODE_PATTERN, { message: UNIT_CODE_MESSAGE })
   readonly code?: string;
 
   @ApiPropertyOptional({
@@ -104,12 +112,13 @@ export class UpdateOrganizationalUnitDto {
     nullable: true,
     example: '1510',
     maxLength: 20,
+    pattern: '^[0-9]{1,20}$',
     description:
       'Centro propio por código. Si el centro no existe todavía (o está archivado) se guarda como pendiente con una advertencia y se amarra solo cuando se cree. Tiene prioridad sobre headCostCenterId. null lo quita.',
   })
   @Transform(({ value }: { value: unknown }) => (value === '' ? null : value))
   @IsOptional()
-  @Matches(/^[0-9]{1,20}$/, { message: 'El código del centro propio son solo dígitos' })
+  @Matches(HEAD_CENTER_CODE_PATTERN, { message: HEAD_CENTER_CODE_MESSAGE })
   readonly headCostCenterCode?: string | null;
 
   @ApiPropertyOptional({
