@@ -204,6 +204,28 @@ export class StructureCenterInArchivedUnitDto {
   readonly unitName!: string;
 }
 
+export class StructureDuplicateUnitDto {
+  @ApiProperty({ format: 'uuid' })
+  readonly id!: string;
+
+  @ApiProperty()
+  readonly code!: string;
+}
+
+export class StructureDuplicateSiblingNameDto {
+  @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Dependencia común; null en el primer nivel' })
+  readonly parentId!: string | null;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de la dependencia común; null en el primer nivel' })
+  readonly parentName!: string | null;
+
+  @ApiProperty({ description: 'Nombre repetido, tal como lo tiene la primera unidad del grupo (por código interno)' })
+  readonly name!: string;
+
+  @ApiProperty({ type: [StructureDuplicateUnitDto], description: 'Unidades activas con ese nombre, ordenadas por código interno (dos o más)' })
+  readonly units!: ReadonlyArray<StructureDuplicateUnitDto>;
+}
+
 export class StructurePendingDto {
   @ApiProperty({ type: [StructurePendingHeadDto], description: 'Unidades con centro propio pendiente' })
   readonly pendingHeadCenters!: ReadonlyArray<StructurePendingHeadDto>;
@@ -231,4 +253,11 @@ export class StructurePendingDto {
     description: 'Centros activos cuya unidad está archivada (datos anteriores a la regla): reactive la unidad, reubique o archive el centro',
   })
   readonly centersInArchivedUnit!: ReadonlyArray<StructureCenterInArchivedUnitDto>;
+
+  @ApiProperty({
+    type: [StructureDuplicateSiblingNameDto],
+    description:
+      'Unidades activas que se llaman igual (sin tildes ni mayúsculas) bajo la misma dependencia o en el primer nivel (datos anteriores a la regla): renombre o archive una. Vacío si no hay',
+  })
+  readonly duplicateSiblingNames!: ReadonlyArray<StructureDuplicateSiblingNameDto>;
 }

@@ -5,6 +5,7 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
+import { duplicateSiblingGroups } from '../../organizational-units/domain/unit-name.js';
 import { longestPrefix } from '../domain/code-prefix.js';
 import {
   ALL_SCOPE,
@@ -185,7 +186,23 @@ export class StructureReconcilerService {
          WHERE cc.is_active AND NOT u.is_active
          ORDER BY cc.external_code`,
       )) as StructureCenterInArchivedUnitDto[],
+      duplicateSiblingNames: await this.duplicateSiblingNames(manager),
     };
+  }
+
+  private async duplicateSiblingNames(manager: EntityManager): Promise<StructurePendingDto['duplicateSiblingNames']> {
+    const units = (await manager.query(
+      `SELECT u.id, u.code, u.name, u.parent_id AS "parentId", p.name AS "parentName"
+       FROM organizational_unit u
+       LEFT JOIN organizational_unit p ON p.id = u.parent_id
+       WHERE u.is_active`,
+    )) as Array<{ id: string; code: string; name: string; parentId: string | null; parentName: string | null }>;
+    return duplicateSiblingGroups(units).map((group) => ({
+      parentId: group[0]?.parentId ?? null,
+      parentName: group[0]?.parentName ?? null,
+      name: group[0]?.name ?? '',
+      units: group.map((unit) => ({ id: unit.id, code: unit.code })),
+    }));
   }
 
   async backToAuto(costCenterId: string, actorId: string, request: RequestMeta = NO_REQUEST): Promise<StructureReconcileResultDto> {
