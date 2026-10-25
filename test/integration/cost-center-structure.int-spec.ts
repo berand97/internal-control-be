@@ -10,6 +10,7 @@ import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
+import { bogotaDate } from '../../src/modules/cost-centers/export/cost-center-export.js';
 import { userDisplayNameSubquery } from '../../src/modules/persons/services/cost-center-heads.service.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
@@ -488,15 +489,16 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(roots.some((node) => node.id === ids['c7200'])).toBe(false);
     expect(root).toMatchObject({ acceptsAssets: false });
 
+    const today = bogotaDate();
     const exported = await http()
       .get('/api/v1/cost-centers/export')
-      .query({ at: '2026-10-18', includeArchived: 'true' })
+      .query({ at: today, includeArchived: 'true' })
       .set(auth('viewer'))
       .buffer(true)
       .parse(binaryParser);
     expect(exported.status).toBe(200);
     expect(exported.headers['content-type']).toContain('spreadsheetml');
-    expect(exported.headers['content-disposition']).toBe('attachment; filename="centros-de-costo-2026-10-18.xlsx"');
+    expect(exported.headers['content-disposition']).toBe(`attachment; filename="centros-de-costo-${today}.xlsx"`);
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(exported.body as ArrayBuffer);
     const sheet = workbook.getWorksheet('Centros de costo');
