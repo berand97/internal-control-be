@@ -25,7 +25,9 @@ import { duplicateSiblingError, sameUnitName } from '../domain/unit-name.js';
 import { CreateOrganizationalUnitDto } from '../dto/create-organizational-unit.dto.js';
 import { QueryOrganizationalUnitsDto } from '../dto/query-organizational-units.dto.js';
 import { OrganizationalUnitTreeResponseDto } from '../dto/responses/organizational-unit-tree.response.dto.js';
+import type { UnitCostCenterDto } from '../dto/responses/unit-cost-center.response.dto.js';
 import {
+  type OrganizationalUnitDetailResponseDto,
   OrganizationalUnitResponseDto,
   OrganizationalUnitSaveResponseDto,
   OrgUnitWarningCode,
@@ -114,8 +116,23 @@ export class OrganizationalUnitsService {
     return suggestUnitPrefix(ancestor?.codePrefix ?? null, taken);
   }
 
-  async getById(id: string): Promise<OrganizationalUnitResponseDto> {
-    return OrganizationalUnitResponseDto.from(await this.requireUnit(id));
+  async getById(id: string): Promise<OrganizationalUnitDetailResponseDto> {
+    const unit = await this.requireUnit(id);
+    const parent = unit.parentId ? await this.unitsRepository.findById(unit.parentId) : null;
+    return { ...OrganizationalUnitResponseDto.from(unit), parentName: parent?.name ?? null };
+  }
+
+  async costCenters(id: string, at: Date = new Date()): Promise<ReadonlyArray<UnitCostCenterDto>> {
+    const unit = await this.requireUnit(id);
+    const rows = await this.unitsRepository.findActiveCostCentersOfUnit(unit.id, at);
+    return rows.map((row) => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      acceptsAssets: row.acceptsAssets,
+      currentHead: row.headPersonId ? { personId: row.headPersonId, fullName: row.headFullName ?? '' } : null,
+      assetCount: row.assetCount,
+    }));
   }
 
   async descendants(

@@ -104,6 +104,11 @@ export class OrganizationalUnitResponseDto {
   }
 }
 
+export class OrganizationalUnitDetailResponseDto extends OrganizationalUnitResponseDto {
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de la unidad de la que depende; null si es raíz' })
+  readonly parentName!: string | null;
+}
+
 export const ORG_UNIT_WARNING_FIELDS = ['codePrefix', 'headCostCenterCode'] as const;
 export type OrgUnitWarningField = (typeof ORG_UNIT_WARNING_FIELDS)[number];
 

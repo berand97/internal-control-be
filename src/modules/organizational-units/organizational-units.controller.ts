@@ -66,9 +66,11 @@ import {
 import { UnitPrefixSuggestionDto } from './dto/responses/unit-prefix-suggestion.response.dto.js';
 import { OrganizationalUnitTreeResponseDto } from './dto/responses/organizational-unit-tree.response.dto.js';
 import {
+  OrganizationalUnitDetailResponseDto,
   OrganizationalUnitResponseDto,
   OrganizationalUnitSaveResponseDto,
 } from './dto/responses/organizational-unit.response.dto.js';
+import { UnitCostCenterDto, UnitCostCenterHeadDto } from './dto/responses/unit-cost-center.response.dto.js';
 import { UpdateOrganizationalUnitDto } from './dto/update-organizational-unit.dto.js';
 import { OrganizationalUnitsService } from './services/organizational-units.service.js';
 
@@ -78,8 +80,11 @@ import { OrganizationalUnitsService } from './services/organizational-units.serv
   ApiSuccessEnvelope,
   ApiErrorEnvelope,
   OrganizationalUnitResponseDto,
+  OrganizationalUnitDetailResponseDto,
   OrganizationalUnitSaveResponseDto,
   OrganizationalUnitTreeResponseDto,
+  UnitCostCenterDto,
+  UnitCostCenterHeadDto,
   OrgChartPreviewDto,
   OrgChartConfirmDto,
   StructureRemovalResultDto,
@@ -257,6 +262,21 @@ export class OrganizationalUnitsController {
     return this.historyService.list('ORG_UNIT', id);
   }
 
+  @Get(':id/cost-centers')
+  @RequirePermission('org_unit:read:global')
+  @ApiOperation({
+    summary: 'Centros de costo de una unidad',
+    description:
+      'Solo los centros activos que pertenecen directamente a la unidad (no los de sus unidades hijas), ordenados por código. currentHead es el jefe vigente hoy (solo id de la persona y nombre completo) o null; assetCount cuenta los activos cuyo centro actual es ese, sin los dados de baja. Una unidad archivada también responde con sus centros activos. 404 si la unidad no existe.',
+  })
+  @ApiOkResponse({ schema: envelopedArraySchema(UnitCostCenterDto) })
+  @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
+  costCenters(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ReadonlyArray<UnitCostCenterDto>> {
+    return this.organizationalUnitsService.costCenters(id);
+  }
+
   @Get(':id/descendants')
   @RequirePermission('org_unit:read:global')
   @ApiOperation({
@@ -301,15 +321,15 @@ export class OrganizationalUnitsController {
 
   @Get(':id')
   @RequirePermission('org_unit:read:global')
-  @ApiOperation({ summary: 'Detalle de unidad organizacional' })
+  @ApiOperation({ summary: 'Detalle de unidad organizacional', description: 'Trae además parentName (nombre de la unidad de la que depende, null si es raíz).' })
   @ApiResponse({
     status: 200,
-    schema: envelopedSchema(OrganizationalUnitResponseDto),
+    schema: envelopedSchema(OrganizationalUnitDetailResponseDto),
   })
   @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
   getById(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
-  ): Promise<OrganizationalUnitResponseDto> {
+  ): Promise<OrganizationalUnitDetailResponseDto> {
     return this.organizationalUnitsService.getById(id);
   }
 

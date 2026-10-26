@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, type EntityManager, Repository } from 'typeorm';
+import { currentHeadCondition } from '../../cost-centers/domain/cost-center-head-rule.js';
 import { CostCenter } from '../../cost-centers/entities/cost-center.entity.js';
 import { OrganizationalUnit } from '../entities/organizational-unit.entity.js';
 import type {
   CreateOrgUnitRecord,
   OrganizationalUnitsRepository,
+  UnitCostCenterRecord,
   UpdateOrgUnitRecord,
 } from './organizational-units.repository.interface.js';
 
@@ -69,6 +71,32 @@ export class TypeOrmOrganizationalUnitsRepository
     return this.costCenters.count({
       where: { organizationalUnitId: orgUnitId, isActive: false },
     });
+  }
+
+  async findActiveCostCentersOfUnit(orgUnitId: string, at: Date): Promise<ReadonlyArray<UnitCostCenterRecord>> {
+    const rows = (await this.dataSource.query(
+      `SELECT cc.id, cc.external_code AS code, cc.name, cc.accepts_assets AS "acceptsAssets",
+              head.person_id AS "headPersonId", trim(p.first_name || ' ' || p.last_name) AS "headFullName",
+              coalesce(a.count, 0)::int AS "assetCount"
+       FROM cost_center cc
+       LEFT JOIN LATERAL (
+         SELECT h.person_id FROM cost_center_head h
+         WHERE ${currentHeadCondition('cc.id', '$2::timestamptz')}
+         ORDER BY h.valid_from DESC, h.id
+         LIMIT 1
+       ) head ON TRUE
+       LEFT JOIN person p ON p.id = head.person_id
+       LEFT JOIN (
+         SELECT current_cost_center_id, count(*) AS count FROM asset
+         WHERE operational_status <> 'WRITTEN_OFF'
+           AND current_cost_center_id IN (SELECT id FROM cost_center WHERE organizational_unit_id = $1 AND is_active)
+         GROUP BY current_cost_center_id
+       ) a ON a.current_cost_center_id = cc.id
+       WHERE cc.organizational_unit_id = $1 AND cc.is_active
+       ORDER BY cc.external_code, cc.id`,
+      [orgUnitId, at],
+    )) as UnitCostCenterRecord[];
+    return rows;
   }
 
   costCenterExists(id: string): Promise<boolean> {

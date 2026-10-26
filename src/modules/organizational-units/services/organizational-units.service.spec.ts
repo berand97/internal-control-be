@@ -57,6 +57,7 @@ describe('OrganizationalUnitsService', () => {
       countActiveCostCenters: vi.fn().mockResolvedValue(0),
       countArchivedChildren: vi.fn().mockResolvedValue(0),
       countArchivedCostCenters: vi.fn().mockResolvedValue(0),
+      findActiveCostCentersOfUnit: vi.fn().mockResolvedValue([]),
       costCenterExists: vi.fn().mockResolvedValue(true),
       costCenterCode: vi.fn().mockResolvedValue('4010'),
       findCostCenterByCode: vi.fn().mockResolvedValue(null),
@@ -628,6 +629,37 @@ describe('OrganizationalUnitsService', () => {
       const edited = await service.update('1', { name: 'Rectoría' }, actor);
       expect(edited).not.toHaveProperty('archivedChildUnits');
       expect(edited).not.toHaveProperty('archivedCostCenters');
+    });
+  });
+
+  describe('detalle', () => {
+    it('trae el nombre del padre (null si es raíz)', async () => {
+      const rec = unit('1', 'REC', null, 0);
+      rec.name = 'Rectoría';
+      const vf = unit('2', 'VF', '1', 1);
+      vi.mocked(unitsRepository.findById).mockImplementation(async (id) => ({ '1': rec, '2': vf })[id] ?? null);
+      expect(await service.getById('2')).toMatchObject({ id: '2', parentId: '1', parentName: 'Rectoría' });
+      expect(await service.getById('1')).toMatchObject({ id: '1', parentId: null, parentName: null });
+    });
+
+    it('centros de la unidad: jefe vigente o null, conteo de activos y la fecha con la que se pide', async () => {
+      vi.mocked(unitsRepository.findById).mockResolvedValue(unit('2', 'VF', null, 0));
+      vi.mocked(unitsRepository.findActiveCostCentersOfUnit).mockResolvedValue([
+        { id: 'c1', code: '4010', name: 'Vicerrectoría', acceptsAssets: true, headPersonId: 'p1', headFullName: 'Ana Pérez', assetCount: 3 },
+        { id: 'c2', code: '4011', name: 'Caja', acceptsAssets: false, headPersonId: null, headFullName: null, assetCount: 0 },
+      ]);
+      const at = new Date('2030-01-01T00:00:00Z');
+      expect(await service.costCenters('2', at)).toEqual([
+        { id: 'c1', code: '4010', name: 'Vicerrectoría', acceptsAssets: true, currentHead: { personId: 'p1', fullName: 'Ana Pérez' }, assetCount: 3 },
+        { id: 'c2', code: '4011', name: 'Caja', acceptsAssets: false, currentHead: null, assetCount: 0 },
+      ]);
+      expect(unitsRepository.findActiveCostCentersOfUnit).toHaveBeenCalledWith('2', at);
+    });
+
+    it('centros de una unidad que no existe: RESOURCE_NOT_FOUND sin consultar centros', async () => {
+      vi.mocked(unitsRepository.findById).mockResolvedValue(null);
+      await expect(service.costCenters('x')).rejects.toMatchObject({ code: ErrorCode.ResourceNotFound });
+      expect(unitsRepository.findActiveCostCentersOfUnit).not.toHaveBeenCalled();
     });
   });
 });

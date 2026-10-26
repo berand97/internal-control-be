@@ -32,6 +32,16 @@ export interface UpdateOrgUnitRecord {
   readonly color?: string | null;
 }
 
+export interface UnitCostCenterRecord {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+  readonly acceptsAssets: boolean;
+  readonly headPersonId: string | null;
+  readonly headFullName: string | null;
+  readonly assetCount: number;
+}
+
 export interface OrganizationalUnitsRepository {
   findAll(isActive?: boolean): Promise<ReadonlyArray<OrganizationalUnit>>;
   findById(id: string): Promise<OrganizationalUnit | null>;
@@ -43,6 +53,7 @@ export interface OrganizationalUnitsRepository {
   countActiveCostCenters(orgUnitId: string): Promise<number>;
   countArchivedChildren(parentId: string): Promise<number>;
   countArchivedCostCenters(orgUnitId: string): Promise<number>;
+  findActiveCostCentersOfUnit(orgUnitId: string, at: Date): Promise<ReadonlyArray<UnitCostCenterRecord>>;
   costCenterExists(id: string): Promise<boolean>;
   costCenterCode(id: string): Promise<string | null>;
   findCostCenterByCode(code: string): Promise<{ readonly id: string; readonly isActive: boolean } | null>;
