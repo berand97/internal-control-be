@@ -154,6 +154,14 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
       [`PRV_${tag}`],
     );
     director = await actor('Directora', 'INTERNAL_CONTROL_DIRECTOR', null, []);
+    ids['unitB'] = (
+      await http()
+        .post('/api/v1/organizational-units')
+        .set(auth(director))
+        .send({ code: `IT_PRV_UB_${tag}`, name: `Unidad B Privacidad ${tag}`, type: 'DEPARTMENT' })
+        .expect(201)
+    ).body.data.id;
+    await dataSource.query('UPDATE cost_center SET organizational_unit_id = $1 WHERE id = $2', [ids['unitB'], centerB]);
     headA = await actor('JefeA', 'DEPARTMENT_HEAD', centerA, [centerA]);
     headB = await actor('JefeB', 'DEPARTMENT_HEAD', centerB, [centerB]);
     headC = await actor('JefeC', 'DEPARTMENT_HEAD', centerC, [centerC]);
@@ -313,6 +321,7 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
       { name: 'POST /assets/:id/change-status', method: 'post', path: `/assets/${a}/change-status`, body: { status: 'IN_STORAGE', reason: 'x' } },
       { name: 'POST /assets/:id/reassign-location', method: 'post', path: `/assets/${a}/reassign-location`, body: {} },
       { name: 'GET /assets/:id/depreciation-history', method: 'get', path: `/assets/${a}/depreciation-history` },
+      { name: 'GET /organizational-units/:id/cost-centers (unidad de B)', method: 'get', path: `/organizational-units/${ids['unitB']}/cost-centers`, list: true },
       { name: 'GET /depreciation', method: 'get', path: '/depreciation', list: true },
       { name: 'GET /depreciation/summary', method: 'get', path: '/depreciation/summary', list: true },
       { name: 'GET /movements', method: 'get', path: `/movements?assetId=${a}`, list: true },
