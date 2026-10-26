@@ -11,9 +11,12 @@ export interface HeadlessCostCenter {
   readonly name: string;
 }
 
+export const currentHeadCondition = (centerColumn: string, atParameter: string, alias = 'h'): string =>
+  `${alias}.cost_center_id = ${centerColumn}
+     AND ${alias}.valid_from <= ${atParameter} AND (${alias}.valid_until IS NULL OR ${alias}.valid_until > ${atParameter})`;
+
 export const currentHeadExistsSql = (centerColumn: string, atParameter: string): string =>
-  `EXISTS (SELECT 1 FROM cost_center_head h WHERE h.cost_center_id = ${centerColumn}
-     AND h.valid_from <= ${atParameter} AND (h.valid_until IS NULL OR h.valid_until > ${atParameter}))`;
+  `EXISTS (SELECT 1 FROM cost_center_head h WHERE ${currentHeadCondition(centerColumn, atParameter)})`;
 
 export const costCenterWithoutHeadMessage = (code: string, name: string): string =>
   `El centro ${code} · ${name} no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.`;
