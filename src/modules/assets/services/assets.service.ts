@@ -309,7 +309,7 @@ export class AssetsService {
             await this.dynamicFieldsService.effectiveFields(nextCategoryId),
             {
               ...(categoryChanged ? await this.currentCustomValues(asset.id) : {}),
-              ...(dto.customValues ?? {}),
+              ...dto.customValues,
             },
           )
         : null;
