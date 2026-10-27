@@ -5,10 +5,18 @@ import ts from 'typescript';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const EXCEPTIONS_FILE = 'tools/ui-copy-exceptions.json';
-const MODE = { blocking: true };
+const ZONES = {
+  user: { blocking: true, skippedRules: new Set() },
+  swagger: { blocking: false, skippedRules: new Set(['tú imperative']) },
+};
 
-const CATALOG_FILE = 'src/common/constants/error-catalog.ts';
+const SOURCE_DIR = 'src';
 const MODULES_DIR = 'src/modules';
+const WHOLE_FILE_SCOPE = /^src\/(common\/constants\/error-catalog\.ts$|modules\/staging\/)/;
+const SWAGGER_DECORATOR = /^Api[A-Z]\w*$/;
+const MACHINE_CALL = /(^|\.)(logger\.\w+|query|setHeader|header|createQueryBuilder|where|andWhere|select|addSelect)$/;
+const SQL_TEXT = /^(SELECT|INSERT|UPDATE|DELETE|WITH)\b/;
+const SWAGGER_PROPERTIES = new Set(['description', 'summary', 'example']);
 const SPEC_FILE = /\.spec\.ts$/;
 const SOURCE_FILE = /\.ts$/;
 const EXCEPTION_CLASS = /Exception$/;
@@ -115,43 +123,75 @@ const literalText = (node) => {
   return undefined;
 };
 
-const isCopyRoot = (node, source, wholeFile) => {
-  if (wholeFile) return ts.isSourceFile(node);
-  if (ts.isNewExpression(node) && EXCEPTION_CLASS.test(node.expression.getText(source))) return true;
-  return (
-    ts.isPropertyAssignment(node) &&
-    !ts.isComputedPropertyName(node.name) &&
-    node.name.getText(source).replace(/^['"]|['"]$/g, '') === MESSAGE_PROPERTY
-  );
-};
+const propertyName = (node, source) =>
+  ts.isPropertyAssignment(node) && !ts.isComputedPropertyName(node.name)
+    ? node.name.getText(source).replace(/^['"]|['"]$/g, '')
+    : undefined;
+
+const isSwaggerDecorator = (node, source) =>
+  ts.isDecorator(node) &&
+  ts.isCallExpression(node.expression) &&
+  SWAGGER_DECORATOR.test(node.expression.expression.getText(source));
+
+const isMachineCall = (node, source) =>
+  ts.isCallExpression(node) && MACHINE_CALL.test(node.expression.getText(source));
+
+const isCopyRoot = (node, source) =>
+  (ts.isNewExpression(node) && EXCEPTION_CLASS.test(node.expression.getText(source))) ||
+  propertyName(node, source) === MESSAGE_PROPERTY;
 
 const snippetsOf = (file) => {
   const text = readFileSync(join(ROOT, file), 'utf8');
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const wholeFile = file === CATALOG_FILE;
-  const snippets = [];
+  const wholeFile = WHOLE_FILE_SCOPE.test(file);
+  const inModules = file.startsWith(`${MODULES_DIR}/`);
+  const found = new Map();
+  let zone = wholeFile ? 'user' : 'swagger';
   const collect = (node) => {
     if (ts.isImportDeclaration(node) || ts.isLiteralTypeNode(node)) return;
     const literal = literalText(node);
     if (literal !== undefined) {
       const normalized = normalize(literal);
-      if (/\p{L}/u.test(normalized)) {
-        const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
-        snippets.push({ file, line: line + 1, text: normalized });
+      const start = node.getStart(source);
+      if (/\p{L}/u.test(normalized) && !SQL_TEXT.test(normalized)) {
+        const { line } = source.getLineAndCharacterOfPosition(start);
+        found.set(start, { file, line: line + 1, text: normalized, zone });
       }
       return;
     }
     node.forEachChild(collect);
   };
-  const find = (node) => {
-    if (isCopyRoot(node, source, wholeFile)) {
-      node.forEachChild(collect);
+  const findSwaggerTexts = (node) => {
+    if (SWAGGER_PROPERTIES.has(propertyName(node, source))) {
+      collect(node.initializer);
       return;
+    }
+    node.forEachChild(findSwaggerTexts);
+  };
+  const find = (node) => {
+    if (isSwaggerDecorator(node, source)) {
+      zone = 'swagger';
+      findSwaggerTexts(node);
+      return;
+    }
+    if (wholeFile && (ts.isDecorator(node) || isMachineCall(node, source))) {
+      return;
+    }
+    if (wholeFile || (inModules && isCopyRoot(node, source))) {
+      zone = 'user';
+      if (literalText(node) !== undefined) {
+        collect(node);
+        return;
+      }
+      if (!wholeFile) {
+        node.forEachChild(collect);
+        return;
+      }
     }
     node.forEachChild(find);
   };
   find(source);
-  return snippets;
+  return [...found.values()];
 };
 
 const loadExceptions = () => {
@@ -160,35 +200,36 @@ const loadExceptions = () => {
 };
 
 const exceptions = loadExceptions();
-const files = [
-  CATALOG_FILE,
-  ...walkFiles(join(ROOT, MODULES_DIR))
-    .map((path) => relative(ROOT, path).split(sep).join('/'))
-    .filter((file) => SOURCE_FILE.test(file) && !SPEC_FILE.test(file))
-    .sort(),
-];
+const files = walkFiles(join(ROOT, SOURCE_DIR))
+  .map((path) => relative(ROOT, path).split(sep).join('/'))
+  .filter((file) => SOURCE_FILE.test(file) && !SPEC_FILE.test(file))
+  .sort();
 
 const infractions = files
   .flatMap(snippetsOf)
   .flatMap((snippet) =>
-    RULES.filter((rule) => rule.pattern.test(snippet.text)).map((rule) => ({ ...snippet, rule: rule.name })),
+    RULES.filter((rule) => !ZONES[snippet.zone].skippedRules.has(rule.name) && rule.pattern.test(snippet.text)).map(
+      (rule) => ({ ...snippet, rule: rule.name }),
+    ),
   )
   .filter(
     (infraction) =>
       !exceptions.some((exception) => exception.file === infraction.file && exception.text === infraction.text),
   );
 
-for (const { file, line, rule, text } of infractions) {
-  console.log(`${file}:${line} [${rule}] ${text.length > 140 ? `${text.slice(0, 140)}...` : text}`);
+for (const { file, line, rule, text, zone } of infractions) {
+  console.log(`${file}:${line} [${zone}] [${rule}] ${text.length > 140 ? `${text.slice(0, 140)}...` : text}`);
 }
 
-const scanned = `${files.length} files scanned, ${exceptions.length} exceptions`;
-if (infractions.length === 0) {
-  console.log(`UI copy ok: ${scanned}.`);
-} else if (MODE.blocking) {
-  console.error(`UI copy check failed: ${infractions.length} infractions (${scanned}).`);
+console.log(`${files.length} files scanned, ${exceptions.length} exceptions.`);
+let failed = false;
+for (const [zone, { blocking }] of Object.entries(ZONES)) {
+  const count = infractions.filter((infraction) => infraction.zone === zone).length;
+  const mode = blocking ? 'blocking' : 'report only';
+  console.log(`UI copy ${zone}: ${count} infractions (${mode}).`);
+  failed ||= blocking && count > 0;
+}
+if (failed) {
   console.error('Fix the text following .claude/rules/ui-copy.md or add an entry to tools/ui-copy-exceptions.json.');
   process.exit(1);
-} else {
-  console.log(`UI copy report: ${infractions.length} infractions (${scanned}). Report mode, not blocking.`);
 }
