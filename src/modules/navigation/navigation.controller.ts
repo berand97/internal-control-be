@@ -78,7 +78,7 @@ export class NavigationController {
   @Post()
   @RequirePermission('navigation:manage:global')
   @ApiOperation({ summary: 'Crear ítem de menú' })
-  @ApiResponse({ status: 400, schema: errorEnvelopeSchema(), description: 'Validación (p. ej. icon fuera del catálogo)' })
+  @ApiResponse({ status: 400, schema: errorEnvelopeSchema(), description: 'Validación (por ejemplo icon fuera del catálogo)' })
   @ApiResponse({
     status: 201,
     schema: envelopedSchema(NavigationAdminItemResponseDto),
@@ -92,7 +92,7 @@ export class NavigationController {
   @Patch(':id')
   @RequirePermission('navigation:manage:global')
   @ApiOperation({ summary: 'Actualizar ítem de menú' })
-  @ApiResponse({ status: 400, schema: errorEnvelopeSchema(), description: 'Validación (p. ej. icon fuera del catálogo)' })
+  @ApiResponse({ status: 400, schema: errorEnvelopeSchema(), description: 'Validación (por ejemplo icon fuera del catálogo)' })
   @ApiResponse({
     status: 200,
     schema: envelopedSchema(NavigationAdminItemResponseDto),

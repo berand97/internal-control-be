@@ -157,7 +157,7 @@ export class CostCentersController {
   @ApiOperation({
     summary: 'Exportar los centros de costo a Excel a una fecha',
     description:
-      'Hoja «Centros de costo», una fila por centro en el orden del árbol (cada padre antes de sus hijos): Código, Nombre, Tipo (Con movimiento / Agrupador), Centro padre (código · nombre), Dependencia, Jefe(s) vigente(s) (separados por «; »), Activos (directos) y Estado (Activo / Archivado). Ubicación y jefes a la fecha pedida (?at=AAAA-MM-DD, por defecto hoy); los activos son los que hoy apuntan directamente al centro. Por defecto solo centros activos; ?includeArchived=true incluye los archivados. El nombre del archivo lleva la fecha pedida.',
+      'Hoja "Centros de costo", una fila por centro en el orden del árbol (cada padre antes de sus hijos): Código, Nombre, Tipo (Con movimiento / Agrupador), Centro padre (código · nombre), Dependencia, Jefe(s) vigente(s) (separados por "; "), Activos (directos) y Estado (Activo / Archivado). Ubicación y jefes a la fecha pedida (?at=AAAA-MM-DD, por defecto hoy); los activos son los que hoy apuntan directamente al centro. Por defecto solo centros activos; ?includeArchived=true incluye los archivados. El nombre del archivo lleva la fecha pedida.',
   })
   async export(@Query() query: CostCenterTreeQueryDto, @Res() response: Response): Promise<void> {
     const at = resolveAt(query.at);
@@ -262,7 +262,7 @@ export class CostCentersController {
   @ApiOperation({
     summary: 'Crear centro de costo',
     description:
-      'Si la unidad tiene prefijo de código, el código debe empezar por él: 400 COST_CENTER_CODE_OUT_OF_UNIT_RANGE con el rango («Los centros de … van de 4000 a 4999»). Abre el historial de ubicación del centro.',
+      'Si la unidad tiene prefijo de código, el código debe empezar por él: 400 COST_CENTER_CODE_OUT_OF_UNIT_RANGE con el rango ("Los centros de … van de 4000 a 4999"). Abre el historial de ubicación del centro.',
   })
   @ApiResponse({ status: 201, schema: envelopedSchema(CostCenterResponseDto) })
   create(
@@ -298,7 +298,7 @@ export class CostCentersController {
   @ApiOperation({
     summary: 'Eliminar (o archivar) un centro de costo',
     description:
-      'Se rechaza si tiene activos no dados de baja: 406 COST_CENTER_HAS_ACTIVE_ASSETS («Tiene activos asignados. No se puede desactivar.») con details[{field:"activeAssets", message:"<n>"}]; con centros hijos activos: 406 HAS_DEPENDENT_ENTITIES con details[{field:"activeChildren", message:"<n>"}]. Sin historia se borra de verdad (deleted=true: también sus jefaturas, roles con alcance en el centro e historial de ubicación; las personas quedan sin centro). Con historia (activos dados de baja, movimientos, traslados, préstamos, tomas/actas, documentos, solicitudes…) se archiva: archived=true y reason.',
+      'Se rechaza si tiene activos no dados de baja: 406 COST_CENTER_HAS_ACTIVE_ASSETS ("Tiene activos asignados. No se puede desactivar.") con details[{field:"activeAssets", message:"<n>"}]; con centros hijos activos: 406 HAS_DEPENDENT_ENTITIES con details[{field:"activeChildren", message:"<n>"}]. Sin historia se borra de verdad (deleted=true: también sus jefaturas, roles con alcance en el centro e historial de ubicación; las personas quedan sin centro). Con historia (activos dados de baja, movimientos, traslados, préstamos, tomas/actas, documentos, solicitudes…) se archiva: archived=true y reason.',
   })
   @ApiResponse({ status: 200, schema: envelopedSchema(StructureRemovalResultDto) })
   @ApiResponse({ status: 406, schema: errorEnvelopeSchema() })

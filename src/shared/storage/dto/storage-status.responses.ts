@@ -76,7 +76,7 @@ export class StorageStatusDto {
     type: 'string',
     nullable: true,
     description:
-      'Client ID de Google enmascarado (dos primeros y dos últimos caracteres, p. ej. "cl****le")',
+      'Client ID de Google enmascarado (dos primeros y dos últimos caracteres, por ejemplo "cl****le")',
   })
   readonly googleClientId!: string | null;
 

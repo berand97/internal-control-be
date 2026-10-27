@@ -514,7 +514,7 @@ export class InventoriesController {
     description:
       'MISPLACED actualiza la ubicación; MISSING marca LOST; FOUND y MISPLACED con condición distinta actualizan la ' +
       'condición. NOT_VERIFIED y los sobrantes (incluidos los de activos LOST) no cambian nada. En la misma ' +
-      'transacción encola el acta OCI-21-37; si el formato no está listo (o falla armarla, p. ej. quien aprueba firma ' +
+      'transacción encola el acta OCI-21-37; si el formato no está listo (o falla armarla, por ejemplo quien aprueba firma ' +
       'AUDITA y no tiene el permiso act:sign_control:global), la conciliación sigue y el acta queda NOT_ENQUEUED con ' +
       'su motivo (act en la respuesta).',
   })

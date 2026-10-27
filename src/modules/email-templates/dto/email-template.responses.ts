@@ -243,7 +243,7 @@ export class EmailTestSendResponseDto {
   @ApiProperty({ enum: MAIL_OUTBOX_STATUSES, enumName: 'MailOutboxStatus' })
   readonly status!: MailOutboxStatus;
 
-  @ApiProperty({ type: 'string', nullable: true, description: 'Motivo si quedó FAILED (p. ej. SMTP sin configurar)' })
+  @ApiProperty({ type: 'string', nullable: true, description: 'Motivo si quedó FAILED (por ejemplo SMTP sin configurar)' })
   readonly lastError!: string | null;
 
   @ApiProperty({ type: 'string', nullable: true, description: 'Correo del usuario actual; null si no tiene' })

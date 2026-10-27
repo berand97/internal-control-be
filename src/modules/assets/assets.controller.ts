@@ -221,7 +221,7 @@ export class AssetsController {
   @RequirePermission('asset:create:global')
   @ApiOperation({
     summary: 'Registrar activo',
-    description: 'El centro de costo debe estar activo, admitir activos y tener jefe vigente: si no tiene, 409 COST_CENTER_WITHOUT_HEAD («El centro 4310 · Contabilidad no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.», details[field=costCenterId]).',
+    description: 'El centro de costo debe estar activo, admitir activos y tener jefe vigente: si no tiene, 409 COST_CENTER_WITHOUT_HEAD ("El centro 4310 · Contabilidad no tiene jefe vigente. Asígnele un jefe antes de agregarle activos.", details[field=costCenterId]).',
   })
   @ApiResponse({ status: 201, schema: envelopedSchema(AssetResponseDto) })
   create(

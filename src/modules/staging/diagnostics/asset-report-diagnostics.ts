@@ -146,7 +146,7 @@ export const diagnoseAssetSheet = (
       header('assetId'),
       'ROW_WITHOUT_ASSET_ID',
       null,
-      `Fila con datos pero sin ${header('assetId')}; no se cuenta como activo (columnas: ${Object.keys(row.cells).join(', ')})`,
+      `Fila con datos pero sin ${header('assetId')}. No cuenta como activo (columnas: ${Object.keys(row.cells).join(', ')}).`,
     );
   }
   const nonEmpty = letters.assetId
@@ -312,7 +312,7 @@ export const diagnoseAssetSheet = (
       value: total,
       base: null,
       detail: letters.assetId
-        ? `Filas con ${header('assetId')}; todas las métricas siguientes se calculan sobre estas`
+        ? `Filas con ${header('assetId')}. Las demás métricas se calculan sobre estas.`
         : `Sin columna ${header('assetId')}: se toman todas las filas con datos`,
     },
     {
@@ -417,7 +417,7 @@ export const diagnoseAssetSheet = (
         value: writeOffDates.length,
         base: writtenOff.length,
         detail: writeOffDates.length > 0
-          ? `${percent(writeOffDates.length, writtenOff.length)}; de ${writeOffDates[0]} a ${writeOffDates.at(-1)}`
+          ? `${percent(writeOffDates.length, writtenOff.length)}, de ${writeOffDates[0]} a ${writeOffDates.at(-1)}`
           : percent(0, writtenOff.length),
       },
       { key: 'write_off_date_missing', label: 'Bajas sin fecha de baja', value: writeOffMissing, base: writtenOff.length, detail: percent(writeOffMissing, writtenOff.length) },

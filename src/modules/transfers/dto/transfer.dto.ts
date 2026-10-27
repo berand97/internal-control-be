@@ -26,20 +26,20 @@ export class TransferItemInputDto {
   @IsUUID('all')
   readonly assetId!: string;
 
-  @ApiProperty({ format: 'uuid', description: 'Motivo del catálogo (GET /transfers/reasons, activo). Columna «Razón» del acta' })
+  @ApiProperty({ format: 'uuid', description: 'Motivo del catálogo (GET /transfers/reasons, activo). Columna "Razón" del acta' })
   @IsUUID('all')
   readonly reasonId!: string;
 
   @ApiPropertyOptional({
     enum: PHYSICAL_CONDITIONS,
     enumName: 'PhysicalCondition',
-    description: 'Estado del activo en el acta (columna «Estado»). Por defecto, la condición física registrada del activo',
+    description: 'Estado del activo en el acta (columna "Estado"). Por defecto, la condición física registrada del activo',
   })
   @IsOptional()
   @IsIn(PHYSICAL_CONDITIONS)
   readonly physicalCondition?: PhysicalCondition;
 
-  @ApiPropertyOptional({ description: 'Verificación física del activo (columna «Físico»: Sí/No)', default: false })
+  @ApiPropertyOptional({ description: 'Verificación física del activo (columna "Físico": Sí/No)', default: false })
   @IsOptional()
   @IsBoolean()
   readonly physicallyVerified?: boolean;
@@ -51,7 +51,7 @@ export class TransferItemInputDto {
   readonly verificationNote?: string;
 
   @ApiPropertyOptional({
-    description: 'El activo tiene su numeración (placa) — columna «Numeración» del acta institucional: Sí/No',
+    description: 'El activo tiene su numeración (placa). Columna "Numeración" del acta institucional: Sí/No',
     default: false,
   })
   @IsOptional()
