@@ -619,7 +619,7 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
         'SELECT revocation_reason FROM user_role WHERE id = $1',
         [firstId],
       );
-      expect(reason).toContain('cascada');
+      expect(reason).toBe('Se revocó porque se revocó el rol original de la delegación.');
     });
   });
 

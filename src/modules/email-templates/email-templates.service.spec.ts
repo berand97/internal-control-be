@@ -104,7 +104,7 @@ describe('EmailTemplatesService', () => {
     ];
     const expected = {
       code: ErrorCode.EmailTemplateInvalidDesign,
-      details: [{ field: 'blocks[2].assetId', message: 'La imagen no existe; súbala de nuevo' }],
+      details: [{ field: 'blocks[2].assetId', message: 'La imagen ya no existe. Súbala de nuevo.' }],
     };
     await expect(service.create('SYSTEM_ALERT', '{{alert.title}}', blocks, 'actor')).rejects.toMatchObject(expected);
     await expect(service.preview('SYSTEM_ALERT', '{{alert.title}}', blocks)).rejects.toMatchObject(expected);

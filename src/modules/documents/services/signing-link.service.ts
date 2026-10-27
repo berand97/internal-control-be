@@ -169,7 +169,7 @@ export class SigningLinkService {
       await manager.query('SELECT id FROM document WHERE id = $1 FOR UPDATE', [documentId]);
       const current = await this.currentTurn(manager, documentId);
       if (!current || current.sign_order !== order) {
-        throw new ApiException(ErrorCode.SignatureLinkNotApplicable, `El turno ${order} no es el turno actual del acta`);
+        throw new ApiException(ErrorCode.SignatureLinkNotApplicable, 'No es el turno actual del acta.');
       }
       const candidate = await this.candidate(manager, current.signer_person_id);
       const channel = channelFor(current.role, candidate);
@@ -179,7 +179,7 @@ export class SigningLinkService {
       if (channel.channel !== 'EMAIL_LINK' || !candidate?.email) {
         throw new ApiException(
           ErrorCode.SignatureLinkNotApplicable,
-          'La persona de este turno firma con su sesión en el sistema, no por enlace',
+          'Esta persona firma con su usuario en el sistema, no por enlace.',
         );
       }
       await this.invalidate(manager, documentId, 'RESENT', order);
@@ -290,7 +290,7 @@ export class SigningLinkService {
         error = 'El correo saliente (SMTP) no está configurado o está deshabilitado';
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message.slice(0, 500) : 'Falló el envío del correo';
+      error = cause instanceof Error ? cause.message.slice(0, 500) : 'No se pudo enviar el correo.';
     }
     await this.dataSource.query(
       `UPDATE signature_signing_link SET delivery_status = $3::text,

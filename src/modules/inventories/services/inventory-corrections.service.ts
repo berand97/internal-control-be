@@ -67,7 +67,7 @@ export class InventoryCorrectionsService {
     await this.actorPolicy.assertCanOperate(inventory, actor);
     const item = await this.requireItem(inventory.id, itemId);
     if (item.verificationResult === VerificationResult.Surplus) {
-      throw new ApiException(ErrorCode.InvalidState, 'Un sobrante no se corrige: se anula y, si aplica, se registra de nuevo');
+      throw new ApiException(ErrorCode.InvalidState, 'Un sobrante no se corrige. Anúlelo y regístrelo de nuevo si hace falta.');
     }
     const before = snapshot(item);
     await this.applyResult(item, dto, actor);
@@ -79,7 +79,7 @@ export class InventoryCorrectionsService {
     const after = snapshot(item);
     const comparable = (value: ReturnType<typeof snapshot>) => JSON.stringify({ ...value, verifiedAt: null, verifiedBy: null });
     if (comparable(before) === comparable(after)) {
-      throw invalid('result', 'La corrección no cambia nada del ítem');
+      throw invalid('result', 'La corrección no cambia nada.');
     }
     const correction = await this.persist(inventory, item, 'CORRECT', before, after, dto.reason, actor);
     return { item: toItemView(item, await this.valuation.viewContext(inventory, [item])), correction: await this.withName(correction) };
@@ -90,7 +90,7 @@ export class InventoryCorrectionsService {
     await this.actorPolicy.assertCanOperate(inventory, actor);
     const item = await this.requireItem(inventory.id, itemId);
     if (item.verificationResult !== VerificationResult.Surplus || item.voidedAt) {
-      throw new ApiException(ErrorCode.InvalidState, 'Solo se anula un sobrante vigente');
+      throw new ApiException(ErrorCode.InvalidState, 'Este sobrante ya está anulado.');
     }
     const before = snapshot(item);
     item.voidedAt = new Date();
@@ -105,7 +105,7 @@ export class InventoryCorrectionsService {
     await this.actorPolicy.assertCanOperate(inventory, actor);
     const item = await this.requireItem(inventory.id, itemId);
     if (item.voidedAt || item.verificationResult === VerificationResult.Pending) {
-      throw new ApiException(ErrorCode.InvalidState, 'Solo se categoriza un ítem ya verificado y vigente');
+      throw new ApiException(ErrorCode.InvalidState, 'Solo se puede clasificar un activo ya verificado.');
     }
     const from = item.findingCategoryCode ?? null;
     const code = dto.code ? (await this.catalogs.requireAssignableCategory(dto.code)).code : null;
@@ -143,11 +143,11 @@ export class InventoryCorrectionsService {
     const result = dto.result;
     const wantsCause = dto.causeId !== undefined || dto.otherCause !== undefined;
     if (result !== VerificationResult.Missing && wantsCause) {
-      throw invalid('causeId', 'La causa solo aplica a MISSING');
+      throw invalid('causeId', 'La causa solo se indica en un faltante.');
     }
     if (result === VerificationResult.Pending) {
       if (dto.actualCondition !== undefined || dto.actualLocationId !== undefined) {
-        throw invalid('result', 'PENDING no lleva condición ni ubicación observadas');
+        throw invalid('result', 'Un activo pendiente no lleva condición ni ubicación.');
       }
       Object.assign(item, {
         verificationResult: VerificationResult.Pending,
@@ -162,7 +162,7 @@ export class InventoryCorrectionsService {
     }
     if (result === VerificationResult.Missing) {
       if (dto.actualCondition !== undefined || dto.actualLocationId !== undefined) {
-        throw invalid('result', 'MISSING no lleva condición ni ubicación observadas');
+        throw invalid('result', 'Un faltante no lleva condición ni ubicación.');
       }
       const cause = await this.catalogs.resolveMissingCause(dto.causeId, dto.otherCause);
       Object.assign(item, {
@@ -176,7 +176,7 @@ export class InventoryCorrectionsService {
       return;
     }
     if (!dto.actualCondition) {
-      throw invalid('actualCondition', 'FOUND y MISPLACED exigen la condición observada');
+      throw invalid('actualCondition', 'Indique la condición del activo.');
     }
     if (dto.actualLocationId) {
       const location = await this.locations.findOne({ where: { id: dto.actualLocationId, isActive: true } });
@@ -189,11 +189,11 @@ export class InventoryCorrectionsService {
     if (result === VerificationResult.Found) {
       actualLocationId = dto.actualLocationId ?? expected;
       if (expected !== null && actualLocationId !== expected) {
-        throw invalid('actualLocationId', 'Con otra ubicación el resultado es MISPLACED');
+        throw invalid('actualLocationId', 'Si está en otra ubicación, márquelo como en otra ubicación.');
       }
     } else {
       if (!dto.actualLocationId || expected === null || dto.actualLocationId === expected) {
-        throw invalid('actualLocationId', 'MISPLACED exige una ubicación observada distinta de la esperada');
+        throw invalid('actualLocationId', 'Indique una ubicación distinta de la esperada.');
       }
       actualLocationId = dto.actualLocationId;
     }
@@ -284,7 +284,7 @@ export class InventoryCorrectionsService {
   private async requireInProgress(id: string): Promise<PhysicalInventory> {
     const inventory = await this.requireInventory(id);
     if (inventory.status !== InventoryStatus.InProgress) {
-      throw new ApiException(ErrorCode.InvalidState, 'La toma no está en curso');
+      throw new ApiException(ErrorCode.InvalidState, 'La toma no está en curso.');
     }
     return inventory;
   }

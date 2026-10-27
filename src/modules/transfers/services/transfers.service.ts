@@ -116,11 +116,7 @@ export class TransfersService {
     if (await this.permissions.userHasPermission(actor.id, TRANSFER_READ_GLOBAL)) {
       return { kind: 'GLOBAL' };
     }
-    return requireReadableScope(
-      await this.permissions.costCenterScope(actor.id, ASSET_READ_GLOBAL, ASSET_READ_SCOPED),
-      `${TRANSFER_READ_GLOBAL}, ${ASSET_READ_GLOBAL}`,
-      ASSET_READ_SCOPED,
-    );
+    return requireReadableScope(await this.permissions.costCenterScope(actor.id, ASSET_READ_GLOBAL, ASSET_READ_SCOPED));
   }
 
   async list(query: QueryTransfersDto, actor: AuthenticatedUser): Promise<TransferListResponseDto> {
@@ -167,7 +163,7 @@ export class TransfersService {
       [id],
     )) as Array<{ source_cost_center_id: string; target_cost_center_id: string }>;
     if (!row || (scope && !scope.includes(row.source_cost_center_id) && !scope.includes(row.target_cost_center_id))) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el traslado');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el traslado.');
     }
     return this.detail(id);
   }
@@ -205,7 +201,7 @@ export class TransfersService {
       }
     >;
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el traslado');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el traslado.');
     }
     const items = (await manager.query(
       `SELECT i.id, i.line_number AS "lineNumber",
@@ -276,13 +272,13 @@ export class TransfersService {
   ): Promise<string> {
     const justification = input.justification.trim();
     if (justification.length < 3) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'La justificación es obligatoria', [
+      throw new ApiException(ErrorCode.ValidationFailed, 'Escriba la justificación.', [
         { field: 'justification', message: 'Mínimo 3 caracteres' },
       ]);
     }
     await this.assertPersons(manager, [
-      ['requesterPersonId', input.requesterPersonId, 'No existe la persona que entrega'],
-      ['ownerPersonId', input.ownerPersonId, 'No existe la persona que recibe'],
+      ['requesterPersonId', input.requesterPersonId, 'No encontramos a la persona que entrega.'],
+      ['ownerPersonId', input.ownerPersonId, 'No encontramos a la persona que recibe.'],
     ]);
     const source = await this.assertItems(manager, input.items, null);
     await this.assertTarget(manager, source, input.targetCostCenterId);
@@ -307,7 +303,7 @@ export class TransfersService {
     await this.dataSource.transaction(async (manager) => {
       const transfer = await this.lock(manager, id);
       if (transfer.status !== 'DRAFT') {
-        throw new ApiException(ErrorCode.TransferInvalidStateTransition, `El traslado está ${transfer.status}: sus activos solo se editan en DRAFT`);
+        throw new ApiException(ErrorCode.TransferInvalidStateTransition, 'Los activos solo se editan mientras el traslado es borrador.');
       }
       const before = (await manager.query('SELECT asset_id FROM asset_transfer_item WHERE transfer_id = $1 ORDER BY line_number', [
         id,
@@ -363,7 +359,7 @@ export class TransfersService {
     {
       const transfer = await this.lock(manager, id);
       if (!canTransferTransition(transfer.status, 'PENDING_SIGNATURES')) {
-        throw new ApiException(ErrorCode.TransferInvalidStateTransition, `El traslado está ${transfer.status}: su acta ya se generó o está cerrado`);
+        throw new ApiException(ErrorCode.TransferInvalidStateTransition, 'El acta del traslado ya se generó o el traslado está cerrado.');
       }
       const items = (await manager.query(
         `SELECT i.asset_id AS "assetId", i.reason_id AS "reasonId", i.physical_condition AS "physicalCondition",
@@ -373,7 +369,7 @@ export class TransfersService {
         [id],
       )) as TransferItemInputDto[];
       if (items.length === 0) {
-        throw new ApiException(ErrorCode.ValidationFailed, 'El traslado no tiene activos');
+        throw new ApiException(ErrorCode.ValidationFailed, 'El traslado no tiene activos.');
       }
       await this.assertItems(manager, items, transfer.source_cost_center_id, id);
       await assertCostCenterHasHead(manager, transfer.target_cost_center_id, new Date(), 'targetCostCenterId');
@@ -483,17 +479,17 @@ export class TransfersService {
   async cancel(id: string, reason: string, actor: AuthenticatedUser): Promise<TransferDetailDto> {
     const motive = reason.trim();
     if (motive.length < 5) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'El motivo de la cancelación es obligatorio', [
+      throw new ApiException(ErrorCode.ValidationFailed, 'Escriba el motivo de la cancelación.', [
         { field: 'reason', message: 'Mínimo 5 caracteres' },
       ]);
     }
     await this.dataSource.transaction(async (manager) => {
       const [exists] = (await manager.query('SELECT status FROM asset_transfer WHERE id = $1', [id])) as Array<{ status: TransferStatus }>;
       if (!exists) {
-        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el traslado');
+        throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el traslado.');
       }
       if (!canTransferTransition(exists.status, 'CANCELLED')) {
-        throw new ApiException(ErrorCode.TransferInvalidStateTransition, `El traslado está ${exists.status} y no se puede cancelar`);
+        throw new ApiException(ErrorCode.TransferInvalidStateTransition, 'El traslado no se puede cancelar en su estado actual.');
       }
       const [signed] = (await manager.query(
         `SELECT count(*)::int AS total FROM document_signature s JOIN document d ON d.id = s.document_id
@@ -503,7 +499,7 @@ export class TransfersService {
       if ((signed?.total ?? 0) > 0) {
         throw new ApiException(
           ErrorCode.TransferInvalidStateTransition,
-          'El acta del traslado ya tiene firmas: no se cancela. Un firmante puede rechazarla',
+          'El acta del traslado ya tiene firmas y no se puede cancelar. Un firmante puede rechazarla.',
         );
       }
       const voided = await this.engine.voidForEntity(manager, {
@@ -514,7 +510,7 @@ export class TransfersService {
       });
       const transfer = await this.lock(manager, id);
       if (!canTransferTransition(transfer.status, 'CANCELLED')) {
-        throw new ApiException(ErrorCode.TransferInvalidStateTransition, `El traslado está ${transfer.status} y no se puede cancelar`);
+        throw new ApiException(ErrorCode.TransferInvalidStateTransition, 'El traslado no se puede cancelar en su estado actual.');
       }
       await manager.query(
         `UPDATE asset_transfer SET status = 'CANCELLED', cancelled_at = NOW(), cancelled_by = $2, cancel_reason = $3 WHERE id = $1`,
@@ -541,7 +537,7 @@ export class TransfersService {
         )) as TransferRow[])
       : [];
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el traslado');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el traslado.');
     }
     return row;
   }
@@ -553,7 +549,7 @@ export class TransfersService {
     const ids = new Set(found.map((item) => item.id));
     const missing: ErrorDetail[] = persons.filter(([, id]) => !ids.has(id)).map(([field, , message]) => ({ field, message }));
     if (missing.length > 0) {
-      throw new ApiException(ErrorCode.ResourceNotFound, missing.map((item) => item.message).join('; '), missing);
+      throw new ApiException(ErrorCode.ResourceNotFound, missing.map((item) => item.message).join(' '), missing);
     }
   }
 
@@ -566,8 +562,8 @@ export class TransfersService {
       [targetId],
     )) as unknown[];
     if (!target) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'El centro de costo de destino no existe, está inactivo o no admite activos', [
-        { field: 'targetCostCenterId', message: 'Centro de destino no disponible' },
+      throw new ApiException(ErrorCode.ResourceNotFound, 'El centro de costo de destino no existe, está archivado o no recibe activos.', [
+        { field: 'targetCostCenterId', message: 'Elija otro centro de destino.' },
       ]);
     }
     await assertCostCenterHasHead(manager, targetId, new Date(), 'targetCostCenterId');
@@ -585,8 +581,8 @@ export class TransfersService {
     if (repeated.length > 0) {
       throw new ApiException(
         ErrorCode.ValidationFailed,
-        'Un activo aparece más de una vez en el traslado',
-        [...new Set(repeated)].map((id) => ({ field: 'items', message: `Activo repetido: ${id}` })),
+        'Un activo aparece más de una vez en el traslado.',
+        [...new Set(repeated)].map(() => ({ field: 'items', message: 'Este activo está repetido.' })),
       );
     }
     await manager.query('SELECT id FROM asset WHERE id = ANY($1) ORDER BY id FOR UPDATE', [assetIds]);
@@ -607,8 +603,8 @@ export class TransfersService {
     if (missing.length > 0) {
       throw new ApiException(
         ErrorCode.ResourceNotFound,
-        'Hay activos inexistentes en el traslado',
-        missing.map((id) => ({ field: 'items', message: `No existe el activo ${id}` })),
+        'Algunos activos del traslado no existen.',
+        missing.map(() => ({ field: 'items', message: 'Este activo no existe.' })),
       );
     }
     const ordered = assetIds.map((id) => byId.get(id) as AssetGuardRow);
@@ -618,7 +614,7 @@ export class TransfersService {
       throw new ApiException(
         ErrorCode.TransferMixedSourceCostCenter,
         undefined,
-        elsewhere.map((row) => ({ field: 'items', message: `El activo ${row.code} está en otro centro de costo` })),
+        elsewhere.map((row) => ({ field: 'items', message: `El activo ${row.code} está en otro centro de costo.` })),
       );
     }
     const fail = (code: ErrorCode, list: AssetGuardRow[], message: (row: AssetGuardRow) => string) => {
@@ -647,7 +643,7 @@ export class TransfersService {
       throw new ApiException(
         ErrorCode.TransferReasonUnavailable,
         undefined,
-        unavailable.map((id) => ({ field: 'items.reasonId', message: `Motivo inexistente o inactivo: ${id}` })),
+        unavailable.map(() => ({ field: 'items.reasonId', message: 'Ese motivo no existe o está inactivo.' })),
       );
     }
     return source;

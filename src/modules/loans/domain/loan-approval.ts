@@ -12,10 +12,10 @@ export const LOAN_READ_GLOBAL = 'loan:read:global';
 export const LOAN_READ_SCOPED = 'loan:read:org_unit';
 
 export const requireReadScope = (scope: CostCenterScope): ReadableCostCenterScope =>
-  requireReadableScope(scope, LOAN_READ_GLOBAL, LOAN_READ_SCOPED);
+  requireReadableScope(scope);
 
 export const requireApprovalScope = (scope: CostCenterScope): ReadableCostCenterScope =>
-  requireReadableScope(scope, LOAN_APPROVE_GLOBAL, LOAN_APPROVE_SCOPED);
+  requireReadableScope(scope);
 
 export const assertLoanInApprovalScope = (scope: ReadableCostCenterScope, sourceCostCenterId: string): void => {
   if (scope.kind === 'COST_CENTERS' && !scope.costCenterIds.includes(sourceCostCenterId)) {

@@ -4,7 +4,7 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { Asset } from '../../assets/entities/asset.entity.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
-import { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
+import { OPERATIONAL_STATUS_PHRASE, OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import { AssetStateService } from '../../assets/services/asset-state.service.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import {
@@ -91,10 +91,10 @@ export class TransferActLifecycle implements OnModuleInit {
           },
           guard: (current: Asset) => {
             if (current.operationalStatus === OperationalStatus.WrittenOff || current.operationalStatus === OperationalStatus.OnLoan) {
-              throw new ApiException(ErrorCode.AssetCannotBeModified, `El activo ${current.internalCode} está ${current.operationalStatus}`);
+              throw new ApiException(ErrorCode.AssetCannotBeModified, `El activo ${current.internalCode} está ${OPERATIONAL_STATUS_PHRASE[current.operationalStatus]}.`);
             }
             if (current.costCenterId !== transfer.source_cost_center_id) {
-              throw new ApiException(ErrorCode.TransferMixedSourceCostCenter, `El activo ${current.internalCode} ya no está en el centro de origen`);
+              throw new ApiException(ErrorCode.TransferMixedSourceCostCenter, `El activo ${current.internalCode} ya no está en el centro de origen.`);
             }
           },
           alsoWrite: async (tx) => {

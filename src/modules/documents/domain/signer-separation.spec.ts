@@ -36,7 +36,7 @@ describe('resolveSigners (separación de funciones)', () => {
       expect.objectContaining({
         code: 'DOCUMENT_SIGNER_DUPLICATED',
         details: expect.arrayContaining([
-          { field: 'signers.RECIBE', message: expect.stringContaining('Control Interno (CONTROL_INTERNO)') },
+          { field: 'signers.RECIBE', message: expect.stringMatching(/^La misma persona firma como .*Control Interno\.$/u) },
           { field: 'signerSubstitutions.CONTROL_INTERNO', message: expect.stringContaining('sustituto') },
         ]),
       }),
@@ -47,8 +47,8 @@ describe('resolveSigners (separación de funciones)', () => {
     expect(() => resolveSigners(TRANSFER, payload({ ENTREGA: B, CONTROL_INTERNO: C, CONTABILIDAD: D }, B))).toThrow(
       expect.objectContaining({
         code: 'DOCUMENT_SIGNER_DUPLICATED',
-        message: expect.stringContaining('no hay sustituto posible'),
-        details: expect.arrayContaining([{ field: 'signers', message: expect.stringContaining('cambie el firmante') }]),
+        message: expect.stringContaining('Cambie el firmante.'),
+        details: expect.arrayContaining([{ field: 'signers', message: expect.stringContaining('Cambie el firmante de') }]),
       }),
     );
   });
@@ -87,7 +87,7 @@ describe('resolveSigners (separación de funciones)', () => {
         TRANSFER,
         payload({ ENTREGA: B, CONTROL_INTERNO: B, CONTABILIDAD: D }, B, { CONTROL_INTERNO: { personId: S, reason: 'Motivo' } }),
       ),
-    ).toThrow(expect.objectContaining({ code: 'DOCUMENT_SIGNER_DUPLICATED', message: expect.stringContaining('Entrega (ENTREGA), Recibe (RECIBE)') }));
+    ).toThrow(expect.objectContaining({ code: 'DOCUMENT_SIGNER_DUPLICATED', message: expect.stringContaining('Entrega, Recibe') }));
   });
 
   it('designado de Control Interno sin el permiso: se acepta un sustituto aunque no ocupe otra firma', () => {

@@ -9,7 +9,7 @@ export class MfaProofDto {
     maxLength: 6,
   })
   @IsOptional()
-  @Matches(/^\d{6}$/, { message: 'code debe ser un TOTP de 6 dígitos' })
+  @Matches(/^\d{6}$/, { message: 'Escriba el código de 6 dígitos.' })
   readonly code?: string;
 
   @ApiPropertyOptional({

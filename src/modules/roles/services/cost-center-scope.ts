@@ -66,15 +66,11 @@ const REASON_ERRORS: Record<CostCenterScopeReason, ErrorCode> = {
   ORG_UNIT_UNRESOLVED: ErrorCode.ScopeOrgUnitUnresolved,
 };
 
-export const requireReadableScope = (
-  scope: CostCenterScope,
-  globalCode: string,
-  scopedCode: string,
-): ReadableCostCenterScope => {
+export const requireReadableScope = (scope: CostCenterScope): ReadableCostCenterScope => {
   if (scope.kind === 'DENIED') {
     throw new ApiException(
       ErrorCode.InsufficientPermissions,
-      `Requiere permiso ${globalCode} o ${scopedCode}`,
+      'No tiene permiso para hacer esto.',
     );
   }
   if (scope.kind === 'EMPTY') {

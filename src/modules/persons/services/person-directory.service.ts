@@ -24,7 +24,7 @@ export class PersonDirectoryService {
     }
     throw new ApiException(
       ErrorCode.InsufficientPermissions,
-      `Requiere alguno de los permisos ${PERSON_DIRECTORY_PERMISSIONS.join(', ')}`,
+      'No tiene permiso para hacer esto.',
     );
   }
 

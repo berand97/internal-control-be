@@ -68,7 +68,7 @@ export class S3StorageAdapter implements StoragePort {
       try {
         hostname = new URL(endpoint).hostname;
       } catch {
-        throw new ApiException(ErrorCode.StorageNotConfigured, 'El endpoint S3 no es una URL válida');
+        throw new ApiException(ErrorCode.StorageNotConfigured, 'La dirección del servidor S3 no es válida.');
       }
       assertHostShapeAllowed(hostname, outbound);
     }

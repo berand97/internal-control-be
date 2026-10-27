@@ -76,13 +76,13 @@ export class AccountingCutsService {
       if (!CUT_EDITABLE_STATUSES.includes(found.status)) {
         throw new ApiException(
           ErrorCode.InvalidState,
-          'El corte contable se asocia o cambia antes de cerrar la toma',
+          'El corte contable se asocia o cambia antes de cerrar la toma.',
         );
       }
       if (cutId) {
         const [cut] = (await manager.query('SELECT id FROM accounting_cut WHERE id = $1', [cutId])) as unknown[];
         if (!cut) {
-          throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el corte contable');
+          throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el corte contable.');
         }
       }
       const previous = found.accountingCutId ?? null;

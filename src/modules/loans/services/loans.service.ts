@@ -9,7 +9,7 @@ import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import { Asset } from '../../assets/entities/asset.entity.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
-import { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
+import { OPERATIONAL_STATUS_PHRASE, OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
 import { AssetStateService } from '../../assets/services/asset-state.service.js';
 import type { UpdateAssetRecord } from '../../assets/repositories/assets.repository.interface.js';
@@ -415,7 +415,7 @@ export class LoansService {
         throw new ApiException(
           ErrorCode.AssetAlreadyLoaned,
           undefined,
-          busy.map((row) => ({ field: 'assets', message: `El activo ${row.asset_id} ya está en un préstamo abierto` })),
+          busy.map((row) => ({ field: 'assets', message: `El activo ${assets.find((asset) => asset.id === row.asset_id)?.internalCode ?? ''} ya está prestado.` })),
         );
       }
       const now = new Date();
@@ -520,7 +520,7 @@ export class LoansService {
       if (!(await this.canCancel(manager, id, actor.id))) {
         throw new ApiException(
           ErrorCode.InsufficientPermissions,
-          `Requiere ${LOAN_UPDATE_GLOBAL}, ser quien solicitó el préstamo, o ser jefe vigente del centro dueño de un préstamo que salió de una solicitud de activos`,
+          'Solo quien pidió el préstamo o el jefe del centro de costo dueño puede cancelarlo.',
         );
       }
       const loan = await this.lockLoan(manager, id);
@@ -557,7 +557,7 @@ export class LoansService {
       if (!role) {
         throw new ApiException(
           ErrorCode.InsufficientPermissions,
-          `Requiere ${LOAN_UPDATE_GLOBAL}, o ser jefe vigente del centro dueño de un préstamo que salió de una solicitud de activos`,
+          'Solo el jefe del centro de costo dueño puede entregar este préstamo.',
         );
       }
       await this.deliverWithin(manager, id, dto, actor.id, role);
@@ -630,15 +630,15 @@ export class LoansService {
       if (dto.deliveredByPersonId && dto.deliveredByPersonId !== role.personId) {
         throw new ApiException(
           ErrorCode.ValidationFailed,
-          'Cuando entrega el jefe del centro dueño, firma ENTREGA él mismo: no puede indicar a otra persona',
-          [{ field: 'deliveredByPersonId', message: 'Debe ser el jefe que entrega (o omitirse)' }],
+          'Cuando el jefe entrega, él mismo firma la entrega.',
+          [{ field: 'deliveredByPersonId', message: 'Debe ser el jefe que entrega o quedar vacío.' }],
         );
       }
       deliveredBy = role.personId;
     } else {
       if (!dto.deliveredByPersonId) {
-        throw new ApiException(ErrorCode.ValidationFailed, 'Indique quién entrega los activos (firma ENTREGA)', [
-          { field: 'deliveredByPersonId', message: 'Obligatorio cuando entrega Control Interno' },
+        throw new ApiException(ErrorCode.ValidationFailed, 'Indique quién entrega los activos.', [
+          { field: 'deliveredByPersonId', message: 'Indique quién entrega.' },
         ]);
       }
       deliveredBy = dto.deliveredByPersonId;
@@ -654,8 +654,8 @@ export class LoansService {
     if (others.length > 0) {
       throw new ApiException(
         ErrorCode.TransferSignerRequired,
-        `Hay ${candidates.length} personas que pueden firmar por Control Interno: indique controlInternoPersonId`,
-        [{ field: 'controlInternoPersonId', message: `Elija entre ${candidates.length} personas` }],
+        `${candidates.length} personas pueden firmar por Control Interno. Elija una.`,
+        [{ field: 'controlInternoPersonId', message: 'Elija quién firma por Control Interno.' }],
       );
     }
     return { deliveredBy, control: only.personId };
@@ -676,7 +676,7 @@ export class LoansService {
       if (loan.startDate && today < loan.startDate) {
         throw new ApiException(
           ErrorCode.LoanNotStarted,
-          `El préstamo se entrega desde el ${longSpanishDate(loan.startDate)} (${loan.startDate}); hoy es ${today}`,
+          `El préstamo empieza el ${longSpanishDate(loan.startDate)}. Entréguelo desde esa fecha.`,
           [{ field: 'startDate', message: loan.startDate }],
         );
       }
@@ -684,7 +684,7 @@ export class LoansService {
       if (!contactPersonId) {
         throw new ApiException(
           ErrorCode.ValidationFailed,
-          'El préstamo no tiene persona de contacto: el acta OCI-01-65 necesita quién recibe',
+          'Indique la persona de contacto del préstamo. Ella firma el recibo.',
         );
       }
       const { deliveredBy, control } = await this.deliverySigners(manager, dto, role);
@@ -706,7 +706,7 @@ export class LoansService {
       if (!estimated) {
         throw new ApiException(
           ErrorCode.ValidationFailed,
-          `La fecha estimada de devolución (${loan.expectedReturnDate}) es anterior a la entrega (${deliveryDay})`,
+          'La fecha de devolución es anterior a la entrega.',
         );
       }
 
@@ -716,7 +716,7 @@ export class LoansService {
         [loan.id],
       )) as Array<{ id: string; asset_id: string }>;
       if (items.length === 0) {
-        throw new ApiException(ErrorCode.InvalidState, 'El préstamo no tiene activos');
+        throw new ApiException(ErrorCode.InvalidState, 'El préstamo no tiene activos.');
       }
       const assetIds = items.map((item) => item.asset_id);
       const assetNotes = dto.assetNotes ?? {};
@@ -724,7 +724,7 @@ export class LoansService {
       if (foreign.length > 0 || Object.values(assetNotes).some((note) => typeof note !== 'string')) {
         throw new ApiException(
           ErrorCode.ValidationFailed,
-          `assetNotes solo admite texto para activos del préstamo${foreign.length ? `: ${foreign.join(', ')}` : ''}`,
+          'Las observaciones solo pueden ser texto y de activos del préstamo.',
         );
       }
 
@@ -752,13 +752,13 @@ export class LoansService {
               if (current.costCenterId !== loan.sourceCostCenterId) {
                 throw new ApiException(
                   ErrorCode.AssetCannotBeModified,
-                  `El activo ${current.internalCode} ya no pertenece al centro de costo de origen del préstamo`,
+                  `El activo ${current.internalCode} ya no está en el centro de costo del préstamo.`,
                 );
               }
               if (!LOANABLE.includes(current.operationalStatus)) {
                 throw new ApiException(
                   ErrorCode.AssetCannotBeModified,
-                  `El activo ${current.internalCode} está ${current.operationalStatus}: no se puede entregar en préstamo`,
+                  `El activo ${current.internalCode} está ${OPERATIONAL_STATUS_PHRASE[current.operationalStatus]}. No se puede prestar.`,
                 );
               }
             },
@@ -827,7 +827,7 @@ export class LoansService {
   async regenerateDeliveryAct(id: string, dto: RegenerateDeliveryActDto, actor: AuthenticatedUser) {
     const { format } = await this.documents.formatReadiness(LOAN_DELIVERY_FORMAT);
     if (!(await this.permissions.userHasPermission(actor.id, format.generatePermission))) {
-      throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${format.generatePermission}`);
+      throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para hacer esto.');
     }
     await this.dataSource.transaction(async (manager) => {
       const loan = await this.lockLoan(manager, id);
@@ -836,7 +836,7 @@ export class LoansService {
       }
       const act = await this.deliveryAct(loan, manager);
       if (act.status !== 'REJECTED' || !act.documentId) {
-        throw new ApiException(ErrorCode.LoanDeliveryActNotRejected, `El acta de entrega está ${act.status}`);
+        throw new ApiException(ErrorCode.LoanDeliveryActNotRejected);
       }
       const [previousRequest] = (await manager.query(
         `SELECT payload FROM document_request
@@ -845,11 +845,11 @@ export class LoansService {
         [LOAN_DELIVERY_FORMAT, LOAN_DOCUMENT_ENTITY, loan.id],
       )) as Array<{ payload: DocumentRequestPayload }>;
       if (!previousRequest) {
-        throw new ApiException(ErrorCode.InvalidState, 'No se encontró la solicitud del acta de entrega original');
+        throw new ApiException(ErrorCode.InvalidState, 'No encontramos el acta de entrega original.');
       }
       const contactPersonId = dto.contactPersonId ?? loan.contactPersonId;
       if (!contactPersonId) {
-        throw new ApiException(ErrorCode.ValidationFailed, 'El acta necesita la persona de contacto que firma RECIBE');
+        throw new ApiException(ErrorCode.ValidationFailed, 'Indique la persona de contacto del préstamo. Ella firma el recibo.');
       }
       await this.requirePersons(manager, [dto.deliveredByPersonId, dto.controlInternoPersonId, contactPersonId]);
       await this.documents.assertSigners(
@@ -900,7 +900,7 @@ export class LoansService {
   async undoDelivery(id: string, dto: UndoDeliveryDto, actor: AuthenticatedUser) {
     const { format } = await this.documents.formatReadiness(LOAN_DELIVERY_FORMAT);
     if (!(await this.permissions.userHasPermission(actor.id, format.generatePermission))) {
-      throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${format.generatePermission}`);
+      throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para hacer esto.');
     }
     const reason = dto.reason.trim();
     await this.dataSource.transaction(async (manager) => {
@@ -939,7 +939,7 @@ export class LoansService {
               if (current.operationalStatus !== OperationalStatus.OnLoan) {
                 throw new ApiException(
                   ErrorCode.InvalidState,
-                  `El activo ${current.internalCode} no está ON_LOAN (${current.operationalStatus})`,
+                  `El activo ${current.internalCode} no está prestado.`,
                 );
               }
             },
@@ -975,24 +975,24 @@ export class LoansService {
       const recorded: Array<{ assetId: string; condition: string; returnedAt: string }> = [];
       for (const returned of dto.assetsReturned) {
         if (seen.has(returned.assetId)) {
-          throw new ApiException(ErrorCode.ValidationFailed, `El activo ${returned.assetId} está repetido`);
+          throw new ApiException(ErrorCode.ValidationFailed, 'Un activo está repetido.');
         }
         seen.add(returned.assetId);
         const item = byAsset.get(returned.assetId);
         if (!item) {
-          throw new ApiException(ErrorCode.ResourceNotFound, `El activo ${returned.assetId} no está en el préstamo`);
+          throw new ApiException(ErrorCode.ResourceNotFound, 'Un activo no está en el préstamo.');
         }
         if (item.receivedAt) {
-          throw new ApiException(ErrorCode.ValidationFailed, `El activo ${returned.assetId} ya se recibió de vuelta`);
+          throw new ApiException(ErrorCode.ValidationFailed, 'Un activo ya se devolvió.');
         }
         const returnedAt = returned.returnedAt ? new Date(returned.returnedAt) : now;
         if (returnedAt.getTime() > now.getTime()) {
-          throw new ApiException(ErrorCode.ValidationFailed, 'La fecha real de devolución no puede ser futura');
+          throw new ApiException(ErrorCode.ValidationFailed, 'La fecha de devolución no puede ser futura.');
         }
         if (loan.deliveredAt && returnedAt.getTime() < loan.deliveredAt.getTime()) {
           throw new ApiException(
             ErrorCode.ValidationFailed,
-            'La fecha real de devolución no puede ser anterior a la entrega',
+            'La fecha de devolución no puede ser antes de la entrega.',
           );
         }
         await manager.update(AssetLoanItem, item.id, {
@@ -1056,7 +1056,7 @@ export class LoansService {
               if (current.operationalStatus !== OperationalStatus.OnLoan) {
                 throw new ApiException(
                   ErrorCode.InvalidState,
-                  `El activo ${current.internalCode} no está ON_LOAN (${current.operationalStatus})`,
+                  `El activo ${current.internalCode} no está prestado.`,
                 );
               }
             },
@@ -1072,7 +1072,7 @@ export class LoansService {
         }
       }
       if (received.length === 0) {
-        throw new ApiException(ErrorCode.InvalidState, 'No hay activos con devolución registrada pendientes de recibir');
+        throw new ApiException(ErrorCode.InvalidState, 'No hay activos devueltos pendientes de recibir.');
       }
       const status: LoanStatus = statusAfterReception(
         items.map((item) => ({ received: item.receivedAt !== null, lost: item.returnCondition === 'LOST' })),
@@ -1119,14 +1119,14 @@ export class LoansService {
     const unknown = Object.keys(given).filter((role) => !roles.includes(role));
     const invalid = Object.entries(given).filter(([, personId]) => typeof personId !== 'string' || !UUID.test(personId));
     if (missing.length > 0 || unknown.length > 0 || invalid.length > 0) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'Firmantes del acta de devolución inválidos', [
-        ...missing.map((role) => ({ field: 'returnActSigners', message: `Falta el firmante ${role}` })),
-        ...unknown.map((role) => ({ field: 'returnActSigners', message: `El acta de devolución no tiene el rol ${role}` })),
-        ...invalid.map(([role]) => ({ field: 'returnActSigners', message: `El firmante ${role} no es un uuid` })),
+      throw new ApiException(ErrorCode.ValidationFailed, 'Revise los firmantes del acta de devolución.', [
+        ...missing.map((role) => ({ field: 'returnActSigners', message: `Falta el firmante ${role}.` })),
+        ...unknown.map((role) => ({ field: 'returnActSigners', message: `El acta de devolución no tiene el turno ${role}.` })),
+        ...invalid.map(([role]) => ({ field: 'returnActSigners', message: `Elija una persona para ${role}.` })),
       ]);
     }
     if (specs.some((spec) => spec.source === 'RESPONSIBLE') && !loan.contactPersonId) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'El acta de devolución necesita la persona de contacto del préstamo');
+      throw new ApiException(ErrorCode.ValidationFailed, 'Indique la persona de contacto del préstamo. Ella firma la devolución.');
     }
     const signers = Object.fromEntries(roles.map((role) => [role, given[role] as string]));
     await this.requirePersons(manager, Object.values(signers));
@@ -1211,7 +1211,7 @@ export class LoansService {
       if (requested <= loan.expectedReturnDate || requested < bogotaDate(new Date())) {
         throw new ApiException(
           ErrorCode.ValidationFailed,
-          `La nueva fecha (${requested}) debe ser posterior a la vigente (${loan.expectedReturnDate}) y no pasada`,
+          'La nueva fecha debe ser posterior a la actual y no puede haber pasado.',
         );
       }
       await manager.update(AssetLoan, loan.id, {
@@ -1401,7 +1401,7 @@ export class LoansService {
         return {
           ...base,
           status: 'PENDING_FORMAT' as LoanReturnActStatus,
-          error: act?.reasons?.length ? `Formato institucional pendiente: ${act.reasons.join('; ')}` : 'Formato institucional pendiente',
+          error: act?.reasons?.length ? `El formato del acta no está listo. ${act.reasons.join(' ')}` : 'El formato del acta no está listo.',
         };
       }
       const requestStatus = request.status as string;

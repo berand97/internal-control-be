@@ -89,11 +89,11 @@ describe('resolveCostCenterScope', () => {
 
 describe('requireReadableScope', () => {
   const run = (rows: ReadonlyArray<EffectivePermission>) => () =>
-    requireReadableScope(resolve(rows), GLOBAL, SCOPED);
+    requireReadableScope(resolve(rows));
 
-  it('lanza INSUFFICIENT_PERMISSIONS nombrando ambos permisos', () => {
+  it('lanza INSUFFICIENT_PERMISSIONS sin nombrar códigos de permiso', () => {
     expect(thrownCode(run([]))).toBe(ErrorCode.InsufficientPermissions);
-    expect(run([])).toThrow('Requiere permiso asset:read:global o asset:read:org_unit');
+    expect(run([])).toThrow(/^No tiene permiso para hacer esto\.$/u);
   });
 
   it('lanza el código que explica la falta de centros', () => {

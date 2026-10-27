@@ -107,7 +107,7 @@ export class NotificationsService {
       )) as [NotificationView[], number];
       const updated = rows[0];
       if (!updated) {
-        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la notificación');
+        throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la notificación.');
       }
       await this.events.publish(manager, { userId, type: 'notification.count', refId: null });
       return updated;

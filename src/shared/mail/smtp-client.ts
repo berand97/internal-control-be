@@ -156,7 +156,7 @@ function connectTcp(host: string, port: number, lookup: LookupFunction | undefin
     const socket = netConnect({ host, port, ...(lookup ? { lookup } : {}) }, () => resolve(socket));
     socket.setTimeout(12_000, () => {
       socket.destroy();
-      reject(new Error('Tiempo de espera agotado al conectar con el SMTP'));
+      reject(new Error('El servidor de correo no respondió a tiempo.'));
     });
     socket.once('error', reject);
   });
@@ -169,7 +169,7 @@ function connectTls(host: string, port: number, lookup: LookupFunction | undefin
     );
     socket.setTimeout(12_000, () => {
       socket.destroy();
-      reject(new Error('Tiempo de espera agotado al conectar con el SMTP'));
+      reject(new Error('El servidor de correo no respondió a tiempo.'));
     });
     socket.once('error', reject);
   });

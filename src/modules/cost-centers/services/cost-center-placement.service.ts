@@ -131,7 +131,7 @@ export const resolveAt = (date: string | undefined): Date => {
   }
   const at = new Date(`${date}${BOGOTA_END_OF_DAY}`);
   if (Number.isNaN(at.getTime()) || !isCalendarDate(date)) {
-    throw new ApiException(ErrorCode.ValidationFailed, 'Fecha inválida', [{ field: 'at', message: 'Use AAAA-MM-DD' }]);
+    throw new ApiException(ErrorCode.ValidationFailed, 'La fecha no es válida.', [{ field: 'at', message: 'Use el formato AAAA-MM-DD.' }]);
   }
   return at;
 };
@@ -169,7 +169,7 @@ export class CostCenterPlacementService {
       ],
     )) as Array<{ id: string }>;
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el centro de costo.');
     }
     return row.id;
   }
@@ -217,7 +217,7 @@ export class CostCenterPlacementService {
       accepts_assets: boolean;
     }>;
     if (!center) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el centro de costo.');
     }
     const from: PlacementState = {
       unitId: center.organizational_unit_id,
@@ -343,7 +343,7 @@ export class CostCenterPlacementService {
     }
     const [row] = (await this.dataSource.query(`${PLACEMENT_SELECT} WHERE p.id = $1`, [change.placementId])) as PlacementRow[];
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No se encontró la ubicación registrada');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos esa ubicación.');
     }
     return toPlacementDto(row);
   }
@@ -538,7 +538,7 @@ export class CostCenterPlacementService {
           code: group.code,
           rangeFrom,
           rangeTo,
-          reason: group.code ? null : `No quedan códigos libres bajo ${parent.external_code} (${rangeFrom}–${rangeTo}, sin ${group.fixedPrefix}5)`,
+          reason: group.code ? null : `No quedan códigos libres en ${parent.external_code}.`,
           fixedPrefix: group.fixedPrefix,
           basis: 'PARENT',
           matchesUnitPrefix: prefix && group.code ? codeMatchesPrefix(group.code, prefix) : null,
@@ -569,7 +569,7 @@ export class CostCenterPlacementService {
       code: byUnit.code,
       rangeFrom,
       rangeTo,
-      reason: byUnit.code ? null : `No quedan códigos libres entre ${rangeFrom} y ${rangeTo}`,
+      reason: byUnit.code ? null : `No quedan códigos libres entre ${rangeFrom} y ${rangeTo}.`,
       fixedPrefix: byUnit.fixedPrefix,
       basis: 'UNIT',
       matchesUnitPrefix: true,
@@ -592,7 +592,7 @@ export class CostCenterPlacementService {
     }
     const [parent] = (await manager.query('SELECT id FROM cost_center WHERE id = $1', [parentId])) as unknown[];
     if (!parent) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro padre');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el centro padre.');
     }
     const [cycle] = (await manager.query(
       `WITH RECURSIVE up (id, parent_id, depth) AS (
@@ -613,7 +613,7 @@ export class CostCenterPlacementService {
       id,
     ])) as Array<{ id: string; external_code: string; name: string }>;
     if (!center) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el centro de costo.');
     }
     return center;
   }

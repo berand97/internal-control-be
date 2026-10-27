@@ -75,7 +75,7 @@ export const FEATURE_CATALOG: ReadonlyArray<FeatureDefinition> = [
   },
   {
     code: 'organizational-units',
-    label: 'Unidades organizacionales',
+    label: 'Dependencias',
     core: false,
     resourceTypes: ['org_unit'],
     pathPrefixes: ['/organizational-units'],

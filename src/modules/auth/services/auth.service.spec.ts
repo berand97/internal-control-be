@@ -90,8 +90,10 @@ describe('AuthService', () => {
     clear: ReturnType<typeof vi.fn>;
   };
   let service: AuthService;
+  let authConfig: { skipMfaAtLogin: boolean };
 
   beforeEach(() => {
+    authConfig = { skipMfaAtLogin: false };
     authUsersRepository = {
       findByUsernameWithPerson: vi.fn(),
       findByEmailWithPerson: vi.fn(),
@@ -224,6 +226,7 @@ describe('AuthService', () => {
       mfaAccount as unknown as MfaAccountService,
       lockout as unknown as AuthLockoutService,
       sessions as unknown as SessionStateService,
+      { getOrThrow: () => authConfig } as never,
     );
   });
 
@@ -306,6 +309,45 @@ describe('AuthService', () => {
       );
       expect(outcome.refreshToken).toBe('refresh');
       expect('accessToken' in outcome.response).toBe(true);
+    });
+
+    it('con AUTH_SKIP_MFA emite sesión sin pedir el autenticador aunque el usuario lo tenga', async () => {
+      authConfig.skipMfaAtLogin = true;
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser({ mfaEnabled: true, mfaSecret: 's' }),
+      );
+      const outcome = await service.login(
+        { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+        context,
+      );
+      expect(outcome.refreshToken).toBe('refresh');
+      expect('accessToken' in outcome.response).toBe(true);
+      expect(tokenService.signMfaChallengeToken).not.toHaveBeenCalled();
+    });
+
+    it('con AUTH_SKIP_MFA no pide configurar el autenticador aunque el rol lo exija', async () => {
+      authConfig.skipMfaAtLogin = true;
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser({ mfaEnrollmentRequired: true }),
+      );
+      const outcome = await service.login(
+        { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+        context,
+      );
+      expect('accessToken' in outcome.response).toBe(true);
+      expect(tokenService.signMfaSetupToken).not.toHaveBeenCalled();
+    });
+
+    it('sin AUTH_SKIP_MFA sigue pidiendo el autenticador', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser({ mfaEnabled: true, mfaSecret: 's' }),
+      );
+      const outcome = await service.login(
+        { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+        context,
+      );
+      expect(outcome.refreshToken).toBeNull();
+      expect(tokenService.signMfaChallengeToken).toHaveBeenCalled();
     });
 
     it('resuelve la cuenta por correo institucional', async () => {

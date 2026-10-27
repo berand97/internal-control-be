@@ -309,7 +309,7 @@ export class AssetsService {
             await this.dynamicFieldsService.effectiveFields(nextCategoryId),
             {
               ...(categoryChanged ? await this.currentCustomValues(asset.id) : {}),
-              ...(dto.customValues ?? {}),
+              ...dto.customValues,
             },
           )
         : null;
@@ -956,7 +956,7 @@ export class AssetsService {
     }
     return {
       row,
-      message: 'No se pudo importar la fila',
+      message: 'No se pudo importar la fila.',
       code: ErrorCode.InternalError,
     };
   }
@@ -987,8 +987,8 @@ const acquisitionPriceChange = (asset: Asset, dto: UpdateAssetDto): PriceChange 
     return null;
   }
   if (!dto.priceChangeReason) {
-    throw new ApiException(ErrorCode.ValidationFailed, 'Cambiar el precio de compra exige el motivo de la corrección', [
-      { field: 'priceChangeReason', message: 'Obligatorio cuando acquisitionPrice cambia (3 a 500 caracteres)' },
+    throw new ApiException(ErrorCode.ValidationFailed, 'Escriba el motivo del cambio de precio.', [
+      { field: 'priceChangeReason', message: 'Escriba un motivo de 3 a 500 caracteres.' },
     ]);
   }
   return { from: (cents(asset.acquisitionPrice) / 100).toFixed(2), to: (cents(dto.acquisitionPrice) / 100).toFixed(2) };
@@ -997,7 +997,7 @@ const acquisitionPriceChange = (asset: Asset, dto: UpdateAssetDto): PriceChange 
 const assertAcquisitionUnchanged = (asset: Asset, dto: UpdateAssetDto): void => {
   const details: Array<{ field: string; message: string }> = [];
   if (dto.acquisitionTypeId !== undefined && dto.acquisitionTypeId !== asset.acquisitionTypeId) {
-    details.push({ field: 'acquisitionTypeId', message: 'El tipo de adquisición no se edita' });
+    details.push({ field: 'acquisitionTypeId', message: 'El tipo de adquisición no se puede cambiar.' });
   }
   if (
     dto.acquisitionDate !== undefined &&
@@ -1005,11 +1005,11 @@ const assertAcquisitionUnchanged = (asset: Asset, dto: UpdateAssetDto): void => 
   ) {
     details.push({
       field: 'acquisitionDate',
-      message: 'La fecha de adquisición no se edita: define el código interno y la depreciación',
+      message: 'La fecha de adquisición no se puede cambiar.',
     });
   }
   if (details.length > 0) {
-    throw new ApiException(ErrorCode.ValidationFailed, 'Hay datos de la adquisición que no se editan', details);
+    throw new ApiException(ErrorCode.ValidationFailed, 'Algunos datos de la adquisición no se pueden cambiar.', details);
   }
 };
 

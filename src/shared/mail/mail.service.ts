@@ -112,8 +112,8 @@ export class MailService {
     await this.dispatch(
       row,
       recipient,
-      'Prueba de correo — Control Interno UNAC',
-      'Este es un mensaje de prueba. El SMTP quedó configurado correctamente.',
+      'Prueba de correo de Control Interno UNAC',
+      'Este es un mensaje de prueba. El correo quedó bien configurado.',
     );
     return { ok: true, to: recipient };
   }

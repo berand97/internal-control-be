@@ -12,7 +12,7 @@ export class OutboundDestinationError extends Error {
   readonly code = OUTBOUND_FORBIDDEN_CODE;
 
   constructor() {
-    super('Destino saliente no permitido: red privada, loopback o link-local');
+    super('Ese servidor está en una red interna. Use una dirección pública.');
     this.name = 'OutboundDestinationError';
   }
 }
@@ -143,7 +143,7 @@ export const guardedLookup = (
         }
         const first = addresses[0];
         if (!first) {
-          callback(Object.assign(new Error('Sin direcciones para el host'), { code: 'ENOTFOUND' }));
+          callback(Object.assign(new Error('No se encontró ese servidor.'), { code: 'ENOTFOUND' }));
           return;
         }
         callback(null, first.address, first.family);

@@ -15,7 +15,7 @@ describe('issuesToCsv (BE-10)', () => {
     ]);
     const line = csv.replace(/^﻿/, '').split('\r\n')[1];
     expect(line).toBe(
-      `Activos;7;MovPrecio;El precio de compra no es un número;"'=cmd|""/c calc""!A1";"precio; con punto y coma";PRICE_NOT_A_NUMBER`,
+      `Activos;7;MovPrecio;El precio de compra no es un número.;"'=cmd|""/c calc""!A1";"precio; con punto y coma";PRICE_NOT_A_NUMBER`,
     );
   });
 });

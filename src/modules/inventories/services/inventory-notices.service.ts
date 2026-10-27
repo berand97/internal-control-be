@@ -151,12 +151,12 @@ export class InventoryNoticesService {
     if (inventory.scopeType !== InventoryScopeType.CostCenter) {
       warnings.push({
         code: 'NO_HEAD_FOR_SCOPE',
-        message: `La toma es de ${scope.label}: no hay jefe de centro de costo a quien avisar; solo el responsable recibe la notificación en la aplicación`,
+        message: `La toma es de ${scope.label} y no hay un jefe de centro de costo a quien avisar. Solo el responsable recibe la notificación.`,
       });
     } else if (emailPersonIds.length === 0) {
       warnings.push({
         code: 'NO_HEAD_WITH_EMAIL',
-        message: `El centro ${scope.costCenter?.code ?? ''} no tiene jefe vigente con correo: el aviso y los recordatorios no llegarán por correo a nadie`,
+        message: `El centro ${scope.costCenter?.code ?? ''} no tiene un jefe con correo. El aviso y los recordatorios no llegarán por correo.`,
       });
     }
     return {
@@ -287,7 +287,7 @@ export class InventoryNoticesService {
       code: string;
       name: string;
     }>;
-    const prefix = inventory.scopeType === InventoryScopeType.Location ? 'Ubicación' : 'Unidad';
+    const prefix = inventory.scopeType === InventoryScopeType.Location ? 'Ubicación' : 'Dependencia';
     return { label: target ? `${prefix} ${target.code} · ${target.name}` : prefix, costCenter: null };
   }
 }

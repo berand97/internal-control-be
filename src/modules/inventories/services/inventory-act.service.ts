@@ -56,7 +56,7 @@ type EnqueueOutcome =
   | { readonly blocked: BlockedReason; readonly message: string };
 
 const TEMPLATE_NOT_ACTIVE_MESSAGE =
-  `El formato ${INVENTORY_ACT_FORMAT_KEY} no tiene plantilla vigente: Control Interno debe cargarla en ` +
+  `El formato ${INVENTORY_ACT_FORMAT_KEY} no tiene plantilla activa. Control Interno debe cargarla en ` +
   'Administración de formatos. El acta se genera al reintentar.';
 
 interface ActItemRow {
@@ -146,7 +146,7 @@ export class InventoryActService implements OnModuleInit {
       if (inventory.status !== InventoryStatus.Reconciled || act.documentRequestId) {
         throw new ApiException(
           ErrorCode.InvalidState,
-          'El acta se encola solo en una toma conciliada cuya acta no se encoló',
+          'El acta se genera cuando la toma está conciliada y solo una vez.',
         );
       }
       const result = await this.tryEnqueue(manager, inventory, act, inventory.reconcileApprovedBy ?? actor.id, signerSubstitutions, {
@@ -368,7 +368,7 @@ export class InventoryActService implements OnModuleInit {
     if (!readiness.ready) {
       return {
         blocked: 'FORMAT_NOT_READY',
-        message: `El formato ${INVENTORY_ACT_FORMAT_KEY} no se puede generar: ${readiness.reasons.join('; ')}`,
+        message: `El formato ${INVENTORY_ACT_FORMAT_KEY} no está listo. ${readiness.reasons.join(' ')}`,
       };
     }
     const signerHeadPersonId = act.signerHeadPersonId;
@@ -516,7 +516,7 @@ export class InventoryActService implements OnModuleInit {
       case InventoryScopeType.Global:
         return 'Toda la universidad';
       default:
-        return one(`SELECT 'Unidad organizacional ' || name AS label FROM organizational_unit WHERE id = $1`);
+        return one(`SELECT 'Dependencia ' || name AS label FROM organizational_unit WHERE id = $1`);
     }
   }
 

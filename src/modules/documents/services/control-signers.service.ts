@@ -39,7 +39,7 @@ export class ControlSignersService {
     }
     throw new ApiException(
       ErrorCode.InsufficientPermissions,
-      'Ver quién firma por Control Interno requiere un permiso de generación de actas o asset_request:review:global',
+      'No tiene permiso para hacer esto.',
     );
   }
 }

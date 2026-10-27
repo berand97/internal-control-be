@@ -211,7 +211,7 @@ export class StructureReconcilerService {
         external_code: string;
       }>;
       if (!center) {
-        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo');
+        throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el centro de costo.');
       }
       const reason = `El centro ${center.external_code} vuelve a ubicación automática`;
       await this.placements.change(manager, costCenterId, {}, {

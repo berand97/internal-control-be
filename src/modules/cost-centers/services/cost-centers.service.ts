@@ -129,10 +129,10 @@ export class CostCentersService {
     const center = await this.requireCenter(id);
     const structural = [
       ...(dto.organizationalUnitId !== undefined && dto.organizationalUnitId !== center.organizationalUnitId
-        ? [{ field: 'organizationalUnitId', message: 'Use POST /cost-centers/{id}/placement' }]
+        ? [{ field: 'organizationalUnitId', message: 'Cámbiela desde la ubicación del centro.' }]
         : []),
       ...(dto.parentId !== undefined && dto.parentId !== center.parentId
-        ? [{ field: 'parentId', message: 'Use POST /cost-centers/{id}/placement' }]
+        ? [{ field: 'parentId', message: 'Cámbielo desde la ubicación del centro.' }]
         : []),
     ];
     if (structural.length > 0) {

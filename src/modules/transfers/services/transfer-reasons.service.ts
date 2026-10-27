@@ -27,7 +27,7 @@ export class TransferReasonsService {
   private async one(id: string): Promise<TransferReasonDto> {
     const [row] = (await this.dataSource.query(`${SELECT} WHERE r.id = $1`, [id])) as TransferReasonDto[];
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el motivo de traslado');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el motivo de traslado.');
     }
     return row;
   }
@@ -35,7 +35,7 @@ export class TransferReasonsService {
   async create(dto: CreateTransferReasonDto, actor: AuthenticatedUser): Promise<TransferReasonDto> {
     const name = dto.name.trim();
     if (!name) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'El nombre es obligatorio', [{ field: 'name', message: 'Obligatorio' }]);
+      throw new ApiException(ErrorCode.ValidationFailed, 'Escriba el nombre.', [{ field: 'name', message: 'Escriba el nombre.' }]);
     }
     try {
       const id = await this.dataSource.transaction(async (manager) => {
@@ -71,7 +71,7 @@ export class TransferReasonsService {
     const before = await this.one(id);
     const name = dto.name === undefined ? undefined : dto.name.trim();
     if (name === '') {
-      throw new ApiException(ErrorCode.ValidationFailed, 'El nombre es obligatorio', [{ field: 'name', message: 'Obligatorio' }]);
+      throw new ApiException(ErrorCode.ValidationFailed, 'Escriba el nombre.', [{ field: 'name', message: 'Escriba el nombre.' }]);
     }
     await this.dataSource.transaction(async (manager) => {
       await manager.query(

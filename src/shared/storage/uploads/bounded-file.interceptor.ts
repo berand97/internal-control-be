@@ -56,7 +56,7 @@ export const BoundedFileInterceptor = (
         if (error instanceof PayloadTooLargeException) {
           throw new ApiException(
             ErrorCode.FileTooLarge,
-            `El archivo supera el máximo de ${maxMib} MB`,
+            `El archivo pasa de ${maxMib} MB.`,
           );
         }
         throw error;

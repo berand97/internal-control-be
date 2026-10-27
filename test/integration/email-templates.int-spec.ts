@@ -717,7 +717,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       });
       expect(unknownImage.body.error).toMatchObject({
         code: 'EMAIL_TEMPLATE_INVALID_DESIGN',
-        details: [{ field: 'blocks[1].assetId', message: 'La imagen no existe; súbala de nuevo' }],
+        details: [{ field: 'blocks[1].assetId', message: 'La imagen ya no existe. Súbala de nuevo.' }],
       });
 
       const extraField = await post({ templateType: 'SYSTEM_ALERT', subject: 'x', blocks: [], body: 'texto' });
@@ -867,14 +867,14 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
     it('rechaza por los bytes antes de tocar el almacenamiento: SVG, GIF y HTML renombrados; más de 1 MB; más de 100 megapíxeles; dañada', async () => {
       const svg = await upload(director, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), 'logo.png', 'image/png');
       expect(svg.status).toBe(400);
-      expect(svg.body.error).toMatchObject({ code: 'FILE_TYPE_NOT_ALLOWED', message: 'Solo se admiten imágenes PNG o JPEG' });
+      expect(svg.body.error).toMatchObject({ code: 'FILE_TYPE_NOT_ALLOWED', message: 'Suba una imagen PNG o JPEG.' });
       const gif = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#fff' } }).gif().toBuffer();
       expect((await upload(director, gif, 'anim.jpg', 'image/jpeg')).body.error.code).toBe('FILE_TYPE_NOT_ALLOWED');
       const html = await upload(director, Buffer.from('<!DOCTYPE html><p>hola</p>'), 'foto.jpg', 'image/jpeg');
       expect(html.body.error.code).toBe('FILE_TYPE_NOT_ALLOWED');
       const big = await upload(director, Buffer.alloc(1024 * 1024 + 1, 0x41), 'grande.png', 'image/png');
       expect(big.status).toBe(400);
-      expect(big.body.error).toMatchObject({ code: 'FILE_TOO_LARGE', message: 'El archivo supera el máximo de 1 MB' });
+      expect(big.body.error).toMatchObject({ code: 'FILE_TOO_LARGE', message: 'El archivo pasa de 1 MB.' });
       const bomb = await sharp({ create: { width: 10240, height: 10240, channels: 3, background: '#306999' } })
         .png({ compressionLevel: 9 })
         .toBuffer();
@@ -883,10 +883,10 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       expect(huge.status).toBe(400);
       expect(huge.body.error).toMatchObject({
         code: 'EMAIL_ASSET_INVALID_IMAGE',
-        message: 'La imagen es demasiado grande para procesarla (más de 100 megapíxeles)',
+        message: 'La imagen pasa de 100 megapíxeles. Use una más pequeña.',
       });
       const broken = await upload(director, (await png(40, 20)).subarray(0, 40), 'rota.png', 'image/png');
-      expect(broken.body.error).toMatchObject({ code: 'EMAIL_ASSET_INVALID_IMAGE', message: 'La imagen está dañada o no se puede leer' });
+      expect(broken.body.error).toMatchObject({ code: 'EMAIL_ASSET_INVALID_IMAGE', message: 'La imagen está dañada.' });
       const noFile = await http().post('/api/v1/email-templates/assets').set(auth(director)).field('x', '1');
       expect(noFile.body.error.code).toBe('FILE_TYPE_NOT_ALLOWED');
     });
@@ -985,7 +985,7 @@ describe('Plantillas de correo por bloques (HTTP real + PostgreSQL real)', () =>
       expectConforms('post', '/api/v1/email-templates/test-send', 200, sent.body);
       expect(sent.body.data).toMatchObject({
         status: 'FAILED',
-        lastError: 'El correo saliente (SMTP) no está configurado o está deshabilitado',
+        lastError: 'El servidor de correo no está configurado o está apagado.',
         to: director.email,
         templateId: expect.any(String),
       });

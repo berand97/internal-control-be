@@ -120,7 +120,7 @@ describe('Importación de Excel como funcionalidad (PostgreSQL real)', () => {
     const quarantine = await imports.quarantine(preview.importId);
     expect(quarantine).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ rowNumber: 10, legacyAssetId: '8', reason: 'COST_CENTER_UNKNOWN', detail: 'Centro de costo 9999' }),
+        expect.objectContaining({ rowNumber: 10, legacyAssetId: '8', reason: 'COST_CENTER_UNKNOWN', detail: 'El centro de costo 9999 no existe.' }),
         expect.objectContaining({ rowNumber: 11, reason: 'EMPTY_ROW' }),
         expect.objectContaining({ rowNumber: 12, reason: 'ROW_WITHOUT_ASSET_ID' }),
       ]),

@@ -115,7 +115,7 @@ export class MovementsService {
       ...input,
       loanId: input.loanId ?? null,
       metadata: {
-        ...(input.metadata ?? {}),
+        ...input.metadata,
         signedAt: now.toISOString(),
         signatureVersion: SIGNATURE_VERSION,
       },

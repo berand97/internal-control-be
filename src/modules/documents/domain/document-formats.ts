@@ -39,8 +39,8 @@ export interface ProcessFormatBinding {
 export const formatNotReadyReasons = (
   format: Pick<DocumentFormat, 'sgcCode' | 'signers'>,
 ): string[] => [
-  ...(format.sgcCode ? [] : ['sin código SGC institucional']),
-  ...(format.signers.length > 0 ? [] : ['sin firmantes definidos']),
+  ...(format.sgcCode ? [] : ['Falta el código SGC.']),
+  ...(format.signers.length > 0 ? [] : ['Faltan los firmantes.']),
 ];
 
 export const processBindingViolations = (
@@ -56,8 +56,8 @@ export const processBindingViolations = (
     ...Object.entries(required)
       .filter(([role]) => !byRole.has(role))
       .map(
-        ([role, source]) =>
-          `Falta el rol ${role} (${source}): ${binding.process} lo usa`,
+        ([role]) =>
+          `Falta el firmante ${role}. ${binding.process} lo necesita.`,
       ),
     ...Object.entries(required)
       .filter(
@@ -65,13 +65,13 @@ export const processBindingViolations = (
       )
       .map(
         ([role, source]) =>
-          `El rol ${role} debe tener origen ${source}: ${binding.process} lo asigna así`,
+          `El firmante ${role} debe salir de ${source}. Así lo asigna ${binding.process}.`,
       ),
     ...signers
       .filter((signer) => !(signer.role in required))
       .map(
         (signer) =>
-          `El rol ${signer.role} no lo asigna ${binding.process}: el acta no se podría generar`,
+          `${binding.process} no asigna el firmante ${signer.role}. El acta no se podría generar.`,
       ),
   ];
 };

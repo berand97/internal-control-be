@@ -48,7 +48,7 @@ export class CostCenterAtQueryDto {
     description: 'Fecha (AAAA-MM-DD): se resuelve al final de ese día, hora de Colombia. Por defecto, ahora',
   })
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'at debe tener la forma AAAA-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Use el formato AAAA-MM-DD.' })
   readonly at?: string;
 }
 

@@ -151,7 +151,7 @@ export class DocumentFormatCatalogService {
     if (!format) {
       throw new ApiException(
         ErrorCode.ValidationFailed,
-        `Formato desconocido: ${key}`,
+        `El formato ${key} no existe.`,
       );
     }
     return format;
@@ -209,7 +209,7 @@ export class DocumentFormatCatalogService {
     if (!row) {
       throw new ApiException(
         ErrorCode.ResourceNotFound,
-        'No existe el documento',
+        'No encontramos el acta.',
       );
     }
     return toFormat(row);
@@ -232,7 +232,7 @@ export class DocumentFormatCatalogService {
     if (!current) {
       throw new ApiException(
         ErrorCode.ResourceNotFound,
-        `No existe el formato ${key}`,
+        `El formato ${key} no existe.`,
       );
     }
     const today = bogotaToday();
@@ -274,14 +274,14 @@ export class DocumentFormatCatalogService {
       errors.push({
         field: 'key',
         message:
-          'Mayúsculas, dígitos, guion o guion bajo; de 2 a 40 caracteres',
+          'Use de 2 a 40 mayúsculas, números, guiones o guion bajo.',
       });
     }
     const effectiveFrom = input.effectiveFrom ?? today;
     if (DATE_PATTERN.test(effectiveFrom) && effectiveFrom > today) {
       errors.push({
         field: 'effectiveFrom',
-        message: 'La primera versión de un formato rige desde hoy o antes',
+        message: 'La primera versión debe regir desde hoy o antes.',
       });
     }
     errors.push(...this.versionErrors(input));
@@ -294,7 +294,7 @@ export class DocumentFormatCatalogService {
       if (exists) {
         throw new ApiException(
           ErrorCode.DocumentFormatAlreadyExists,
-          `Ya existe el formato ${key}`,
+          `Ya existe el formato ${key}.`,
         );
       }
       await this.assertPermissionsExist(
@@ -312,7 +312,7 @@ export class DocumentFormatCatalogService {
       if (inserted.length === 0) {
         throw new ApiException(
           ErrorCode.DocumentFormatAlreadyExists,
-          `Ya existe el formato ${key}`,
+          `Ya existe el formato ${key}.`,
         );
       }
       const versionId = await this.insertVersion(
@@ -338,7 +338,7 @@ export class DocumentFormatCatalogService {
     if (DATE_PATTERN.test(effectiveFrom) && effectiveFrom < today) {
       errors.push({
         field: 'effectiveFrom',
-        message: 'Una versión nueva rige desde hoy o una fecha futura',
+        message: 'La versión nueva debe regir desde hoy o una fecha futura.',
       });
     }
     this.throwIfErrors(errors);
@@ -352,7 +352,7 @@ export class DocumentFormatCatalogService {
       if (!format) {
         throw new ApiException(
           ErrorCode.ResourceNotFound,
-          `No existe el formato ${key}`,
+          `El formato ${key} no existe.`,
         );
       }
       const [latest] = (await manager.query(
@@ -363,11 +363,11 @@ export class DocumentFormatCatalogService {
       if (latest?.effective_from && effectiveFrom < latest.effective_from) {
         throw new ApiException(
           ErrorCode.ValidationFailed,
-          'La vigencia no puede ser anterior a la de la última versión',
+          'La fecha no puede ser anterior a la de la última versión.',
           [
             {
               field: 'effectiveFrom',
-              message: `La versión ${latest.version_number} rige desde ${latest.effective_from}`,
+              message: `La versión ${latest.version_number} rige desde ${latest.effective_from}.`,
             },
           ],
         );
@@ -400,17 +400,17 @@ export class DocumentFormatCatalogService {
       errors.push({
         field: 'sgcCode',
         message:
-          'Código SGC de 1 a 20 caracteres (letras, dígitos, punto, guion)',
+          'Use hasta 20 letras, números, puntos o guiones.',
       });
     }
     if (!SGC_VERSION_PATTERN.test(text(input.sgcVersion))) {
       errors.push({
         field: 'sgcVersion',
-        message: 'Versión SGC de 1 a 10 caracteres (letras, dígitos, punto, guion), sin "/" ni ".."',
+        message: 'Use hasta 10 letras, números, puntos o guiones.',
       });
     }
     if (text(input.name).length < 3 || text(input.name).length > 200) {
-      errors.push({ field: 'name', message: 'Nombre de 3 a 200 caracteres' });
+      errors.push({ field: 'name', message: 'Escriba un nombre de 3 a 200 caracteres.' });
     }
     if (
       input.effectiveFrom !== undefined &&
@@ -436,7 +436,7 @@ export class DocumentFormatCatalogService {
       ) {
         errors.push({
           field: `signers[${index}].order`,
-          message: 'Entero de 1 a 99',
+          message: 'Escriba un número de 1 a 99.',
         });
       }
       if (
@@ -446,32 +446,32 @@ export class DocumentFormatCatalogService {
         errors.push({
           field: `signers[${index}].role`,
           message:
-            'Mayúsculas, dígitos o guion bajo, empezando por letra (máx. 40)',
+            'Use hasta 40 mayúsculas, números o guion bajo. Debe empezar con letra.',
         });
       }
       if (text(signer.label).length < 1 || text(signer.label).length > 80) {
         errors.push({
           field: `signers[${index}].label`,
-          message: 'Etiqueta de 1 a 80 caracteres',
+          message: 'Escriba una etiqueta de 1 a 80 caracteres.',
         });
       }
       if (!SIGNER_SOURCE_VALUES.includes(signer.source)) {
         errors.push({
           field: `signers[${index}].source`,
-          message: `Uno de ${SIGNER_SOURCE_VALUES.join(', ')}`,
+          message: 'Elija de dónde sale el firmante.',
         });
       }
     });
     if (new Set(orders).size !== orders.length) {
       errors.push({
         field: 'signers',
-        message: 'Dos firmantes no pueden tener el mismo orden',
+        message: 'Dos firmantes no pueden tener el mismo orden.',
       });
     }
     if (new Set(roles).size !== roles.length) {
       errors.push({
         field: 'signers',
-        message: 'Dos firmantes no pueden tener el mismo rol',
+        message: 'Dos firmantes no pueden tener el mismo rol.',
       });
     }
     const numbering =
@@ -483,13 +483,13 @@ export class DocumentFormatCatalogService {
     ) {
       errors.push({
         field: 'numbering.width',
-        message: 'Dígitos del consecutivo: entero de 1 a 10',
+        message: 'Escriba un número de dígitos de 1 a 10.',
       });
     }
     if (typeof numbering.perYear !== 'boolean') {
       errors.push({
         field: 'numbering.perYear',
-        message: 'true (anual, AAAA-NNNN) o false (continuo)',
+        message: 'Elija si el consecutivo es anual o continuo.',
       });
     }
     if (
@@ -498,14 +498,14 @@ export class DocumentFormatCatalogService {
     ) {
       errors.push({
         field: 'numbering.lastIssued',
-        message: 'Entero ≥ 0: último número emitido antes del sistema',
+        message: 'Escriba el último número emitido antes del sistema, 0 o más.',
       });
     }
     const period = numbering.lastIssuedPeriod ?? null;
     if (numbering.perYear === false && period !== null) {
       errors.push({
         field: 'numbering.lastIssuedPeriod',
-        message: 'Solo aplica a un consecutivo anual',
+        message: 'El año solo se indica en un consecutivo anual.',
       });
     }
     if (
@@ -513,7 +513,7 @@ export class DocumentFormatCatalogService {
       period !== null &&
       !YEAR_PATTERN.test(period)
     ) {
-      errors.push({ field: 'numbering.lastIssuedPeriod', message: 'Año AAAA' });
+      errors.push({ field: 'numbering.lastIssuedPeriod', message: 'Escriba el año con 4 dígitos.' });
     }
     if (
       numbering.perYear === true &&
@@ -523,7 +523,7 @@ export class DocumentFormatCatalogService {
       errors.push({
         field: 'numbering.lastIssuedPeriod',
         message:
-          'Con consecutivo anual, indique el año del último número emitido',
+          'Indique el año del último número emitido.',
       });
     }
     const decisions = input.pendingDecisions ?? [];
@@ -536,7 +536,7 @@ export class DocumentFormatCatalogService {
     ) {
       errors.push({
         field: 'pendingDecisions',
-        message: 'Hasta 20 textos de 1 a 500 caracteres',
+        message: 'Escriba hasta 20 textos de 1 a 500 caracteres.',
       });
     }
     if (
@@ -554,7 +554,7 @@ export class DocumentFormatCatalogService {
     if (errors.length > 0) {
       throw new ApiException(
         ErrorCode.ValidationFailed,
-        'La versión del formato no es válida',
+        'Revise los datos del formato.',
         errors,
       );
     }
@@ -568,7 +568,7 @@ export class DocumentFormatCatalogService {
     if (binding && violations.length > 0) {
       throw new ApiException(
         ErrorCode.DocumentFormatBreaksProcess,
-        `${key} lo usa ${binding.process}: ${violations.join('; ')}`,
+        `${binding.process} usa el formato ${key}. ${violations.join(' ')}`,
         violations.map((message) => ({ field: 'signers', message })),
       );
     }
@@ -588,11 +588,11 @@ export class DocumentFormatCatalogService {
     if (missing.length > 0) {
       throw new ApiException(
         ErrorCode.ValidationFailed,
-        'Permisos inexistentes',
+        'Ese permiso no existe.',
         missing.map((code) => ({
           field:
             codes.indexOf(code) === 0 ? 'readPermission' : 'generatePermission',
-          message: `No existe el permiso ${code}`,
+          message: 'Ese permiso no existe.',
         })),
       );
     }
@@ -623,11 +623,11 @@ export class DocumentFormatCatalogService {
     if (sequence) {
       throw new ApiException(
         ErrorCode.DocumentFormatSequenceStarted,
-        `El consecutivo de ${key}${period ? ` en ${period}` : ''} ya va en ${sequence.current_value}: el valor inicial ya no aplica`,
+        `El consecutivo de ${key}${period ? ` en ${period}` : ''} ya va en ${sequence.current_value}. El valor inicial ya no se puede cambiar.`,
         [
           {
             field: 'numbering.lastIssued',
-            message: `Consecutivo actual: ${sequence.current_value}`,
+            message: `El consecutivo va en ${sequence.current_value}.`,
           },
         ],
       );

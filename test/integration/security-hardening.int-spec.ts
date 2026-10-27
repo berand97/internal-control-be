@@ -108,7 +108,7 @@ describe('Endurecimiento BE-01 / BE-05 / BE-06 (HTTP real + PostgreSQL real)', (
       const response = await http().post(url).set(auth('director')).attach('file', oversize(limit), name).expect(400);
       expect(response.body.error).toMatchObject({
         code: 'FILE_TOO_LARGE',
-        message: `El archivo supera el máximo de ${mb} MB`,
+        message: `El archivo pasa de ${mb} MB.`,
       });
     });
 
@@ -186,7 +186,7 @@ describe('Endurecimiento BE-01 / BE-05 / BE-06 (HTTP real + PostgreSQL real)', (
       ]))).toBe(1);
       const quarantine = (await imports.quarantine(preview.importId)) as Array<Record<string, unknown>>;
       expect(quarantine.filter((row) => row['reason'] === 'EMAIL_NOT_INSTITUTIONAL')).toEqual([
-        expect.objectContaining({ rowNumber: 2, detail: expect.stringContaining('saltos de línea') }),
+        expect.objectContaining({ rowNumber: 2, detail: 'El correo tiene espacios u otros caracteres no permitidos.' }),
         expect.objectContaining({ rowNumber: 4, detail: expect.stringContaining('espacios') }),
       ]);
       expect(JSON.stringify(quarantine)).not.toContain('atacante');

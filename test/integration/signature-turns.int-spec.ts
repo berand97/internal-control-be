@@ -316,7 +316,7 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
       .catch((error: unknown) => error);
     expect(withoutPermission).toMatchObject({
       code: 'DOCUMENT_SIGNER_NOT_ELIGIBLE',
-      details: [{ field: 'signers.AUDITA', message: expect.stringContaining('AUDITA') }],
+      details: [{ field: 'signers.AUDITA', message: 'Esta persona no tiene permiso para firmar actas por Control Interno.' }],
     });
     const substituted = await engine.generate(
       {
@@ -336,7 +336,7 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     const document = await generate(true);
     const notEligible = await reassign(document.id, 2, director, stranger.personId);
     expect([notEligible.status, notEligible.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
-    expect(notEligible.body.error.details).toEqual([{ field: 'personId', message: expect.stringContaining('AUDITA') }]);
+    expect(notEligible.body.error.details).toEqual([{ field: 'personId', message: 'No tiene permiso para firmar actas por Control Interno.' }]);
     const revoked = await person('Revocada', true);
     await grantControlSigner(dataSource, revoked.personId);
     await dataSource.query('UPDATE user_role SET revoked_at = NOW() WHERE user_id = $1', [revoked.userId]);
@@ -353,7 +353,7 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     const duplicatedResponsible = await reassign(document.id, 1, director, auditor.personId);
     expect([duplicatedResponsible.status, duplicatedResponsible.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
     expect(duplicatedResponsible.body.error.details).toEqual(
-      expect.arrayContaining([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]),
+      expect.arrayContaining([{ field: 'signers.AUDITA', message: expect.stringMatching(/^Asigne .+ a otra persona con permiso para firmar actas por Control Interno y escriba el motivo\.$/u) }]),
     );
     const accepted = await reassign(document.id, 2, director, replacement.personId);
     expect(accepted.status).toBe(200);

@@ -20,7 +20,7 @@ export class SigningLinkParams {
 }
 
 export class ConfirmIdentityDto {
-  @Matches(/^\d{4}$/, { message: 'last4 son los últimos 4 dígitos del número de documento' })
+  @Matches(/^\d{4}$/, { message: 'Escriba los últimos 4 dígitos de su documento.' })
   readonly last4!: string;
 }
 

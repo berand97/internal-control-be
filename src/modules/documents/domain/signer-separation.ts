@@ -40,24 +40,24 @@ export const normalizeSubstitutions = (raw: unknown): SignerSubstitutions => {
     return {};
   }
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    return invalid('signerSubstitutions', 'Debe ser un objeto rol → { personId, reason }');
+    return invalid('signerSubstitutions', 'Las sustituciones no son válidas.');
   }
   const result: Record<string, SignerSubstitution> = {};
   for (const [role, value] of Object.entries(raw as Record<string, unknown>)) {
     const field = `signerSubstitutions.${role.slice(0, 40)}`;
     if (!ROLE.test(role)) {
-      invalid(field, 'Rol inválido');
+      invalid(field, 'Ese turno no existe.');
     }
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      return invalid(field, 'Debe ser { personId, reason }');
+      return invalid(field, 'Indique la persona y el motivo.');
     }
     const { personId, reason } = value as Record<string, unknown>;
     if (typeof personId !== 'string' || !UUID.test(personId)) {
-      invalid(`${field}.personId`, 'Persona sustituta inválida');
+      invalid(`${field}.personId`, 'Elija la persona sustituta.');
     }
     const motive = typeof reason === 'string' ? reason.trim() : '';
     if (motive.length < SUBSTITUTION_REASON_MIN || motive.length > SUBSTITUTION_REASON_MAX) {
-      invalid(`${field}.reason`, `Motivo de ${SUBSTITUTION_REASON_MIN} a ${SUBSTITUTION_REASON_MAX} caracteres`);
+      invalid(`${field}.reason`, `Escriba un motivo de ${SUBSTITUTION_REASON_MIN} a ${SUBSTITUTION_REASON_MAX} caracteres.`);
     }
     result[role] = { personId: personId as string, reason: motive };
   }
@@ -87,7 +87,7 @@ export const conflictsOf = (
     .map(([personId, specs]) => ({ personId, specs }));
 };
 
-const roleList = (specs: ReadonlyArray<SignerSpec>): string => specs.map((spec) => `${spec.label} (${spec.role})`).join(', ');
+const roleList = (specs: ReadonlyArray<SignerSpec>): string => specs.map((spec) => spec.label).join(', ');
 
 export const resolveSigners = (
   specs: ReadonlyArray<SignerSpec>,
@@ -105,19 +105,19 @@ export const resolveSigners = (
     const field = `signerSubstitutions.${role}`;
     const slot = designated.find((item) => item.spec.role === role);
     if (!slot) {
-      invalid(field, `El acta no tiene el turno ${role}`);
+      invalid(field, `El acta no tiene el turno ${role}.`);
     }
     if (!SUBSTITUTABLE_ROLES.includes(role)) {
-      invalid(field, `Solo se sustituyen turnos de Control Interno (${SUBSTITUTABLE_ROLES.join(', ')}); ${role} no`);
+      invalid(field, 'Solo se sustituyen los turnos de Control Interno.');
     }
     if (!slot?.personId || (!conflicted.has(slot.personId) && !ineligibleRoles.has(role))) {
       invalid(
         field,
-        `El designado de ${role} no ocupa otra firma del acta y tiene el permiso vigente: no hay nada que resolver con un sustituto`,
+        'Este turno no necesita sustituto.',
       );
     }
     if (substitution.personId === slot?.personId) {
-      invalid(`${field}.personId`, 'El sustituto es la misma persona designada');
+      invalid(`${field}.personId`, 'El sustituto es la misma persona del turno.');
     }
   }
   const resolved: ResolvedSigner[] = designated.map((item) => {
@@ -131,7 +131,7 @@ export const resolveSigners = (
     if (other) {
       invalid(
         `signerSubstitutions.${signer.spec.role}.personId`,
-        `El sustituto de ${signer.spec.label} ya firma el acta como ${other.spec.label} (${other.spec.role})`,
+        `El sustituto de ${signer.spec.label} ya firma el acta como ${other.spec.label}.`,
       );
     }
   }
@@ -142,24 +142,24 @@ export const resolveSigners = (
       return [
         ...taken.map((spec) => ({
           field: `signers.${spec.role}`,
-          message: `La misma persona firma como ${roleList(taken)}`,
+          message: `La misma persona firma como ${roleList(taken)}.`,
         })),
         ...(substitutable.length > 0
           ? substitutable.map((spec) => ({
               field: `signerSubstitutions.${spec.role}`,
-              message: `Indique un sustituto para ${spec.label} con el permiso «Firmar actas por Control Interno» vigente, y el motivo`,
+              message: `Indique un sustituto para ${spec.label} y el motivo.`,
             }))
-          : [{ field: 'signers', message: `No hay sustituto posible entre ${roleList(taken)}: cambie el firmante` }]),
+          : [{ field: 'signers', message: `Cambie el firmante de ${roleList(taken)}.` }]),
       ];
     });
     const summary = remaining
       .map(({ specs: taken }) =>
         taken.some((spec) => SUBSTITUTABLE_ROLES.includes(spec.role))
-          ? `una misma persona firma como ${roleList(taken)}; indique un sustituto para el turno de Control Interno`
-          : `una misma persona firma como ${roleList(taken)}; no hay sustituto posible, cambie el firmante`,
+          ? `La misma persona firma como ${roleList(taken)}. Indique un sustituto para Control Interno.`
+          : `La misma persona firma como ${roleList(taken)}. Cambie el firmante.`,
       )
-      .join('. ');
-    throw new ApiException(ErrorCode.DocumentSignerDuplicated, `Separación de funciones: ${summary}`, details);
+      .join(' ');
+    throw new ApiException(ErrorCode.DocumentSignerDuplicated, summary, details);
   }
   return resolved;
 };

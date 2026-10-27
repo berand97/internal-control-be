@@ -574,19 +574,20 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     const elsewhere = await asset({ costCenterId: otherCostCenter });
     const mismatch = await create([free, elsewhere]).expect(406);
     expect(mismatch.body.error.code).toBe('HANDOVER_COST_CENTER_MISMATCH');
-    expect(mismatch.body.error.details[0].message).toContain(elsewhere);
+    expect(mismatch.body.error.details[0].message).toMatch(/^El activo \S+ está en el centro de costo \S+\.$/u);
+    expect(mismatch.body.error.details[0].message).not.toContain(elsewhere);
     expect(await scalar<string>(dataSource, 'SELECT current_cost_center_id FROM asset WHERE id = $1', [elsewhere])).toBe(otherCostCenter);
 
     for (const status of ['WRITTEN_OFF', 'ON_LOAN']) {
       const response = await create([await asset({ status })]).expect(406);
       expect(response.body.error.code).toBe('HANDOVER_ASSET_NOT_DELIVERABLE');
-      expect(response.body.error.details[0].message).toContain(status);
+      expect(response.body.error.details[0].message).toContain(status === 'WRITTEN_OFF' ? 'está dado de baja.' : 'está prestado.');
     }
 
     expect((await create([free, free]).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
     expect((await create([randomUUID()]).expect(404)).body.error.code).toBe('RESOURCE_NOT_FOUND');
     expect((await create([free], { receiverPersonId: randomUUID() }).expect(404)).body.error.details).toEqual([
-      { field: 'receiverPersonId', message: 'No existe la persona que recibe' },
+      { field: 'receiverPersonId', message: 'No encontramos a la persona que recibe.' },
     ]);
     expect((await create([free], { auditorPersonId: randomUUID() }).expect(404)).body.error.code).toBe('RESOURCE_NOT_FOUND');
     expect((await create([free], { costCenterId: randomUUID() }).expect(404)).body.error.code).toBe('RESOURCE_NOT_FOUND');
@@ -799,7 +800,7 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     const before = await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_handover');
     const rejected = await create([assetId], { auditorPersonId: outsider.personId });
     expect([rejected.status, rejected.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
-    expect(rejected.body.error.details).toEqual([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]);
+    expect(rejected.body.error.details).toEqual([{ field: 'signers.AUDITA', message: 'Esta persona no tiene permiso para firmar actas por Control Interno.' }]);
     expect(await scalar<number>(dataSource, 'SELECT count(*)::int FROM asset_handover')).toBe(before);
     await create([assetId], { auditorPersonId: auditor.personId }).expect(201);
   });

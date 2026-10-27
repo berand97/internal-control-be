@@ -173,7 +173,7 @@ export const classifyS3Error = (error: unknown): ClassifiedError => {
       transport: true,
       code: 'OUTBOUND_DESTINATION_FORBIDDEN',
       message:
-        'El endpoint resuelve a una red privada, loopback o link-local y el despliegue no lo autoriza (OUTBOUND_ALLOWED_HOSTS)',
+        'El servidor está en una red interna. Use una dirección pública.',
     };
   }
   const facts = factsOf(error);
@@ -198,7 +198,7 @@ export const classifyS3Error = (error: unknown): ClassifiedError => {
     return {
       transport: true,
       code: 'ENDPOINT_UNREACHABLE',
-      message: 'No se obtuvo respuesta S3 del endpoint',
+      message: 'El servidor S3 no respondió.',
     };
   }
   if (facts.name && INVALID_CREDENTIAL_NAMES.has(facts.name)) {
@@ -212,7 +212,7 @@ export const classifyS3Error = (error: unknown): ClassifiedError => {
     return { transport: false, code: 'BUCKET_NOT_FOUND', message: 'El bucket no existe' };
   }
   if (facts.name === 'AccessDenied' || facts.httpStatus === 403) {
-    return { transport: false, code: 'ACCESS_DENIED', message: 'La política de la clave no permite esta operación' };
+    return { transport: false, code: 'ACCESS_DENIED', message: 'La clave de acceso no tiene permiso para esta operación.' };
   }
   return {
     transport: false,
@@ -233,7 +233,7 @@ const toBuffer = async (body: unknown): Promise<Buffer | null> => {
   return null;
 };
 
-const ENDPOINT_OK = 'El endpoint respondió';
+const ENDPOINT_OK = 'El servidor respondió.';
 
 export const runS3Probe = async (send: S3Send, bucket: string): Promise<S3ProbeResult> => {
   const checks: StorageCheck[] = [];
@@ -267,7 +267,7 @@ export const runS3Probe = async (send: S3Send, bucket: string): Promise<S3ProbeR
         warning(
           'BUCKET',
           classified.code,
-          'Sin permiso s3:ListBucket no se puede confirmar que el bucket exista; se prueba igual escribir en él',
+          'La clave no puede listar el bucket. Se probará escribir en él de todos modos.',
         ),
       );
     } else {
@@ -295,7 +295,7 @@ export const runS3Probe = async (send: S3Send, bucket: string): Promise<S3ProbeR
       checks.push(
         read && read.equals(payload)
           ? passed('READ')
-          : failed('READ', 'CONTENT_MISMATCH', 'El objeto leído no coincide con el escrito'),
+          : failed('READ', 'CONTENT_MISMATCH', 'El archivo de prueba leído no coincide con el escrito.'),
       );
     } catch (error) {
       const classified = classifyS3Error(error);
@@ -318,18 +318,18 @@ export const runS3Probe = async (send: S3Send, bucket: string): Promise<S3ProbeR
     versioning = result.Status === 'Enabled' ? 'ENABLED' : result.Status === 'Suspended' ? 'SUSPENDED' : 'DISABLED';
     checks.push(
       versioning === 'ENABLED'
-        ? passed('VERSIONING', 'Versionado activo')
+        ? passed('VERSIONING', 'El versionado está activo.')
         : warning(
             'VERSIONING',
             null,
             versioning === 'SUSPENDED'
-              ? 'El versionado está suspendido: un archivo sobrescrito o borrado no se puede recuperar'
-              : 'El versionado no está activo: un archivo sobrescrito o borrado no se puede recuperar',
+              ? 'El versionado está suspendido. Un archivo sobrescrito o borrado no se podrá recuperar.'
+              : 'El versionado no está activo. Un archivo sobrescrito o borrado no se podrá recuperar.',
           ),
     );
   } catch (error) {
     const classified = classifyS3Error(error);
-    checks.push(warning('VERSIONING', classified.code, 'No se pudo consultar el versionado del bucket'));
+    checks.push(warning('VERSIONING', classified.code, 'No se pudo consultar el versionado del bucket.'));
   }
 
   let objectLock: BucketObjectLockState = 'UNKNOWN';
@@ -344,12 +344,12 @@ export const runS3Probe = async (send: S3Send, bucket: string): Promise<S3ProbeR
       objectLock = 'DISABLED';
     } else {
       const classified = classifyS3Error(error);
-      checks.push(warning('OBJECT_LOCK', classified.code, 'No se pudo consultar object lock del bucket'));
+      checks.push(warning('OBJECT_LOCK', classified.code, 'No se pudo consultar el bloqueo de objetos del bucket.'));
     }
   }
   if (objectLock !== 'UNKNOWN') {
     checks.push(
-      passed('OBJECT_LOCK', objectLock === 'ENABLED' ? 'Object lock activo' : 'Object lock no está activo (opcional)'),
+      passed('OBJECT_LOCK', objectLock === 'ENABLED' ? 'El bloqueo de objetos está activo.' : 'El bloqueo de objetos no está activo. Es opcional.'),
     );
   }
 

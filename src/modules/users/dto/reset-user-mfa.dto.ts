@@ -11,6 +11,6 @@ export class ResetUserMfaDto {
   })
   @IsString()
   @Length(10, 500)
-  @Matches(/\S.{8,}\S/s, { message: 'reason debe tener al menos 10 caracteres útiles' })
+  @Matches(/\S.{8,}\S/s, { message: 'Escriba un motivo de al menos 10 caracteres.' })
   readonly reason!: string;
 }

@@ -265,7 +265,7 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     expect(data.warnings).toEqual([
       {
         code: 'NO_HEAD_WITH_EMAIL',
-        message: `El centro ${code} no tiene jefe vigente con correo: el aviso y los recordatorios no llegarán por correo a nadie`,
+        message: `El centro ${code} no tiene un jefe con correo. El aviso y los recordatorios no llegarán por correo.`,
       },
     ]);
     expect(data.noticeRecipients.map((item) => item.role)).toEqual(['RESPONSIBLE']);
@@ -312,7 +312,7 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     const created = await schedule({ scope: 'COST_CENTER', scopeId: centerId, plannedStartDate: start, plannedEndDate: day(8) });
     const data = created.data as unknown as { id: string; warnings: Array<{ code: string; message: string }> };
     expect(data.warnings).toEqual([
-      { code: 'REMINDERS_SKIPPED', message: 'Los recordatorios de 30, 15 días antes ya pasaron y no se enviarán' },
+      { code: 'REMINDERS_SKIPPED', message: 'Los recordatorios de 30, 15 días antes ya pasaron y no se enviarán.' },
     ]);
     expect((await reminders(data.id)).map((row) => [row.offset_days, row.status])).toEqual([
       [30, 'SKIPPED'],

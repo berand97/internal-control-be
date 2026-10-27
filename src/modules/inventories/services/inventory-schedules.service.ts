@@ -139,15 +139,15 @@ export class InventorySchedulesService {
     this.assertRange(start, end);
     const now = new Date();
     if (start < bogotaDate(now)) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'La nueva fecha de inicio no puede ser anterior a hoy', [
-        { field: 'plannedStartDate', message: 'Debe ser hoy o una fecha futura' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'La nueva fecha de inicio no puede ser anterior a hoy.', [
+        { field: 'plannedStartDate', message: 'Debe ser hoy o una fecha futura.' },
       ]);
     }
     return this.dataSource.transaction(async (manager) => {
       const inventory = await this.lockPlanned(manager, id);
       if (inventory.plannedStartDate === start && inventory.plannedEndDate === end) {
-        throw new ApiException(ErrorCode.ValidationFailed, 'Las fechas nuevas son iguales a las actuales', [
-          { field: 'plannedStartDate', message: 'Reprogramar exige cambiar al menos una fecha' },
+        throw new ApiException(ErrorCode.ValidationFailed, 'Las fechas nuevas son iguales a las actuales.', [
+          { field: 'plannedStartDate', message: 'Cambie al menos una fecha.' },
         ]);
       }
       const previous = { start: inventory.plannedStartDate, end: inventory.plannedEndDate };
@@ -242,8 +242,8 @@ export class InventorySchedulesService {
 
   private assertRange(start: string, end: string): void {
     if (end < start) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'La fecha de fin no puede ser anterior a la de inicio', [
-        { field: 'plannedEndDate', message: 'Debe ser igual o posterior a plannedStartDate' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'La fecha de fin no puede ser anterior a la de inicio.', [
+        { field: 'plannedEndDate', message: 'Debe ser igual o posterior a la fecha de inicio.' },
       ]);
     }
   }
@@ -266,7 +266,7 @@ export class InventorySchedulesService {
       throw new ApiException(ErrorCode.ResourceNotFound);
     }
     if (inventory.status !== InventoryStatus.Planned) {
-      throw new ApiException(ErrorCode.InvalidState, 'Solo se puede reprogramar o cancelar una toma planeada');
+      throw new ApiException(ErrorCode.InvalidState, 'Solo se puede reprogramar o cancelar una toma planeada.');
     }
     return inventory;
   }
@@ -296,18 +296,18 @@ export class InventorySchedulesService {
         code: 'SCHEDULE_OVERLAP',
         message: `Las fechas se cruzan con ${conflicts.length === 1 ? 'la toma' : 'las tomas'} ${conflicts
           .map((item) => item.code)
-          .join(', ')} del mismo alcance o con activos en común`,
+          .join(', ')} del mismo alcance o con activos en común.`,
       });
     }
     const skipped = reminders.filter((item) => item.status === 'SKIPPED').map((item) => item.offsetDays);
     if (skipped.length > 0) {
       warnings.push({
         code: 'REMINDERS_SKIPPED',
-        message: `Los recordatorios de ${skipped.join(', ')} ${skipped.length === 1 && skipped[0] === 1 ? 'día' : 'días'} antes ya pasaron y no se enviarán`,
+        message: `Los recordatorios de ${skipped.join(', ')} ${skipped.length === 1 && skipped[0] === 1 ? 'día' : 'días'} antes ya pasaron y no se enviarán.`,
       });
     }
     if (start < bogotaDate(now)) {
-      warnings.push({ code: 'START_IN_PAST', message: 'La fecha de inicio ya pasó' });
+      warnings.push({ code: 'START_IN_PAST', message: 'La fecha de inicio ya pasó.' });
     }
     return warnings;
   }

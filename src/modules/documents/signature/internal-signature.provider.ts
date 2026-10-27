@@ -100,7 +100,7 @@ export class InternalSignatureProvider implements SignatureProvider {
   async request(input: SignatureRequest): Promise<{ readonly externalReference: string }> {
     const originalSha256 = sha256(input.pdf);
     if (originalSha256 !== input.pdfSha256) {
-      throw new ApiException(ErrorCode.DocumentTampered, 'El PDF recibido no coincide con el hash del documento');
+      throw new ApiException(ErrorCode.DocumentTampered, 'El PDF no coincide con el del acta.');
     }
     const code = randomBytes(24).toString('base64url');
     const signers = [...input.signers].sort((a, b) => a.order - b.order);
@@ -165,7 +165,7 @@ export class InternalSignatureProvider implements SignatureProvider {
   async signedDocument(externalReference: string): Promise<Buffer> {
     const envelope = await this.envelope(this.dataSource.manager, externalReference);
     if (envelope.status !== 'COMPLETED') {
-      throw new ApiException(ErrorCode.InvalidState, 'El documento todavía no tiene todas las firmas');
+      throw new ApiException(ErrorCode.InvalidState, 'El acta todavía no tiene todas las firmas.');
     }
     return this.currentPdf(envelope);
   }
@@ -176,7 +176,7 @@ export class InternalSignatureProvider implements SignatureProvider {
 
   async capture(externalReference: string, capture: SignatureCapture, outer?: EntityManager): Promise<void> {
     if (!isPng(capture.rubricPng) || capture.rubricPng.length > MAX_RUBRIC_BYTES) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'La rúbrica debe ser una imagen PNG de máximo 64 KB');
+      throw new ApiException(ErrorCode.ValidationFailed, 'La firma debe ser una imagen PNG de máximo 64 KB.');
     }
     return this.within(outer, async (manager) => {
       const envelope = await this.envelope(manager, externalReference, true);
@@ -296,7 +296,7 @@ export class InternalSignatureProvider implements SignatureProvider {
     }
     const originalSha256 = sha256(input.pdf);
     if (originalSha256 !== input.pdfSha256) {
-      throw new ApiException(ErrorCode.DocumentTampered, 'El PDF recibido no coincide con el hash del documento');
+      throw new ApiException(ErrorCode.DocumentTampered, 'El PDF no coincide con el del acta.');
     }
     const signers = [...input.signers].sort((a, b) => a.order - b.order);
     const prepared = await prepareForSignature(input.pdf, {
@@ -413,7 +413,7 @@ export class InternalSignatureProvider implements SignatureProvider {
       [id],
     )) as EnvelopeRow[];
     if (!envelope) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la solicitud de firma');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la solicitud de firma.');
     }
     return envelope;
   }
@@ -423,7 +423,7 @@ export class InternalSignatureProvider implements SignatureProvider {
       created_at: Date;
     }>;
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el documento de la solicitud de firma');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el acta de esta firma.');
     }
     return row.created_at;
   }
@@ -444,12 +444,12 @@ export class InternalSignatureProvider implements SignatureProvider {
     personId: string,
   ): Promise<SignerRow> {
     if (envelope.status !== 'PENDING') {
-      throw new ApiException(ErrorCode.InvalidState, 'La solicitud de firma ya está cerrada');
+      throw new ApiException(ErrorCode.InvalidState, 'La solicitud de firma ya está cerrada.');
     }
     const signers = await this.signers(manager, envelope.id);
     const signer = signers.find((item) => item.sign_order === order);
     if (!signer || signer.status !== 'PENDING') {
-      throw new ApiException(ErrorCode.InvalidState, `El firmante ${order} no está pendiente`);
+      throw new ApiException(ErrorCode.InvalidState, 'Este firmante ya no está pendiente.');
     }
     if (!signer.person_id) {
       throw new ApiException(ErrorCode.SignatureSignerUnassigned);
@@ -459,7 +459,7 @@ export class InternalSignatureProvider implements SignatureProvider {
     }
     const next = signers.find((item) => item.status === 'PENDING');
     if (next?.sign_order !== order) {
-      throw new ApiException(ErrorCode.SignatureOutOfOrder, `Primero debe firmar el turno ${next?.sign_order}`);
+      throw new ApiException(ErrorCode.SignatureOutOfOrder, `Primero debe firmar el turno ${next?.sign_order}.`);
     }
     return signer;
   }

@@ -41,18 +41,18 @@ export class InventorySurplusService {
     if (inventory.status !== InventoryStatus.Closed) {
       throw new ApiException(
         ErrorCode.InvalidState,
-        'Los sobrantes se resuelven con la toma cerrada y antes de aprobar la conciliación',
+        'Los sobrantes se resuelven con la toma cerrada y antes de aprobar la conciliación.',
       );
     }
     await this.actorPolicy.assertCanOperate(inventory, actor);
     if (dto.action === 'CREATE_ASSET') {
       if (!dto.asset) {
         throw new ApiException(ErrorCode.ValidationFailed, undefined, [
-          { field: 'asset', message: 'CREATE_ASSET necesita los datos del activo' },
+          { field: 'asset', message: 'Escriba los datos del activo.' },
         ]);
       }
       if (!(await this.permissions.userHasPermission(actor.id, ASSET_CREATE_PERMISSION))) {
-        throw new ApiException(ErrorCode.InsufficientPermissions, 'Registrar el activo exige asset:create:global');
+        throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para registrar activos.');
       }
     }
     if (dto.costCenterId && inventory.scopeType !== InventoryScopeType.CostCenter) {
@@ -146,13 +146,13 @@ export class InventorySurplusService {
     if (inventory.status !== InventoryStatus.Closed) {
       throw new ApiException(
         ErrorCode.InvalidState,
-        'El centro de un sobrante se elige con la toma cerrada y antes de aprobar la conciliación',
+        'El centro de un sobrante se elige con la toma cerrada y antes de aprobar la conciliación.',
       );
     }
     if (inventory.scopeType === InventoryScopeType.CostCenter) {
       throw new ApiException(
         ErrorCode.InvalidState,
-        'En una toma por centro de costo los sobrantes ya son del centro de la toma y van a su acta',
+        'En una toma por centro de costo los sobrantes ya son de ese centro.',
       );
     }
     await this.actorPolicy.assertCanOperate(inventory, actor);
@@ -198,15 +198,15 @@ export class InventorySurplusService {
       [costCenterId],
     )) as Array<{ id: string }>;
     if (!center) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'El centro de costo no existe, está inactivo o no admite activos', [
-        { field: 'costCenterId', message: 'Debe ser un centro de costo activo que admita activos' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'El centro de costo no existe, está archivado o no recibe activos.', [
+        { field: 'costCenterId', message: 'Elija un centro de costo activo que reciba activos.' },
       ]);
     }
   }
 
   private assertResolvable(item: PhysicalInventoryItem | null): void {
     if (!item || item.verificationResult !== VerificationResult.Surplus || item.voidedAt) {
-      throw new ApiException(ErrorCode.InventorySurplusNotResolvable, 'El ítem no es un sobrante vigente de esta toma');
+      throw new ApiException(ErrorCode.InventorySurplusNotResolvable, 'No es un sobrante de esta toma.');
     }
     if (item.wasLost) {
       throw new ApiException(ErrorCode.InventorySurplusWasLost);
@@ -214,11 +214,11 @@ export class InventorySurplusService {
     if (item.assetId) {
       throw new ApiException(
         ErrorCode.InventorySurplusNotResolvable,
-        'El sobrante es un activo ya registrado: no se crea otro',
+        'El sobrante ya es un activo registrado.',
       );
     }
     if (item.surplusResolution === 'CREATE_ASSET') {
-      throw new ApiException(ErrorCode.InventorySurplusNotResolvable, 'El sobrante ya se registró como activo');
+      throw new ApiException(ErrorCode.InventorySurplusNotResolvable, 'El sobrante ya se registró como activo.');
     }
   }
 
@@ -226,7 +226,7 @@ export class InventorySurplusService {
     if (inventory.scopeType === InventoryScopeType.CostCenter && inventory.scopeId) {
       if (requested && requested !== inventory.scopeId) {
         throw new ApiException(ErrorCode.ValidationFailed, undefined, [
-          { field: 'costCenterId', message: 'En una toma por centro de costo el activo queda en el centro de la toma' },
+          { field: 'costCenterId', message: 'El activo queda en el centro de costo de la toma.' },
         ]);
       }
       return inventory.scopeId;
@@ -237,8 +237,8 @@ export class InventorySurplusService {
           field: 'costCenterId',
           message:
             action === 'CREATE_ASSET'
-              ? 'La toma no es de un centro de costo: indique el centro del activo'
-              : 'La toma no es de un centro de costo: indique el centro cuya acta lista el sobrante sin resolver',
+              ? 'Elija el centro de costo del activo.'
+              : 'Elija el centro de costo del sobrante.',
         },
       ]);
     }

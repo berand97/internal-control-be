@@ -3,15 +3,16 @@ import type { ValidationError } from 'class-validator';
 import { ErrorCode } from '../constants/error-code.enum.js';
 import { ApiException } from '../exceptions/api.exception.js';
 import type { ErrorDetail } from '../types/response-envelope.type.js';
+import { translateConstraint } from './validation-messages.js';
 
 const flattenValidationErrors = (
   errors: ReadonlyArray<ValidationError>,
 ): ReadonlyArray<ErrorDetail> =>
   errors.flatMap((error): ReadonlyArray<ErrorDetail> => {
     const ownConstraints = error.constraints
-      ? Object.values(error.constraints).map((message): ErrorDetail => ({
+      ? Object.entries(error.constraints).map(([constraint, message]): ErrorDetail => ({
           field: error.property,
-          message,
+          message: translateConstraint(constraint, message, error.property),
         }))
       : [];
     const children = error.children

@@ -208,7 +208,7 @@ export class StorageService {
       passed('CONFIGURATION'),
       skipped('DESTINATION'),
       passed('WRITE'),
-      read.equals(body) ? passed('READ') : failed('READ', 'CONTENT_MISMATCH', 'El objeto leído no coincide con el escrito'),
+      read.equals(body) ? passed('READ') : failed('READ', 'CONTENT_MISMATCH', 'El archivo de prueba leído no coincide con el escrito.'),
       passed('DELETE'),
     ];
     return this.testResult(adapter.driver, checks, null);
@@ -230,7 +230,7 @@ export class StorageService {
       return this.testResult(
         's3',
         [
-          failed('CONFIGURATION', 'STORAGE_NOT_CONFIGURED', 'Faltan el bucket, la clave de acceso o la clave secreta'),
+          failed('CONFIGURATION', 'STORAGE_NOT_CONFIGURED', 'Faltan el bucket, la clave de acceso o la clave secreta.'),
           skipped('DESTINATION'),
           ...rest.map(skipped),
         ],
@@ -252,14 +252,14 @@ export class StorageService {
             ? failed(
                 'DESTINATION',
                 'OUTBOUND_DESTINATION_FORBIDDEN',
-                'El endpoint está en una red privada, loopback o link-local y el despliegue no lo autoriza (OUTBOUND_ALLOWED_HOSTS)',
+                'El servidor está en una red interna. Use una dirección pública.',
               )
             : failed('DESTINATION', 'ENDPOINT_NOT_ALLOWED', error.message),
         );
         return this.testResult('s3', [...checks, ...rest.map(skipped)], null);
       }
     } else {
-      checks.push(passed('DESTINATION', 'Endpoint por defecto del proveedor'));
+      checks.push(passed('DESTINATION', 'Se usa la dirección del proveedor.'));
     }
     let adapter: S3StorageAdapter;
     try {
@@ -271,7 +271,7 @@ export class StorageService {
       checks[checks.length - 1] = failed(
         'DESTINATION',
         'OUTBOUND_DESTINATION_FORBIDDEN',
-        'El endpoint está en una red privada, loopback o link-local y el despliegue no lo autoriza (OUTBOUND_ALLOWED_HOSTS)',
+        'El servidor está en una red interna. Use una dirección pública.',
       );
       return this.testResult('s3', [...checks, ...rest.map(skipped)], null);
     }
@@ -329,13 +329,13 @@ export class StorageService {
     if (nextDriver === 'google_drive' && (!nextGoogleId || !nextGoogleSecret)) {
       throw new ApiException(
         ErrorCode.StorageNotConfigured,
-        'Falta Client ID y Client Secret de Google',
+        'Escriba el Client ID y el Client Secret de Google.',
       );
     }
     if (nextDriver === 'onedrive' && (!nextOnedriveId || !nextOnedriveSecret)) {
       throw new ApiException(
         ErrorCode.StorageNotConfigured,
-        'Falta Client ID y Client Secret de OneDrive',
+        'Escriba el Client ID y el Client Secret de OneDrive.',
       );
     }
     if (patch.driver !== undefined) {
@@ -416,8 +416,8 @@ export class StorageService {
       throw new ApiException(
         ErrorCode.StorageNotConfigured,
         provider === 'google_drive'
-          ? 'Guarda googleClientId y googleClientSecret con PATCH /api/v1/storage/settings antes de conectar Google'
-          : 'Guarda onedriveClientId y onedriveClientSecret con PATCH /api/v1/storage/settings antes de conectar OneDrive',
+          ? 'Guarde el Client ID y el Client Secret de Google antes de conectar la cuenta.'
+          : 'Guarde el Client ID y el Client Secret de OneDrive antes de conectar la cuenta.',
       );
     }
     const state = randomBytes(32).toString('base64url');
@@ -606,7 +606,7 @@ export class StorageService {
     try {
       url = new URL(endpoint);
     } catch {
-      throw new ApiException(ErrorCode.ValidationFailed, 's3Endpoint debe ser una URL http(s)');
+      throw new ApiException(ErrorCode.ValidationFailed, 'La dirección del servidor S3 debe empezar por https.');
     }
     if (
       (url.protocol !== 'https:' && url.protocol !== 'http:') ||
@@ -617,7 +617,7 @@ export class StorageService {
     ) {
       throw new ApiException(
         ErrorCode.ValidationFailed,
-        's3Endpoint debe ser una URL http(s) sin usuario, parámetros ni fragmento',
+        'La dirección del servidor S3 no puede llevar usuario ni parámetros.',
       );
     }
     const policy = this.outboundPolicy();
@@ -633,7 +633,7 @@ export class StorageService {
       throw error;
     }
     if (url.protocol === 'http:' && !policy.allowPrivateNetworks && !listed) {
-      throw new ApiException(ErrorCode.ValidationFailed, 's3Endpoint debe usar https');
+      throw new ApiException(ErrorCode.ValidationFailed, 'La dirección del servidor S3 debe usar https.');
     }
   }
 
@@ -730,7 +730,7 @@ export class StorageService {
       if (!resolved.google.clientId || !resolved.google.clientSecret) {
         throw new ApiException(
           ErrorCode.StorageNotConfigured,
-          'Falta Client ID y Client Secret de Google',
+          'Escriba el Client ID y el Client Secret de Google.',
         );
       }
       if (!resolved.google.refreshToken) {
@@ -749,7 +749,7 @@ export class StorageService {
     ) {
       throw new ApiException(
         ErrorCode.StorageNotConfigured,
-        'Falta Client ID y Client Secret de OneDrive',
+        'Escriba el Client ID y el Client Secret de OneDrive.',
       );
     }
     if (!resolved.onedrive.refreshToken) {
