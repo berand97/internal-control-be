@@ -1,21 +1,48 @@
-import { clearAuthorMetadata, escape, generateClean, PizZip, replaceTextOrFail, runCli, templateTags } from './template-builder.mjs';
-import { SAMPLE as BASE_SAMPLE } from './build-oci-01-65-template.mjs';
+import { readFile, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
-export const SAMPLE = BASE_SAMPLE;
+import { clearAuthorMetadata, escape, generateClean, PizZip, replaceTextOrFail, templateTags } from './template-builder.mjs';
 
-export const TITLE = 'ACTA DE BAJA DE ACTIVOS FIJOS';
+const require = createRequire(import.meta.url);
+const ExcelJS = require('exceljs');
+
+const SHEET = 'Solicitud baja de activos';
 
 const BASE_TITLE = 'ACTA DE PRÉSTAMO TEMPORAL DE ACTIVOS FIJOS';
 
+export const SAMPLE = {
+  names: ['MONICA', 'MÓNICA', 'ELIANA', 'PEÑA', 'MOSQUERA', 'ANNY', 'JISETH', 'JOSEPH', 'TREJOS'],
+  documents: [],
+  numbers: ['00019', '18502', '18513', '4410', '4330', '5310', '030-2026', '38.267.493', '4169000'],
+  text: [
+    'Silla Gris 101',
+    'MONITORES SALA 101',
+    'GRANDSTREAM',
+    'OPTIPLEX',
+    'PELADORA DE PAPAS',
+    'DEPARTAMENTO DE SISTEMAS',
+    'Autorizado dar de baja',
+    'La depreciación varió',
+    'IBV - 00015',
+    'Jefe Control Interno',
+    'Jefe Contabilidad',
+    '28 de julio de 2026',
+  ],
+};
+
 export const COLUMNS = [
-  { header: '#', tag: '{{indice}}', width: 600, align: 'center' },
-  { header: 'Código', tag: '{{codigo}}', width: 1500 },
-  { header: 'Descripción', tag: '{{descripcion}}', width: 3700 },
-  { header: 'Serial', tag: '{{campos.serial}}', width: 1700 },
-  { header: 'Fecha de adquisición', tag: '{{campos.fechaAdquisicion}}', width: 1400, align: 'center' },
-  { header: 'Costo', tag: '{{campos.costo}}', width: 1700, align: 'right' },
-  { header: 'Valor en libros', tag: '{{campos.valorLibros}}', width: 2200, align: 'right' },
-  { header: 'Condición', tag: '{{estado}}', width: 1600, align: 'center' },
+  { cell: 'B11', header: '#', tag: '{{indice}}', width: 500, align: 'center' },
+  { cell: 'C11', header: 'Id', tag: '{{idOrigen}}', width: 900, align: 'center' },
+  { cell: 'D11', header: 'Código de barras', tag: '{{codigo}}', width: 1100, align: 'center' },
+  { cell: 'E11', header: 'Descripción del activo', tag: '{{descripcion}}', width: 2900 },
+  { cell: 'F11', header: 'Cantidad', tag: '{{campos.cantidad}}', width: 800, align: 'center' },
+  { cell: 'G11', header: 'Documento', tag: '{{campos.documento}}', width: 1200 },
+  { cell: 'H11', header: 'Centro', tag: '{{campos.centro}}', width: 2000 },
+  { cell: 'I11', header: 'Fecha Compra', tag: '{{campos.fechaCompra}}', width: 1100, align: 'center' },
+  { cell: 'J11', header: 'Precio compra', tag: '{{campos.precioCompra}}', width: 1300, align: 'right' },
+  { cell: 'K11', header: 'Estado', tag: '{{campos.estado}}', width: 900, align: 'center' },
+  { cell: 'L11', header: 'Observaciones', tag: '{{campos.observaciones}}', width: 1700 },
 ];
 
 const TOTAL_WIDTH = 14400;
@@ -55,14 +82,67 @@ const loopRow = (columns, loop, size) =>
 const headerRow = (columns, size) =>
   row(
     columns.map((column) =>
-      cell(column.width, [para([run(column.header, { bold: true, size })], { align: 'center', after: 0 })], { shade: true }),
+      cell(column.width, [para([run(column.label ?? column.header, { bold: true, size })], { align: 'center', after: 0 })], { shade: true }),
     ),
     { header: true },
   );
 
-const body = () => {
-  const label = (text) => run(text, { bold: true });
-  const value = (tag) => run(tag);
+const text = (value) => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'object' && Array.isArray(value.richText)) {
+    return value.richText.map((part) => part.text).join('');
+  }
+  if (typeof value === 'object' && 'result' in value) {
+    return String(value.result ?? '');
+  }
+  return String(value);
+};
+
+export const readFormat = async (xlsx) => {
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(xlsx);
+  const sheet = book.getWorksheet(SHEET);
+  if (!sheet) {
+    throw new Error(`El Excel no tiene la hoja ${SHEET}`);
+  }
+  const expect = (address, value) => {
+    const actual = text(sheet.getCell(address).value).trim().replace(/\s+/g, ' ');
+    if (actual !== value) {
+      throw new Error(`La celda ${address} dice ${actual}, esperaba ${value}. El formato cambió`);
+    }
+    return actual;
+  };
+  for (const column of COLUMNS) {
+    expect(column.cell, column.header);
+  }
+  const note = text(sheet.getCell('B115').value).trim();
+  if (!note.startsWith('Nota:')) {
+    throw new Error('No encontré la nota en B115');
+  }
+  return {
+    area: expect('G2', 'CONTROL INTERNO'),
+    code: expect('J2', 'Código: OCI-17-90'),
+    version: expect('J4', 'Versión: 1'),
+    title: expect('G4', 'BAJA DE ACTIVOS'),
+    numberTitle: expect('K8', 'BAJA DE ACTIVOS'),
+    date: expect('B9', 'Fecha de la Baja Activos Fijos:'),
+    reportTotal: expect('H115', 'Total Informe Baja:'),
+    authorizedTotal: expect('H116', 'Total Autorizado Baja:'),
+    difference: expect('H117', 'Diferencia'),
+    review: expect('C117', 'REVISAN:'),
+    control: expect('C119', 'CONTROL INTERNO'),
+    accounting: expect('G119', 'CONTABILIDAD'),
+    council: expect('C125', 'VOTO CONSEJO UNIVERSITARIO:'),
+    reports: expect('C126', 'INFORMES DE VICEFINANCIERA'),
+    note: 'Nota:',
+  };
+};
+
+const body = (format) => {
+  const label = (value, size = 18) => run(value, { bold: true, size });
+  const value = (tag, size = 18) => run(tag, { size });
   const small = 14;
   const left = 3600;
   const pair = (title, runs) =>
@@ -70,22 +150,7 @@ const body = () => {
 
   const header = table(
     [left, TOTAL_WIDTH - left],
-    [
-      pair('Acta de baja No.', [value('{{documento.numero}}')]),
-      pair('Fecha del acta', [value('{{documento.fecha}}')]),
-      pair('Centro de costo', [value('{{centroCosto.codigo}}'), run(' '), value('{{centroCosto.nombre}}')]),
-      pair('Dependencia', [value('{{centroCosto.unidad.nombre}}')]),
-    ],
-  );
-
-  const data = table(
-    [left, TOTAL_WIDTH - left],
-    [
-      pair('Motivo de la baja', [value('{{campos.motivo}}')]),
-      pair('Concepto técnico o estado físico', [value('{{campos.conceptoTecnico}}')]),
-      pair('Disposición final del bien', [value('{{campos.disposicionFinal}}')]),
-      pair('Observaciones', [value('{{campos.observaciones}}')]),
-    ],
+    [pair(`${format.numberTitle} No.`, [value('{{documento.numero}}')]), pair(format.date, [value('{{documento.fecha}}')])],
   );
 
   const assets = table(
@@ -93,35 +158,33 @@ const body = () => {
     [headerRow(COLUMNS, small), loopRow(COLUMNS, 'activos', small)],
   );
 
-  const totals = para(
+  const totalLeft = TOTAL_WIDTH - 3200;
+  const totalRow = (title, tag) =>
+    row([
+      cell(totalLeft, [para([label(title, 16)], { align: 'right', after: 0 })], { shade: true }),
+      cell(3200, [para([value(tag, 16)], { align: 'right', after: 0 })]),
+    ]);
+  const totals = table(
+    [totalLeft, 3200],
     [
-      run('Total de activos: ', { bold: true, size: 16 }),
-      run('{{totalElementos}}', { size: 16 }),
-      run('   Costo total: ', { bold: true, size: 16 }),
-      run('{{campos.totalCosto}}', { size: 16 }),
-      run('   Valor en libros total: ', { bold: true, size: 16 }),
-      run('{{campos.totalValorLibros}}', { size: 16 }),
+      totalRow(format.reportTotal, '{{campos.totalInforme}}'),
+      totalRow(format.authorizedTotal, '{{campos.totalAutorizado}}'),
+      totalRow(format.difference, '{{campos.diferencia}}'),
     ],
-    { before: 60, after: 40 },
   );
 
-  const valuationNote = para(
-    [
-      run('Valor en libros con la depreciación registrada al ', { size: small }),
-      run('{{campos.fechaValor}}', { size: small }),
-      run('. Si un activo no tiene depreciación se muestra su costo.', { size: small }),
-    ],
-    { after: 120 },
-  );
+  const note = [
+    para([run('{{#campos.nota}}', { size: small })], { after: 0 }),
+    para([label(`${format.note} `, small), value('{{campos.nota}}', small)], { after: 60 }),
+    para([run('{{/campos.nota}}', { size: small })], { after: 0 }),
+  ];
 
   const substitutions = [
     para([run('{{#tablas.sustituciones}}', { size: small })], { after: 0 }),
     para(
       [
-        run('Sustitución de firmante: ', { bold: true, size: small }),
-        run('firma por {{rol}} {{sustituto}} en lugar de {{sustituido}}, que firma el acta como {{conflicto}}. Motivo: {{motivo}}', {
-          size: small,
-        }),
+        label('Sustitución de firmante: ', small),
+        value('firma por {{rol}} {{sustituto}} en lugar de {{sustituido}}, que firma el acta como {{conflicto}}. Motivo: {{motivo}}', small),
       ],
       { after: 60 },
     ),
@@ -129,28 +192,36 @@ const body = () => {
   ];
 
   const signerColumns = [
-    { header: 'Firma como', tag: '{{etiqueta}}', width: 3000 },
-    { header: 'Nombre', tag: '{{nombre}}', width: 4000 },
-    { header: 'Documento', tag: '{{tipoDocumento}} {{documento}}', width: 2400 },
-    { header: 'Cargo', tag: '{{cargo}}', width: 2600 },
-    { header: 'Firma', tag: ' ', width: 2400 },
+    { header: 'Firma por', tag: '{{etiqueta}}', width: 3000 },
+    { header: 'Nombre', tag: '{{nombre}}', width: 4400 },
+    { header: 'Cargo', tag: '{{cargo}}', width: 3600 },
+    { header: 'Firma', tag: ' ', width: 3400 },
   ];
   const signatures = table(
     signerColumns.map((column) => column.width),
     [headerRow(signerColumns, 16), loopRow(signerColumns, 'firmantes', 16)],
   );
 
+  const footer = table(
+    [left, TOTAL_WIDTH - left],
+    [
+      pair(format.council, [value('{{campos.acuerdoConsejo}}'), run(' '), value('{{campos.fechaAcuerdo}}')]),
+      pair(format.reports, [value('{{campos.informesVicefinanciera}}')]),
+    ],
+  );
+
   return [
     header,
-    para([label('Datos de la baja')], { before: 120, after: 40, keepNext: true }),
-    data,
-    para([label('Activos dados de baja')], { before: 120, after: 40, keepNext: true }),
+    para([run(' ')], { after: 120 }),
     assets,
+    para([run(' ')], { after: 60 }),
     totals,
-    valuationNote,
+    ...note,
     ...substitutions,
-    para([label('Firmas')], { before: 120, after: 40, keepNext: true }),
+    para([label(format.review)], { before: 120, after: 60, keepNext: true }),
     signatures,
+    para([run(' ')], { after: 120 }),
+    footer,
   ].join('');
 };
 
@@ -161,12 +232,13 @@ const landscapeHeader = (xml) => {
     .replace('<w:tblInd w:w="-289" w:type="dxa"/>', '<w:tblInd w:w="0" w:type="dxa"/>')
     .replace(/<w:(gridCol|tcW) w:w="(3225|4636|2779)"/g, (_, tag, width) => `<w:${tag} w:w="${widths[width]}"`);
   if (!result.includes(`<w:tblW w:w="${TOTAL_WIDTH}"`)) {
-    throw new Error('El encabezado de la base cambió: no encontré su tabla de 10 640 twips');
+    throw new Error('El encabezado de la base cambió. No encontré su tabla de 10 640 twips');
   }
   return result;
 };
 
-export const build = (base) => {
+export const build = async (base, xlsx) => {
+  const format = await readFormat(xlsx);
   const zip = new PizZip(base);
   const document = zip.file('word/document.xml').asText();
   const sectPr = document.match(/<w:sectPr\b[\s\S]*<\/w:sectPr>/)?.[0];
@@ -178,11 +250,20 @@ export const build = (base) => {
     .replace(/<w:pgMar [^>]*\/>/, '<w:pgMar w:top="1080" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/>');
   const start = document.indexOf('<w:body>') + '<w:body>'.length;
   const end = document.indexOf('</w:body>');
-  zip.file('word/document.xml', `${document.slice(0, start)}${body()}${landscape}${document.slice(end)}`);
+  zip.file('word/document.xml', `${document.slice(0, start)}${body(format)}${landscape}${document.slice(end)}`);
   const header = zip.file('word/header1.xml').asText();
-  zip.file('word/header1.xml', landscapeHeader(replaceTextOrFail(header, BASE_TITLE, TITLE)));
+  zip.file('word/header1.xml', landscapeHeader(replaceTextOrFail(header, BASE_TITLE, format.title)));
   clearAuthorMetadata(zip);
   return { output: generateClean(zip, SAMPLE, { metadata: true }), tags: templateTags(zip) };
 };
 
-await runCli(import.meta.url, 'build-oci-17-90-baja-template.mjs', build);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const [base, xlsx, target] = process.argv.slice(2);
+  if (!base || !xlsx || !target) {
+    throw new Error('Uso: build-oci-17-90-baja-template.mjs <base.docx> <formato.xlsx> <destino.docx>');
+  }
+  const { output, tags } = await build(await readFile(base), await readFile(xlsx));
+  await writeFile(target, output);
+  console.log(`Plantilla escrita en ${target}`);
+  console.log(tags.join(' '));
+}
