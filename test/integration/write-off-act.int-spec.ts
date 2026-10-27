@@ -198,6 +198,7 @@ describe('Baja de activos con acta OCI-17-90 (HTTP real + PostgreSQL real)', () 
 
   afterAll(async () => {
     const ids = ((await dataSource.query(`SELECT id FROM document WHERE entity_type = 'WRITE_OFF'`)) as Array<{ id: string }>).map((item) => item.id);
+    await dataSource.query('DELETE FROM asset_depreciation WHERE asset_id IN (SELECT id FROM asset WHERE category_id = $1)', [categoryId]);
     await dataSource.query('DELETE FROM asset_write_off_item');
     await dataSource.query('DELETE FROM asset_write_off');
     await dataSource.query('DELETE FROM document_signature_reassignment WHERE document_id = ANY($1)', [ids]);
