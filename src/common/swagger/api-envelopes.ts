@@ -20,7 +20,7 @@ export class ApiErrorEnvelope {
   @ApiProperty({
     description:
       'Cuerpo del error: message legible, code del catálogo y details opcionales',
-    example: { message: 'La sesión expiró', code: 'TOKEN_EXPIRED' },
+    example: { message: 'Su sesión expiró. Inicie sesión de nuevo.', code: 'TOKEN_EXPIRED' },
   })
   readonly error!: unknown;
 

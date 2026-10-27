@@ -81,7 +81,7 @@ const READ_FORBIDDEN_RESPONSE = {
             error: {
               code: 'SCOPE_NO_COST_CENTER',
               message:
-                'Tu rol solo da acceso a los centros de costo que tengas asignados y no tienes ninguno. Pide a Control Interno que te asigne el rol sobre tu centro de costo.',
+                'Su rol no tiene centros de costo asignados. Pida a Control Interno que se los asigne.',
             },
           },
         },
@@ -92,7 +92,7 @@ const READ_FORBIDDEN_RESPONSE = {
             error: {
               code: 'SCOPE_ORG_UNIT_UNRESOLVED',
               message:
-                'Tu rol está asignado a una unidad organizacional, pero aún no está definido qué centros de costo cubre una unidad, así que no da acceso. Pide a Control Interno que te asigne el rol sobre un centro de costo.',
+                'Su rol está asignado a una dependencia y aún no le da acceso a centros de costo. Pida a Control Interno que se lo asigne sobre un centro de costo.',
             },
           },
         },

@@ -286,7 +286,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(deactivate.status).toBe(406);
     expect(deactivate.body.error).toMatchObject({
       code: 'COST_CENTER_HAS_ACTIVE_ASSETS',
-      message: 'No puede desactivarse: tiene activos asignados',
+      message: 'Tiene activos asignados. No se puede desactivar.',
       details: [{ field: 'activeAssets', message: '1' }],
     });
 

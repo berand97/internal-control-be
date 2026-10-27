@@ -232,7 +232,7 @@ export class TypeOrmUsersRepository implements UsersRepository {
             frontier[0].map((row) => row.id),
             at,
             revokedBy,
-            'Revocada en cascada: se revocó la asignación de origen de la delegación',
+            'Se revocó porque se revocó el rol original de la delegación.',
           ],
         )) as [Array<{ id: string; user_id: string }>, number];
       }

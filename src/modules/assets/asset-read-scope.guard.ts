@@ -52,11 +52,7 @@ export class AssetReadScopeGuard implements CanActivate {
     if (catalog && scope.kind === 'EMPTY') {
       return true;
     }
-    request.assetReadScope = requireReadableScope(
-      scope,
-      ASSET_READ_GLOBAL,
-      ASSET_READ_SCOPED,
-    );
+    request.assetReadScope = requireReadableScope(scope);
     return true;
   }
 }

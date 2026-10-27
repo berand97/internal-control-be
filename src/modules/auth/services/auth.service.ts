@@ -480,7 +480,7 @@ export class AuthService {
     void this.deliverPasswordReset(user, dto.email, context).catch(
       (error: unknown) => {
         this.logger.error(
-          'No se pudo completar el restablecimiento de contraseña solicitado',
+          'No se pudo cambiar la contraseña. Intente de nuevo.',
           error instanceof Error ? error.stack : String(error),
         );
       },

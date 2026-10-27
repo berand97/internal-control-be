@@ -55,7 +55,7 @@ export class PermissionsGuard implements CanActivate {
     if (!allowed) {
       throw new ApiException(
         ErrorCode.InsufficientPermissions,
-        `Requiere permiso ${required.code}`,
+        'No tiene permiso para hacer esto.',
       );
     }
     return true;

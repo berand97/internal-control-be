@@ -298,7 +298,7 @@ export class CostCentersController {
   @ApiOperation({
     summary: 'Eliminar (o archivar) un centro de costo',
     description:
-      'Se rechaza si tiene activos no dados de baja: 406 COST_CENTER_HAS_ACTIVE_ASSETS («No puede desactivarse: tiene activos asignados») con details[{field:"activeAssets", message:"<n>"}]; con centros hijos activos: 406 HAS_DEPENDENT_ENTITIES con details[{field:"activeChildren", message:"<n>"}]. Sin historia se borra de verdad (deleted=true: también sus jefaturas, roles con alcance en el centro e historial de ubicación; las personas quedan sin centro). Con historia (activos dados de baja, movimientos, traslados, préstamos, tomas/actas, documentos, solicitudes…) se archiva: archived=true y reason.',
+      'Se rechaza si tiene activos no dados de baja: 406 COST_CENTER_HAS_ACTIVE_ASSETS («Tiene activos asignados. No se puede desactivar.») con details[{field:"activeAssets", message:"<n>"}]; con centros hijos activos: 406 HAS_DEPENDENT_ENTITIES con details[{field:"activeChildren", message:"<n>"}]. Sin historia se borra de verdad (deleted=true: también sus jefaturas, roles con alcance en el centro e historial de ubicación; las personas quedan sin centro). Con historia (activos dados de baja, movimientos, traslados, préstamos, tomas/actas, documentos, solicitudes…) se archiva: archived=true y reason.',
   })
   @ApiResponse({ status: 200, schema: envelopedSchema(StructureRemovalResultDto) })
   @ApiResponse({ status: 406, schema: errorEnvelopeSchema() })

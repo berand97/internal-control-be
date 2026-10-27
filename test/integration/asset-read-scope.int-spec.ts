@@ -187,7 +187,7 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
       expect(outside.body).toEqual({
         type: 'ERROR',
         action: 'CANCEL',
-        error: { code: 'RESOURCE_NOT_FOUND', message: 'El recurso solicitado no existe' },
+        error: { code: 'RESOURCE_NOT_FOUND', message: 'No encontramos lo que busca.' },
       });
       expect(outside.status).toBe(nonexistent.status);
       expect(outside.body).toEqual(nonexistent.body);
@@ -244,7 +244,7 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
             error: {
               code: 'SCOPE_NO_COST_CENTER',
               message:
-                'Tu rol solo da acceso a los centros de costo que tengas asignados y no tienes ninguno. Pide a Control Interno que te asigne el rol sobre tu centro de costo.',
+                'Su rol no tiene centros de costo asignados. Pida a Control Interno que se los asigne.',
             },
           },
         });
@@ -267,7 +267,7 @@ describe('Alcance de lectura de activos por centro de costo (HTTP real + Postgre
       expect(response.status).toBe(403);
       expect(response.body.error).toEqual({
         code: 'INSUFFICIENT_PERMISSIONS',
-        message: 'Requiere permiso asset:read:global o asset:read:org_unit',
+        message: 'No tiene permiso para hacer esto.',
       });
     }
   });
