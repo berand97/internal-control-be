@@ -1,3 +1,5 @@
+import { readSkipMfaAtLogin } from './skip-mfa-at-login.js';
+
 const REQUIRED_ENVIRONMENT_VARIABLES = [
   'DATABASE_URL',
   'JWT_ACCESS_SECRET',
@@ -19,5 +21,6 @@ export const validateEnv = (
       `Variables de entorno requeridas ausentes: ${missing.join(', ')}`,
     );
   }
+  readSkipMfaAtLogin(env);
   return env;
 };

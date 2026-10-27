@@ -1,7 +1,9 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
+import type { AppConfig } from '../../../config/configuration.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { HashService } from '../../../shared/crypto/hash.service.js';
 import { MailService } from '../../../shared/mail/mail.service.js';
@@ -76,7 +78,7 @@ const LAST_LOGINS_LIMIT = 5;
 const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
   private readonly logger = new Logger(AuthService.name);
 
   constructor(
@@ -97,7 +99,18 @@ export class AuthService {
     private readonly mfaAccount: MfaAccountService,
     private readonly lockout: AuthLockoutService,
     private readonly sessions: SessionStateService,
+    private readonly config: ConfigService<AppConfig, true>,
   ) {}
+
+  onModuleInit(): void {
+    if (this.skipMfaAtLogin()) {
+      this.logger.warn('AUTH_SKIP_MFA activo: el login no pide el autenticador. Solo para desarrollo.');
+    }
+  }
+
+  private skipMfaAtLogin(): boolean {
+    return this.config.getOrThrow('auth', { infer: true }).skipMfaAtLogin;
+  }
 
   async login(
     dto: LoginDto,
@@ -156,6 +169,10 @@ export class AuthService {
     }
     await this.lockout.clear(lockSubject, 'PASSWORD');
     this.assertAccountUsable(user);
+
+    if (this.skipMfaAtLogin()) {
+      return this.issueSession(user, context);
+    }
 
     if (user.mfaEnabled) {
       const mfaChallengeToken = this.tokenService.signMfaChallengeToken(

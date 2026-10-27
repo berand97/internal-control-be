@@ -11,6 +11,7 @@ import { type EventsConfig, resolveEventsConfig } from './events-config.js';
 import { type FeaturesConfig, resolveFeaturesConfig } from './features-config.js';
 import { resolveGotenbergUrl } from './gotenberg-url.js';
 import { resolveSignatureVerifyUrl } from './signature-verify-url.js';
+import { readSkipMfaAtLogin } from './skip-mfa-at-login.js';
 import { normalizePublicAssetsBaseUrl, normalizePublicAssetsBucket } from '../shared/storage/public-assets.js';
 
 export interface DatabaseConfig {
@@ -108,6 +109,11 @@ export interface AppConfig {
   readonly emailBrand: EmailBrandConfig;
   readonly inventories: InventoriesConfig;
   readonly events: EventsConfig;
+  readonly auth: AuthConfig;
+}
+
+export interface AuthConfig {
+  readonly skipMfaAtLogin: boolean;
 }
 
 export interface InventoriesConfig {
@@ -378,6 +384,9 @@ const configuration = (): AppConfig => {
       weeklyConcentrationThreshold: readOptionalPositiveInteger('INVENTORY_WEEKLY_CONCENTRATION_THRESHOLD'),
     },
     events: resolveEventsConfig(process.env),
+    auth: {
+      skipMfaAtLogin: readSkipMfaAtLogin(process.env),
+    },
   };
 };
 
