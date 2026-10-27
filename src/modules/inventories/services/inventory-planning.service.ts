@@ -91,13 +91,13 @@ export class InventoryPlanningService {
   async calendar(query: InventoryCalendarQueryDto) {
     const { from, to } = query;
     if (to < from) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'La fecha final de la ventana es anterior a la inicial', [
-        { field: 'to', message: 'Debe ser igual o posterior a from' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'La fecha final es anterior a la inicial.', [
+        { field: 'to', message: 'Debe ser igual o posterior a la fecha inicial.' },
       ]);
     }
     if (daysBetween(from, to) + 1 > MAX_CALENDAR_DAYS) {
-      throw new ApiException(ErrorCode.ValidationFailed, `La ventana no puede superar ${MAX_CALENDAR_DAYS} días`, [
-        { field: 'to', message: `Máximo ${MAX_CALENDAR_DAYS} días entre from y to` },
+      throw new ApiException(ErrorCode.ValidationFailed, `El rango no puede pasar de ${MAX_CALENDAR_DAYS} días.`, [
+        { field: 'to', message: `Elija un rango de hasta ${MAX_CALENDAR_DAYS} días.` },
       ]);
     }
     const rows = (await this.dataSource.query(
@@ -326,6 +326,6 @@ const scopeLabel = (row: CalendarRow): string => {
     case InventoryScopeType.Location:
       return row.target_code ? `Ubicación ${row.target_code} · ${row.target_name ?? ''}` : 'Ubicación';
     case InventoryScopeType.OrgUnit:
-      return row.target_code ? `Unidad ${row.target_code} · ${row.target_name ?? ''}` : 'Unidad';
+      return row.target_code ? `Dependencia ${row.target_code} · ${row.target_name ?? ''}` : 'Dependencia';
   }
 };

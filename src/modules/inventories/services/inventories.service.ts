@@ -553,7 +553,7 @@ export class InventoriesService {
         patch: { operationalStatus: OperationalStatus.Lost },
         movement: {
           type: MovementType.PhysicalVerification,
-          reason: `Faltante en ${inventory.code} — inicia baja formal`,
+          reason: `Faltante en ${inventory.code}. Inicia la baja formal.`,
           documentReference: inventory.code,
           requestedBy: inventory.reconcileRequestedBy,
           metadata: { inventoryId: inventory.id, result: 'MISSING' },

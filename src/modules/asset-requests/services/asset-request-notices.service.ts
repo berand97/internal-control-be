@@ -259,22 +259,22 @@ export class AssetRequestNoticesService {
       lines.push(`${extra.document.kind}${extra.document.number ? ` N.° ${extra.document.number}` : ''}`);
     }
     if (kind === 'SCHEDULED' && extra.startDate) {
-      lines.push(`Préstamo programado: se entrega desde el ${extra.startDate}. Nada se ha entregado todavía`);
+      lines.push(`El préstamo se entrega desde el ${extra.startDate}. Todavía no se ha entregado nada.`);
     }
     if (kind === 'LOAN_STARTS' && extra.startDate) {
-      lines.push(`Hoy (${extra.startDate}) se puede entregar el préstamo: el jefe del centro dueño o Control Interno registran la entrega`);
+      lines.push(`Desde hoy, ${extra.startDate}, se puede entregar el préstamo. La entrega la registra el jefe del centro dueño o Control Interno.`);
     }
     if (extra.returnReason !== undefined) {
-      lines.push(`Estaba devuelta al solicitante para corregir (motivo: ${extra.returnReason || 'sin motivo registrado'}) y no se corrigió`);
+      lines.push(`Se devolvió para corregir y no se corrigió. Motivo: ${extra.returnReason || 'sin motivo registrado'}.`);
     }
     if (kind === 'LOAN_REJECTED') {
-      lines.push('El préstamo programado se rechazó antes de entregarse: la solicitud quedó cerrada y los activos quedaron libres');
+      lines.push('El préstamo se rechazó antes de entregarse. La solicitud quedó cerrada y los activos quedaron libres.');
     }
     if (kind === 'LOAN_CANCELLED') {
-      lines.push('El préstamo programado se canceló antes de entregarse: no se va a realizar, la solicitud quedó cerrada y los activos quedaron libres');
+      lines.push('El préstamo se canceló antes de entregarse. La solicitud quedó cerrada y los activos quedaron libres.');
     }
     if (extra.expiredOn) {
-      lines.push(`Venció el ${extra.expiredOn}; los activos elegidos quedaron libres`);
+      lines.push(`Venció el ${extra.expiredOn}. Los activos elegidos quedaron libres.`);
     }
     return lines.join('\n');
   }

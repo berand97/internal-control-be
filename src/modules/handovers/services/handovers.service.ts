@@ -8,7 +8,7 @@ import type { ErrorDetail } from '../../../common/types/response-envelope.type.j
 import { HOLD_OPEN_LOAN, HOLD_OPEN_TRANSFER, HOLD_REQUEST_RESERVATION, holdReasons } from '../../assets/domain/asset-holds.js';
 import type { Asset } from '../../assets/entities/asset.entity.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
-import type { OperationalStatus } from '../../assets/enums/operational-status.enum.js';
+import { OPERATIONAL_STATUS_PHRASE, type OperationalStatus } from '../../assets/enums/operational-status.enum.js';
 import { AssetStateService } from '../../assets/services/asset-state.service.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
@@ -52,6 +52,7 @@ interface AssetCheckRow {
   current_cost_center_id: string;
   operational_status: OperationalStatus;
   code: string;
+  center_code: string | null;
 }
 
 const PERSON_JSON = (alias: string) =>
@@ -90,8 +91,8 @@ export class HandoversService implements OnModuleInit {
     if (repeated.length > 0) {
       throw new ApiException(
         ErrorCode.ValidationFailed,
-        'Un activo aparece más de una vez en la entrega',
-        [...new Set(repeated)].map((id) => ({ field: 'assets', message: `Activo repetido: ${id}` })),
+        'Un activo aparece más de una vez en la entrega.',
+        [...new Set(repeated)].map(() => ({ field: 'assets', message: 'Este activo está repetido.' })),
       );
     }
     const handoverId = randomUUID();
@@ -155,7 +156,7 @@ export class HandoversService implements OnModuleInit {
   async cancel(id: string, reason: string, actor: AuthenticatedUser): Promise<HandoverDetailDto> {
     const motive = reason.trim();
     if (motive.length < 5) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'El motivo de la cancelación es obligatorio', [
+      throw new ApiException(ErrorCode.ValidationFailed, 'Escriba el motivo de la cancelación.', [
         { field: 'reason', message: 'Mínimo 5 caracteres' },
       ]);
     }
@@ -164,10 +165,10 @@ export class HandoversService implements OnModuleInit {
         status: HandoverStatus;
       }>;
       if (!exists) {
-        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la entrega');
+        throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la entrega.');
       }
       if (exists.status === 'SIGNED') {
-        throw new ApiException(ErrorCode.DocumentAlreadySigned, 'La entrega ya está firmada y aplicada; no se puede cancelar');
+        throw new ApiException(ErrorCode.DocumentAlreadySigned, 'La entrega ya está firmada. No se puede cancelar.');
       }
       const voided = await this.engine.voidForEntity(manager, {
         entityType: HANDOVER_ENTITY_TYPE,
@@ -179,7 +180,7 @@ export class HandoversService implements OnModuleInit {
         status: HandoverStatus;
       }>;
       if (!handover || !CANCELLABLE_HANDOVER_STATUSES.includes(handover.status)) {
-        throw new ApiException(ErrorCode.InvalidState, `La entrega está ${handover?.status ?? 'sin estado'} y no se puede cancelar`);
+        throw new ApiException(ErrorCode.InvalidState, 'La entrega no se puede cancelar en su estado actual.');
       }
       await manager.query(
         `UPDATE asset_handover SET status = 'CANCELLED', closed_at = NOW(), cancelled_by = $2, cancel_reason = $3 WHERE id = $1`,
@@ -265,7 +266,7 @@ export class HandoversService implements OnModuleInit {
       Omit<HandoverDetailDto, 'items' | 'document'> & { document_request_id: string; document_id: string | null }
     >;
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la entrega');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la entrega.');
     }
     const items = (await manager.query(
       `SELECT i.line_number AS "lineNumber", i.note, i.movement_id AS "movementId",
@@ -318,27 +319,28 @@ export class HandoversService implements OnModuleInit {
     ])) as Array<{ id: string }>;
     const ids = new Set(found.map((item) => item.id));
     const missing: ErrorDetail[] = [
-      ...(ids.has(dto.receiverPersonId) ? [] : [{ field: 'receiverPersonId', message: 'No existe la persona que recibe' }]),
-      ...(ids.has(dto.auditorPersonId) ? [] : [{ field: 'auditorPersonId', message: 'No existe la persona de Control Interno' }]),
+      ...(ids.has(dto.receiverPersonId) ? [] : [{ field: 'receiverPersonId', message: 'No encontramos a la persona que recibe.' }]),
+      ...(ids.has(dto.auditorPersonId) ? [] : [{ field: 'auditorPersonId', message: 'No encontramos a la persona de Control Interno.' }]),
     ];
     if (missing.length > 0) {
-      throw new ApiException(ErrorCode.ResourceNotFound, missing.map((item) => item.message).join('; '), missing);
+      throw new ApiException(ErrorCode.ResourceNotFound, missing.map((item) => item.message).join(' '), missing);
     }
   }
 
   private async assertCostCenter(manager: EntityManager, costCenterId: string): Promise<void> {
     const [found] = (await manager.query('SELECT id FROM cost_center WHERE id = $1', [costCenterId])) as unknown[];
     if (!found) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo', [
-        { field: 'costCenterId', message: 'No existe el centro de costo' },
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el centro de costo.', [
+        { field: 'costCenterId', message: 'No encontramos el centro de costo.' },
       ]);
     }
   }
 
   private async assertAssets(manager: EntityManager, assetIds: ReadonlyArray<string>, costCenterId: string): Promise<void> {
     const rows = (await manager.query(
-      `SELECT a.id, a.current_cost_center_id, a.operational_status, ${ASSET_CODE} AS code
-       FROM asset a WHERE a.id = ANY($1) ORDER BY a.id FOR SHARE OF a`,
+      `SELECT a.id, a.current_cost_center_id, a.operational_status, ${ASSET_CODE} AS code, c.external_code AS center_code
+       FROM asset a LEFT JOIN cost_center c ON c.id = a.current_cost_center_id
+       WHERE a.id = ANY($1) ORDER BY a.id FOR SHARE OF a`,
       [assetIds],
     )) as AssetCheckRow[];
     const byId = new Map(rows.map((row) => [row.id, row]));
@@ -346,8 +348,8 @@ export class HandoversService implements OnModuleInit {
     if (missing.length > 0) {
       throw new ApiException(
         ErrorCode.ResourceNotFound,
-        'Hay activos inexistentes en la entrega',
-        missing.map((id) => ({ field: 'assets', message: `No existe el activo ${id}` })),
+        'Algunos activos de la entrega no existen.',
+        missing.map(() => ({ field: 'assets', message: 'Este activo no existe.' })),
       );
     }
     const blocked = rows.filter((row) => NOT_DELIVERABLE_STATUSES.includes(row.operational_status));
@@ -355,7 +357,7 @@ export class HandoversService implements OnModuleInit {
       throw new ApiException(
         ErrorCode.HandoverAssetNotDeliverable,
         undefined,
-        blocked.map((row) => ({ field: 'assets', message: `El activo ${row.code} (${row.id}) está ${row.operational_status}` })),
+        blocked.map((row) => ({ field: 'assets', message: `El activo ${row.code} está ${OPERATIONAL_STATUS_PHRASE[row.operational_status]}.` })),
       );
     }
     const elsewhere = rows.filter((row) => row.current_cost_center_id !== costCenterId);
@@ -365,7 +367,7 @@ export class HandoversService implements OnModuleInit {
         undefined,
         elsewhere.map((row) => ({
           field: 'assets',
-          message: `El activo ${row.code} (${row.id}) está en el centro de costo ${row.current_cost_center_id}`,
+          message: `El activo ${row.code} está en el centro de costo ${row.center_code ?? ''}.`,
         })),
       );
     }
@@ -382,21 +384,22 @@ export class HandoversService implements OnModuleInit {
       throw new ApiException(
         ErrorCode.HandoverAssetReserved,
         undefined,
-        blocked.map((row) => ({ field: 'assets', message: `El activo ${row.code} ${row.reasons.join(', ')}` })),
+        blocked.map((row) => ({ field: 'assets', message: `El activo ${row.code} ${row.reasons.join(', ')}.` })),
       );
     }
   }
 
   private async assertNotInOpenHandover(manager: EntityManager, assetIds: ReadonlyArray<string>): Promise<void> {
     const open = (await manager.query(
-      `SELECT i.asset_id, i.handover_id FROM asset_handover_item i WHERE i.open AND i.asset_id = ANY($1)`,
+      `SELECT h.asset_id, ${ASSET_CODE} AS code FROM asset_handover_item h JOIN asset a ON a.id = h.asset_id
+       WHERE h.open AND h.asset_id = ANY($1)`,
       [assetIds],
-    )) as Array<{ asset_id: string; handover_id: string }>;
+    )) as Array<{ asset_id: string; code: string }>;
     if (open.length > 0) {
       throw new ApiException(
         ErrorCode.HandoverAssetInOpenHandover,
         undefined,
-        open.map((row) => ({ field: 'assets', message: `El activo ${row.asset_id} está en la entrega abierta ${row.handover_id}` })),
+        open.map((row) => ({ field: 'assets', message: `El activo ${row.code} está en otra entrega abierta.` })),
       );
     }
   }
@@ -524,13 +527,13 @@ export class HandoversService implements OnModuleInit {
     if (NOT_DELIVERABLE_STATUSES.includes(current.operationalStatus)) {
       throw new ApiException(
         ErrorCode.HandoverAssetNotDeliverable,
-        `El activo ${current.internalCode} está ${current.operationalStatus}; la entrega no se aplica`,
+        `El activo ${current.internalCode} está ${OPERATIONAL_STATUS_PHRASE[current.operationalStatus]}. La entrega no se aplica.`,
       );
     }
     if (current.costCenterId !== costCenterId) {
       throw new ApiException(
         ErrorCode.HandoverCostCenterMismatch,
-        `El activo ${current.internalCode} cambió de centro de costo; la entrega no se aplica`,
+        `El activo ${current.internalCode} cambió de centro de costo. La entrega no se aplica.`,
       );
     }
   }

@@ -99,8 +99,8 @@ export class InventorySignerHeadService {
       throw new ApiException(
         ErrorCode.InventoryUnassignedSurplus,
         total === 1
-          ? 'Hay 1 sobrante sin centro de costo: no pertenece a ninguna acta. Elija su centro (PUT /inventories/:id/items/:itemId/surplus-center) o regístrelo como activo antes de conciliar'
-          : `Hay ${total} sobrantes sin centro de costo: no pertenecen a ninguna acta. Elija el centro de cada uno (PUT /inventories/:id/items/:itemId/surplus-center) o regístrelos como activos antes de conciliar`,
+          ? 'Hay 1 sobrante sin centro de costo. Elija su centro o regístrelo como activo antes de conciliar.'
+          : `Hay ${total} sobrantes sin centro de costo. Elija el centro de cada uno o regístrelos como activos antes de conciliar.`,
         [{ field: 'unassignedSurplus', message: String(total) }],
       );
     }
@@ -174,9 +174,9 @@ export class InventorySignerHeadService {
       const chosen = choices.get(center);
       if (chosen && !options.some((option) => option.personId === chosen)) {
         fail(
-          `Quien firma el acta del centro ${refs.get(center)?.code ?? ''} como ENCARGADO debe ser jefe vigente de ese centro`,
+          `Quien firma el acta del centro ${refs.get(center)?.code ?? ''} como encargado debe ser su jefe.`,
           centers.length === 1 && input.signerHeadPersonId ? 'signerHeadPersonId' : 'signerHeads',
-          'No es jefe vigente del centro (GET /inventories/:id/acts/head-candidates)',
+          'No es jefe de este centro de costo.',
         );
       }
       if (!chosen && options.length > 1) {
@@ -204,11 +204,11 @@ export class InventorySignerHeadService {
       throw new ApiException(
         ErrorCode.ValidationFailed,
         single
-          ? `El centro de la toma tiene ${candidates.get(unchosen[0] as string)?.length ?? 0} jefes vigentes: indique cuál firma el acta como ENCARGADO`
-          : 'Algunos centros de la toma tienen varios jefes vigentes: indique cuál firma cada acta como ENCARGADO',
+          ? `El centro de la toma tiene ${candidates.get(unchosen[0] as string)?.length ?? 0} jefes. Elija cuál firma el acta como encargado.`
+          : 'Algunos centros de la toma tienen varios jefes. Elija cuál firma cada acta como encargado.',
         unchosen.map((center) => ({
           field: single ? 'signerHeadPersonId' : `signerHeads.${center}`,
-          message: `${refs.get(center)?.code ?? center}: elija uno de GET /inventories/:id/acts/head-candidates`,
+          message: `Elija el jefe que firma el acta del centro ${refs.get(center)?.code ?? ''}.`,
         })),
       );
     }
@@ -219,20 +219,20 @@ export class InventorySignerHeadService {
     const choices = new Map<string, string>();
     if (input.signerHeadPersonId) {
       if (input.signerHeads?.length) {
-        fail('Indique el firmante con signerHeads o con signerHeadPersonId, no ambos', 'signerHeadPersonId', 'No junto con signerHeads');
+        fail('Indique el firmante de una sola forma.', 'signerHeadPersonId', 'Indique el firmante de una sola forma.');
       }
       if (centers.length !== 1) {
         fail(
-          `La toma tiene ${centers.length} centros de costo (un acta por centro): indique el firmante de cada uno en signerHeads`,
+          `La toma tiene ${centers.length} centros de costo y un acta por centro. Elija el firmante de cada una.`,
           'signerHeadPersonId',
-          'Use signerHeads [{ costCenterId, personId }]',
+          'Elija el firmante de cada acta.',
         );
       }
       choices.set(centers[0] as string, input.signerHeadPersonId);
     }
     for (const choice of input.signerHeads ?? []) {
       if (!centers.includes(choice.costCenterId)) {
-        fail('El centro indicado no tiene acta en esta toma', `signerHeads.${choice.costCenterId}`, 'No es un centro de la toma');
+        fail('Ese centro de costo no tiene acta en esta toma.', `signerHeads.${choice.costCenterId}`, 'No es un centro de la toma.');
       }
       if (choices.has(choice.costCenterId)) {
         fail('Un centro con dos firmantes', `signerHeads.${choice.costCenterId}`, 'Repetido');
@@ -251,7 +251,7 @@ export class InventorySignerHeadService {
     const byCenter = new Map<string, { personId: string | null; name: string | null }>();
     for (const entry of input.attendedBy ?? []) {
       if (!centers.includes(entry.costCenterId)) {
-        fail('El centro indicado no tiene acta en esta toma', `attendedBy.${entry.costCenterId}`, 'No es un centro de la toma');
+        fail('Ese centro de costo no tiene acta en esta toma.', `attendedBy.${entry.costCenterId}`, 'No es un centro de la toma.');
       }
       if (byCenter.has(entry.costCenterId)) {
         fail('Un centro con dos personas que atendieron', `attendedBy.${entry.costCenterId}`, 'Repetido');
@@ -266,7 +266,7 @@ export class InventorySignerHeadService {
         id: string;
       }>;
       if (found.length < new Set(persons).size) {
-        fail('La persona que atendió por el área no existe', 'attendedByPersonId', 'No existe');
+        fail('No encontramos a la persona que atendió por el área.', 'attendedByPersonId', 'No encontramos a esta persona.');
       }
     }
     return new Map(centers.map((center) => [center, byCenter.get(center) ?? general]));
@@ -274,7 +274,7 @@ export class InventorySignerHeadService {
 
   private who(personId: string | undefined, name: string | undefined, field: string) {
     if (personId && name !== undefined) {
-      fail('Quién atendió por el área es una persona del sistema o un nombre, no ambos', field, 'No se envía junto con la persona');
+      fail('Elija una persona o escriba un nombre, no ambos.', field, 'Elija una persona o escriba un nombre, no ambos.');
     }
     return { personId: personId ?? null, name: name?.trim() || null };
   }
@@ -342,15 +342,15 @@ export class InventorySignerHeadService {
       ) {
         throw new ApiException(
           ErrorCode.InvalidState,
-          'El firmante ENCARGADO se indica con la toma cerrada o conciliada y el acta aún sin encolar',
+          'El encargado se elige con la toma cerrada o conciliada y antes de generar el acta.',
         );
       }
       const options = (await this.candidatesByCenter(manager, [row.costCenterId])).get(row.costCenterId) ?? [];
       if (!options.some((option) => option.personId === signerHeadPersonId)) {
         fail(
-          'Quien firma como ENCARGADO debe ser jefe vigente del centro de costo del acta',
+          'Quien firma como encargado debe ser jefe del centro de costo del acta.',
           'signerHeadPersonId',
-          'No es jefe vigente del centro (GET /inventories/:id/acts/head-candidates)',
+          'No es jefe de este centro de costo.',
         );
       }
       row.signerHeadPersonId = signerHeadPersonId;
@@ -367,12 +367,12 @@ export class InventorySignerHeadService {
       lock: { mode: 'pessimistic_write' },
     });
     if (rows.length === 0) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'La toma no tiene acta para ese centro de costo');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'La toma no tiene acta para ese centro de costo.');
     }
     if (rows.length > 1) {
       throw new ApiException(
         ErrorCode.InvalidState,
-        `La toma tiene ${rows.length} actas (una por centro de costo): indique el centro (/inventories/:id/acts/:costCenterId/…)`,
+        `La toma tiene ${rows.length} actas, una por centro de costo. Elija el centro.`,
       );
     }
     return rows[0] as PhysicalInventoryAct;
@@ -385,10 +385,10 @@ export class InventorySignerHeadService {
       costCenterId: center?.id ?? null,
       message:
         candidates > 1
-          ? `El centro de costo ${label} tiene ${candidates} jefes vigentes y no se eligió cuál firma: su acta OCI-21-37 no se ` +
-            'emitirá hasta indicarlo (PUT /inventories/:id/acts/:costCenterId/signer-head) y encolarla. Las demás actas siguen.'
-          : `El centro de costo ${label} no tiene jefe vigente: su acta OCI-21-37 no se podrá emitir hasta asignarle un jefe, ` +
-            'indicarlo (PUT /inventories/:id/acts/:costCenterId/signer-head) y encolarla. Las demás actas siguen.',
+          ? `El centro de costo ${label} tiene ${candidates} jefes y no se eligió cuál firma. Su acta no se ` +
+            'emitirá hasta que lo elija. Las demás actas siguen.'
+          : `El centro de costo ${label} no tiene jefe. Su acta no se podrá emitir hasta que le asignen uno ` +
+            'y lo elija como firmante. Las demás actas siguen.',
     };
   }
 

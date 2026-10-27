@@ -34,14 +34,14 @@ export class InventoryActorPolicy {
     if (reason === 'COST_CENTER_HEAD') {
       throw new ApiException(
         ErrorCode.InventoryConflictOfInterest,
-        'Eres jefe vigente de un centro de costo que audita esta toma: no puedes ejecutarla, corregirla ni cerrarla',
+        'Usted es jefe de un centro de costo de esta toma. No puede ejecutarla, corregirla ni cerrarla.',
         [{ field: 'reason', message: reason }],
       );
     }
     if (reason === 'ASSET_CUSTODIAN') {
       throw new ApiException(
         ErrorCode.InventoryConflictOfInterest,
-        'Eres custodio de activos que audita esta toma: no puedes ejecutarla, corregirla ni cerrarla',
+        'Usted tiene a cargo activos de esta toma. No puede ejecutarla, corregirla ni cerrarla.',
         [{ field: 'reason', message: reason }],
       );
     }

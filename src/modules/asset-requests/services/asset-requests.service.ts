@@ -1,3 +1,4 @@
+import { operationalStatusPhraseSql } from '../../assets/enums/operational-status.enum.js';
 import { Injectable } from '@nestjs/common';
 import { DataSource, type EntityManager, QueryFailedError } from 'typeorm';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
@@ -63,7 +64,7 @@ const ASSET_CODE = `coalesce(
 const CURRENT_HEAD = `h.valid_from <= NOW() AND (h.valid_until IS NULL OR h.valid_until > NOW())`;
 
 const BLOCKERS = holdReasons(
-  `CASE WHEN a.operational_status::text NOT IN ('IN_USE', 'IN_STORAGE') THEN 'está ' || a.operational_status::text END`,
+  `CASE WHEN a.operational_status::text NOT IN ('IN_USE', 'IN_STORAGE') THEN 'está ' || ${operationalStatusPhraseSql('a.operational_status')} END`,
   HOLD_OPEN_LOAN('$2'),
   HOLD_OPEN_TRANSFER,
   HOLD_OPEN_INVENTORY,
@@ -200,14 +201,14 @@ export class AssetRequestsService {
     const request = await this.row(manager, id, lock);
     const roles = request ? await this.roles(manager, request, userId) : [];
     if (!request || roles.length === 0) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la solicitud');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la solicitud.');
     }
     return { request, roles };
   }
 
   private assertOwnerHead(request: AssetRequestRow, roles: ReadonlyArray<AssetRequestViewerRole>, userId: string): void {
     if (!roles.includes('OWNER_HEAD')) {
-      throw new ApiException(ErrorCode.AssetRequestNotHead, 'Solo un jefe vigente del centro dueño decide la solicitud');
+      throw new ApiException(ErrorCode.AssetRequestNotHead, 'Solo el jefe del centro de costo dueño de los activos decide la solicitud.');
     }
     if (request.requester_user_id === userId) {
       throw new ApiException(ErrorCode.AssetRequestSodViolation);
@@ -216,13 +217,13 @@ export class AssetRequestsService {
 
   private assertRequester(roles: ReadonlyArray<AssetRequestViewerRole>): void {
     if (!roles.includes('REQUESTER')) {
-      throw new ApiException(ErrorCode.InsufficientPermissions, 'Solo quien hizo la solicitud puede corregirla o cancelarla');
+      throw new ApiException(ErrorCode.InsufficientPermissions, 'Solo quien hizo la solicitud puede corregirla o cancelarla.');
     }
   }
 
   private assertReviewer(roles: ReadonlyArray<AssetRequestViewerRole>): void {
     if (!roles.includes('REVIEWER')) {
-      throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${ASSET_REQUEST_REVIEW}`);
+      throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para hacer esto.');
     }
   }
 
@@ -246,11 +247,11 @@ export class AssetRequestsService {
     const person = await this.personOf(this.dataSource.manager, actor.id);
     const total = await this.headCount(this.dataSource.manager, costCenterId, person);
     return total > 0
-      ? { hasHead: true, message: 'El centro tiene jefe vigente que puede decidir la solicitud' }
+      ? { hasHead: true, message: 'El centro tiene un jefe que puede decidir la solicitud.' }
       : {
           hasHead: false,
           message:
-            'El centro no tiene jefe vigente que pueda decidir la solicitud: no se puede enviar. Pídale al administrador que asigne la jefatura',
+            'El centro no tiene jefe y la solicitud no se puede enviar. Pida a un administrador que le asigne uno.',
         };
   }
 
@@ -266,14 +267,14 @@ export class AssetRequestsService {
       return;
     }
     if (!startDate || !expectedReturnDate) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'Un préstamo temporal necesita fecha de inicio y de devolución', [
-        ...(startDate ? [] : [{ field: 'startDate', message: 'Obligatoria en un préstamo temporal' }]),
-        ...(expectedReturnDate ? [] : [{ field: 'expectedReturnDate', message: 'Obligatoria en un préstamo temporal' }]),
+      throw new ApiException(ErrorCode.ValidationFailed, 'Indique la fecha de inicio y la de devolución.', [
+        ...(startDate ? [] : [{ field: 'startDate', message: 'Indique la fecha de inicio.' }]),
+        ...(expectedReturnDate ? [] : [{ field: 'expectedReturnDate', message: 'Indique la fecha de devolución.' }]),
       ]);
     }
     if (expectedReturnDate < startDate) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'La devolución no puede ser anterior al inicio', [
-        { field: 'expectedReturnDate', message: 'Anterior a startDate' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'La devolución no puede ser antes del inicio.', [
+        { field: 'expectedReturnDate', message: 'Es antes de la fecha de inicio.' },
       ]);
     }
   }
@@ -286,20 +287,20 @@ export class AssetRequestsService {
     ownerCostCenterId: string,
   ): Promise<void> {
     if (requestingCostCenterId === ownerCostCenterId) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'El centro que solicita y el centro dueño deben ser distintos', [
-        { field: 'ownerCostCenterId', message: 'Igual al centro que solicita' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'Elija un centro de costo distinto al suyo.', [
+        { field: 'ownerCostCenterId', message: 'Es el mismo centro que solicita.' },
       ]);
     }
     const centers = (await manager.query('SELECT id FROM cost_center WHERE id = ANY($1) AND is_active', [
       [requestingCostCenterId, ownerCostCenterId],
     ])) as Array<{ id: string }>;
     if (centers.length !== 2) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'El centro de costo no existe o está inactivo');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'El centro de costo no existe o está archivado.');
     }
     if (!(await this.isHead(manager, actorId, requestingCostCenterId))) {
       throw new ApiException(
         ErrorCode.AssetRequestNotHead,
-        'Solo un jefe vigente del centro que solicita puede pedir activos en su nombre',
+        'Solo el jefe del centro de costo puede pedir activos a su nombre.',
       );
     }
     if ((await this.headCount(manager, ownerCostCenterId, personId)) === 0) {
@@ -314,7 +315,7 @@ export class AssetRequestsService {
     const id = await this.dataSource.transaction(async (manager) => {
       const personId = await this.personOf(manager, actor.id);
       if (!personId) {
-        throw new ApiException(ErrorCode.AssetRequestNotHead, 'El usuario no tiene persona asociada: no es jefe de ningún centro');
+        throw new ApiException(ErrorCode.AssetRequestNotHead, 'Su usuario no es jefe de ningún centro de costo.');
       }
       await this.assertCenters(manager, actor.id, personId, dto.requestingCostCenterId, dto.ownerCostCenterId);
       const code = await this.nextCode(manager);
@@ -370,7 +371,7 @@ export class AssetRequestsService {
         );
       } catch (error) {
         if (error instanceof QueryFailedError && (error.driverError as { constraint?: string })?.constraint === 'uq_asset_request_item_open') {
-          throw new ApiException(ErrorCode.AssetRequestAssetUnavailable, 'Otro jefe reservó uno de los activos al mismo tiempo');
+          throw new ApiException(ErrorCode.AssetRequestAssetUnavailable, 'Otro jefe acaba de reservar uno de los activos. Revise la lista.');
         }
         throw error;
       }
@@ -396,14 +397,14 @@ export class AssetRequestsService {
       [assetIds, OPEN_LOAN_STATUSES, request.id, request.owner_cost_center_id],
     )) as Array<{ id: string; code: string; blockers: string[] }>;
     if (rows.length !== assetIds.length) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'Hay activos que no existen');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'Algunos activos no existen.');
     }
     const blocked = rows.filter((row) => row.blockers.length > 0);
     if (blocked.length > 0) {
       throw new ApiException(
         ErrorCode.AssetRequestAssetUnavailable,
         undefined,
-        blocked.map((row) => ({ field: 'assetIds', message: `El activo ${row.code} ${row.blockers.join(', ')}` })),
+        blocked.map((row) => ({ field: 'assetIds', message: `El activo ${row.code} ${row.blockers.join(', ')}.` })),
       );
     }
   }
@@ -425,7 +426,7 @@ export class AssetRequestsService {
       const { request, roles } = await this.partyRequest(manager, id, actor.id, true);
       this.assertRequester(roles);
       if (request.status !== 'RETURNED') {
-        throw new ApiException(ErrorCode.AssetRequestInvalidStateTransition, `La solicitud está ${request.status}: solo se corrige devuelta`);
+        throw new ApiException(ErrorCode.AssetRequestInvalidStateTransition, 'Solo se puede corregir una solicitud devuelta.');
       }
       const kind = dto.kind ?? request.kind;
       const requesting = dto.requestingCostCenterId ?? request.requesting_cost_center_id;
@@ -531,8 +532,8 @@ export class AssetRequestsService {
         if (deliveryOnly.length > 0) {
           throw new ApiException(
             ErrorCode.ValidationFailed,
-            'Generar un préstamo no lo entrega: firmantes y observaciones del acta OCI-01-65 se indican al entregar (POST /loans/:id/deliver)',
-            deliveryOnly.map((field) => ({ field, message: 'Se indica al entregar el préstamo' })),
+            'Los firmantes y las observaciones del acta se indican al entregar el préstamo.',
+            deliveryOnly.map((field) => ({ field, message: 'Se indica al entregar el préstamo.' })),
           );
         }
       }
@@ -541,25 +542,25 @@ export class AssetRequestsService {
         manager,
       );
       if (!(await this.permissions.userHasPermission(actor.id, format.generatePermission))) {
-        throw new ApiException(ErrorCode.InsufficientPermissions, `Generar el ${format.key} requiere permiso ${format.generatePermission}`);
+        throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para hacer esto.');
       }
       const assetIds = ((await manager.query(
         'SELECT asset_id FROM asset_request_item WHERE request_id = $1 AND open ORDER BY created_at, asset_id',
         [request.id],
       )) as Array<{ asset_id: string }>).map((row) => row.asset_id);
       if (assetIds.length === 0) {
-        throw new ApiException(ErrorCode.InvalidState, 'La solicitud no tiene activos aceptados');
+        throw new ApiException(ErrorCode.InvalidState, 'La solicitud no tiene activos aceptados.');
       }
       const [moved] = (await manager.query(
         'SELECT count(*)::int AS total FROM asset WHERE id = ANY($1) AND current_cost_center_id <> $2',
         [assetIds, request.owner_cost_center_id],
       )) as Array<{ total: number }>;
       if ((moved?.total ?? 0) > 0) {
-        throw new ApiException(ErrorCode.AssetRequestAssetUnavailable, 'Algún activo aceptado ya no está en el centro dueño');
+        throw new ApiException(ErrorCode.AssetRequestAssetUnavailable, 'Un activo aceptado ya no está en el centro de costo dueño.');
       }
       const ownerPerson = request.accepted_by ? await this.personOf(manager, request.accepted_by) : null;
       if (!ownerPerson) {
-        throw new ApiException(ErrorCode.InvalidState, 'Quien aceptó la solicitud no tiene persona asociada: no puede firmar ENTREGA');
+        throw new ApiException(ErrorCode.InvalidState, 'Quien aceptó la solicitud no tiene una persona asociada para firmar la entrega.');
       }
       await manager.query('UPDATE asset_request_item SET open = FALSE WHERE request_id = $1', [request.id]);
       const justification = dto.justification?.trim() || request.description;
@@ -592,8 +593,8 @@ export class AssetRequestsService {
         const items = dto.items ?? [];
         const given = items.map((item) => item.assetId);
         if (given.length !== assetIds.length || assetIds.some((assetId) => !given.includes(assetId))) {
-          throw new ApiException(ErrorCode.ValidationFailed, 'items debe traer exactamente los activos aceptados, uno por activo', [
-            { field: 'items', message: `Se esperaban ${assetIds.length} activos aceptados` },
+          throw new ApiException(ErrorCode.ValidationFailed, 'Incluya cada activo aceptado una sola vez.', [
+            { field: 'items', message: assetIds.length === 1 ? 'Debe haber 1 activo aceptado.' : `Deben ser ${assetIds.length} activos aceptados.` },
           ]);
         }
         transferId = await this.transfers.createWithin(
@@ -814,7 +815,7 @@ export class AssetRequestsService {
       request.requester_user_id === userId ||
       !(await this.isHead(manager, userId, request.owner_cost_center_id))
     ) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la solicitud');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la solicitud.');
     }
     return request;
   }
@@ -852,7 +853,7 @@ export class AssetRequestsService {
         )) as Array<EligibleAssetDto & { blockers: string[] }>)
       : [];
     if (!asset) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el activo');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el activo.');
     }
     const { blockers, ...data } = asset;
     return { ...data, eligible: blockers.length === 0, reason: blockers.length > 0 ? `El activo ${blockers.join(', ')}` : null };
@@ -865,7 +866,7 @@ export class AssetRequestsService {
       if (!(await this.isReviewer(actor.id)) && !(await this.isReader(actor.id))) {
         throw new ApiException(
           ErrorCode.InsufficientPermissions,
-          `Requiere permiso ${ASSET_REQUEST_REVIEW} o ${ASSET_REQUEST_READ_GLOBAL}`,
+          'No tiene permiso para hacer esto.',
         );
       }
       where = '$1::uuid IS NULL';
@@ -923,7 +924,7 @@ export class AssetRequestsService {
       [id],
     )) as Array<Record<string, unknown>>;
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la solicitud');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la solicitud.');
     }
     const items = (await manager.query(
       `SELECT a.id AS "assetId", ${ASSET_CODE} AS code, a.description, a.operational_status AS "operationalStatus", i.open

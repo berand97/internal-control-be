@@ -252,7 +252,7 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     expect((await http().get('/api/v1/transfers/accounting-signers').set(auth(director)).expect(200)).body.data).toEqual([]);
     const none = await http().post(`/api/v1/transfers/${created.id}/generate`).set(auth(director)).send({ controlSignerPersonId: auditor.personId });
     expect([none.status, none.body.error.code]).toEqual([409, 'TRANSFER_NO_ACCOUNTING_SIGNER']);
-    expect(none.body.error.message).toContain('Pídele al administrador');
+    expect(none.body.error.message).toBe('Nadie tiene el rol de Contabilidad. Pida a un administrador que lo asigne.');
     expect((await detail(created.id)).status).toBe('DRAFT');
 
     await grant(accountant.userId, 'CONTABILIDAD');
@@ -285,7 +285,7 @@ describe('Traslado de activos OCI-17-89 (HTTP real + PostgreSQL real)', () => {
     for (const ineligible of [deliverer, plainAuditor]) {
       const badControl = await generate(other.id, { controlSignerPersonId: ineligible.personId });
       expect([badControl.status, badControl.body.error.code]).toEqual([400, 'TRANSFER_SIGNER_NOT_ELIGIBLE']);
-      expect(badControl.body.error.message).toContain('Firmar actas por Control Interno');
+      expect(badControl.body.error.message).toBe('Esta persona no tiene permiso para firmar actas por Control Interno.');
     }
     await revoke(plainAuditor.userId, 'AUDITOR');
     await http().post(`/api/v1/transfers/${other.id}/cancel`).set(auth(director)).send({ reason: 'Prueba terminada' }).expect(200);

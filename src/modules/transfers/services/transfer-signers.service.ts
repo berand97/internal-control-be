@@ -45,8 +45,8 @@ export class TransferSignersService {
           ErrorCode.TransferSignerNotEligible,
           kind === 'ACCOUNTING'
             ? 'La persona indicada no tiene el rol de Contabilidad (transfer:sign_accounting:global) vigente'
-            : 'La persona indicada no tiene el permiso «Firmar actas por Control Interno» (act:sign_control:global) vigente',
-          [{ field: FIELD[kind], message: `No puede firmar por ${LABEL[kind]}` }],
+            : 'Esta persona no tiene permiso para firmar actas por Control Interno.',
+          [{ field: FIELD[kind], message: `No puede firmar por ${LABEL[kind]}.` }],
         );
       }
       return requested;
@@ -55,8 +55,8 @@ export class TransferSignersService {
     if (!only || others.length > 0) {
       throw new ApiException(
         ErrorCode.TransferSignerRequired,
-        `Hay ${candidates.length} personas que pueden firmar por ${LABEL[kind]}: indique ${FIELD[kind]}`,
-        [{ field: FIELD[kind], message: `Elija entre ${candidates.length} personas` }],
+        `${candidates.length} personas pueden firmar por ${LABEL[kind]}. Elija una.`,
+        [{ field: FIELD[kind], message: `Elija quién firma por ${LABEL[kind]}.` }],
       );
     }
     return only.personId;
@@ -79,7 +79,7 @@ export class TransferSignersService {
               {
                 code: 'NO_CONTROL_SIGNER' as const,
                 message:
-                  'No hay ningún usuario con el permiso «Firmar actas por Control Interno»: el acta no se podrá generar. Pídele al administrador que lo otorgue',
+                  'Nadie tiene permiso para firmar por Control Interno y el acta no se podrá generar. Pida a un administrador que lo otorgue.',
               },
             ]),
         ...(accounting
@@ -88,7 +88,7 @@ export class TransferSignersService {
               {
                 code: 'NO_ACCOUNTING_SIGNER' as const,
                 message:
-                  'No hay ningún usuario con el rol de Contabilidad: el acta no se podrá generar. Pídele al administrador que lo asigne',
+                  'Nadie tiene el rol de Contabilidad y el acta no se podrá generar. Pida a un administrador que lo asigne.',
               },
             ]),
       ],

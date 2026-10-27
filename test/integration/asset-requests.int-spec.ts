@@ -776,7 +776,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     }
     const early = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(ownerHead)).send(body);
     expect([early.status, early.body.error.code]).toEqual([409, 'LOAN_NOT_STARTED']);
-    expect(early.body.error.message).toContain(start);
+    expect(early.body.error.message).toMatch(/^El préstamo empieza el .+\. Entréguelo desde esa fecha\.$/u);
     expect(early.body.error.details).toEqual([{ field: 'startDate', message: start }]);
     const earlyDirector = await http().post(`/api/v1/loans/${loanId}/deliver`).set(auth(director)).send(body);
     expect([earlyDirector.status, earlyDirector.body.error.code]).toEqual([409, 'LOAN_NOT_STARTED']);

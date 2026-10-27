@@ -271,7 +271,7 @@ export const buildInventoryActContent = (input: ActInput): ActContent => {
 export const INVENTORY_ACT_PLACEHOLDERS: ReadonlyArray<readonly [string, string]> = [
   ['campos.tomaCodigo', 'Código de la toma (TF-2026-001)'],
   ['campos.tomaNombre', 'Nombre de la toma'],
-  ['campos.alcance', 'Alcance de la toma (no del acta): "Centro de costo 1020 — Nombre", "Ubicación …", "Unidad organizacional …" o "Toda la universidad". El centro del acta es centroCosto.* (un acta por centro de costo de la toma)'],
+  ['campos.alcance', 'Alcance de la toma (no del acta): "Centro de costo 1020 — Nombre", "Ubicación …", "Dependencia …" o "Toda la universidad". El centro del acta es centroCosto.* (un acta por centro de costo de la toma)'],
   ['campos.fechaProgramadaInicio / campos.fechaProgramadaFin', 'Fechas planeadas ("15 de marzo de 2026")'],
   ['campos.fechaInicio / campos.fechaCierre / campos.fechaAprobacion', 'Fechas reales de inicio, cierre y aprobación de la conciliación'],
   ['campos.corteContable', 'Fecha del corte contable o "Sin corte contable: estado del sistema al <fecha de la foto>"'],

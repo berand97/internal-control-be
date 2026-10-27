@@ -570,7 +570,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       const failed = await detail(loanId);
       expect(failed).toMatchObject({ status: 'PENDING_SIGNATURES', deliveryDocumentId: null });
       expect(failed.deliveryAct).toMatchObject({ status: 'FAILED', requestId, retryable: true, documentId: null });
-      expect(failed.deliveryAct.error).toContain('No hay plantilla vigente para OCI-01-65');
+      expect(failed.deliveryAct.error).toContain('No hay una plantilla activa para OCI-01-65.');
       expect(failed.deliveryAct.attempts).toBeGreaterThanOrEqual(1);
       for (const id of assets) {
         expect(await assetRow(id)).toMatchObject({ operational_status: 'ON_LOAN' });
@@ -667,7 +667,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
           .set(auth('director'))
           .send(path === 'return' ? { assetsReturned: [{ assetId: assets[0], condition: 'GOOD' }] } : {});
         expect([blocked.status, blocked.body.error.code]).toEqual([409, 'LOAN_DELIVERY_ACT_NOT_SIGNED']);
-        expect(blocked.body.error.message).toBe('No se puede registrar la devolución: el acta de entrega aún no está firmada por todos');
+        expect(blocked.body.error.message).toBe('El acta de entrega aún no tiene todas las firmas. Espere para registrar la devolución.');
       }
       const unchanged = await detail(loanId);
       expect(unchanged.status).toBe('PENDING_SIGNATURES');
@@ -962,7 +962,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         });
       expect([notEligible.status, notEligible.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
       expect(notEligible.body.error.details).toEqual([
-        { field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') },
+        { field: 'signers.AUDITA', message: 'Esta persona no tiene permiso para firmar actas por Control Interno.' },
       ]);
       const regenerated = await regenerate('director').expect(200);
       expectConforms('post', '/api/v1/loans/{id}/delivery-act/regenerate', 200, regenerated.body);
@@ -1190,7 +1190,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         .set(auth('director'))
         .send({ formatKey: 'LOAN_RETURN', responsiblePersonId: users['recibe']?.personId });
       expect([generate.status, generate.body.error.code]).toEqual([409, 'DOCUMENT_FORMAT_NOT_READY']);
-      expect(generate.body.error.message).toContain('sin código SGC');
+      expect(generate.body.error.message).toContain('Falta el código SGC.');
       await expect(
         dataSource.transaction((manager) => engine.enqueue(manager, { formatKey: 'LOAN_RETURN', entityType: 'LOAN', entityId: randomUUID() }, null)),
       ).rejects.toMatchObject({ code: 'DOCUMENT_FORMAT_NOT_READY' });
@@ -1242,7 +1242,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       .set(auth('director'))
       .send({ deliveredByPersonId: users['entrega']?.personId, controlInternoPersonId: users['nadie']?.personId });
     expect([rejected.status, rejected.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
-    expect(rejected.body.error.details).toEqual([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]);
+    expect(rejected.body.error.details).toEqual([{ field: 'signers.AUDITA', message: 'Esta persona no tiene permiso para firmar actas por Control Interno.' }]);
     expect((await detail(id)).status).toBe('APPROVED');
     expect(await scalar<string>(dataSource, 'SELECT operational_status FROM asset WHERE id = $1', [assetId])).not.toBe('ON_LOAN');
     expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE payload->>'entityId' = $1`, [id])).toBe(0);

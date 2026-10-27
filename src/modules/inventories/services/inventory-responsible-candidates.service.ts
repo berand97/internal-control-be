@@ -22,8 +22,8 @@ export class InventoryResponsibleCandidatesService {
 
   async list(query: QueryInventoryResponsibleCandidatesDto): Promise<InventoryResponsibleCandidatesPageDto> {
     if (query.scope && query.scope !== InventoryScopeType.Global && !query.scopeId) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'scopeId es obligatorio si scope no es GLOBAL', [
-        { field: 'scopeId', message: 'Requerido si scope no es GLOBAL' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'Elija el alcance de la toma.', [
+        { field: 'scopeId', message: 'Elija el alcance de la toma.' },
       ]);
     }
     const params: unknown[] = [EXECUTE_PERMISSION];

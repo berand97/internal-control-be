@@ -576,7 +576,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
         retryAction: 'ENQUEUE',
         requestId: null,
       });
-      expect(String(reconciled.act['message'])).toContain('sin código SGC institucional');
+      expect(String(reconciled.act['message'])).toContain('Falta el código SGC.');
       expect(
         await scalar<number>(dataSource, `SELECT count(*)::int FROM document_request WHERE payload->>'entityId' IN (SELECT id::text FROM physical_inventory_act WHERE inventory_id = $1)`, [orphan]),
       ).toBe(0);
@@ -688,11 +688,11 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
     expect(approved.body.data.status).toBe('RECONCILED');
     expect(approved.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
-    expect(String(approved.body.data.act.message)).toContain('Separación de funciones');
+    expect(String(approved.body.data.act.message)).toMatch(/^La misma persona firma como .+\. Indique un sustituto para Control Interno\.$/u);
 
     const duplicated = await post(director, `/${id}/act/enqueue`);
     expect([duplicated.status, duplicated.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
-    expect(duplicated.body.error.message).toContain('Separación de funciones');
+    expect(duplicated.body.error.message).toMatch(/^La misma persona firma como /u);
     expect(duplicated.body.error.details.map((item: { field: string }) => item.field)).toEqual(
       expect.arrayContaining(['signers.RESPONSABLE', 'signers.AUDITA', 'signerSubstitutions.AUDITA']),
     );
@@ -701,7 +701,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       signerSubstitutions: { AUDITA: { personId: withoutRole.personId, reason: 'El responsable aprobó la conciliación' } },
     });
     expect([invalid.status, invalid.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_SUBSTITUTE_INVALID']);
-    expect(invalid.body.error.message).toContain('Firmar actas por Control Interno');
+    expect(invalid.body.error.message).toMatch(/^El sustituto de .+ no tiene permiso para firmar actas por Control Interno\.$/u);
     expect((await detail(id)).act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
     const enqueued = await post(director, `/${id}/act/enqueue`, {
       signerSubstitutions: { AUDITA: { personId: director.personId, reason: 'El responsable aprobó la conciliación' } },
@@ -735,11 +735,11 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
     expect(approved.body.data.status).toBe('RECONCILED');
     expect(approved.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
-    expect(String(approved.body.data.act.message)).toContain('Firmar actas por Control Interno');
+    expect(String(approved.body.data.act.message)).toContain('necesita una persona con permiso para firmar actas por Control Interno');
 
     const notEligible = await post(director, `/${id}/act/enqueue`);
     expect([notEligible.status, notEligible.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
-    expect(notEligible.body.error.details).toEqual([{ field: 'signers.AUDITA', message: expect.stringContaining('act:sign_control:global') }]);
+    expect(notEligible.body.error.details).toEqual([{ field: 'signers.AUDITA', message: 'Esta persona no tiene permiso para firmar actas por Control Interno.' }]);
     const enqueued = await post(director, `/${id}/act/enqueue`, {
       signerSubstitutions: { AUDITA: { personId: approver.personId, reason: 'Quien aprobó no firma por Control Interno' } },
     });
@@ -831,7 +831,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       status: 'CLOSED',
       signerHead: null,
       actIssuable: false,
-      warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', message: expect.stringContaining('no tiene jefe vigente') }],
+      warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', message: expect.stringContaining('no tiene jefe. Su acta no se podrá emitir') }],
     });
     const reconciled = await approve(third);
     expect(reconciled.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'NO_COST_CENTER_HEAD', retryAction: 'ENQUEUE' });
@@ -963,7 +963,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       signerHead: null,
       actIssuable: false,
       unassignedItems: 2,
-      warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', costCenterId: maintenance, message: expect.stringContaining('no tiene jefe vigente') }],
+      warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', costCenterId: maintenance, message: expect.stringContaining('no tiene jefe. Su acta no se podrá emitir') }],
     });
     expect(atClose.get(faculty)).toMatchObject({
       costCenter: { id: faculty, code: await code(faculty), name: 'Facultad' },

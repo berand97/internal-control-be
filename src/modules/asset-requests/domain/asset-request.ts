@@ -43,7 +43,7 @@ export const assertAssetRequestTransition = (from: AssetRequestStatus, to: Asset
   if (!canAssetRequestTransition(from, to)) {
     throw new ApiException(
       ErrorCode.AssetRequestInvalidStateTransition,
-      `La solicitud está ${from}: no puede pasar a ${to}`,
+      'La solicitud no admite esa acción en su estado actual.',
     );
   }
 };

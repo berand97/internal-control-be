@@ -59,8 +59,8 @@ export class CostCenterHeadsService {
     const validFrom = dto.validFrom ? new Date(dto.validFrom) : new Date();
     const validUntil = dto.validUntil ? new Date(dto.validUntil) : null;
     if (validUntil && validUntil <= validFrom) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'La fecha de fin debe ser posterior a la de inicio', [
-        { field: 'validUntil', message: 'Debe ser posterior a validFrom' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'La fecha de fin debe ser posterior a la de inicio.', [
+        { field: 'validUntil', message: 'Debe ser posterior a la fecha de inicio.' },
       ]);
     }
     const id = await this.dataSource.transaction(async (manager) => {
@@ -69,7 +69,7 @@ export class CostCenterHeadsService {
         [dto.costCenterId],
       )) as Array<{ id: string; code: string; name: string; isActive: boolean }>;
       if (!center) {
-        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo');
+        throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el centro de costo.');
       }
       if (!center.isActive) {
         const message = `El centro ${center.code} · ${center.name} está archivado. Reactívelo antes de asignarle un jefe.`;
@@ -79,7 +79,7 @@ export class CostCenterHeadsService {
         dto.personId,
       ])) as Array<{ id: string }>;
       if (!person) {
-        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la persona o está inactiva');
+        throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos a la persona o está inactiva.');
       }
       const [self] = (await manager.query('SELECT 1 FROM app_user WHERE id = $1 AND person_id = $2', [
         actor.id,
@@ -127,7 +127,7 @@ export class CostCenterHeadsService {
         [id],
       )) as Array<{ id: string; person_id: string; cost_center_id: string; ended_at: Date | null; expired: boolean }>;
       if (!head) {
-        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la jefatura');
+        throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la jefatura.');
       }
       if (head.ended_at || head.expired) {
         throw new ApiException(ErrorCode.CostCenterHeadEnded);
@@ -153,7 +153,7 @@ export class CostCenterHeadsService {
   async byCostCenter(costCenterId: string, current: boolean): Promise<CostCenterHeadDto[]> {
     const [center] = (await this.dataSource.query('SELECT id FROM cost_center WHERE id = $1', [costCenterId])) as unknown[];
     if (!center) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el centro de costo.');
     }
     return this.list('h.cost_center_id = $1', costCenterId, current);
   }
@@ -161,7 +161,7 @@ export class CostCenterHeadsService {
   async byPerson(personId: string, current: boolean): Promise<CostCenterHeadDto[]> {
     const [person] = (await this.dataSource.query('SELECT id FROM person WHERE id = $1', [personId])) as unknown[];
     if (!person) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la persona');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos a la persona.');
     }
     return this.list('h.person_id = $1', personId, current);
   }
@@ -178,7 +178,7 @@ export class CostCenterHeadsService {
   private async get(id: string): Promise<CostCenterHeadDto> {
     const [row] = (await this.dataSource.query(`${HEAD_SELECT} WHERE h.id = $1`, [id])) as HeadRow[];
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la jefatura');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la jefatura.');
     }
     return toDto(row);
   }
