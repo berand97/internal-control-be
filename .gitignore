@@ -66,3 +66,7 @@ db/
 storage/documents/
 storage/document-templates/
 storage/import-templates/
+
+.claude/*
+!.claude/CLAUDE.md
+!.claude/rules/
