@@ -349,34 +349,34 @@ const targetRuleErrors = (
   const errors: Array<{ field: string; message: string }> = [];
   const m = request.mapping;
   if (request.structureMode && request.target !== 'COST_CENTERS') {
-    errors.push({ field: 'structureMode', message: 'Solo aplica a la importación de centros de costo' });
+    errors.push({ field: 'structureMode', message: 'Esta opción es para la importación de centros de costo.' });
   }
   if (request.target !== 'PERSONS') {
     if (request.documentType) {
-      errors.push({ field: 'documentType', message: 'Solo aplica a la importación de personas' });
+      errors.push({ field: 'documentType', message: 'Esta opción es para la importación de personas.' });
     }
     return errors;
   }
   if (m['fullName'] && (m['firstName'] || m['lastName'])) {
-    errors.push({ field: 'fullName', message: 'Use nombre completo o nombres y apellidos, no ambos' });
+    errors.push({ field: 'fullName', message: 'Use nombre completo o nombres y apellidos, no ambos.' });
   }
   const nameAbsentFromTemplate =
     !m['fullName'] &&
     ['firstName', 'lastName'].some((field) => !m[field]) &&
     ['firstName', 'lastName'].every((field) => m[field] || absent.has(field));
   if (!m['fullName'] && !(m['firstName'] && m['lastName']) && !nameAbsentFromTemplate) {
-    errors.push({ field: 'fullName', message: 'Falta el nombre: asigne nombre completo, o nombres y apellidos' });
+    errors.push({ field: 'fullName', message: 'Asigne la columna del nombre completo o las de nombres y apellidos.' });
   }
   if (m['documentType'] && request.documentType) {
     errors.push({
       field: 'documentType',
-      message: 'El tipo de documento viene de una columna o lo declara el operador, no de ambas',
+      message: 'Elija la columna del tipo de documento o un tipo para todo el archivo, no ambos.',
     });
   }
   if (request.unknownCostCenters === 'create') {
     errors.push({
       field: 'unknownCostCenters',
-      message: 'En personas un centro de costo inexistente va a cuarentena; no se crea',
+      message: 'En personas no se crean centros de costo. Las filas con un centro que no existe no se importan.',
     });
   }
   return errors;
@@ -415,7 +415,7 @@ export class ExcelImportService {
     if (!actorId || !(await this.permissions.userHasPermission(actorId, STRUCTURE_PERMISSION))) {
       throw new ApiException(
         ErrorCode.InsufficientPermissions,
-        `Actualizar la estructura de los centros de costo requiere ${STRUCTURE_PERMISSION}`,
+        'No tiene permiso para actualizar la estructura de los centros de costo.',
       );
     }
   }
@@ -642,8 +642,8 @@ export class ExcelImportService {
         rawValue: row.code === 'USEFUL_LIFE_DISCARDED' ? row.raw : null,
         detail:
           row.code === 'VALUE_TRUNCATED'
-            ? `${labelOf(row.field)}: ${row.length ?? '?'} caracteres; se guardan los primeros ${row.limit ?? '?'}`
-            : `${labelOf(row.field)}: no es un número entero de años; el activo se importa sin vida útil`,
+            ? `${labelOf(row.field)} tiene ${row.length ?? '?'} caracteres. Se guardan los primeros ${row.limit ?? '?'}.`
+            : `${labelOf(row.field)} no es un número entero de años. El activo se importa sin vida útil.`,
       });
     }
     const transformations: ImportTransformation[] = [];
@@ -687,35 +687,35 @@ export class ExcelImportService {
             fileIssue(
               'TEMPLATE_OUTDATED',
               null,
-              `Plantilla de la versión ${detection.version}${detection.versionGeneratedAt ? ` (generada ${detection.versionGeneratedAt.slice(0, 10)})` : ''}; la vigente es ${detection.currentVersion ?? '—'}. Las columnas que no trae se tratan como vacías.`,
+              `Esta plantilla es de una versión anterior. Las columnas que no trae se toman como vacías.`,
             ),
           ]
         : []),
       ...(detection && detection.target !== request.target
-        ? [fileIssue('TEMPLATE_TARGET_MISMATCH', null, `La plantilla es de ${detection.target}; se importa como ${request.target}`)]
+        ? [fileIssue('TEMPLATE_TARGET_MISMATCH', null, 'La plantilla es de otro tipo de importación. Revise que eligió el tipo correcto.')]
         : []),
       ...missingColumns.map((missing) =>
         fileIssue(
           'TEMPLATE_COLUMN_MISSING',
           missing.header,
           missing.required
-            ? 'El archivo no trae esta columna obligatoria: se trata como vacía y cada fila va a cuarentena'
-            : 'El archivo no trae esta columna: se trata como vacía',
+            ? 'Falta esta columna obligatoria. Ninguna fila se importa.'
+            : 'Falta esta columna. Se toma como vacía.',
         ),
       ),
       ...unmappedColumns.map((unmapped) =>
-        fileIssue('COLUMN_UNMAPPED', unmapped.header, `Columna ${unmapped.column} sin campo asignado: se ignora, no se guarda`),
+        fileIssue('COLUMN_UNMAPPED', unmapped.header, `La columna ${unmapped.column} no tiene campo asignado. No se importa.`),
       ),
       ...exampleRows.map((row) =>
-        fileIssue('TEMPLATE_EXAMPLE_ROW_IGNORED', null, 'Fila de ejemplo de la plantilla: no se importa', row),
+        fileIssue('TEMPLATE_EXAMPLE_ROW_IGNORED', null, 'Es la fila de ejemplo. No se importa.', row),
       ),
       ...responsibleLetters.map((letter) =>
         fileIssue(
           'RESPONSIBLE_NOT_IMPORTED',
           columns[letter] ?? RESPONSIBLE_HEADER,
           strippedFields.length > 0
-            ? `La columna ${letter} (responsable) no se importa: se quitó del mapeo de ${strippedFields.join(', ')}. Los jefes se asignan en Jefes de centro de costo`
-            : `La columna ${letter} (responsable) no se importa: los jefes se asignan en Jefes de centro de costo`,
+            ? `La columna ${letter} es el responsable y no se importa. Los jefes se asignan en Jefes de centro de costo.`
+            : `La columna ${letter} es el responsable y no se importa. Los jefes se asignan en Jefes de centro de costo.`,
         ),
       ),
       ...(structure?.issues ?? []).map((issue) => ({
@@ -916,7 +916,7 @@ export class ExcelImportService {
       [batchId],
     )) as Array<{ sheets: Array<{ name: string }> }>;
     if (!batch) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el archivo cargado');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el archivo.');
     }
     if (!batch.sheets.some((sheet) => sheet.name === request.sheet)) {
       throw new ApiException(ErrorCode.ValidationFailed, `El archivo no tiene la hoja '${request.sheet}'`);
@@ -960,7 +960,7 @@ export class ExcelImportService {
       )
       .map(([field, definition]) => ({
         field,
-        message: `Asigne la columna de «${definition.header}»: sin ese dato ninguna fila se importa. Si el archivo no la trae, agréguela y vuelva a subirlo.`,
+        message: `Asigne la columna ${definition.header}. Sin ese dato ninguna fila se importa.`,
       }));
     const badLetters = Object.entries(request.mapping).filter(([, letter]) => !COLUMN_LETTER.test(letter));
     const rules = targetRuleErrors(request, absent);
@@ -971,11 +971,11 @@ export class ExcelImportService {
       badLetters.length > 0 ||
       rules.length > 0
     ) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'Mapeo inválido', [
-        ...unknown.map((field) => ({ field, message: 'Campo destino desconocido' })),
-        ...missing.map((field) => ({ field, message: 'Campo obligatorio sin columna asignada' })),
+      throw new ApiException(ErrorCode.ValidationFailed, 'Revise las columnas asignadas.', [
+        ...unknown.map((field) => ({ field, message: 'Este campo no existe.' })),
+        ...missing.map((field) => ({ field, message: 'Asígnele una columna.' })),
         ...rejectsEveryRow,
-        ...badLetters.map(([field]) => ({ field, message: 'Columna inválida' })),
+        ...badLetters.map(([field]) => ({ field, message: 'La columna no es válida.' })),
         ...rules,
       ]);
     }
@@ -988,7 +988,7 @@ export class ExcelImportService {
       [importId],
     )) as ImportRow[];
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la importación');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la importación.');
     }
     return row;
   }
@@ -1089,7 +1089,7 @@ export class ExcelImportService {
               THEN 'El centro ' || center_code || ' no está en el catálogo y no tiene jefe vigente. Créelo y asígnele un jefe antes de importar sus activos.'
             WHEN center_code IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM cost_center cc WHERE cc.external_code = import_src.center_code)
-              THEN 'Centro de costo ' || center_code
+              THEN 'El centro de costo ' || center_code || ' no existe.'
             WHEN center_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM cost_center cc
                 WHERE cc.external_code = import_src.center_code AND ${currentHeadExistsSql('cc.id', 'NOW()')})
               THEN (SELECT 'El centro ' || cc.external_code || ' · ' || cc.name
@@ -1097,9 +1097,9 @@ export class ExcelImportService {
                     FROM cost_center cc WHERE cc.external_code = import_src.center_code)
             WHEN category_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM asset_category ac
                 WHERE ac.code = import_src.category_code AND ac.is_active)
-              THEN 'Categoría ' || left(category_code, 40)
+              THEN 'La categoría ' || left(category_code, 40) || ' no existe.'
             WHEN physical_condition IS NOT NULL AND physical_condition NOT IN (${PHYSICAL_CONDITION_LIST})
-              THEN 'Condición física ' || left(physical_condition, 40)
+              THEN 'La condición física ' || left(physical_condition, 40) || ' no existe.'
           END AS detail
         FROM import_src) c
       WHERE s.row_number = c.row_number`);
@@ -1196,18 +1196,18 @@ export class ExcelImportService {
       UPDATE import_src s SET reason = c.reason, detail = c.detail FROM (
         SELECT row_number, reason,
           CASE reason
-            WHEN 'DOCUMENT_TYPE_INVALID' THEN 'Tipo de documento «' || left(doc_type_raw, 20) || '» fuera del catálogo'
-            WHEN 'DOCUMENT_NUMBER_INVALID' THEN 'El número no corresponde al tipo de documento'
-            WHEN 'DOCUMENT_NUMBER_DUPLICATED' THEN 'El número aparece ' || repeated || ' veces en el archivo'
+            WHEN 'DOCUMENT_TYPE_INVALID' THEN 'El tipo de documento ' || left(doc_type_raw, 20) || ' no existe.'
+            WHEN 'DOCUMENT_NUMBER_INVALID' THEN 'El número no corresponde al tipo de documento.'
+            WHEN 'DOCUMENT_NUMBER_DUPLICATED' THEN 'El número aparece ' || repeated || ' veces en el archivo.'
             WHEN 'DOCUMENT_TYPE_CONFLICT' THEN
               CASE WHEN doc_type IS NULL
-                THEN 'Ya existe una persona con ese número y tipo de documento; declare el tipo del lote'
-                ELSE 'Ya existe una persona con ese número sin tipo de documento; complete su tipo antes de importar' END
-            WHEN 'COST_CENTER_UNKNOWN' THEN 'Centro de costo ' || center_code
-            WHEN 'FIELD_TOO_LONG' THEN 'Nombre (máx. ${PERSON_NAME_MAX}) o cargo (máx. ${PERSON_POSITION_MAX}) demasiado largo'
+                THEN 'Ya existe una persona con ese número y tipo de documento. Elija el tipo para todo el archivo.'
+                ELSE 'Ya existe una persona con ese número sin tipo de documento. Complete su tipo antes de importar.' END
+            WHEN 'COST_CENTER_UNKNOWN' THEN 'El centro de costo ' || center_code || ' no existe.'
+            WHEN 'FIELD_TOO_LONG' THEN 'El nombre pasa de ${PERSON_NAME_MAX} caracteres o el cargo pasa de ${PERSON_POSITION_MAX}.'
             WHEN 'EMAIL_NOT_INSTITUTIONAL' THEN
               CASE WHEN email ~* '@unac\\.edu\\.co$'
-                THEN 'El correo no es una dirección válida: tiene espacios, saltos de línea u otros caracteres no permitidos' END
+                THEN 'El correo tiene espacios u otros caracteres no permitidos.' END
           END AS detail
         FROM (
           SELECT row_number, doc_type, doc_type_raw, center_code, email,
@@ -1280,10 +1280,10 @@ export class ExcelImportService {
         base,
         detail:
           typeSource === 'DECLARED_BY_OPERATOR'
-            ? `Tipo declarado por el operador para todo el lote: ${job.options.declaredDocumentType ?? ''}`
+            ? `Tipo elegido para todo el archivo: ${job.options.declaredDocumentType ?? ''}`
             : typeSource === 'COLUMN'
-              ? 'Tipo tomado de la columna del archivo'
-              : 'Sin columna ni tipo declarado: se guardan sin tipo, con la marca DOCUMENT_TYPE_UNKNOWN',
+              ? 'Tipo tomado de la columna del archivo.'
+              : 'No hay columna ni tipo elegido. Se guardan sin tipo y marcadas para revisión.',
       },
       { key: 'PERSONS_WITHOUT_COST_CENTER', label: 'Filas sin centro de costo', value: counts?.without_center ?? 0, base },
       {

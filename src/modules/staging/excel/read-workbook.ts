@@ -84,14 +84,14 @@ export const readWorkbookWithProperties = async (content: Buffer): Promise<RawWo
   if (workbook.worksheets.length > MAX_SHEETS) {
     throw new ApiException(
       ErrorCode.ArchiveTooLarge,
-      `El libro tiene ${workbook.worksheets.length} hojas; el máximo es ${MAX_SHEETS}`,
+      `El archivo tiene ${workbook.worksheets.length} hojas. El máximo es ${MAX_SHEETS}.`,
     );
   }
   const tooLong = workbook.worksheets.find((worksheet) => worksheet.rowCount > MAX_SHEET_ROWS);
   if (tooLong) {
     throw new ApiException(
       ErrorCode.ArchiveTooLarge,
-      `La hoja "${tooLong.name}" llega hasta la fila ${tooLong.rowCount}; el máximo es ${MAX_SHEET_ROWS}. Borre las filas vacías sobrantes al final de la hoja`,
+      `La hoja ${tooLong.name} llega hasta la fila ${tooLong.rowCount}. El máximo es ${MAX_SHEET_ROWS}. Borre las filas vacías del final.`,
     );
   }
   const created = workbook.created as Date | undefined;

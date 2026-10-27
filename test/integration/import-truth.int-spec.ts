@@ -95,7 +95,7 @@ describe('La importación dice la verdad antes de escribir (HTTP real + PostgreS
     const summaryOf = (field: string) =>
       (persons.body.data.fields as Array<{ field: string; summary: string }>).find((item) => item.field === field)?.summary;
     expect(summaryOf('email')).toBe('El correo debe terminar en @unac.edu.co.');
-    expect(summaryOf('documentNumber')).toBe('Con CC o TI, solo dígitos. No puede repetirse en el archivo.');
+    expect(summaryOf('documentNumber')).toBe('Con CC o TI, solo números. No se puede repetir en el archivo.');
     expect(summaryOf('documentType')).toBe('Un tipo de la lista (CC, CE, PA, PEP, PPT, TI) o su abreviatura.');
     await http().get('/api/v1/imports/targets/PERSONS/fields').set(auth('nobody')).expect(403);
   });
@@ -171,7 +171,7 @@ describe('La importación dice la verdad antes de escribir (HTTP real + PostgreS
       {
         field: 'email',
         message:
-          'Asigne la columna de «Correo institucional»: sin ese dato ninguna fila se importa. Si el archivo no la trae, agréguela y vuelva a subirlo.',
+          'Asigne la columna Correo institucional. Sin ese dato ninguna fila se importa.',
       },
     ]);
     expect(blocked.body.error.details[0].message).not.toMatch(ERROR_CODE);
@@ -232,7 +232,7 @@ describe('La importación dice la verdad antes de escribir (HTTP real + PostgreS
           code: 'VALUE_TRUNCATED',
           column: 'Descripcion',
           rawValue: null,
-          detail: 'Descripción: 600 caracteres; se guardan los primeros 500',
+          detail: 'Descripción tiene 600 caracteres. Se guardan los primeros 500.',
         }),
         expect.objectContaining({ rowNumber: 3, code: 'VALUE_TRUNCATED', column: 'Documento' }),
         expect.objectContaining({ rowNumber: 3, code: 'USEFUL_LIFE_DISCARDED', column: 'Vida util', rawValue: '5.5' }),

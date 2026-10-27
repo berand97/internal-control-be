@@ -258,7 +258,7 @@ describe('Staging de Excel y diagnóstico (PostgreSQL real)', () => {
     const lines = csv.slice(1).trimEnd().split('\r\n');
     expect(lines).toHaveLength(diagnosis.issues.length + 1);
     expect(lines).toContain(
-      'ACTIVOS;11;MovFechaCompra;La fecha de compra no es una fecha;12/05/2019;Tipo de celda: string;PURCHASE_DATE_NOT_A_DATE',
+      'ACTIVOS;11;MovFechaCompra;La fecha de compra no es válida.;12/05/2019;Tipo de celda: string;PURCHASE_DATE_NOT_A_DATE',
     );
   });
 });

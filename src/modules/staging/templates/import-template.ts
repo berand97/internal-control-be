@@ -50,6 +50,8 @@ export const catalogValue = (entry: CatalogEntry): string => `${entry.code}${CAT
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
+const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
+
 export const catalogsUsedBy = (target: ImportTarget): ReadonlyArray<TemplateCatalog> => [
   ...new Set(templateFields(target).flatMap(([, field]) => (field.catalog ? [field.catalog] : []))),
 ];
@@ -196,7 +198,7 @@ export const buildTemplate = async ({ target, catalogs, generatedAt }: BuildTemp
     header.value = field.header;
     header.font = { bold: true, color: { argb: obligatory ? 'FFFFFFFF' : 'FF000000' } };
     header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: obligatory ? REQUIRED_FILL : OPTIONAL_FILL } };
-    header.note = `${obligatory ? 'OBLIGATORIA' : 'Opcional'}. ${field.format} Si se deja vacía: ${field.whenEmpty.text}`;
+    header.note = `${obligatory ? 'Obligatoria' : 'Opcional'}. ${field.format} Si la deja vacía, ${lowerFirst(field.whenEmpty.text)}`;
 
     const value = exampleValue(field, catalogs);
     const cell = data.getCell(`${letter}${EXAMPLE_ROW}`);
@@ -221,18 +223,18 @@ export const buildTemplate = async ({ target, catalogs, generatedAt }: BuildTemp
     }
   });
   data.getCell(`A${EXAMPLE_ROW}`).note =
-    'FILA DE EJEMPLO: el importador la ignora mientras no se modifique. Puede dejarla, borrarla o reemplazarla por un dato real.';
+    'Fila de ejemplo. No se importa mientras no la cambie. Puede dejarla, borrarla o reemplazarla por un dato real.';
 
   const obligatoryHeaders = fields.filter(([, field]) => field.whenEmpty.effect === 'QUARANTINE');
   const lines = [
     `Plantilla de importación: ${DATA_SHEET_NAME[target]}`,
     `Versión de plantilla: ${version} (generada ${generatedAt.toISOString().slice(0, 10)})`,
-    `Llene la hoja «${DATA_SHEET_NAME[target]}». La fila ${EXAMPLE_ROW} es un ejemplo: el importador la ignora mientras no la modifique; puede dejarla o borrarla.`,
-    `Encabezados en rojo: obligatorios (${obligatoryHeaders.map(([, field]) => field.header).join(', ')}). Sin ese dato la fila no se importa (queda en cuarentena).`,
-    'No cambie los encabezados: así el sistema reconoce las columnas. Si agrega columnas propias, se ignoran y el diagnóstico las reporta como no mapeadas.',
-    'Las columnas de códigos tienen formato de texto: los ceros a la izquierda se conservan (01979 sigue siendo 01979).',
-    'Los desplegables muestran código y nombre; el sistema guarda el código.',
-    ...TARGET_RULES[target].map((rule) => `Regla: ${rule}`),
+    `Llene la hoja ${DATA_SHEET_NAME[target]}. La fila ${EXAMPLE_ROW} es un ejemplo y no se importa mientras no la cambie. Puede dejarla o borrarla.`,
+    `Los encabezados en rojo son obligatorios: ${obligatoryHeaders.map(([, field]) => field.header).join(', ')}. Sin ese dato la fila no se importa.`,
+    'No cambie los encabezados. Si agrega columnas propias, se ignoran.',
+    'Las columnas de códigos conservan los ceros a la izquierda.',
+    'Las listas muestran código y nombre. Se guarda el código.',
+    ...TARGET_RULES[target],
   ];
   lines.forEach((line, index) => {
     instructions.getCell(`A${index + 1}`).value = line;

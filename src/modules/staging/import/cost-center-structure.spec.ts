@@ -125,9 +125,9 @@ describe('textos del diagnóstico de estructura', () => {
   it('crear, asociar, conflicto y prefijo sin unidad, en lenguaje llano', () => {
     const plan = planCostCenterStructure(FILE, [], []);
     const created = detailOf(plan, 'UNIT_CREATED', '4');
-    expect(created).toBe('Se crea la unidad «VICERRECTORÍA FINANCIERA» para los códigos que empiezan por 4 (del 4000 al 4999)');
+    expect(created).toBe('Se crea la dependencia VICERRECTORÍA FINANCIERA con los códigos del 4000 al 4999.');
     const withoutUnit = detailOf(plan, 'PREFIX_WITHOUT_UNIT', '3');
-    expect(withoutUnit).toContain('del 3000 al 3999 quedan sin unidad');
+    expect(withoutUnit).toContain('del 3000 al 3999 quedan sin dependencia. Agregue la fila 3 al archivo o asigne esos códigos a una dependencia.');
     for (const detail of [created, withoutUnit]) {
       noInternals(detail);
     }
@@ -139,13 +139,13 @@ describe('textos del diagnóstico de estructura', () => {
     ];
     const other = planCostCenterStructure([row(1, '6', false), row(2, '7', false), row(3, '8', false)], [], units);
     const associated = detailOf(other, 'UNIT_ASSOCIATED', '6');
-    expect(associated).toBe('La unidad «Extensión», que ya existe, queda para los códigos que empiezan por 6');
+    expect(associated).toBe('Extensión queda con los códigos que empiezan por 6.');
     const taken = detailOf(other, 'UNIT_PREFIX_CONFLICT', '7');
     expect(taken).toBe(
-      'Ya existe la unidad «Investigación» para los códigos que empiezan por 2: no se crea ni se asigna una unidad para los códigos que empiezan por 7',
+      'Investigación ya tiene los códigos que empiezan por 2. No se asigna a los que empiezan por 7.',
     );
     const inactive = detailOf(other, 'UNIT_PREFIX_CONFLICT', '8');
-    expect(inactive).toContain('«Posgrados» y está desactivada');
+    expect(inactive).toBe('Posgrados está archivada. No se asigna a los códigos que empiezan por 8.');
     for (const detail of [associated, taken, inactive]) {
       noInternals(detail);
     }
@@ -154,7 +154,7 @@ describe('textos del diagnóstico de estructura', () => {
   it('el padre con movimiento se explica sin «derivado»', () => {
     const plan = planCostCenterStructure([row(1, '4300', true), row(2, '4310', true)], [], []);
     expect(detailOf(plan, 'PARENT_HAS_MOVEMENT', '4310')).toBe(
-      'El centro padre que le corresponde por su código, 4300, recibe movimientos (Movimiento 1): no es agrupador',
+      'Su centro padre 4300 tiene Movimiento 1. Debería ser agrupador.',
     );
   });
 });

@@ -118,7 +118,7 @@ const percentOf = (job: JobRow): number | null => {
 const quarantineLines = (quarantined: Record<string, number>): string[] =>
   Object.entries(quarantined)
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([code, count]) => `  - ${count} · ${ISSUE_DESCRIPTIONS[code] ? `${ISSUE_DESCRIPTIONS[code]} ` : ''}[${code}]`);
+    .map(([code, count]) => `  - ${count} · ${ISSUE_DESCRIPTIONS[code] ?? code}`);
 
 @Injectable()
 export class ImportJobsService {
@@ -137,7 +137,7 @@ export class ImportJobsService {
       importId,
     ])) as Array<{ id: string; target: ImportTarget }>;
     if (!imported) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la importación');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la importación.');
     }
     await this.dataSource.query(
       `INSERT INTO staging_import_job (import_id, target, requested_by) VALUES ($1, $2, $3)
@@ -154,7 +154,7 @@ export class ImportJobsService {
   async find(jobId: string): Promise<ImportJobView> {
     const [row] = (await this.dataSource.query('SELECT * FROM staging_import_job WHERE id = $1', [jobId])) as JobRow[];
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el trabajo de importación');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la importación.');
     }
     return this.view(row);
   }
@@ -368,7 +368,7 @@ export class ImportJobsService {
     for (const job of abandoned) {
       await this.fail(
         { id: job.id, importId: job.import_id, target: job.target, requestedBy: job.requested_by, lease: job.lease_id, rows: null },
-        `El trabajo se interrumpió ${IMPORT_JOB_MAX_ATTEMPTS} veces sin terminar (el proceso se detuvo)`,
+        `La importación se interrumpió ${IMPORT_JOB_MAX_ATTEMPTS} veces sin terminar.`,
       );
     }
   }
@@ -394,13 +394,16 @@ export class ImportJobsService {
           ...(result.costCentersCreated > 0 ? [`Centros de costo creados: ${result.costCentersCreated}`] : []),
           ...(result.costCenterStructure
             ? [
-                `Estructura: ${result.costCenterStructure.parentChanges} cambios de padre, ${result.costCenterStructure.unitChanges} de unidad, ${result.costCenterStructure.movementChanges} de movimiento`,
-                `Unidades creadas: ${result.costCenterStructure.unitsToCreate}; nombres distintos (no se cambiaron): ${result.costCenterStructure.nameDifferences}`,
+                `Cambios de centro padre: ${result.costCenterStructure.parentChanges}`,
+                `Cambios de dependencia: ${result.costCenterStructure.unitChanges}`,
+                `Cambios de movimiento: ${result.costCenterStructure.movementChanges}`,
+                `Dependencias creadas: ${result.costCenterStructure.unitsToCreate}`,
+                `Nombres distintos sin cambiar: ${result.costCenterStructure.nameDifferences}`,
               ]
             : []),
           ...(claim.target === 'ASSETS' ? [`Movimientos de registro: ${result.registrationMovements}`] : []),
         ].join('\n')
-      : 'La importación se detuvo sin terminar. Puede reintentarla desde el asistente de importación sin volver a subir el archivo; lo que ya quedó escrito no se duplica.';
+      : 'La importación se detuvo sin terminar. Reinténtela desde el asistente de importación sin volver a subir el archivo. Lo que ya se guardó no se duplica.';
     const state = outcome === 'SUCCEEDED' ? 'terminada' : 'fallida';
     await this.notifications.create(manager, {
       recipientUserId: claim.requestedBy,

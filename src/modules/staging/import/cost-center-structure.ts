@@ -126,7 +126,9 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'UNIT_PREFIX_CONFLICT',
         rawValue: row.code,
-        detail: `Ya existe la unidad «${byCode.name}» ${byCode.isActive ? `para los códigos que empiezan por ${byCode.codePrefix ?? ''}` : 'y está desactivada'}: no se crea ni se asigna una unidad para los códigos que empiezan por ${row.code}`,
+        detail: byCode.isActive
+          ? `${byCode.name} ya tiene los códigos que empiezan por ${byCode.codePrefix ?? ''}. No se asigna a los que empiezan por ${row.code}.`
+          : `${byCode.name} está archivada. No se asigna a los códigos que empiezan por ${row.code}.`,
       });
       continue;
     }
@@ -136,7 +138,7 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'UNIT_ASSOCIATED',
         rawValue: row.code,
-        detail: `La unidad «${byCode.name}», que ya existe, queda para los códigos que empiezan por ${row.code}`,
+        detail: `${byCode.name} queda con los códigos que empiezan por ${row.code}.`,
       });
       continue;
     }
@@ -145,7 +147,7 @@ export const planCostCenterStructure = (
       rowNumber: row.rowNumber,
       code: 'UNIT_CREATED',
       rawValue: row.code,
-      detail: `Se crea la unidad «${row.name}» para los códigos que empiezan por ${row.code} (del ${prefixRange(row.code).from} al ${prefixRange(row.code).to})`,
+      detail: `Se crea la dependencia ${row.name} con los códigos del ${prefixRange(row.code).from} al ${prefixRange(row.code).to}.`,
     });
   }
   const prefixed: Array<{ codePrefix: string; ref: UnitRef }> = [
@@ -181,7 +183,7 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'CODE_OUTSIDE_PLAN',
         rawValue: row.code,
-        detail: 'El código no es de 1 ni de 4 dígitos: no se deriva su padre ni su unidad por prefijo',
+        detail: 'El código no tiene 1 ni 4 dígitos. No se le asigna centro padre ni dependencia.',
       });
     } else if (!isRootCode(row.code) && derivedParent === null) {
       orphans += 1;
@@ -189,9 +191,9 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'PARENT_NOT_FOUND',
         rawValue: row.code,
-        detail: `No existe ninguno de ${[`${row.code.slice(0, 3)}0`, `${row.code.slice(0, 2)}00`, `${row.code.slice(0, 1)}000`, row.code.slice(0, 1)]
+        detail: `No existe ninguno de estos centros: ${[`${row.code.slice(0, 3)}0`, `${row.code.slice(0, 2)}00`, `${row.code.slice(0, 1)}000`, row.code.slice(0, 1)]
           .filter((code, index, all) => code !== row.code && all.indexOf(code) === index)
-          .join(', ')}: queda sin padre`,
+          .join(', ')}. Queda sin centro padre.`,
       });
     }
     if (derivedParent !== null && isGrouping(derivedParent) === false) {
@@ -199,7 +201,7 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'PARENT_HAS_MOVEMENT',
         rawValue: row.code,
-        detail: `El centro padre que le corresponde por su código, ${derivedParent}, recibe movimientos (Movimiento 1): no es agrupador`,
+        detail: `Su centro padre ${derivedParent} tiene Movimiento 1. Debería ser agrupador.`,
       });
     }
     const explicit = row.unitCode ? unitByCode.get(row.unitCode) : undefined;
@@ -218,7 +220,7 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'GROUPING_HAS_ASSETS',
         rawValue: row.code,
-        detail: `El archivo lo marca agrupador (Movimiento 0) pero tiene ${existing.activeAssets} activos: sigue con movimiento`,
+        detail: `Tiene ${existing.activeAssets === 1 ? '1 activo' : `${existing.activeAssets} activos`}. Sigue con Movimiento 1 aunque el archivo diga 0.`,
       });
     }
     if (existing && existing.name !== row.name) {
@@ -227,7 +229,7 @@ export const planCostCenterStructure = (
         rowNumber: row.rowNumber,
         code: 'NAME_DIFFERS',
         rawValue: row.code,
-        detail: `En el sistema: «${existing.name}»; en el archivo: «${row.name}». El nombre no se cambia`,
+        detail: `El archivo dice ${row.name} y el sistema dice ${existing.name}. El nombre no cambia.`,
       });
     }
     const keepParent = existing !== null && derivedParent === null && !isRootCode(row.code);
@@ -263,7 +265,7 @@ export const planCostCenterStructure = (
       rowNumber: center.rowNumber,
       code: 'GROUPING_WITHOUT_CHILDREN',
       rawValue: center.code,
-      detail: 'Es agrupador (Movimiento 0) pero ningún código queda bajo él por la regla del código: revise si agrupa centros solo por nombre',
+      detail: 'Es agrupador pero ningún centro queda debajo por su código.',
     });
   }
   for (const [digit, count] of prefixesWithoutUnit) {
@@ -272,7 +274,7 @@ export const planCostCenterStructure = (
       rowNumber: null,
       code: 'PREFIX_WITHOUT_UNIT',
       rawValue: digit,
-      detail: `${count} centros del ${range.from} al ${range.to} quedan sin unidad: el archivo no trae la fila «${digit}» ni hay una unidad para los códigos que empiezan por ${digit}. No se crea ninguna unidad por su cuenta`,
+      detail: `${count === 1 ? '1 centro' : `${count} centros`} del ${range.from} al ${range.to} quedan sin dependencia. Agregue la fila ${digit} al archivo o asigne esos códigos a una dependencia.`,
     });
   }
   return {

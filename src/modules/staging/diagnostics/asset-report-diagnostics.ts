@@ -107,7 +107,7 @@ export const diagnoseAssetSheet = (
   for (const key of Object.keys(ASSET_COLUMNS) as AssetColumn[]) {
     letters[key] = mapping ? (mapping[key] ?? null) : findColumn(sheet.columns, ASSET_COLUMNS[key]);
     if (!mapping && !letters[key] && !OPTIONAL_COLUMNS.has(key)) {
-      issue(null, ASSET_COLUMNS[key][0], 'MISSING_COLUMN', null, 'La columna no aparece en el encabezado');
+      issue(null, ASSET_COLUMNS[key][0], 'MISSING_COLUMN', null, 'Falta esta columna en el encabezado.');
     }
   }
   const header = (key: AssetColumn): string => {
@@ -135,7 +135,7 @@ export const diagnoseAssetSheet = (
   );
   const trailingEmpty = dataRows.filter((row) => row.rowNumber > lastDataRow).length;
   for (const row of emptyRows) {
-    issue(row.rowNumber, null, 'EMPTY_ROW', null, 'Fila completamente vacía en medio de los datos');
+    issue(row.rowNumber, null, 'EMPTY_ROW', null, 'Fila vacía en medio de los datos.');
   }
   const withoutIdentity = letters.assetId
     ? withContent.filter((row) => isBlank(cell(row, 'assetId')))
@@ -249,7 +249,7 @@ export const diagnoseAssetSheet = (
         issue(row.rowNumber, header('purchaseDate'), 'PURCHASE_DATE_NOT_A_DATE', value, `Tipo de celda: ${kind}`);
       } else if (String(value).startsWith('1970-01-01')) {
         epochDate += 1;
-        issue(row.rowNumber, header('purchaseDate'), 'PURCHASE_DATE_EPOCH', value, 'Fecha 1970-01-01');
+        issue(row.rowNumber, header('purchaseDate'), 'PURCHASE_DATE_EPOCH', value, 'La fecha es 1970-01-01.');
       }
     }
 
@@ -279,7 +279,7 @@ export const diagnoseAssetSheet = (
       const code = text(cell(row, 'costCenter'));
       if (code !== '' && !costCenterCodes.has(code)) {
         unknownCenters.set(code, (unknownCenters.get(code) ?? 0) + 1);
-        issue(row.rowNumber, header('costCenter'), 'COST_CENTER_UNKNOWN', code, 'No existe en el catálogo de centros de costo');
+        issue(row.rowNumber, header('costCenter'), 'COST_CENTER_UNKNOWN', code, 'Este centro de costo no existe.');
       }
     }
   }
@@ -346,7 +346,7 @@ export const diagnoseAssetSheet = (
       label: 'Códigos reales duplicados',
       value: has('barcode', duplicated.length),
       base: null,
-      detail: `${duplicatedRows} filas; máximo ${Math.max(0, ...duplicated.map(([, rows]) => rows.length))} repeticiones`,
+      detail: `${duplicatedRows} filas. Máximo ${Math.max(0, ...duplicated.map(([, rows]) => rows.length))} repeticiones.`,
     },
     { key: 'barcode_duplicated_rows', label: 'Filas con código duplicado', value: has('barcode', duplicatedRows), base: total },
     {

@@ -99,7 +99,7 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
         {
           field: 'email',
           message:
-            'Asigne la columna de «Correo institucional»: sin ese dato ninguna fila se importa. Si el archivo no la trae, agréguela y vuelva a subirlo.',
+            'Asigne la columna Correo institucional. Sin ese dato ninguna fila se importa.',
         },
       ],
     });
@@ -135,7 +135,7 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
     const quarantine = (await imports.quarantine(preview.importId)) as Array<Record<string, unknown>>;
     expect(quarantine).toEqual([
       expect.objectContaining({ rowNumber: 2, reason: 'EMAIL_MISSING', legacyAssetId: null }),
-      expect.objectContaining({ rowNumber: 3, reason: 'COST_CENTER_UNKNOWN', detail: 'Centro de costo NO-EXISTE-1' }),
+      expect.objectContaining({ rowNumber: 3, reason: 'COST_CENTER_UNKNOWN', detail: 'El centro de costo NO-EXISTE-1 no existe.' }),
       expect.objectContaining({ rowNumber: 4, reason: 'EMAIL_MISSING', legacyAssetId: null }),
     ]);
     await expectNoDocumentNumbers(preview.importId, numbers);
@@ -279,7 +279,7 @@ describe('Importación de personas (destino PERSONS, PostgreSQL real)', () => {
     });
     const issues = await imports.issues(preview.importId, 1, 50);
     expect(issues.items).toEqual([
-      expect.objectContaining({ rowNumber: 4, code: 'DOCUMENT_TYPE_INVALID', rawValue: null, detail: 'Tipo de documento «XX» fuera del catálogo' }),
+      expect.objectContaining({ rowNumber: 4, code: 'DOCUMENT_TYPE_INVALID', rawValue: null, detail: 'El tipo de documento XX no existe.' }),
     ]);
     await moduleRef.get(ImportJobsService).runNow(preview.importId, actor.id);
     const stored = (await dataSource.query(

@@ -191,7 +191,7 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     expect(mailed.email).toMatchObject({
       status: 'FAILED',
       attempts: 1,
-      lastError: 'El correo saliente (SMTP) no está configurado o está deshabilitado',
+      lastError: 'El servidor de correo no está configurado o está apagado.',
     });
   });
 
@@ -213,7 +213,7 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
     expect(notification?.['body']).toContain('Insertados: 2');
     expect(notification?.['body']).toContain('Omitidos por ya existir: 0');
     expect(notification?.['body']).toContain('En cuarentena: 2');
-    expect(notification?.['body']).toContain('1 · El centro de costo no existe en el catálogo [COST_CENTER_UNKNOWN]');
+    expect(notification?.['body']).toContain('1 · El centro de costo no existe.');
     const [mail] = (await dataSource.query(
       `SELECT template_type, recipient_user_id, context, delivery_status FROM mail_outbox WHERE entity_id = $1`,
       [job.id],
