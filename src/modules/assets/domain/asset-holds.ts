@@ -15,4 +15,14 @@ export const HOLD_REQUEST_RESERVATION = (exceptRequestParam?: string): string =>
     : `CASE WHEN EXISTS (SELECT 1 FROM asset_request_item ri WHERE ri.asset_id = a.id AND ri.open)
        THEN 'está reservado por una solicitud de activos' END`;
 
+export const HOLD_OPEN_WRITE_OFF = (exceptWriteOffParam?: string): string =>
+  exceptWriteOffParam
+    ? `CASE WHEN EXISTS (SELECT 1 FROM asset_write_off_item wi WHERE wi.asset_id = a.id AND wi.open AND wi.write_off_id IS DISTINCT FROM ${exceptWriteOffParam}::uuid)
+       THEN 'está en otra baja abierta' END`
+    : `CASE WHEN EXISTS (SELECT 1 FROM asset_write_off_item wi WHERE wi.asset_id = a.id AND wi.open)
+       THEN 'está en una baja abierta' END`;
+
+export const HOLD_OPEN_HANDOVER = `CASE WHEN EXISTS (SELECT 1 FROM asset_handover_item hi WHERE hi.asset_id = a.id AND hi.open)
+       THEN 'está en una entrega abierta' END`;
+
 export const holdReasons = (...holds: ReadonlyArray<string>): string => `ARRAY_REMOVE(ARRAY[\n  ${holds.join(',\n  ')}\n]::text[], NULL)`;
