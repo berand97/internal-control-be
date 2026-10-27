@@ -126,6 +126,10 @@ export const createFreeTestFormat = async (
   catalog: DocumentFormatCatalogService,
   key: string,
   actorId: string | null,
+  permissions: { readonly readPermission: string; readonly generatePermission: string } = {
+    readPermission: 'inventory:read:global',
+    generatePermission: 'inventory:execute:global',
+  },
 ): Promise<string> => {
   await catalog.createFormat(
     {
@@ -138,8 +142,7 @@ export const createFreeTestFormat = async (
         { order: 2, role: 'AUDITA', label: 'Control Interno', source: 'REQUEST' },
       ],
       numbering: { width: 5, perYear: false, lastIssued: 0 },
-      readPermission: 'inventory:read:global',
-      generatePermission: 'inventory:execute:global',
+      ...permissions,
     },
     actorId,
   );

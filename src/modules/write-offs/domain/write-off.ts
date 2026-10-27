@@ -15,41 +15,28 @@ export const canWriteOffTransition = (from: WriteOffStatus, to: WriteOffStatus):
 
 export const isWriteOffEditable = (status: WriteOffStatus): boolean => status === 'DRAFT';
 
-export const WRITE_OFF_REASONS = [
-  'OBSOLESCENCE',
-  'IRREPARABLE_DAMAGE',
-  'LOSS',
-  'THEFT',
-  'DONATION',
-  'PERMANENT_TRANSFER',
-  'OTHER',
-] as const;
-export type WriteOffReason = (typeof WRITE_OFF_REASONS)[number];
+export const WRITE_OFF_ITEM_STATES = ['OBSOLETE', 'DAMAGED', 'STOLEN', 'NOT_AN_ASSET', 'OTHER'] as const;
+export type WriteOffItemState = (typeof WRITE_OFF_ITEM_STATES)[number];
 
-export const WRITE_OFF_REASON_LABELS: Readonly<Record<WriteOffReason, string>> = {
-  OBSOLESCENCE: 'Obsolescencia',
-  IRREPARABLE_DAMAGE: 'Daño irreparable',
-  LOSS: 'Pérdida',
-  THEFT: 'Hurto',
-  DONATION: 'Donación',
-  PERMANENT_TRANSFER: 'Traslado definitivo',
+export const WRITE_OFF_ITEM_STATE_LABELS: Readonly<Record<WriteOffItemState, string>> = {
+  OBSOLETE: 'Obsoleto',
+  DAMAGED: 'Dañado',
+  STOLEN: 'Robado',
+  NOT_AN_ASSET: 'No es activo',
   OTHER: 'Otro',
 };
 
-export const writeOffReasonText = (reason: WriteOffReason, detail: string | null): string => {
-  const extra = detail?.trim() ?? '';
-  if (reason === 'OTHER') {
-    return extra || WRITE_OFF_REASON_LABELS.OTHER;
-  }
-  return extra ? `${WRITE_OFF_REASON_LABELS[reason]}. ${extra}` : WRITE_OFF_REASON_LABELS[reason];
+export const writeOffItemReason = (state: WriteOffItemState, notes: string | null): string => {
+  const extra = notes?.trim() ?? '';
+  return extra ? `${WRITE_OFF_ITEM_STATE_LABELS[state]}. ${extra}` : WRITE_OFF_ITEM_STATE_LABELS[state];
 };
 
 export const WRITE_OFF_ENTITY_TYPE = 'WRITE_OFF';
 export const WRITE_OFF_FORMAT_KEY = 'OCI-17-90-BAJA';
 
 export const WRITE_OFF_SIGNER_SOURCES = {
-  RESPONSABLE: 'RESPONSIBLE',
-  AUDITA: 'REQUEST',
+  CONTROL_INTERNO: 'REQUEST',
+  CONTABILIDAD: 'REQUEST',
 } as const;
 
 export const WRITE_OFF_MANAGE = 'asset:write_off:global';
@@ -57,3 +44,4 @@ export const ASSET_READ_GLOBAL = 'asset:read:global';
 export const ASSET_READ_SCOPED = 'asset:read:org_unit';
 
 export const MAX_WRITE_OFF_ASSETS = 500;
+export const MAX_WRITE_OFF_QUANTITY = 10_000;

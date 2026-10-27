@@ -80,6 +80,7 @@ import { OrgUnitColor1767226070000 } from './migrations/1767226070000-org-unit-c
 import { OrgUnitTypesEstructuraOrganica1767226080000 } from './migrations/1767226080000-org-unit-types-estructura-organica.js';
 import { DependenciaLabels1767226090000 } from './migrations/1767226090000-dependencia-labels.js';
 import { AssetWriteOffs1767226100000 } from './migrations/1767226100000-asset-write-offs.js';
+import { WriteOffOfficialAct1767226110000 } from './migrations/1767226110000-write-off-official-act.js';
 
 type MigrationClass = new () => MigrationInterface;
 
@@ -165,4 +166,5 @@ export const MIGRATIONS: ReadonlyArray<MigrationClass> = [
   OrgUnitTypesEstructuraOrganica1767226080000,
   DependenciaLabels1767226090000,
   AssetWriteOffs1767226100000,
+  WriteOffOfficialAct1767226110000,
 ];

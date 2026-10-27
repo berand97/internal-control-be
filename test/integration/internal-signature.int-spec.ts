@@ -16,8 +16,11 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { GotenbergPdfConverter, PDF_CONVERTER, type PdfConverter } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
+import { DocumentFormatCatalogService } from '../../src/modules/documents/services/document-format-catalog.service.js';
 import { prepareForSignature, stampSignature } from '../../src/modules/documents/signature/pdf-stamp.js';
-import { createActor, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
+import { createActor, createFreeTestFormat, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
+
+const FORMAT = 'IT-INTERNA-FIRMA';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 const SECRET_DESCRIPTION = 'MICROSCOPIO CONFIDENCIAL XK-99';
@@ -93,7 +96,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
   const generate = () =>
     engine.generate(
       {
-        formatKey: 'OCI-17-90-BAJA',
+        formatKey: FORMAT,
         costCenterId,
         responsiblePersonId: responsible.personId,
         assetIds: [assetId],
@@ -172,8 +175,9 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     outsider = await signer('Ajeno', 'Firma', '1000000503');
     rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica de prueba', { width: 180 })).toString('base64')}`;
 
+    await createFreeTestFormat(app.get(DocumentFormatCatalogService), FORMAT, directorId, { readPermission: 'asset:read:global', generatePermission: 'asset:write_off:global' });
     await engine.uploadTemplate(
-      'OCI-17-90-BAJA',
+      FORMAT,
       { buffer: await readFile(TEMPLATE), originalname: 'plantilla.docx' },
       { sgcVersion: '1', effectiveDate: '2026-02-01' },
       directorId,
@@ -349,7 +353,7 @@ describe('Firma electrónica simple con el proveedor interno (HTTP real + Postgr
     for (const secret of [
       document.id,
       document.number,
-      'OCI-17-90',
+      'PRUEBA-NA-FIRMA',
       SECRET_DESCRIPTION,
       SECRET_CENTER,
       'FIRMA-1',

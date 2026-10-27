@@ -13,12 +13,13 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import type { AppConfig } from '../../src/config/configuration.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
+import { DocumentFormatCatalogService } from '../../src/modules/documents/services/document-format-catalog.service.js';
 import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js';
-import { createActor, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
+import { createActor, createFreeTestFormat, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter, pdfText, squash } from './pdf-text.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
-const FORMAT = 'OCI-17-90-BAJA';
+const FORMAT = 'IT-TURNOS-FIRMA';
 
 interface Person {
   userId: string;
@@ -132,6 +133,7 @@ describe('Turnos de firma: códigos de error, detalle por usuario y reasignació
     replacement = await person('Reemplazo', true);
     await grantControlSigner(dataSource, replacement.personId);
     rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica', { width: 120 })).toString('base64')}`;
+    await createFreeTestFormat(app.get(DocumentFormatCatalogService), FORMAT, director.userId, { readPermission: 'asset:read:global', generatePermission: 'asset:write_off:global' });
     await engine.uploadTemplate(
       FORMAT,
       { buffer: await readFile(TEMPLATE), originalname: 'plantilla.docx' },

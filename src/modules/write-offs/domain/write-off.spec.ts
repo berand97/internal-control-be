@@ -1,4 +1,4 @@
-import { canWriteOffTransition, isWriteOffEditable, WRITE_OFF_STATUSES, writeOffReasonText } from './write-off.js';
+import { canWriteOffTransition, isWriteOffEditable, WRITE_OFF_STATUSES, writeOffItemReason } from './write-off.js';
 
 describe('estados de la baja', () => {
   it('DRAFT pasa a PENDING_SIGNATURES o CANCELLED', () => {
@@ -27,14 +27,10 @@ describe('estados de la baja', () => {
   });
 });
 
-describe('texto del motivo', () => {
-  it('usa la etiqueta y agrega el detalle', () => {
-    expect(writeOffReasonText('THEFT', null)).toBe('Hurto');
-    expect(writeOffReasonText('THEFT', ' Denuncia 123 ')).toBe('Hurto. Denuncia 123');
-  });
-
-  it('con OTHER muestra el detalle', () => {
-    expect(writeOffReasonText('OTHER', 'Cambio de normativa')).toBe('Cambio de normativa');
-    expect(writeOffReasonText('OTHER', null)).toBe('Otro');
+describe('motivo que queda en el activo', () => {
+  it('usa el estado del acta y agrega las observaciones', () => {
+    expect(writeOffItemReason('DAMAGED', null)).toBe('Dañado');
+    expect(writeOffItemReason('OBSOLETE', ' Acuerdo 030-2026 ')).toBe('Obsoleto. Acuerdo 030-2026');
+    expect(writeOffItemReason('NOT_AN_ASSET', '')).toBe('No es activo');
   });
 });

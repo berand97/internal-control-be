@@ -1,25 +1,25 @@
 import { formatMoney } from '../../inventories/domain/inventory-act.js';
-import { valuationOf } from '../../inventories/domain/inventory-valuation.js';
-import { type WriteOffReason, writeOffReasonText } from './write-off.js';
+import { longSpanishDate } from '../../loans/domain/loan-dates.js';
+import { WRITE_OFF_ITEM_STATE_LABELS, type WriteOffItemState } from './write-off.js';
 
-export const WITHOUT_DEPRECIATION = 'sin depreciación';
-
-export interface WriteOffActAsset {
-  readonly id: string;
-  readonly serialNumber: string | null;
+export interface WriteOffActItem {
+  readonly assetId: string;
+  readonly quantity: number;
+  readonly state: WriteOffItemState;
+  readonly notes: string | null;
+  readonly costCenter: string;
+  readonly acquisitionDocument: string | null;
   readonly acquisitionDate: string | null;
   readonly acquisitionPrice: number | null;
-  readonly depreciatedValue: number | null;
 }
 
 export interface WriteOffActInput {
-  readonly reason: WriteOffReason;
-  readonly reasonDetail: string | null;
-  readonly technicalConcept: string;
-  readonly finalDisposition: string;
+  readonly authorizedTotal: number;
   readonly observations: string | null;
-  readonly valuationDate: string;
-  readonly assets: ReadonlyArray<WriteOffActAsset>;
+  readonly councilAgreementNumber: string | null;
+  readonly councilAgreementDate: string | null;
+  readonly vicefinanceReports: string | null;
+  readonly items: ReadonlyArray<WriteOffActItem>;
 }
 
 export interface WriteOffActContent {
@@ -27,43 +27,45 @@ export interface WriteOffActContent {
   readonly assetFields: Record<string, Record<string, string>>;
 }
 
-const sum = (values: ReadonlyArray<number | null>): number | null =>
-  values.some((value) => value === null) ? null : values.reduce<number>((total, value) => total + (value ?? 0), 0);
+const cents = (value: number): number => Math.round(value * 100);
 
-export const bookValueText = (asset: Pick<WriteOffActAsset, 'acquisitionPrice' | 'depreciatedValue'>): string => {
-  const valuation = valuationOf(asset.acquisitionPrice, null, asset.depreciatedValue);
-  if (valuation.bookValue !== null) {
-    return formatMoney(valuation.bookValue);
-  }
-  if (asset.acquisitionPrice === null) {
-    return formatMoney(null);
-  }
-  return `${formatMoney(asset.acquisitionPrice)} ${WITHOUT_DEPRECIATION}`;
+export const reportTotal = (prices: ReadonlyArray<number | null>): number =>
+  prices.reduce<number>((total, price) => total + cents(price ?? 0), 0) / 100;
+
+export const totalsOf = (
+  prices: ReadonlyArray<number | null>,
+  authorized: number | null,
+): { readonly report: number; readonly authorized: number | null; readonly difference: number | null } => {
+  const report = reportTotal(prices);
+  return { report, authorized, difference: authorized === null ? null : (cents(authorized) - cents(report)) / 100 };
 };
 
 export const buildWriteOffActContent = (input: WriteOffActInput): WriteOffActContent => {
-  const shown = input.assets.map((asset) => asset.depreciatedValue ?? asset.acquisitionPrice);
-  const withoutDepreciation = input.assets.filter((asset) => asset.depreciatedValue === null).length;
+  const totals = totalsOf(
+    input.items.map((item) => item.acquisitionPrice),
+    input.authorizedTotal,
+  );
   return {
     fields: {
-      motivo: writeOffReasonText(input.reason, input.reasonDetail),
-      motivoCodigo: input.reason,
-      conceptoTecnico: input.technicalConcept.trim(),
-      disposicionFinal: input.finalDisposition.trim(),
-      observaciones: input.observations?.trim() || 'Sin observaciones',
-      fechaValor: input.valuationDate,
-      totalCosto: formatMoney(sum(input.assets.map((asset) => asset.acquisitionPrice))),
-      totalValorLibros: formatMoney(sum(shown)),
-      activosSinDepreciacion: String(withoutDepreciation),
+      totalInforme: formatMoney(totals.report),
+      totalAutorizado: formatMoney(totals.authorized),
+      diferencia: formatMoney(totals.difference),
+      nota: input.observations?.trim() ?? '',
+      acuerdoConsejo: input.councilAgreementNumber?.trim() ?? '',
+      fechaAcuerdo: input.councilAgreementDate ? longSpanishDate(input.councilAgreementDate) : '',
+      informesVicefinanciera: input.vicefinanceReports?.trim() ?? '',
     },
     assetFields: Object.fromEntries(
-      input.assets.map((asset) => [
-        asset.id,
+      input.items.map((item) => [
+        item.assetId,
         {
-          serial: asset.serialNumber ?? '',
-          fechaAdquisicion: asset.acquisitionDate ?? '',
-          costo: formatMoney(asset.acquisitionPrice),
-          valorLibros: bookValueText(asset),
+          cantidad: String(item.quantity),
+          documento: item.acquisitionDocument ?? '',
+          centro: item.costCenter,
+          fechaCompra: item.acquisitionDate ?? '',
+          precioCompra: formatMoney(item.acquisitionPrice),
+          estado: WRITE_OFF_ITEM_STATE_LABELS[item.state],
+          observaciones: item.notes?.trim() ?? '',
         },
       ]),
     ),

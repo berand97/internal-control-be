@@ -3,10 +3,11 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
-  ArrayUnique,
   IsArray,
+  IsDateString,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
@@ -14,122 +15,113 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { ApiSignerSubstitutions, type SignerSubstitutionsInput } from '../../documents/dto/signer-substitution.dto.js';
 import {
   MAX_WRITE_OFF_ASSETS,
-  WRITE_OFF_REASONS,
+  MAX_WRITE_OFF_QUANTITY,
+  WRITE_OFF_ITEM_STATES,
   WRITE_OFF_STATUSES,
-  type WriteOffReason,
+  type WriteOffItemState,
   type WriteOffStatus,
 } from '../domain/write-off.js';
 
-export class CreateWriteOffDto {
-  @ApiProperty({
-    type: [String],
-    format: 'uuid',
-    description: `Activos de la baja en el orden del acta (1 a ${MAX_WRITE_OFF_ASSETS}), todos del mismo centro de costo`,
-  })
-  @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(MAX_WRITE_OFF_ASSETS)
-  @ArrayUnique()
-  @IsUUID('all', { each: true })
-  readonly assetIds!: string[];
+export class WriteOffItemInputDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID('all')
+  readonly assetId!: string;
 
-  @ApiProperty({ enum: WRITE_OFF_REASONS, enumName: 'WriteOffReason', description: 'Motivo de la baja (GET /write-offs/reasons)' })
-  @IsIn(WRITE_OFF_REASONS)
-  readonly reason!: WriteOffReason;
+  @ApiPropertyOptional({ type: 'integer', minimum: 1, maximum: MAX_WRITE_OFF_QUANTITY, default: 1, description: 'Columna Cantidad del acta' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_WRITE_OFF_QUANTITY)
+  readonly quantity?: number;
 
-  @ApiPropertyOptional({ description: 'Detalle del motivo. Obligatorio con OTHER', maxLength: 500 })
+  @ApiProperty({ enum: WRITE_OFF_ITEM_STATES, enumName: 'WriteOffItemState', description: 'Columna Estado del acta (GET /write-offs/item-states)' })
+  @IsIn(WRITE_OFF_ITEM_STATES)
+  readonly state!: WriteOffItemState;
+
+  @ApiPropertyOptional({ description: 'Columna Observaciones del acta', maxLength: 500 })
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  readonly reasonDetail?: string;
-
-  @ApiProperty({ description: 'Concepto técnico o estado físico de los bienes', minLength: 3, maxLength: 2000 })
-  @IsString()
-  @MinLength(3)
-  @MaxLength(2000)
-  readonly technicalConcept!: string;
-
-  @ApiProperty({ description: 'Disposición final de los bienes', minLength: 3, maxLength: 1000 })
-  @IsString()
-  @MinLength(3)
-  @MaxLength(1000)
-  readonly finalDisposition!: string;
-
-  @ApiPropertyOptional({ maxLength: 2000 })
-  @IsOptional()
-  @IsString()
-  @MaxLength(2000)
-  readonly observations?: string;
-
-  @ApiPropertyOptional({
-    format: 'uuid',
-    description: 'Quien firma como Responsable. Por defecto, el jefe vigente del centro de costo de los activos',
-  })
-  @IsOptional()
-  @IsUUID('all')
-  readonly responsiblePersonId?: string;
+  readonly notes?: string;
 }
 
-export class UpdateWriteOffDto {
-  @ApiPropertyOptional({ type: [String], format: 'uuid', description: 'Lista completa de activos (reemplaza la anterior)' })
+class WriteOffFieldsDto {
+  @ApiPropertyOptional({ type: 'number', minimum: 0, nullable: true, description: 'Total autorizado de la baja. Obligatorio para generar el acta' })
   @IsOptional()
-  @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(MAX_WRITE_OFF_ASSETS)
-  @ArrayUnique()
-  @IsUUID('all', { each: true })
-  readonly assetIds?: string[];
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(9_999_999_999_999)
+  readonly authorizedTotal?: number | null;
 
-  @ApiPropertyOptional({ enum: WRITE_OFF_REASONS, enumName: 'WriteOffReason' })
-  @IsOptional()
-  @IsIn(WRITE_OFF_REASONS)
-  readonly reason?: WriteOffReason;
-
-  @ApiPropertyOptional({ type: 'string', nullable: true, maxLength: 500 })
+  @ApiPropertyOptional({ type: 'string', nullable: true, maxLength: 100, example: 'ACUERDO 030-2026', description: 'Acuerdo del Consejo Universitario que autoriza la baja' })
   @IsOptional()
   @IsString()
-  @MaxLength(500)
-  readonly reasonDetail?: string | null;
+  @MaxLength(100)
+  readonly councilAgreementNumber?: string | null;
 
-  @ApiPropertyOptional({ minLength: 3, maxLength: 2000 })
+  @ApiPropertyOptional({ type: 'string', format: 'date', nullable: true, example: '2026-07-28', description: 'Fecha del voto del Consejo Universitario' })
+  @IsOptional()
+  @IsDateString({ strict: true })
+  readonly councilAgreementDate?: string | null;
+
+  @ApiPropertyOptional({ type: 'string', nullable: true, maxLength: 200, example: 'IBV - 00015 y 00016', description: 'Informes de Vicefinanciera citados en el acta' })
   @IsOptional()
   @IsString()
-  @MinLength(3)
-  @MaxLength(2000)
-  readonly technicalConcept?: string;
+  @MaxLength(200)
+  readonly vicefinanceReports?: string | null;
 
-  @ApiPropertyOptional({ minLength: 3, maxLength: 1000 })
-  @IsOptional()
-  @IsString()
-  @MinLength(3)
-  @MaxLength(1000)
-  readonly finalDisposition?: string;
-
-  @ApiPropertyOptional({ type: 'string', nullable: true, maxLength: 2000 })
+  @ApiPropertyOptional({ type: 'string', nullable: true, maxLength: 2000, description: 'Nota del acta' })
   @IsOptional()
   @IsString()
   @MaxLength(2000)
   readonly observations?: string | null;
+}
 
-  @ApiPropertyOptional({ format: 'uuid' })
+export class CreateWriteOffDto extends WriteOffFieldsDto {
+  @ApiProperty({
+    type: [WriteOffItemInputDto],
+    description: `Activos de la baja en el orden del acta (1 a ${MAX_WRITE_OFF_ASSETS}). Pueden ser de varios centros de costo`,
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_WRITE_OFF_ASSETS)
+  @ValidateNested({ each: true })
+  @Type(() => WriteOffItemInputDto)
+  readonly items!: WriteOffItemInputDto[];
+}
+
+export class UpdateWriteOffDto extends WriteOffFieldsDto {
+  @ApiPropertyOptional({ type: [WriteOffItemInputDto], description: 'Lista completa de activos (reemplaza la anterior)' })
   @IsOptional()
-  @IsUUID('all')
-  readonly responsiblePersonId?: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_WRITE_OFF_ASSETS)
+  @ValidateNested({ each: true })
+  @Type(() => WriteOffItemInputDto)
+  readonly items?: WriteOffItemInputDto[];
 }
 
 export class GenerateWriteOffActDto {
   @ApiPropertyOptional({
     format: 'uuid',
-    description:
-      'Quién firma por Control Interno (GET /documents/control-signers). Opcional si hay una sola persona elegible, obligatorio si hay varias',
+    description: 'Quién firma por Control Interno (GET /documents/control-signers). Opcional si hay una sola persona elegible',
   })
   @IsOptional()
   @IsUUID('all')
   readonly controlSignerPersonId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Quién firma por Contabilidad (GET /write-offs/accounting-signers). Opcional si hay una sola persona elegible',
+  })
+  @IsOptional()
+  @IsUUID('all')
+  readonly accountingSignerPersonId?: string;
 
   @ApiSignerSubstitutions()
   readonly signerSubstitutions?: SignerSubstitutionsInput;
@@ -164,7 +156,7 @@ export class QueryWriteOffsDto {
   @IsIn(WRITE_OFF_STATUSES)
   readonly status?: WriteOffStatus;
 
-  @ApiPropertyOptional({ format: 'uuid' })
+  @ApiPropertyOptional({ format: 'uuid', description: 'Bajas con algún activo de este centro de costo' })
   @IsOptional()
   @IsUUID('all')
   readonly costCenterId?: string;

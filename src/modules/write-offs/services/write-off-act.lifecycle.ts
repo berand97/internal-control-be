@@ -12,7 +12,8 @@ import {
   WRITE_OFF_ENTITY_TYPE,
   WRITE_OFF_FORMAT_KEY,
   WRITE_OFF_SIGNER_SOURCES,
-  writeOffReasonText,
+  type WriteOffItemState,
+  writeOffItemReason,
 } from '../domain/write-off.js';
 import { type WriteOffRow, WriteOffsService } from './write-offs.service.js';
 
@@ -30,12 +31,6 @@ export class WriteOffActLifecycle implements OnModuleInit {
     this.lifecycle.register({
       entityType: WRITE_OFF_ENTITY_TYPE,
       formats: [{ formatKey: WRITE_OFF_FORMAT_KEY, process: 'Bajas de activos', signers: WRITE_OFF_SIGNER_SOURCES }],
-      links: async (manager, entityId) => {
-        const [row] = (await manager.query('SELECT cost_center_id FROM asset_write_off WHERE id = $1', [entityId])) as Array<{
-          cost_center_id: string;
-        }>;
-        return row ? { costCenterId: row.cost_center_id } : {};
-      },
       onGenerated: (manager, event) => this.onGenerated(manager, event),
       onSigned: (manager, event) => this.onSigned(manager, event),
       onRejected: (manager, event) => this.onRejected(manager, event),
@@ -71,7 +66,7 @@ export class WriteOffActLifecycle implements OnModuleInit {
     if (writeOff.status !== 'PENDING_SIGNATURES') {
       throw new Error(`La baja ${writeOff.id} está ${writeOff.status}, no pendiente de firmas`);
     }
-    const controlPerson = event.signersByRole['AUDITA'] ?? null;
+    const controlPerson = event.signersByRole['CONTROL_INTERNO'] ?? null;
     const [controlUser] = controlPerson
       ? ((await manager.query(`SELECT id FROM app_user WHERE person_id = $1 ORDER BY (status = 'ACTIVE') DESC, id LIMIT 1`, [
           controlPerson,
@@ -79,12 +74,12 @@ export class WriteOffActLifecycle implements OnModuleInit {
       : [];
     const authorizedBy = controlUser?.id ?? writeOff.created_by;
     const items = (await manager.query(
-      'SELECT asset_id AS "assetId", movement_id FROM asset_write_off_item WHERE write_off_id = $1 ORDER BY line_number',
+      'SELECT asset_id AS "assetId", state, notes, movement_id FROM asset_write_off_item WHERE write_off_id = $1 ORDER BY line_number',
       [writeOff.id],
-    )) as Array<{ assetId: string; movement_id: string | null }>;
-    const reason = writeOffReasonText(writeOff.reason, writeOff.reason_detail);
+    )) as Array<{ assetId: string; state: WriteOffItemState; notes: string | null; movement_id: string | null }>;
     const writtenOffAt = bogotaDate(new Date());
-    for (const { assetId } of items.filter((item) => item.movement_id === null)) {
+    for (const { assetId, state, notes } of items.filter((item) => item.movement_id === null)) {
+      const reason = writeOffItemReason(state, notes);
       await this.assetState.apply(
         {
           assetId,
@@ -101,7 +96,7 @@ export class WriteOffActLifecycle implements OnModuleInit {
             reason: `Acta de baja de activos ${WRITE_OFF_FORMAT_KEY} No. ${event.number}`,
             documentReference: event.number,
             requestedBy: writeOff.created_by,
-            metadata: { writeOffId: writeOff.id, documentId: event.documentId, reason: writeOff.reason },
+            metadata: { writeOffId: writeOff.id, documentId: event.documentId, state },
           },
           guard: (current: Asset) => {
             if (current.operationalStatus === OperationalStatus.WrittenOff || current.operationalStatus === OperationalStatus.OnLoan) {
@@ -133,7 +128,7 @@ export class WriteOffActLifecycle implements OnModuleInit {
           },
           audit: {
             action: AuditAction.AssetWrittenOff,
-            changes: { writeOffId: writeOff.id, documentId: event.documentId, documentReference: event.number, reason: writeOff.reason },
+            changes: { writeOffId: writeOff.id, documentId: event.documentId, documentReference: event.number, state },
           },
         },
         manager,

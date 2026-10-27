@@ -763,11 +763,6 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'La baja no admite esa acción en su estado actual.',
   },
-  [ErrorCode.WriteOffMixedCostCenter]: {
-    httpStatus: 400,
-    action: 'CANCEL',
-    message: 'Todos los activos de la baja deben ser del mismo centro de costo.',
-  },
   [ErrorCode.WriteOffAssetHeld]: {
     httpStatus: 409,
     action: 'CANCEL',
@@ -781,7 +776,17 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
   [ErrorCode.WriteOffSignerRequired]: {
     httpStatus: 400,
     action: 'CANCEL',
-    message: 'Varias personas pueden firmar por Control Interno. Elija una.',
+    message: 'Varias personas pueden firmar ese turno. Elija una.',
+  },
+  [ErrorCode.WriteOffNoAccountingSigner]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message: 'Nadie tiene el rol de Contabilidad. Pida a un administrador que lo asigne.',
+  },
+  [ErrorCode.WriteOffSignerNotEligible]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'Esta persona no puede firmar ese turno del acta de baja.',
   },
   [ErrorCode.AssetInOpenWriteOff]: {
     httpStatus: 409,
