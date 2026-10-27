@@ -128,7 +128,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           action: ERROR_CATALOG[ErrorCode.ValidationFailed].action,
           details: body.message.map((message) => ({
             field: 'request',
-            message,
+            message: message.startsWith('Validation failed') ? 'El valor no es válido.' : message,
           })),
         };
       }

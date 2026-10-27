@@ -30,7 +30,7 @@ export class CreateNavigationItemDto {
   @IsNotEmpty()
   @MaxLength(50)
   @Matches(/^[a-z][a-z0-9_]*$/, {
-    message: 'resource debe ser snake_case en minúsculas',
+    message: 'Use minúsculas sin tildes, números y guion bajo.',
   })
   readonly resource!: string;
 
@@ -39,7 +39,7 @@ export class CreateNavigationItemDto {
   @IsNotEmpty()
   @MaxLength(200)
   @Matches(/^\/[a-z0-9\-_/]*$/, {
-    message: 'path debe empezar con / y usar kebab-case',
+    message: 'La ruta debe empezar con / y usar minúsculas y guiones.',
   })
   readonly path!: string;
 
@@ -64,7 +64,7 @@ export class CreateNavigationItemDto {
   })
   @IsOptional()
   @IsIn(NAVIGATION_ICONS, {
-    message: 'icon debe ser una clave del catálogo de íconos (GET /navigation/icons)',
+    message: 'Elija un ícono de la lista.',
   })
   readonly icon?: NavigationIcon | null;
 

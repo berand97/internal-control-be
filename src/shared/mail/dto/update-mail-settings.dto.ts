@@ -53,7 +53,7 @@ export class UpdateMailSettingsDto {
   @IsOptional()
   @IsString()
   @MaxLength(150)
-  @Matches(NO_CONTROL_CHARS, { message: 'fromName no admite saltos de línea ni caracteres de control' })
+  @Matches(NO_CONTROL_CHARS, { message: 'El nombre del remitente no puede tener saltos de línea.' })
   readonly fromName?: string;
 
   @ApiPropertyOptional({ example: 'noreply@unac.edu.co' })

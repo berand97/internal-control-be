@@ -14,7 +14,7 @@ export class CreateCampusDto {
   @IsNotEmpty()
   @MaxLength(20)
   @Matches(/^[A-Z][A-Z0-9_]*$/, {
-    message: 'El código debe ser SCREAMING_SNAKE_CASE',
+    message: 'Use mayúsculas sin tildes, números y guion bajo.',
   })
   readonly code!: string;
 

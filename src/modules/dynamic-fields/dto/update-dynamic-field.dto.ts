@@ -22,7 +22,7 @@ export class UpdateDynamicFieldDto {
   @IsString()
   @MaxLength(50)
   @Matches(/^[a-z][a-zA-Z0-9_]*$/, {
-    message: 'El código debe ser camelCase o snake_case iniciando en minúscula',
+    message: 'Use letras sin tildes, números y guion bajo. Debe empezar con minúscula.',
   })
   readonly code?: string;
 

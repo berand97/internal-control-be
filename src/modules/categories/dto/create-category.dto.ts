@@ -22,7 +22,7 @@ export class CreateCategoryDto {
   @IsNotEmpty()
   @MaxLength(30)
   @Matches(/^[A-Z][A-Z0-9_]*$/, {
-    message: 'El código debe ser SCREAMING_SNAKE_CASE',
+    message: 'Use mayúsculas sin tildes, números y guion bajo.',
   })
   readonly code!: string;
 

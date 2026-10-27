@@ -123,7 +123,7 @@ export class DocumentFormatVersionInputDto {
   @MinLength(1)
   @MaxLength(10)
   @Matches(SGC_VERSION_PATTERN, {
-    message: 'sgcVersion admite de 1 a 10 letras, dígitos, punto, guion o guion bajo, sin "/" ni ".."',
+    message: 'Use hasta 10 letras, números, puntos o guiones.',
   })
   readonly sgcVersion!: string;
 
