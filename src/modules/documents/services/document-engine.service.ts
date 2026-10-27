@@ -264,7 +264,7 @@ export class DocumentEngineService {
     if (reasons.length > 0) {
       throw new ApiException(
         ErrorCode.DocumentFormatNotReady,
-        `El formato ${format.key} no se puede generar: ${reasons.join('; ')}`,
+        `El formato ${format.key} no está listo. ${reasons.join(' ')}`,
       );
     }
   }
@@ -332,14 +332,14 @@ export class DocumentEngineService {
     const today = bogotaToday();
     const format = await this.catalog.current(formatKey, this.dataSource.manager, meta.effectiveDate > today ? meta.effectiveDate : today);
     if (!format.sgcCode) {
-      throw new ApiException(ErrorCode.DocumentFormatNotReady, `El formato ${format.key} aún no tiene código SGC institucional`);
+      throw new ApiException(ErrorCode.DocumentFormatNotReady, `El formato ${format.key} aún no tiene código SGC.`);
     }
     const sgcVersion = meta.sgcVersion?.trim() || format.version || '';
     if (!SGC_VERSION_PATTERN.test(sgcVersion)) {
       throw new ApiException(ErrorCode.ValidationFailed, undefined, [
         {
           field: 'sgcVersion',
-          message: 'Versión SGC de 1 a 10 caracteres (letras, dígitos, punto, guion), sin "/" ni ".."',
+          message: 'Use hasta 10 letras, números, puntos o guiones.',
         },
       ]);
     }
@@ -388,10 +388,10 @@ export class DocumentEngineService {
     if (unresolved.length > 0) {
       throw new ApiException(
         ErrorCode.DocumentSignerNotEligible,
-        `La persona designada para ${unresolved.map((signer) => `${signer.spec.label} (${signer.spec.role})`).join(', ')} no tiene usuario activo con el permiso «Firmar actas por Control Interno» vigente: elija a quien lo tenga o indique un sustituto con motivo`,
+        `${unresolved.map((signer) => signer.spec.label).join(', ')} necesita una persona con permiso para firmar actas por Control Interno. Elija otra o indique un sustituto con el motivo.`,
         unresolved.map((signer) => ({
           field: `signers.${signer.spec.role}`,
-          message: `El turno ${signer.spec.role} exige el permiso vigente ${CONTROL_SIGNER_PERMISSION}`,
+          message: 'Esta persona no tiene permiso para firmar actas por Control Interno.',
         })),
       );
     }
@@ -399,16 +399,16 @@ export class DocumentEngineService {
       return resolved;
     }
     if (!actorId) {
-      throw new ApiException(ErrorCode.DocumentSignerSubstituteInvalid, 'Una sustitución de firmante necesita un usuario que la haga');
+      throw new ApiException(ErrorCode.DocumentSignerSubstituteInvalid, 'Inicie sesión para sustituir un firmante.');
     }
     const rejected = substitutes.filter((signer) => !allowed.has(signer.personId ?? ''));
     if (rejected.length > 0) {
       throw new ApiException(
         ErrorCode.DocumentSignerSubstituteInvalid,
-        `El sustituto de ${rejected.map((signer) => signer.spec.label).join(', ')} no tiene usuario activo con el permiso «Firmar actas por Control Interno» vigente`,
+        `El sustituto de ${rejected.map((signer) => signer.spec.label).join(', ')} no tiene permiso para firmar actas por Control Interno.`,
         rejected.map((signer) => ({
           field: `signerSubstitutions.${signer.spec.role}.personId`,
-          message: `Sin el permiso vigente ${CONTROL_SIGNER_PERMISSION}`,
+          message: 'No tiene permiso para firmar actas por Control Interno.',
         })),
       );
     }
@@ -534,7 +534,7 @@ export class DocumentEngineService {
     const now = new Date();
     const template = await this.activeTemplate(format.key, now.toISOString().slice(0, 10), manager);
     if (!template) {
-      throw new ApiException(ErrorCode.TemplateNotActive, `No hay plantilla vigente para ${format.key}`);
+      throw new ApiException(ErrorCode.TemplateNotActive, `No hay una plantilla activa para ${format.key}.`);
     }
     const source = await this.storage.getFrom(template.storage_driver, template.storage_key);
     const context = await this.buildContext(manager, format, template, payload, resolved, options.documentDate ?? now);
@@ -799,7 +799,7 @@ export class DocumentEngineService {
   ) {
     const { reference, sessionId, method } = await this.prepareSignerAction(documentId, order, actor);
     if (!this.signatures.capture) {
-      throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no captura firmas en el sistema`);
+      throw new ApiException(ErrorCode.InvalidState, 'Esta acta no se firma en el sistema.');
     }
     await this.signatures.capture(reference, {
       order,
@@ -824,7 +824,7 @@ export class DocumentEngineService {
   ) {
     const { reference, sessionId, method } = await this.prepareSignerAction(documentId, order, actor);
     if (!this.signatures.reject) {
-      throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no recibe rechazos en el sistema`);
+      throw new ApiException(ErrorCode.InvalidState, 'Esta acta no se rechaza en el sistema.');
     }
     await this.signatures.reject(reference, {
       order,
@@ -843,7 +843,7 @@ export class DocumentEngineService {
   async attestation(verificationCode: string) {
     const attestation = this.signatures.attestation ? await this.signatures.attestation(verificationCode) : null;
     if (!attestation) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe una firma con ese código');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos una firma con ese código.');
     }
     return attestation;
   }
@@ -858,7 +858,7 @@ export class DocumentEngineService {
   async voidForEntity(manager: EntityManager, input: VoidForEntityInput): Promise<VoidForEntityResult> {
     const reason = input.reason.trim();
     if (!input.entityType.trim() || !input.entityId.trim() || !reason) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'Anular exige entityType, entityId y motivo');
+      throw new ApiException(ErrorCode.ValidationFailed, 'Indique qué acta anular y el motivo.');
     }
     const cancelled = (await manager.query(
       `WITH cancelled AS (
@@ -879,7 +879,7 @@ export class DocumentEngineService {
     if (signed.length > 0) {
       throw new ApiException(
         ErrorCode.DocumentAlreadySigned,
-        `El acta ${signed.map((document) => document.number).join(', ')} ya está firmada y no se puede anular`,
+        `El acta ${signed.map((document) => document.number).join(', ')} ya está firmada y no se puede anular.`,
       );
     }
     const voided: string[] = [];
@@ -903,7 +903,7 @@ export class DocumentEngineService {
   private async linkContext(manager: EntityManager, token: string, lock: boolean) {
     const link = await this.links.findByToken(manager, token, lock);
     if (!link) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el enlace de firma');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el enlace de firma.');
     }
     const document = await this.documentRow(link.document_id);
     const current = await this.links.currentTurn(manager, link.document_id);
@@ -951,7 +951,7 @@ export class DocumentEngineService {
   async signingLinkPdf(token: string): Promise<{ readonly body: Buffer; readonly fileName: string }> {
     const { document } = await this.activeLink(this.dataSource.manager, token);
     if (!document.signature_reference || !this.signatures.currentDocument) {
-      throw new ApiException(ErrorCode.InvalidState, 'El acta todavía no tiene solicitud de firma');
+      throw new ApiException(ErrorCode.InvalidState, 'El acta todavía no está lista para firmar.');
     }
     return {
       body: await this.signatures.currentDocument(document.signature_reference),
@@ -1013,7 +1013,7 @@ export class DocumentEngineService {
   ) {
     return this.actByLink(token, identityToken, 'SIGNED', async (manager, link, reference) => {
       if (!this.signatures.capture) {
-        throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no captura firmas en el sistema`);
+        throw new ApiException(ErrorCode.InvalidState, 'Esta acta no se firma en el sistema.');
       }
       await this.signatures.capture(
         reference,
@@ -1038,7 +1038,7 @@ export class DocumentEngineService {
   ) {
     return this.actByLink(token, identityToken, 'REJECTED', async (manager, link, reference) => {
       if (!this.signatures.reject) {
-        throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no recibe rechazos en el sistema`);
+        throw new ApiException(ErrorCode.InvalidState, 'Esta acta no se rechaza en el sistema.');
       }
       await this.signatures.reject(
         reference,
@@ -1083,7 +1083,7 @@ export class DocumentEngineService {
         throw new ApiException(ErrorCode.SignatureIdentityRequired);
       }
       if (!document.signature_reference) {
-        throw new ApiException(ErrorCode.InvalidState, 'El acta todavía no tiene solicitud de firma');
+        throw new ApiException(ErrorCode.InvalidState, 'El acta todavía no está lista para firmar.');
       }
       await perform(manager, link, document.signature_reference);
       await manager.query(
@@ -1119,7 +1119,7 @@ export class DocumentEngineService {
       [personId],
     )) as PersonRow[];
     if (!person) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la persona indicada');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos a esa persona.');
     }
     await this.dataSource.transaction(async (manager) => {
       const [targetSlot] = (await manager.query(
@@ -1132,16 +1132,16 @@ export class DocumentEngineService {
           throw new ApiException(
             ErrorCode.SignatureSignerCannotSign,
             requiresMfa(targetSlot.role)
-              ? 'El turno de Control Interno exige una persona activa con usuario activo y verificación en dos pasos'
-              : 'La persona debe estar activa y tener usuario activo, o correo y número de documento para firmar por enlace',
+              ? 'El turno de Control Interno necesita una persona con usuario activo y verificación en dos pasos.'
+              : 'La persona necesita usuario activo, o correo y documento para firmar por enlace.',
             [{ field: 'personId', message: channel.blockedBy }],
           );
         }
         if (requiresControlSigner(targetSlot.role) && !(await this.controlSignersAmong(manager, [personId])).has(personId)) {
           throw new ApiException(
             ErrorCode.DocumentSignerNotEligible,
-            `El turno ${targetSlot.role} es de Control Interno: la persona debe tener usuario activo con el permiso «Firmar actas por Control Interno» vigente`,
-            [{ field: 'personId', message: `El turno ${targetSlot.role} exige el permiso vigente ${CONTROL_SIGNER_PERMISSION}` }],
+            'Esta persona no tiene permiso para firmar actas por Control Interno.',
+            [{ field: 'personId', message: 'No tiene permiso para firmar actas por Control Interno.' }],
           );
         }
       }
@@ -1163,7 +1163,7 @@ export class DocumentEngineService {
         created_at: Date;
       }>;
       if (locked?.status !== 'PENDING_SIGNATURE') {
-        throw new ApiException(ErrorCode.InvalidState, 'El documento no está pendiente de firma');
+        throw new ApiException(ErrorCode.InvalidState, 'El acta no está pendiente de firma.');
       }
       const slots = (await manager.query(
         'SELECT sign_order, role, signer_person_id, status FROM document_signature WHERE document_id = $1 ORDER BY sign_order FOR UPDATE',
@@ -1171,28 +1171,28 @@ export class DocumentEngineService {
       )) as Array<{ sign_order: number; role: string; signer_person_id: string | null; status: string }>;
       const slot = slots.find((item) => item.sign_order === order);
       if (!slot) {
-        throw new ApiException(ErrorCode.ResourceNotFound, `El documento no tiene el firmante ${order}`);
+        throw new ApiException(ErrorCode.ResourceNotFound, 'El acta no tiene ese firmante.');
       }
       if (slots.some((item) => item.status !== 'PENDING')) {
         throw new ApiException(ErrorCode.SignatureReassignAfterSigning);
       }
       if (slot.signer_person_id === personId) {
-        throw new ApiException(ErrorCode.ValidationFailed, 'La persona ya está asignada a ese turno');
+        throw new ApiException(ErrorCode.ValidationFailed, 'Esa persona ya está en ese turno.');
       }
       const taken = slots.filter((item) => item.sign_order !== order && item.signer_person_id === personId);
       if (taken.length > 0) {
         const label = (role: string) => format.signers.find((spec) => spec.role === role)?.label ?? role;
         throw new ApiException(
           ErrorCode.DocumentSignerDuplicated,
-          `Separación de funciones: la persona ya firma el acta como ${taken.map((item) => `${label(item.role)} (${item.role})`).join(', ')}`,
+          `Esa persona ya firma el acta como ${taken.map((item) => label(item.role)).join(', ')}.`,
           [
-            { field: 'personId', message: `Ya firma como ${taken.map((item) => item.role).join(', ')}` },
-            ...taken.map((item) => ({ field: `signers.${item.role}`, message: `Misma persona que ${label(slot.role)} (${slot.role})` })),
+            { field: 'personId', message: `Ya firma como ${taken.map((item) => label(item.role)).join(', ')}.` },
+            ...taken.map((item) => ({ field: `signers.${item.role}`, message: `Es la misma persona de ${label(slot.role)}.` })),
             ...[slot, ...taken]
               .filter((item) => requiresControlSigner(item.role))
               .map((item) => ({
                 field: `signers.${item.role}`,
-                message: `Reasigne el turno ${item.role} a otra persona con el permiso vigente ${CONTROL_SIGNER_PERMISSION}, con el motivo`,
+                message: `Asigne ${label(item.role)} a otra persona con permiso para firmar actas por Control Interno y escriba el motivo.`,
               })),
           ],
         );
@@ -1225,7 +1225,7 @@ export class DocumentEngineService {
       );
       if (locked.signature_reference) {
         if (!this.signatures.reissue) {
-          throw new ApiException(ErrorCode.InvalidState, `El proveedor ${this.signatures.name} no permite reemitir el acta`);
+          throw new ApiException(ErrorCode.InvalidState, 'Esta acta no se puede volver a emitir.');
         }
         await this.signatures.reissue(
           locked.signature_reference,
@@ -1282,7 +1282,7 @@ export class DocumentEngineService {
       [document.template_version_id],
     )) as Array<{ storage_driver: StorageDriver; storage_key: string }>;
     if (!template) {
-      throw new ApiException(ErrorCode.TemplateNotActive, 'No se encontró la versión de plantilla del acta');
+      throw new ApiException(ErrorCode.TemplateNotActive, 'No encontramos la plantilla del acta.');
     }
     const [revisions] = (await manager.query(
 "SELECT count(*)::int AS total FROM document_signature_reassignment WHERE document_id = $1 AND source = 'REASSIGNED'",
@@ -1405,10 +1405,10 @@ export class DocumentEngineService {
     const document = await this.documentRow(documentId);
     const blocker = await this.signerBlocker(document, await this.signerSlots(documentId), order, actor);
     if (blocker.code === ErrorCode.InvalidState) {
-      throw new ApiException(ErrorCode.InvalidState, `El documento no está pendiente de firma en el turno ${order}`);
+      throw new ApiException(ErrorCode.InvalidState, 'Este turno no está pendiente de firma.');
     }
     if (blocker.code === ErrorCode.ResourceNotFound) {
-      throw new ApiException(ErrorCode.ResourceNotFound, `El documento no tiene el firmante ${order}`);
+      throw new ApiException(ErrorCode.ResourceNotFound, 'El acta no tiene ese firmante.');
     }
     if (blocker.code) {
       throw new ApiException(blocker.code);
@@ -1618,7 +1618,7 @@ export class DocumentEngineService {
     const byId = new Map(persons.map((person) => [person.id, person]));
     const missing = personIds.filter((id) => !byId.has(id));
     if (missing.length > 0) {
-      throw new ApiException(ErrorCode.ResourceNotFound, `Personas inexistentes: ${missing.join(', ')}`);
+      throw new ApiException(ErrorCode.ResourceNotFound, 'Algunas personas no existen.');
     }
     const [costCenter] = payload.costCenterId
       ? ((await manager.query('SELECT external_code, name FROM cost_center WHERE id = $1', [
@@ -1626,7 +1626,7 @@ export class DocumentEngineService {
         ])) as Array<{ external_code: string; name: string }>)
       : [];
     if (payload.costCenterId && !costCenter) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'Centro de costo inexistente');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'El centro de costo no existe.');
     }
     const costCenterUnit = payload.costCenterId ? await unitAt(manager, payload.costCenterId, now) : null;
     const assetIds = payload.assetIds ?? [];
@@ -1650,7 +1650,7 @@ export class DocumentEngineService {
         }>)
       : [];
     if (assets.length !== new Set(assetIds).size) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'Hay activos inexistentes en la solicitud');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'Algunos activos no existen.');
     }
     const ordered = assetIds
       .map((id) => assets.find((asset) => asset.id === id))
@@ -1696,7 +1696,7 @@ export class DocumentEngineService {
     if (unassigned.length > 0) {
       throw new ApiException(
         ErrorCode.ValidationFailed,
-        `El acta nombra a sus firmantes: falta asignar ${unassigned.join(', ')}`,
+        `Falta asignar ${unassigned.join(', ')}.`,
       );
     }
     const auditor = signers.find((signer) => signer.rol === 'AUDITA' || signer.rol === 'CONTROL_INTERNO');
@@ -1748,7 +1748,7 @@ export class DocumentEngineService {
     const movementIds = payload.movementIds ?? {};
     const foreign = Object.keys(movementIds).filter((assetId) => !assetIds.includes(assetId));
     if (foreign.length > 0) {
-      throw new ApiException(ErrorCode.ValidationFailed, `Movimientos de activos que no están en el documento: ${foreign.join(', ')}`);
+      throw new ApiException(ErrorCode.ValidationFailed, 'Hay movimientos de activos que no están en el acta.');
     }
     if (assetIds.length === 0) {
       return;
@@ -1765,7 +1765,7 @@ export class DocumentEngineService {
     if (unmatched.length > 0) {
       throw new ApiException(
         ErrorCode.ValidationFailed,
-        `El movimiento indicado no pertenece al activo: ${unmatched.map((item) => item.asset_id).join(', ')}`,
+        'Un movimiento no corresponde a su activo.',
       );
     }
   }
@@ -1797,7 +1797,7 @@ export class DocumentEngineService {
       void_reason: string | null;
     }>;
     if (!row) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el documento');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos el acta.');
     }
     return row;
   }
@@ -1812,13 +1812,13 @@ export class DocumentEngineService {
       [documentId, actorId],
     )) as Array<{ found: number }>;
     if (!signer) {
-      throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${permission} o ser firmante del documento`);
+      throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para hacer esto.');
     }
   }
 
   private async assertPermission(actorId: string, permission: string): Promise<void> {
     if (!(await this.permissions.userHasPermission(actorId, permission))) {
-      throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${permission}`);
+      throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para hacer esto.');
     }
   }
 }

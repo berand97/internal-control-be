@@ -165,7 +165,7 @@ export class DocumentTemplatesService {
     if (!template) {
       throw new ApiException(
         ErrorCode.TemplateNotActive,
-        `No hay plantilla activa para ${input.documentType}`,
+        `No hay una plantilla activa para ${input.documentType}.`,
       );
     }
     const source = await this.storageService.get(template.storageKey);

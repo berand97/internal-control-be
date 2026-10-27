@@ -309,7 +309,7 @@ describe('Motor de documentos (PostgreSQL real)', () => {
     expect(requests.find((row) => row.id === ok)).toMatchObject({ status: 'GENERATED' });
     expect(requests.find((row) => row.id === ok)?.document_id).not.toBeNull();
     expect(requests.find((row) => row.id === broken)).toMatchObject({ status: 'FAILED', document_id: null });
-    expect(requests.find((row) => row.id === broken)?.last_error).toContain('activos inexistentes');
+    expect(requests.find((row) => row.id === broken)?.last_error).toBe('Algunos activos no existen.');
     expect(await sequence('OCI-01-55')).toBe((before ?? 0) + 1);
   });
 

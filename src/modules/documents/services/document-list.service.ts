@@ -112,13 +112,13 @@ export class DocumentListService {
     const formats = await this.catalog.currentAll();
     const readable = await this.readableFormats(formats, actorId);
     if (query.formatKey && !formats.some((format) => format.key === query.formatKey)) {
-      throw new ApiException(ErrorCode.ValidationFailed, `Formato desconocido: ${query.formatKey}`);
+      throw new ApiException(ErrorCode.ValidationFailed, `El formato ${query.formatKey} no existe.`);
     }
     if (query.formatKey && !readable.includes(query.formatKey)) {
-      throw new ApiException(ErrorCode.InsufficientPermissions, `Sin permiso de lectura sobre ${query.formatKey}`);
+      throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para ver estas actas.');
     }
     if (readable.length === 0) {
-      throw new ApiException(ErrorCode.InsufficientPermissions, 'Sin permiso de lectura sobre ningún formato');
+      throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para ver actas.');
     }
     const params = [
       query.formatKey ? [query.formatKey] : readable,
@@ -166,10 +166,10 @@ export class DocumentListService {
     )) as Array<{ format_key: string; status: string; document_id: string | null }>;
     const format = request ? await this.catalog.find(request.format_key) : undefined;
     if (!request || !format) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la solicitud de documento');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la solicitud del acta.');
     }
     if (!(await this.permissions.userHasPermission(actorId, format.generatePermission))) {
-      throw new ApiException(ErrorCode.InsufficientPermissions, `Requiere permiso ${format.generatePermission}`);
+      throw new ApiException(ErrorCode.InsufficientPermissions, 'No tiene permiso para hacer esto.');
     }
     const updated = (await this.dataSource.query(
       `WITH updated AS (
@@ -179,11 +179,11 @@ export class DocumentListService {
       [requestId],
     )) as Array<{ id: string }>;
     if (updated.length === 0) {
-      throw new ApiException(ErrorCode.InvalidState, 'Solo se reintenta una solicitud fallida');
+      throw new ApiException(ErrorCode.InvalidState, 'Solo se puede reintentar una solicitud que falló.');
     }
     const [item] = (await this.list({ id: requestId, formatKey: format.key, page: 1, pageSize: 1 }, actorId)).items;
     if (!item) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la solicitud de documento');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'No encontramos la solicitud del acta.');
     }
     return item;
   }

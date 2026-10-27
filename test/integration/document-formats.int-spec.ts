@@ -399,14 +399,14 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
       { order: 2, role: 'RECIBE', label: 'Recibe', source: 'RESPONSIBLE' },
     ]);
     expect([withoutAudit.status, withoutAudit.body.error.code]).toEqual([409, 'DOCUMENT_FORMAT_BREAKS_PROCESS']);
-    expect(withoutAudit.body.error.message).toContain('Falta el rol AUDITA');
+    expect(withoutAudit.body.error.message).toContain('Falta el firmante AUDITA.');
     const changedSource = await loanVersion([
       { order: 1, role: 'ENTREGA', label: 'Entrega', source: 'RESPONSIBLE' },
       { order: 2, role: 'RECIBE', label: 'Recibe', source: 'RESPONSIBLE' },
       { order: 3, role: 'AUDITA', label: 'Control Interno', source: 'REQUEST' },
     ]);
     expect([changedSource.status, changedSource.body.error.code]).toEqual([409, 'DOCUMENT_FORMAT_BREAKS_PROCESS']);
-    expect(changedSource.body.error.message).toContain('ENTREGA debe tener origen REQUEST');
+    expect(changedSource.body.error.message).toContain('El firmante ENTREGA debe salir de REQUEST.');
     const extraRole = await loanVersion([
       { order: 1, role: 'ENTREGA', label: 'Entrega', source: 'REQUEST' },
       { order: 2, role: 'RECIBE', label: 'Recibe', source: 'RESPONSIBLE' },
