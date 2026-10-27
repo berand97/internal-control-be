@@ -83,6 +83,7 @@ interface AssetGuardRow {
   open_inventories: number;
   active_loans: number;
   open_transfer: string | null;
+  open_write_off: boolean;
 }
 
 export interface CreateTransferInput {
@@ -594,7 +595,8 @@ export class TransfersService {
               (SELECT count(*)::int FROM asset_loan_item li JOIN asset_loan l ON l.id = li.loan_id
                  WHERE li.asset_id = a.id AND l.status::text = ANY($2) AND li.received_at IS NULL) AS active_loans,
               (SELECT ti.transfer_id::text FROM asset_transfer_item ti
-                 WHERE ti.asset_id = a.id AND ti.open AND ti.transfer_id IS DISTINCT FROM $3::uuid LIMIT 1) AS open_transfer
+                 WHERE ti.asset_id = a.id AND ti.open AND ti.transfer_id IS DISTINCT FROM $3::uuid LIMIT 1) AS open_transfer,
+              EXISTS (SELECT 1 FROM asset_write_off_item wi WHERE wi.asset_id = a.id AND wi.open) AS open_write_off
        FROM asset a WHERE a.id = ANY($1)`,
       [assetIds, OPEN_LOAN_STATUSES, ownTransfer],
     )) as AssetGuardRow[];
@@ -631,6 +633,7 @@ export class TransfersService {
       ordered.filter((row) => row.open_transfer !== null),
       (row) => `El activo ${row.code} está en el traslado abierto ${row.open_transfer}`,
     );
+    fail(ErrorCode.AssetInOpenWriteOff, ordered.filter((row) => row.open_write_off), (row) => `El activo ${row.code} está en una baja abierta.`);
     if (options.checkReasons === false) {
       return source;
     }

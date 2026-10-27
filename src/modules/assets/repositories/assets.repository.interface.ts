@@ -192,6 +192,7 @@ export interface AssetsRepository {
     assetId: string,
   ): Promise<ReadonlyArray<{ readonly id: string; readonly status: string }>>;
   countOpenInventories(assetId: string): Promise<number>;
+  countOpenWriteOffs(assetId: string): Promise<number>;
   findPriceZeroClassification(assetId: string): Promise<AssetPriceZeroClassificationRecord | null>;
   saveImportBatch(record: {
     readonly filename: string;

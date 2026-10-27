@@ -487,6 +487,14 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
       .map((row) => ({ id: row.id, status: row.status }));
   }
 
+  async countOpenWriteOffs(assetId: string): Promise<number> {
+    const rows: unknown = await this.dataSource.query(
+      'SELECT COUNT(*)::int AS count FROM asset_write_off_item WHERE asset_id = $1 AND open',
+      [assetId],
+    );
+    return countFrom(rows);
+  }
+
   async countOpenInventories(assetId: string): Promise<number> {
     const rows: unknown = await this.dataSource.query(
       `
