@@ -666,7 +666,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
   [ErrorCode.HandoverAssetReserved]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'El activo está en un préstamo, una solicitud o un traslado abierto. Espere a que termine para entregarlo.',
+    message: 'El activo está en un préstamo, una solicitud, un traslado o una baja abierta. Espere a que termine para entregarlo.',
   },
   [ErrorCode.DocumentFormatNotReady]: {
     httpStatus: 409,
@@ -757,6 +757,41 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     httpStatus: 400,
     action: 'CANCEL',
     message: 'Varias personas pueden firmar ese turno. Elija una.',
+  },
+  [ErrorCode.WriteOffInvalidStateTransition]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'La baja no admite esa acción en su estado actual.',
+  },
+  [ErrorCode.WriteOffAssetHeld]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El activo está en otro proceso abierto. Espere a que termine para darlo de baja.',
+  },
+  [ErrorCode.WriteOffNoControlSigner]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message: 'Nadie tiene permiso para firmar por Control Interno. Pida a un administrador que lo otorgue.',
+  },
+  [ErrorCode.WriteOffSignerRequired]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'Varias personas pueden firmar ese turno. Elija una.',
+  },
+  [ErrorCode.WriteOffNoAccountingSigner]: {
+    httpStatus: 409,
+    action: 'CONTACT_SUPPORT',
+    message: 'Nadie tiene el rol de Contabilidad. Pida a un administrador que lo asigne.',
+  },
+  [ErrorCode.WriteOffSignerNotEligible]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'Esta persona no puede firmar ese turno del acta de baja.',
+  },
+  [ErrorCode.AssetInOpenWriteOff]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'El activo está en una baja abierta.',
   },
   [ErrorCode.AssetRequestNotHead]: {
     httpStatus: 403,

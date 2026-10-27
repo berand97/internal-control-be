@@ -418,6 +418,17 @@ export class LoansService {
           busy.map((row) => ({ field: 'assets', message: `El activo ${assets.find((asset) => asset.id === row.asset_id)?.internalCode ?? ''} ya está prestado.` })),
         );
       }
+      const writingOff = (await manager.query(
+        'SELECT DISTINCT asset_id FROM asset_write_off_item WHERE asset_id = ANY($1) AND open',
+        [uniqueIds],
+      )) as Array<{ asset_id: string }>;
+      if (writingOff.length > 0) {
+        throw new ApiException(
+          ErrorCode.AssetInOpenWriteOff,
+          undefined,
+          writingOff.map((row) => ({ field: 'assets', message: `El activo ${assets.find((asset) => asset.id === row.asset_id)?.internalCode ?? ''} está en una baja abierta.` })),
+        );
+      }
       const now = new Date();
       const approved = options.approved;
       const requestedBy = approved?.requestedBy ?? actorId;

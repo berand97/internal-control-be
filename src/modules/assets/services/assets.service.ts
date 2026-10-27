@@ -288,6 +288,7 @@ export class AssetsService {
     }
     await this.assertNotUnderInventory(asset.id);
     await this.assertNoActiveLoan(asset.id);
+    await this.assertNotInOpenWriteOff(asset.id);
     assertAcquisitionUnchanged(asset, dto);
     const priceChange = acquisitionPriceChange(asset, dto);
     const photoUrl = dto.photoUrl?.trim() || null;
@@ -439,6 +440,7 @@ export class AssetsService {
   ): Promise<AssetResponseDto> {
     const asset = await this.requireMutable(id);
     await this.assertNotUnderInventory(asset.id);
+    await this.assertNotInOpenWriteOff(asset.id);
     if (status === OperationalStatus.WrittenOff) {
       throw new ApiException(ErrorCode.AssetInvalidStatusTransition);
     }
@@ -481,6 +483,7 @@ export class AssetsService {
     const asset = await this.requireMutable(id);
     await this.assertNotUnderInventory(asset.id);
     await this.assertNoActiveLoan(asset.id);
+    await this.assertNotInOpenWriteOff(asset.id);
     const writtenOffAt =
       dto.writtenOffAt ?? new Date().toISOString().slice(0, 10);
     const updated = await this.assetState.apply({
@@ -920,6 +923,13 @@ export class AssetsService {
     const count = await this.assetsRepository.countActiveLoans(assetId);
     if (count > 0) {
       throw new ApiException(ErrorCode.AssetHasActiveLoan);
+    }
+  }
+
+  private async assertNotInOpenWriteOff(assetId: string): Promise<void> {
+    const count = await this.assetsRepository.countOpenWriteOffs(assetId);
+    if (count > 0) {
+      throw new ApiException(ErrorCode.AssetInOpenWriteOff);
     }
   }
 

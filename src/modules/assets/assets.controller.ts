@@ -339,7 +339,11 @@ export class AssetsController {
   @Post(':id/write-off')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('asset:write_off:global')
-  @ApiOperation({ summary: 'Dar de baja definitiva' })
+  @ApiOperation({
+    summary: 'Dar de baja definitiva sin acta (obsoleto)',
+    deprecated: true,
+    description: 'Obsoleto. Use POST /write-offs y su acta OCI-17-90-BAJA firmada. Se quitará cuando la baja con acta esté en uso. 409 ASSET_IN_OPEN_WRITE_OFF si el activo está en una baja abierta.',
+  })
   writeOff(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: WriteOffAssetDto,

@@ -161,6 +161,7 @@ describe('AssetsService', () => {
       findPriceZeroClassification: vi.fn().mockResolvedValue(null),
       findIdentifiers: vi.fn().mockResolvedValue([]),
       countOpenInventories: vi.fn().mockResolvedValue(0),
+      countOpenWriteOffs: vi.fn().mockResolvedValue(0),
       saveImportBatch: vi.fn(),
       findImportBatch: vi.fn(),
       markImportCommitted: vi.fn(),

@@ -5,7 +5,7 @@ import { ErrorCode } from '../../../common/constants/error-code.enum.js';
 import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import type { ErrorDetail } from '../../../common/types/response-envelope.type.js';
-import { HOLD_OPEN_LOAN, HOLD_OPEN_TRANSFER, HOLD_REQUEST_RESERVATION, holdReasons } from '../../assets/domain/asset-holds.js';
+import { HOLD_OPEN_LOAN, HOLD_OPEN_TRANSFER, HOLD_OPEN_WRITE_OFF, HOLD_REQUEST_RESERVATION, holdReasons } from '../../assets/domain/asset-holds.js';
 import type { Asset } from '../../assets/entities/asset.entity.js';
 import { MovementType } from '../../assets/enums/movement-type.enum.js';
 import { OPERATIONAL_STATUS_PHRASE, type OperationalStatus } from '../../assets/enums/operational-status.enum.js';
@@ -375,7 +375,7 @@ export class HandoversService implements OnModuleInit {
 
   private async assertNotHeld(manager: EntityManager, assetIds: ReadonlyArray<string>): Promise<void> {
     const held = (await manager.query(
-      `SELECT a.id, ${ASSET_CODE} AS code, ${holdReasons(HOLD_OPEN_LOAN('$2'), HOLD_REQUEST_RESERVATION(), HOLD_OPEN_TRANSFER)} AS reasons
+      `SELECT a.id, ${ASSET_CODE} AS code, ${holdReasons(HOLD_OPEN_LOAN('$2'), HOLD_REQUEST_RESERVATION(), HOLD_OPEN_TRANSFER, HOLD_OPEN_WRITE_OFF())} AS reasons
        FROM asset a WHERE a.id = ANY($1) ORDER BY a.id`,
       [assetIds, OPEN_LOAN_STATUSES],
     )) as Array<{ id: string; code: string; reasons: string[] }>;

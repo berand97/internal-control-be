@@ -8,6 +8,7 @@ import {
   HOLD_OPEN_INVENTORY,
   HOLD_OPEN_LOAN,
   HOLD_OPEN_TRANSFER,
+  HOLD_OPEN_WRITE_OFF,
   HOLD_REQUEST_RESERVATION,
   holdReasons,
 } from '../../assets/domain/asset-holds.js';
@@ -69,6 +70,7 @@ const BLOCKERS = holdReasons(
   HOLD_OPEN_TRANSFER,
   HOLD_OPEN_INVENTORY,
   HOLD_REQUEST_RESERVATION('$3'),
+  HOLD_OPEN_WRITE_OFF(),
 );
 
 export interface AssetRequestRow {

@@ -35,6 +35,7 @@ import { StagingModule } from './modules/staging/staging.module.js';
 import { DocumentsModule } from './modules/documents/documents.module.js';
 import { HandoversModule } from './modules/handovers/handovers.module.js';
 import { TransfersModule } from './modules/transfers/transfers.module.js';
+import { WriteOffsModule } from './modules/write-offs/write-offs.module.js';
 import { AssetRequestsModule } from './modules/asset-requests/asset-requests.module.js';
 import { PersonsModule } from './modules/persons/persons.module.js';
 import { EventsModule } from './modules/events/events.module.js';
@@ -94,6 +95,7 @@ const nestObserveImports =
     DocumentsModule,
     HandoversModule,
     TransfersModule,
+    WriteOffsModule,
     AssetRequestsModule,
     PersonsModule,
     EventsModule,
