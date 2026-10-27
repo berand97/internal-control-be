@@ -42,7 +42,7 @@ export class OrganizationalUnitResponseDto {
     type: 'string',
     format: 'uuid',
     nullable: true,
-    description: 'Centro de costo «propio» del cuadro, amarrado (p. ej. unidad 25 → 2510 Decanatura). null si no tiene o está pendiente',
+    description: 'Centro de costo "propio" del cuadro, amarrado (por ejemplo unidad 25 → 2510 Decanatura). null si no tiene o está pendiente',
   })
   readonly headCostCenterId!: string | null;
 

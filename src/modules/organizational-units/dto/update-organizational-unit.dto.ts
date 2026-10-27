@@ -102,7 +102,7 @@ export class UpdateOrganizationalUnitDto {
     type: 'string',
     format: 'uuid',
     nullable: true,
-    description: 'Centro de costo «propio» del cuadro (p. ej. 2510 Decanatura para la unidad 25). null lo quita',
+    description: 'Centro de costo "propio" del cuadro (por ejemplo 2510 Decanatura para la unidad 25). null lo quita',
   })
   @Transform(({ value }: { value: unknown }) => (value === '' ? null : value))
   @IsOptional()

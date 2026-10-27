@@ -79,13 +79,13 @@ export class TransferItemDto {
   @ApiProperty({ enum: PHYSICAL_CONDITIONS, enumName: 'PhysicalCondition', description: 'Estado del activo en el acta' })
   readonly physicalCondition!: PhysicalCondition;
 
-  @ApiProperty({ description: 'Verificación física (columna «Físico»)' })
+  @ApiProperty({ description: 'Verificación física (columna "Físico")' })
   readonly physicallyVerified!: boolean;
 
   @ApiProperty({ type: 'string', nullable: true })
   readonly verificationNote!: string | null;
 
-  @ApiProperty({ description: 'Tiene numeración/placa (columna «Numeración»)' })
+  @ApiProperty({ description: 'Tiene numeración/placa (columna "Numeración")' })
   readonly numberingPresent!: boolean;
 
   @ApiProperty({ type: () => TransferReasonRefDto })

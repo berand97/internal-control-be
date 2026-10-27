@@ -118,7 +118,7 @@ export class StorageController {
   @ApiOperation({
     summary: 'Probar conexión del proveedor activo',
     description:
-      'Con S3 (MinIO, AWS…) responde siempre 200 con el detalle de cada comprobación: destino permitido (BE-16), endpoint alcanzable, credenciales, bucket, escritura/lectura/borrado de health/probe-<uuid>.txt, versionado y object lock. ok=false si alguna terminó en FAILED. Con project/Google Drive/OneDrive los errores siguen llegando como error HTTP (p. ej. 424 STORAGE_OAUTH_REQUIRED).',
+      'Con S3 (MinIO, AWS…) responde siempre 200 con el detalle de cada comprobación: destino permitido (BE-16), endpoint alcanzable, credenciales, bucket, escritura/lectura/borrado de health/probe-<uuid>.txt, versionado y object lock. ok=false si alguna terminó en FAILED. Con project/Google Drive/OneDrive los errores siguen llegando como error HTTP (por ejemplo 424 STORAGE_OAUTH_REQUIRED).',
   })
   @ApiOkResponse({ schema: envelopedSchema(StorageTestResultDto) })
   test() {

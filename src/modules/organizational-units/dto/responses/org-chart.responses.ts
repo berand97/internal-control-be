@@ -182,7 +182,7 @@ export class OrgChartPreviewDto {
   @ApiProperty({ type: [OrgChartIssueDto], description: 'Bloquean la confirmación' })
   readonly errors!: ReadonlyArray<OrgChartIssueDto>;
 
-  @ApiProperty({ type: [OrgChartIssueDto], description: 'No bloquean (p. ej. códigos que no cuadran)' })
+  @ApiProperty({ type: [OrgChartIssueDto], description: 'No bloquean (por ejemplo códigos que no cuadran)' })
   readonly warnings!: ReadonlyArray<OrgChartIssueDto>;
 
   @ApiProperty({

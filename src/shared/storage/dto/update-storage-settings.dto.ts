@@ -156,7 +156,7 @@ export class UpdateStorageSettingsDto {
     nullable: true,
     maxLength: 2048,
     description:
-      'URL pública base de ese bucket (https en producción), p. ej. https://minio-api.dominio/control-interno-public o, con el mismo bucket de documentos, https://minio-api.dominio/control-interno. La imagen queda en <base>/images/email/<uuid>.png',
+      'URL pública base de ese bucket (https en producción), por ejemplo https://minio-api.dominio/control-interno-public o, con el mismo bucket de documentos, https://minio-api.dominio/control-interno. La imagen queda en <base>/images/email/<uuid>.png',
   })
   @IsOptional()
   @Transform(emptyToNull)

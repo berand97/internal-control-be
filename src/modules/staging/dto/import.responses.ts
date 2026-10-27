@@ -340,7 +340,7 @@ export class ImportSampleRowDto {
     type: 'object',
     additionalProperties: { type: 'string' },
     description:
-      `Letra → valor de la celda como texto, solo columnas con encabezado. Recortado a ${SAMPLE_CELL_MAX} caracteres (termina en «…» si se recortó). Números y fechas tal como quedaron en el archivo cargado (fecha en ISO 8601)`,
+      `Letra → valor de la celda como texto, solo columnas con encabezado. Recortado a ${SAMPLE_CELL_MAX} caracteres (termina en "…" si se recortó). Números y fechas tal como quedaron en el archivo cargado (fecha en ISO 8601)`,
   })
   readonly cells!: Record<string, string>;
 }

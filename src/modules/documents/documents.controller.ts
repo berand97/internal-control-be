@@ -334,7 +334,7 @@ export class DocumentsController {
   @ApiOperation({
     summary: 'Quiénes pueden firmar por Control Interno',
     description:
-      'Personas activas con usuario ACTIVE y el permiso vigente act:sign_control:global («Firmar actas por Control Interno»), para elegir el firmante al generar un acta ' +
+      'Personas activas con usuario ACTIVE y el permiso vigente act:sign_control:global ("Firmar actas por Control Interno"), para elegir el firmante al generar un acta ' +
       '(controlSignerPersonId, controlInternoPersonId). Requiere cualquier permiso de generación de un formato vigente del catálogo (asset:update:global, loan:update:global, inventory:execute:global, …) ' +
       'o asset_request:review:global; sin ninguno, 403 INSUFFICIENT_PERMISSIONS. Es la misma lista con la que se valida al generar: vacía, TRANSFER_NO_CONTROL_SIGNER; ' +
       'varias personas sin elegir, TRANSFER_SIGNER_REQUIRED; una persona fuera de ella, TRANSFER_SIGNER_NOT_ELIGIBLE.',

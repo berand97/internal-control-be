@@ -114,7 +114,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Exportar el organigrama (unidades organizacionales) a Excel',
     description:
-      'Hojas «Organigrama» (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Color, Estado, Acción, Código interno) e «Instrucciones». Solo unidades: los centros de costo se administran en su propia pantalla (Depende de acepta códigos de centros existentes; Centro propio también uno que aún no exista: queda pendiente y se amarra cuando el centro se crea). Incluye las archivadas. Trae una hoja oculta «_sello» (hora exacta de la descarga, revisión de la estructura y la huella de cada fila) con la que la previsualización sabe qué cambió la persona. Se edita y se sube a POST /organizational-units/import/preview.',
+      'Hojas "Organigrama" (Prefijo, Nombre, Tipo, Depende de, Línea, Centro propio, Color, Estado, Acción, Código interno) e "Instrucciones". Solo unidades: los centros de costo se administran en su propia pantalla (Depende de acepta códigos de centros existentes; Centro propio también uno que aún no exista: queda pendiente y se amarra cuando el centro se crea). Incluye las archivadas. Trae una hoja oculta "_sello" (hora exacta de la descarga, revisión de la estructura y la huella de cada fila) con la que la previsualización sabe qué cambió la persona. Se edita y se sube a POST /organizational-units/import/preview.',
   })
   async export(@Res() response: Response): Promise<void> {
     this.sendXlsx(response, await this.orgChart.export());
@@ -129,7 +129,7 @@ export class OrganizationalUnitsController {
   })
   @ApiOperation({
     summary: 'Plantilla vacía del Excel del organigrama (misma estructura; el ejemplo va en Instrucciones)',
-    description: 'La hoja «Organigrama» va vacía: subida tal cual no cambia nada. La fila de ejemplo de plantillas viejas (4 Vicerrectoría Financiera, 4010) se ignora al subirla.',
+    description: 'La hoja "Organigrama" va vacía: subida tal cual no cambia nada. La fila de ejemplo de plantillas viejas (4 Vicerrectoría Financiera, 4010) se ignora al subirla.',
   })
   async template(@Res() response: Response): Promise<void> {
     this.sendXlsx(response, await this.orgChart.template());
@@ -149,7 +149,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Previsualizar un Excel del organigrama (no cambia nada)',
     description:
-      'Resumen de unidades nuevas/renombradas/movidas/retipadas/a eliminar/a archivar; errores por fila (bloquean) y advertencias (códigos que no cuadran; no bloquean). Solo lee la hoja «Organigrama»: una hoja «Centros de costo» (archivos viejos) se ignora con una advertencia y summary.centers queda en 0. Las filas que no están en el archivo no se tocan. Subir el mismo archivo exportado sin cambios da 0 cambios. Con el sello oculto del archivo: una fila o columna que la persona no tocó se ignora aunque el sistema haya cambiado después (no revierte cambios de otros); una columna que tocó y que otra persona cambió después es un conflicto (conflicts[] y un error de fila: hay que descargar de nuevo); si el archivo ya dice lo mismo que el sistema no hay cambio ni conflicto. Con o sin sello: un Código interno que ya no existe no se vuelve a crear (advertencia); una archivada no se reactiva salvo que la persona cambie Estado (sin sello: solo si se archivó antes de la fecha del archivo); una fila nueva con el prefijo de una unidad activa se toma como ella; una fila nueva sin prefijo con el nombre (sin tildes ni mayúsculas) de una unidad activa bajo el mismo jefe es un error de fila en Nombre (si es la misma, se copia su Código interno; si es otra, se le pone prefijo o un nombre distinto), salvo que el mismo archivo renombre, mueva, archive o elimine la existente, y dos filas nuevas así en el mismo archivo dan error en la segunda; una unidad nueva con prefijo y un nombre repetido bajo el mismo jefe es solo una advertencia. fileAppliedBefore avisa si un archivo idéntico ya se aplicó; fileAgeDays, los días desde la descarga (más de 7: advertencia). 400 ORG_CHART_INVALID_FILE si no trae la hoja «Organigrama».',
+      'Resumen de unidades nuevas/renombradas/movidas/retipadas/a eliminar/a archivar; errores por fila (bloquean) y advertencias (códigos que no cuadran; no bloquean). Solo lee la hoja "Organigrama": una hoja "Centros de costo" (archivos viejos) se ignora con una advertencia y summary.centers queda en 0. Las filas que no están en el archivo no se tocan. Subir el mismo archivo exportado sin cambios da 0 cambios. Con el sello oculto del archivo: una fila o columna que la persona no tocó se ignora aunque el sistema haya cambiado después (no revierte cambios de otros); una columna que tocó y que otra persona cambió después es un conflicto (conflicts[] y un error de fila: hay que descargar de nuevo); si el archivo ya dice lo mismo que el sistema no hay cambio ni conflicto. Con o sin sello: un Código interno que ya no existe no se vuelve a crear (advertencia); una archivada no se reactiva salvo que la persona cambie Estado (sin sello: solo si se archivó antes de la fecha del archivo); una fila nueva con el prefijo de una unidad activa se toma como ella; una fila nueva sin prefijo con el nombre (sin tildes ni mayúsculas) de una unidad activa bajo el mismo jefe es un error de fila en Nombre (si es la misma, se copia su Código interno; si es otra, se le pone prefijo o un nombre distinto), salvo que el mismo archivo renombre, mueva, archive o elimine la existente, y dos filas nuevas así en el mismo archivo dan error en la segunda; una unidad nueva con prefijo y un nombre repetido bajo el mismo jefe es solo una advertencia. fileAppliedBefore avisa si un archivo idéntico ya se aplicó; fileAgeDays, los días desde la descarga (más de 7: advertencia). 400 ORG_CHART_INVALID_FILE si no trae la hoja "Organigrama".',
   })
   @ApiResponse({ status: 201, schema: envelopedSchema(OrgChartPreviewDto) })
   @ApiResponse({ status: 400, schema: errorEnvelopeSchema() })
@@ -207,7 +207,7 @@ export class OrganizationalUnitsController {
   @Get('reconcile/preview')
   @RequirePermission('org_unit:manage:global')
   @ApiOperation({
-    summary: 'Vista previa de «Recalcular estructura»',
+    summary: 'Vista previa de "Recalcular estructura"',
     description:
       'Compara la estructura con lo que piden los códigos: relocations (centros AUTO cuya unidad por prefijo más largo es otra), reparents (centros AUTO cuyo padre por regla XYZ0 es otro), headLinks (centros propios pendientes cuyo centro ya existe, o amarrados que cambiaron de código), headUnlinks (centros propios archivados o borrados: vuelven a pendiente) y manualExceptions (ubicaciones MANUAL que no coinciden: no se tocan). No cambia nada. hash va como expectedHash en POST /organizational-units/reconcile.',
   })
@@ -222,7 +222,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Recalcular estructura',
     description:
-      'Aplica en una transacción lo que muestra la vista previa: placements nuevos con origen y marca AUTO, amarres del centro propio, historial (motivo «Recalcular estructura») y auditoría STRUCTURE_RECONCILED con conteos. Idempotente: una segunda vez no cambia nada. Con expectedHash: 409 STRUCTURE_RECONCILE_STALE si la estructura cambió desde la vista previa.',
+      'Aplica en una transacción lo que muestra la vista previa: placements nuevos con origen y marca AUTO, amarres del centro propio, historial (motivo "Recalcular estructura") y auditoría STRUCTURE_RECONCILED con conteos. Idempotente: una segunda vez no cambia nada. Con expectedHash: 409 STRUCTURE_RECONCILE_STALE si la estructura cambió desde la vista previa.',
   })
   @ApiOkResponse({ schema: envelopedSchema(StructureReconcileResultDto) })
   @ApiResponse({ status: 409, schema: errorEnvelopeSchema() })
@@ -240,7 +240,7 @@ export class OrganizationalUnitsController {
   @ApiOperation({
     summary: 'Pendientes de la estructura',
     description:
-      'pendingHeadCenters: unidades activas con centro propio escrito por código que aún no existe (o está archivado); centersWithoutUnit: centros activos cuyo código no empieza por el prefijo de ninguna unidad activa; mismatches: lo mismo que GET /cost-centers/prefix-mismatches; manualExceptions: ubicaciones MANUAL que no coinciden con la regla; unitsUnderArchivedParent: unidades activas cuyo padre está archivado; centersInArchivedUnit: centros activos cuya unidad está archivada (estas dos son datos anteriores a la regla «una unidad archivada no puede ser padre»: no se corrigen solos); duplicateSiblingNames: grupos de unidades activas con el mismo nombre (sin tildes ni mayúsculas) bajo la misma dependencia o en el primer nivel, anteriores a la regla de nombres únicos: renombre una o archívela.',
+      'pendingHeadCenters: unidades activas con centro propio escrito por código que aún no existe (o está archivado); centersWithoutUnit: centros activos cuyo código no empieza por el prefijo de ninguna unidad activa; mismatches: lo mismo que GET /cost-centers/prefix-mismatches; manualExceptions: ubicaciones MANUAL que no coinciden con la regla; unitsUnderArchivedParent: unidades activas cuyo padre está archivado; centersInArchivedUnit: centros activos cuya unidad está archivada (estas dos son datos anteriores a la regla "una unidad archivada no puede ser padre": no se corrigen solos); duplicateSiblingNames: grupos de unidades activas con el mismo nombre (sin tildes ni mayúsculas) bajo la misma dependencia o en el primer nivel, anteriores a la regla de nombres únicos: renombre una o archívela.',
   })
   @ApiOkResponse({ schema: envelopedSchema(StructurePendingDto) })
   structurePending(): Promise<StructurePendingDto> {

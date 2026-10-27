@@ -12,7 +12,7 @@ export class UnitCostCenterDto {
   @ApiProperty({ format: 'uuid' })
   readonly id!: string;
 
-  @ApiProperty({ description: 'Código visible del centro de costo (p. ej. 2510)' })
+  @ApiProperty({ description: 'Código visible del centro de costo (por ejemplo 2510)' })
   readonly code!: string;
 
   @ApiProperty()

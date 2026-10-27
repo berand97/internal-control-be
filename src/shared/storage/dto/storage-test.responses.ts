@@ -20,7 +20,7 @@ export class StorageCheckDto {
   @ApiProperty({
     enum: STORAGE_CHECK_STATUSES,
     enumName: 'StorageCheckStatus',
-    description: 'FAILED hace ok=false. WARNING no (p. ej. versionado inactivo o sin s3:ListBucket). SKIPPED: no se llegó a probar',
+    description: 'FAILED hace ok=false. WARNING no (por ejemplo versionado inactivo o sin s3:ListBucket). SKIPPED: no se llegó a probar',
   })
   readonly status!: (typeof STORAGE_CHECK_STATUSES)[number];
 
