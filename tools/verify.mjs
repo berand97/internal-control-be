@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 
 const steps = [
   { name: 'Lint', command: 'pnpm lint' },
+  { name: 'UI copy', command: 'node tools/check-ui-copy.mjs' },
   { name: 'Type-check', command: 'pnpm type-check' },
   { name: 'Unit tests', command: 'pnpm test' },
   { name: 'Integration tests', command: 'pnpm test:int' },

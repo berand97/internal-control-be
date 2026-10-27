@@ -54,6 +54,7 @@ const lintCommand =
 
 const steps = [
   ...(lintable.length > 0 ? [['Lint changed files', lintCommand]] : []),
+  ['UI copy', 'node tools/check-ui-copy.mjs'],
   ['Type-check', 'pnpm type-check'],
   ['Unit tests related to the changes', `pnpm exec vitest run --changed ${mergeBase} --passWithNoTests`],
 ];
