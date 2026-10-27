@@ -220,7 +220,7 @@ const EMAIL_VARIABLES: Readonly<Record<string, Omit<EmailVariableSpec, 'name'>>>
   'importacion.resumen': textVar('Resumen de la importación'),
   'toma.codigo': textVar('Código de la toma física'),
   'toma.nombre': textVar('Nombre de la toma física'),
-  'toma.alcance': textVar('Qué cubre la toma (centro de costo, ubicación, unidad o toda la institución)'),
+  'toma.alcance': textVar('Qué cubre la toma (centro de costo, ubicación, dependencia o toda la institución)'),
   'toma.inicio': textVar('Fecha de inicio de la toma'),
   'toma.fin': textVar('Fecha de fin de la toma'),
   'toma.inicioAnterior': textVar('Fecha de inicio antes de reprogramar'),

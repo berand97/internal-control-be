@@ -21,10 +21,10 @@ const EOCD_MIN = 22;
 const MAX_COMMENT = 0xffff;
 
 const tooLarge = (detail: string): ApiException =>
-  new ApiException(ErrorCode.ArchiveTooLarge, `El archivo es demasiado grande para procesarlo: ${detail}`);
+  new ApiException(ErrorCode.ArchiveTooLarge, `El archivo es demasiado grande para procesarlo. ${detail}`);
 
 const corrupt = (): ApiException =>
-  new ApiException(ErrorCode.FileTypeNotAllowed, 'El archivo está dañado o no es un documento de Office válido');
+  new ApiException(ErrorCode.FileTypeNotAllowed, 'El archivo está dañado o no es un documento de Office.');
 
 const findEndOfCentralDirectory = (content: Buffer): number => {
   const stop = Math.max(0, content.length - EOCD_MIN - MAX_COMMENT);
@@ -51,10 +51,10 @@ export const assertZipWithinLimits = (content: Buffer, limits: ZipLimits): void 
   const centralSize = content.readUInt32LE(eocd + 12);
   const centralOffset = content.readUInt32LE(eocd + 16);
   if (entries === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
-    throw tooLarge('formato ZIP64 no admitido');
+    throw tooLarge('Use un archivo más pequeño.');
   }
   if (entries > limits.maxEntries) {
-    throw tooLarge(`${entries} partes internas; el máximo es ${limits.maxEntries}`);
+    throw tooLarge(`Tiene ${entries} partes internas y el máximo es ${limits.maxEntries}.`);
   }
   if (!within(content, centralOffset, centralSize)) {
     throw corrupt();
@@ -75,12 +75,12 @@ export const assertZipWithinLimits = (content: Buffer, limits: ZipLimits): void 
     const commentLength = content.readUInt16LE(cursor + 32);
     const local = content.readUInt32LE(cursor + 42);
     if (compressed === 0xffffffff || uncompressed === 0xffffffff || local === 0xffffffff) {
-      throw tooLarge('formato ZIP64 no admitido');
+      throw tooLarge('Use un archivo más pequeño.');
     }
     declaredTotal += uncompressed;
     if (declaredTotal > limits.maxUncompressedBytes) {
       throw tooLarge(
-        `descomprimido supera ${Math.round(limits.maxUncompressedBytes / MIB)} MB`,
+        `Descomprimido pasa de ${Math.round(limits.maxUncompressedBytes / MIB)} MB.`,
       );
     }
     pending.push({ method, compressed, uncompressed, local });
@@ -112,12 +112,12 @@ export const assertZipWithinLimits = (content: Buffer, limits: ZipLimits): void 
       }).length;
     } catch (error) {
       if (error instanceof RangeError) {
-        throw tooLarge('una parte interna se descomprime en más de lo que declara');
+        throw tooLarge('Una parte interna está dañada.');
       }
       throw corrupt();
     }
     if (produced > entry.uncompressed) {
-      throw tooLarge('una parte interna se descomprime en más de lo que declara');
+      throw tooLarge('Una parte interna está dañada.');
     }
   }
 };

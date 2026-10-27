@@ -56,7 +56,7 @@ export const itemPath = (config: OneDriveAdapterConfig, key: string): string => 
   const safeKey = assertSafeStorageKey(key);
   const folder = config.folderId ? encodeSegments(config.folderId) : [];
   if (folder.some((segment) => segment === '.' || segment === '..')) {
-    throw new ApiException(ErrorCode.StorageNotConfigured, 'La carpeta de OneDrive no es válida');
+    throw new ApiException(ErrorCode.StorageNotConfigured, 'La carpeta de OneDrive no es válida.');
   }
   return `root:/${[...folder, ...encodeSegments(safeKey)].join('/')}`;
 };

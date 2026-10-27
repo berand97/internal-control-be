@@ -165,7 +165,7 @@ export class FeatureFlagsService implements OnModuleInit, OnModuleDestroy {
     if (this.envOverride(code) !== undefined) {
       throw new ApiException(
         ErrorCode.FeatureNotToggleable,
-        'Este módulo está fijado por variable de entorno',
+        'Este módulo no se puede cambiar desde aquí.',
       );
     }
 

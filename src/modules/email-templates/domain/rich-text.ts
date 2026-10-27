@@ -69,7 +69,7 @@ interface Walk {
 const onlyKeys = (node: Record<string, unknown>, allowed: ReadonlyArray<string>, path: string, walk: Walk): void => {
   for (const key of Object.keys(node)) {
     if (key !== 'type' && !allowed.includes(key)) {
-      walk.issues.push({ field: `${path}.${key}`, message: 'Propiedad no permitida en el texto enriquecido' });
+      walk.issues.push({ field: `${path}.${key}`, message: 'El texto tiene un formato no permitido.' });
     }
   }
 };
@@ -77,7 +77,7 @@ const onlyKeys = (node: Record<string, unknown>, allowed: ReadonlyArray<string>,
 const contentArray = (node: Record<string, unknown>, path: string, walk: Walk): ReadonlyArray<unknown> | null => {
   const content = node['content'];
   if (!Array.isArray(content) || content.length === 0) {
-    walk.issues.push({ field: `${path}.content`, message: 'Debe ser una lista no vacía de nodos' });
+    walk.issues.push({ field: `${path}.content`, message: 'Escriba un texto.' });
     return null;
   }
   return content;
@@ -88,7 +88,7 @@ const checkMarks = (value: unknown, path: string, walk: Walk): void => {
     return;
   }
   if (!Array.isArray(value)) {
-    walk.issues.push({ field: path, message: 'Debe ser una lista de marcas' });
+    walk.issues.push({ field: path, message: 'El formato del texto no es válido.' });
     return;
   }
   const seen = new Set<string>();
@@ -97,13 +97,13 @@ const checkMarks = (value: unknown, path: string, walk: Walk): void => {
     if (!isRecord(mark) || !(RICH_TEXT_MARK_TYPES as ReadonlyArray<unknown>).includes(mark['type'])) {
       walk.issues.push({
         field: `${markPath}.type`,
-        message: `Marca no permitida; use: ${RICH_TEXT_MARK_TYPES.join(', ')}`,
+        message: 'El texto tiene un formato no permitido.',
       });
       return;
     }
     const type = mark['type'] as RichTextMarkType;
     if (seen.has(type)) {
-      walk.issues.push({ field: `${markPath}.type`, message: 'Marca repetida' });
+      walk.issues.push({ field: `${markPath}.type`, message: 'El texto repite un formato.' });
     }
     seen.add(type);
     if (type !== 'link') {
@@ -113,26 +113,26 @@ const checkMarks = (value: unknown, path: string, walk: Walk): void => {
     onlyKeys(mark, ['attrs'], markPath, walk);
     const attrs = mark['attrs'];
     if (!isRecord(attrs)) {
-      walk.issues.push({ field: `${markPath}.attrs`, message: 'El enlace necesita attrs.href' });
+      walk.issues.push({ field: `${markPath}.attrs`, message: 'Escriba la dirección del enlace.' });
       return;
     }
     for (const key of Object.keys(attrs)) {
       if (key !== 'href') {
         walk.issues.push({
           field: `${markPath}.attrs.${key}`,
-          message: 'Atributo no permitido en el enlace (solo href): quítelo antes de enviar',
+          message: 'El enlace tiene datos de más. Vuelva a crearlo.',
         });
       }
     }
     const href = attrs['href'];
     if (typeof href !== 'string' || href.trim() === '') {
-      walk.issues.push({ field: `${markPath}.attrs.href`, message: 'Debe ser un texto no vacío' });
+      walk.issues.push({ field: `${markPath}.attrs.href`, message: 'Escriba un texto.' });
     } else if (href.length > RICH_TEXT_LIMITS.hrefMaxLength) {
       walk.issues.push({ field: `${markPath}.attrs.href`, message: `Máximo ${RICH_TEXT_LIMITS.hrefMaxLength} caracteres` });
     } else if (!isAllowedDesignUrl(href)) {
       walk.issues.push({
         field: `${markPath}.attrs.href`,
-        message: 'Debe ser una variable del catálogo ({{...}}) o un enlace https://',
+        message: 'Use una variable del correo o un enlace que empiece por https://.',
       });
     }
   });
@@ -141,7 +141,7 @@ const checkMarks = (value: unknown, path: string, walk: Walk): void => {
 const checkInline = (node: unknown, path: string, walk: Walk): void => {
   walk.nodes += 1;
   if (!isRecord(node) || (node['type'] !== 'text' && node['type'] !== 'hardBreak')) {
-    walk.issues.push({ field: `${path}.type`, message: 'Dentro de un párrafo solo se admiten text y hardBreak' });
+    walk.issues.push({ field: `${path}.type`, message: 'El párrafo tiene un elemento no permitido.' });
     return;
   }
   if (node['type'] === 'hardBreak') {
@@ -152,7 +152,7 @@ const checkInline = (node: unknown, path: string, walk: Walk): void => {
   onlyKeys(node, ['text', 'marks'], path, walk);
   const text = node['text'];
   if (typeof text !== 'string' || text === '') {
-    walk.issues.push({ field: `${path}.text`, message: 'Debe ser un texto no vacío' });
+    walk.issues.push({ field: `${path}.text`, message: 'Escriba un texto.' });
   } else {
     walk.textLength += text.length;
     if (text.trim() !== '') {
@@ -161,7 +161,7 @@ const checkInline = (node: unknown, path: string, walk: Walk): void => {
     if (/\{\{|\}\}/.test(text.replace(TOKEN_PATTERN, ''))) {
       walk.issues.push({
         field: `${path}.text`,
-        message: 'Variable incompleta o partida por un formato: aplique el formato a toda la {{variable}}',
+        message: 'Una variable quedó partida por un formato. Aplique el formato a toda la variable.',
       });
     }
   }
@@ -180,7 +180,7 @@ const checkParagraph = (node: unknown, path: string, walk: Walk): void => {
     return;
   }
   if (!Array.isArray(content)) {
-    walk.issues.push({ field: `${path}.content`, message: 'Debe ser una lista de nodos' });
+    walk.issues.push({ field: `${path}.content`, message: 'El formato del texto no es válido.' });
     return;
   }
   content.forEach((child: unknown, index) => checkInline(child, `${path}.content[${index}]`, walk));
@@ -193,7 +193,7 @@ const checkList = (node: Record<string, unknown>, path: string, walk: Walk): voi
     const itemPath = `${path}.content[${index}]`;
     walk.nodes += 1;
     if (!isRecord(item) || item['type'] !== 'listItem') {
-      walk.issues.push({ field: `${itemPath}.type`, message: 'Una lista solo contiene listItem' });
+      walk.issues.push({ field: `${itemPath}.type`, message: 'La lista tiene un elemento no permitido.' });
       return;
     }
     onlyKeys(item, ['content'], itemPath, walk);
@@ -202,7 +202,7 @@ const checkList = (node: Record<string, unknown>, path: string, walk: Walk): voi
       const childPath = `${itemPath}.content[${childIndex}]`;
       if (isRecord(child) && (child['type'] === 'bulletList' || child['type'] === 'orderedList')) {
         walk.nodes += 1;
-        walk.issues.push({ field: `${childPath}.type`, message: 'No se admiten listas anidadas' });
+        walk.issues.push({ field: `${childPath}.type`, message: 'No se admiten listas dentro de listas.' });
         return;
       }
       checkParagraph(child, childPath, walk);
@@ -213,7 +213,7 @@ const checkList = (node: Record<string, unknown>, path: string, walk: Walk): voi
 export const validateRichTextDoc = (value: unknown, path: string): ReadonlyArray<RichTextIssue> => {
   const walk: Walk = { issues: [], nodes: 0, textLength: 0, hasVisibleText: false };
   if (!isRecord(value) || value['type'] !== 'doc') {
-    return [{ field: path, message: 'Debe ser un documento { type: "doc", content: [...] }' }];
+    return [{ field: path, message: 'El formato del texto no es válido.' }];
   }
   onlyKeys(value, ['content'], path, walk);
   const blocks = contentArray(value, path, walk);
@@ -226,7 +226,7 @@ export const validateRichTextDoc = (value: unknown, path: string): ReadonlyArray
     }
     if (!isRecord(block) || block['type'] !== 'paragraph') {
       walk.nodes += 1;
-      walk.issues.push({ field: `${blockPath}.type`, message: 'Nodo no permitido; use: paragraph, bulletList, orderedList' });
+      walk.issues.push({ field: `${blockPath}.type`, message: 'El texto tiene un elemento no permitido.' });
       return;
     }
     checkParagraph(block, blockPath, walk);
@@ -238,7 +238,7 @@ export const validateRichTextDoc = (value: unknown, path: string): ReadonlyArray
     walk.issues.push({ field: path, message: `Máximo ${RICH_TEXT_LIMITS.maxNodes} nodos (párrafos, ítems, textos y saltos)` });
   }
   if (blocks !== null && walk.issues.length === 0 && !walk.hasVisibleText) {
-    walk.issues.push({ field: path, message: 'El párrafo no tiene texto' });
+    walk.issues.push({ field: path, message: 'El párrafo está vacío.' });
   }
   return walk.issues;
 };

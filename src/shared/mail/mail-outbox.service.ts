@@ -135,7 +135,7 @@ export class MailOutboxService {
     }
     let error: string | null = null;
     if (!claimed.email) {
-      error = 'El destinatario no tiene correo registrado';
+      error = 'El destinatario no tiene correo registrado.';
     } else {
       try {
         const delivered = await this.mail.sendTemplated(
@@ -146,10 +146,10 @@ export class MailOutboxService {
           claimed.template_version_id,
         );
         if (!delivered) {
-          error = 'El correo saliente (SMTP) no está configurado o está deshabilitado';
+          error = 'El servidor de correo no está configurado o está apagado.';
         }
       } catch (cause) {
-        error = cause instanceof Error ? cause.message.slice(0, 500) : 'Falló el envío del correo';
+        error = cause instanceof Error ? cause.message.slice(0, 500) : 'No se pudo enviar el correo.';
       }
     }
     await this.dataSource.query(

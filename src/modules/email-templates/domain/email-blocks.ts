@@ -239,7 +239,7 @@ const text =
   (maxLength: number): FieldCheck =>
   (value, path, issues) => {
     if (typeof value !== 'string' || value.trim() === '') {
-      issues.push({ field: path, message: 'Debe ser un texto no vacío' });
+      issues.push({ field: path, message: 'Escriba un texto.' });
     } else if (value.length > maxLength) {
       issues.push({ field: path, message: `Máximo ${maxLength} caracteres` });
     }
@@ -249,20 +249,20 @@ const oneOf =
   (options: ReadonlyArray<string>): FieldCheck =>
   (value, path, issues) => {
     if (typeof value !== 'string' || !options.includes(value)) {
-      issues.push({ field: path, message: `Debe ser uno de: ${options.join(', ')}` });
+      issues.push({ field: path, message: 'Elija una opción de la lista.' });
     }
   };
 
 const url: FieldCheck = (value, path, issues) => {
   text(L.urlMaxLength)(value, path, issues);
   if (typeof value === 'string' && value.trim() !== '' && !isAllowedDesignUrl(value)) {
-    issues.push({ field: path, message: 'Debe ser una variable del catálogo ({{...}}) o un enlace https://' });
+    issues.push({ field: path, message: 'Use una variable del correo o un enlace que empiece por https://.' });
   }
 };
 
 const items: FieldCheck = (value, path, issues) => {
   if (!Array.isArray(value)) {
-    issues.push({ field: path, message: 'Debe ser una lista de filas' });
+    issues.push({ field: path, message: 'Agregue al menos una fila.' });
     return;
   }
   if (value.length < L.keyValueMinItems || value.length > L.keyValueMaxItems) {
@@ -271,7 +271,7 @@ const items: FieldCheck = (value, path, issues) => {
   value.forEach((item: unknown, index) => {
     const itemPath = `${path}[${index}]`;
     if (!isRecord(item)) {
-      issues.push({ field: itemPath, message: 'Cada fila es un objeto { label, value }' });
+      issues.push({ field: itemPath, message: 'Cada fila necesita etiqueta y valor.' });
       return;
     }
     for (const key of Object.keys(item)) {
@@ -292,7 +292,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const uuid: FieldCheck = (value, path, issues) => {
   if (typeof value !== 'string' || !UUID.test(value)) {
-    issues.push({ field: path, message: 'Debe ser el id (uuid) de una imagen subida' });
+    issues.push({ field: path, message: 'Suba una imagen.' });
   }
 };
 
@@ -300,7 +300,7 @@ const integer =
   (min: number, max: number): FieldCheck =>
   (value, path, issues) => {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
-      issues.push({ field: path, message: `Debe ser un entero entre ${min} y ${max}` });
+      issues.push({ field: path, message: `Escriba un número entero entre ${min} y ${max}.` });
     }
   };
 
@@ -335,7 +335,7 @@ const isBlockType = (value: unknown): value is EmailBlockType =>
 export const validateEmailBlocks = (blocks: unknown): ReadonlyArray<EmailDesignIssue> => {
   const issues: EmailDesignIssue[] = [];
   if (!Array.isArray(blocks)) {
-    return [{ field: 'blocks', message: 'Debe ser una lista de bloques' }];
+    return [{ field: 'blocks', message: 'El diseño del correo no es válido.' }];
   }
   if (blocks.length < L.minBlocks || blocks.length > L.maxBlocks) {
     issues.push({ field: 'blocks', message: `Entre ${L.minBlocks} y ${L.maxBlocks} bloques` });
@@ -343,13 +343,13 @@ export const validateEmailBlocks = (blocks: unknown): ReadonlyArray<EmailDesignI
   blocks.forEach((block: unknown, index) => {
     const path = `blocks[${index}]`;
     if (!isRecord(block) || !isBlockType(block['type'])) {
-      issues.push({ field: `${path}.type`, message: `Tipo de bloque no permitido; use: ${EMAIL_BLOCK_TYPES.join(', ')}` });
+      issues.push({ field: `${path}.type`, message: 'Ese tipo de bloque no existe.' });
       return;
     }
     const checks = BLOCK_FIELDS[block['type']];
     for (const key of Object.keys(block)) {
       if (key !== 'type' && !(key in checks)) {
-        issues.push({ field: `${path}.${key}`, message: 'Campo no permitido para este bloque' });
+        issues.push({ field: `${path}.${key}`, message: 'Este bloque no admite ese campo.' });
       }
     }
     for (const [name, check] of Object.entries(checks)) {
@@ -358,7 +358,7 @@ export const validateEmailBlocks = (blocks: unknown): ReadonlyArray<EmailDesignI
   });
   const images = blocks.filter((block: unknown) => isRecord(block) && block['type'] === 'image').length;
   if (images > L.maxImages) {
-    issues.push({ field: 'blocks', message: `Máximo ${L.maxImages} imágenes por correo` });
+    issues.push({ field: 'blocks', message: `Use máximo ${L.maxImages} imágenes por correo.` });
   }
   return issues;
 };

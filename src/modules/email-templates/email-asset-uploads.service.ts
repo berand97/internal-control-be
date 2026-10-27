@@ -89,16 +89,16 @@ export class EmailAssetUploadsService {
   private rejection(error: EmailImageRejectedError): ApiException {
     switch (error.reason) {
       case 'NOT_PNG_OR_JPEG':
-        return new ApiException(ErrorCode.FileTypeNotAllowed, 'Solo se admiten imágenes PNG o JPEG');
+        return new ApiException(ErrorCode.FileTypeNotAllowed, 'Suba una imagen PNG o JPEG.');
       case 'TOO_MANY_PIXELS': {
         const megapixels = EMAIL_IMAGE_LIMITS.maxInputPixels / 1_000_000;
         return new ApiException(
           ErrorCode.EmailAssetInvalidImage,
-          `La imagen es demasiado grande para procesarla (más de ${megapixels} megapíxeles)`,
+          `La imagen pasa de ${megapixels} megapíxeles. Use una más pequeña.`,
         );
       }
       case 'UNREADABLE':
-        return new ApiException(ErrorCode.EmailAssetInvalidImage, 'La imagen está dañada o no se puede leer');
+        return new ApiException(ErrorCode.EmailAssetInvalidImage, 'La imagen está dañada.');
     }
   }
 }

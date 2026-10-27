@@ -182,7 +182,7 @@ export class EmailTemplatesService {
         undefined,
         design.blocks.flatMap((block, index) =>
           block.type === 'image' && missingAssets.has(block.assetId)
-            ? [{ field: `blocks[${index}].assetId`, message: 'La imagen no existe; súbala de nuevo' }]
+            ? [{ field: `blocks[${index}].assetId`, message: 'La imagen ya no existe. Súbala de nuevo.' }]
             : [],
         ),
       );
@@ -192,14 +192,14 @@ export class EmailTemplatesService {
       throw new ApiException(
         ErrorCode.EmailTemplateUnknownVariable,
         undefined,
-        check.unknown.map((token) => ({ field: token, message: `{{${token}}} no pertenece al catálogo de este tipo` })),
+        check.unknown.map((token) => ({ field: token, message: `La variable {{${token}}} no existe para este correo.` })),
       );
     }
     if (check.missing.length > 0) {
       throw new ApiException(
         ErrorCode.EmailTemplateMissingVariable,
         undefined,
-        check.missing.map((token) => ({ field: token, message: `Falta la variable obligatoria {{${token}}}` })),
+        check.missing.map((token) => ({ field: token, message: `Falta la variable {{${token}}}.` })),
       );
     }
     return { ...design, placeholders: check.placeholders };
