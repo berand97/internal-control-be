@@ -46,9 +46,9 @@ export const childPrefixError = (childPrefix: string, ancestorPrefix: string | n
     return null;
   }
   if (childPrefix.startsWith(ancestorPrefix)) {
-    return `El prefijo ${childPrefix} debe tener más dígitos que el de su jefe (${ancestorPrefix})`;
+    return `El prefijo ${childPrefix} es el mismo de su jefe. Agregue al menos un dígito.`;
   }
-  return `El prefijo ${childPrefix} no empieza por el de su jefe (${ancestorPrefix})`;
+  return `El prefijo ${childPrefix} no empieza por ${ancestorPrefix}, el de su jefe.`;
 };
 
 export interface PrefixCheck {
@@ -84,13 +84,14 @@ export const checkUnitPrefix = (
         childPrefix.startsWith(prefix),
     )
     .sort((left, right) => right.length - left.length)[0];
-  const child = `${names.child ?? 'La unidad'} (${childPrefix})`;
-  const boss = names.ancestor ? `${names.ancestor} (${ancestorPrefix})` : `su jefe (${ancestorPrefix})`;
+  const child = names.child ?? 'La dependencia';
+  const boss = names.ancestor ?? 'su jefe';
+  const ownerName = owner ? otherActivePrefixes.get(owner) : undefined;
   return {
     level: 'WARNING',
-    message: owner
-      ? `${child} depende de ${boss} pero conserva los códigos ${childPrefix}… de ${otherActivePrefixes.get(owner) ?? 'otra unidad'}`
-      : `${child} depende de ${boss} pero sus códigos ${childPrefix}… no empiezan por ${ancestorPrefix}`,
+    message: ownerName
+      ? `${child} quedó bajo ${boss}, pero su prefijo ${childPrefix} es de la rama de ${ownerName}.`
+      : `${child} quedó bajo ${boss}, pero su prefijo ${childPrefix} no empieza por ${ancestorPrefix}.`,
   };
 };
 
@@ -141,5 +142,5 @@ export const suggestUnitPrefix = (ancestorPrefix: string | null, takenPrefixes: 
 
 export const pendingHeadCenterMessage = (code: string, archived: boolean): string =>
   archived
-    ? `Centro propio ${code} pendiente: el centro está archivado; se amarrará solo cuando se reactive`
-    : `Centro propio ${code} pendiente: el centro aún no existe; se amarrará solo cuando se cree`;
+    ? `El centro ${code} está archivado. Quedará como centro propio cuando lo reactiven.`
+    : `El centro ${code} aún no existe. Quedará como centro propio cuando lo creen.`;

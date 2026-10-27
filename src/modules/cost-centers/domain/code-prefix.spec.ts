@@ -34,7 +34,7 @@ describe('código de centro de costo', () => {
     expect(prefixRange('4')).toEqual({ from: '4000', to: '4999' });
     expect(prefixRange('43')).toEqual({ from: '4300', to: '4399' });
     expect(prefixRangeMessage('Vicerrectoría Financiera', '4')).toBe(
-      'Los centros de Vicerrectoría Financiera van de 4000 a 4999 (el código debe empezar por 4)',
+      'Los centros de Vicerrectoría Financiera van de 4000 a 4999. Use un código que empiece por 4.',
     );
   });
 

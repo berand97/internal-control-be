@@ -10,7 +10,7 @@ export class StructureRemovalResultDto {
   @ApiProperty({
     type: 'string',
     nullable: true,
-    description: 'Por qué se archivó en vez de borrarse (p. ej. «Se archiva porque tiene historia: 3 movimientos de activos»)',
+    description: 'Por qué se archivó en vez de borrarse, como «Tiene 3 movimientos de activos en su historial.»',
   })
   readonly reason!: string | null;
 }

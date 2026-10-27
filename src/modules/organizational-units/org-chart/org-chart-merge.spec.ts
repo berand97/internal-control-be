@@ -173,9 +173,9 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
       },
     ]);
     expect(errors).toHaveLength(1);
-    expect(errors[0]?.message).toContain('otra persona lo cambió el 08/10/2026');
+    expect(errors[0]?.message).toContain('El 08/10/2026');
     expect(errors[0]?.message).toContain('Ana Pérez');
-    expect(errors[0]?.message).toContain('«Contabilidad A»');
+    expect(errors[0]?.message).toContain('se cambió la columna Nombre de Contabilidad A a Contabilidad A. Su archivo dice Contabilidad B.');
     expect(errors[0]?.message).toContain('Descargue el organigrama de nuevo');
     expect(plan.changes).toEqual([]);
   });
@@ -218,11 +218,11 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     expect(errors).toEqual([]);
     expect(plan.changes).toEqual([]);
     expect(warnings.map((warning) => warning.message)).toContainEqual(
-      expect.stringMatching(/«Servicios Administrativos» se eliminó el 08\/10\/2026.*Ana Pérez: no se vuelve a crear\. Para crearla de nuevo borre su Código interno/),
+      expect.stringMatching(/^Servicios Administrativos se eliminó el 08\/10\/2026.*Ana Pérez\. No se vuelve a crear\. Para crearla de nuevo, borre su código interno\.$/),
     );
     const unknown = run(now, input);
     expect(unknown.plan.changes).toEqual([]);
-    expect(unknown.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('No hay ninguna unidad con Código interno U43'));
+    expect(unknown.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('No hay ninguna dependencia con el código interno U43.'));
   });
 
   it('archivada después de la descarga: el archivo sin tocar no la reactiva; si la persona cambió Estado, sí', async () => {
@@ -259,15 +259,15 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     const after = changes([['u30', 'STATUS', { at: AFTER, byName: 'Ana Pérez' }]]);
     const late = run(now, stampless(DOWNLOADED_AT.toISOString()), { lastChanges: after });
     expect(late.plan.changes).toEqual([]);
-    expect(late.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('después de que se hizo este archivo: no se reactiva'));
-    expect(late.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('no trae el sello de la descarga'));
+    expect(late.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('después de que se descargó este archivo. No se reactiva.'));
+    expect(late.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('no tiene el sello de descarga'));
 
     const before = changes([['u30', 'STATUS', { at: BEFORE, byName: 'Ana Pérez' }]]);
     expect(run(now, stampless(DOWNLOADED_AT.toISOString()), { lastChanges: before }).plan.changes.map((change) => change.kind)).toEqual(['REACTIVATED']);
 
     const undated = run(now, stampless(null), { lastChanges: before });
     expect(undated.plan.changes).toEqual([]);
-    expect(undated.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('no dice cuándo se hizo'));
+    expect(undated.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('está archivada y no se reactiva.'));
   });
 
   it('fila nueva sin Código interno ni prefijo subida dos veces: la segunda vez es un error de fila (ya no se toma como la existente)', () => {
@@ -291,11 +291,11 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
         rowNumber: 2,
         column: 'Nombre',
         message:
-          'Ya existe «Oficina de Calidad» bajo Vicerrectoría Financiera (creada el 08/10/2026 por Ana Pérez). Si es la misma, copie su Código interno (OFICINA_DE_CALIDAD) en la fila; si es otra, escriba su prefijo o un nombre distinto.',
+          'Ya existe Oficina de Calidad en Vicerrectoría Financiera (creada el 08/10/2026 por Ana Pérez). Si es la misma, copie su código interno OFICINA_DE_CALIDAD en la fila. Si es otra, póngale prefijo o un nombre distinto.',
       },
     ]);
     const dated = run(now, { ...input, fileCreatedAt: DOWNLOADED_AT.toISOString() }, { unitOrigins });
-    expect(dated.errors[0]?.message).toMatch(/Se creó después de que se hizo este archivo: si ya lo subió antes, esta fila ya está aplicada\.$/);
+    expect(dated.errors[0]?.message).toMatch(/Se creó después de que se descargó este archivo\. Si ya lo subió antes, esta fila ya está aplicada\.$/);
     expect(run(now, { ...input, units: [{ ...input.units[0]!, code: 'OFICINA_DE_CALIDAD' }] }).plan.changes).toEqual([]);
     const elsewhere = run(now, { ...input, units: [{ ...input.units[0]!, name: 'OFICINA DE CALIDAD', parent: '3' }] });
     expect(elsewhere.errors).toEqual([]);
@@ -310,7 +310,7 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     const noPrefix = run(now, input);
     expect(noPrefix.plan.changes).toEqual([]);
     expect(noPrefix.errors.map((error) => error.message)).toEqual([
-      'Ya existe «Calidad» bajo Rectoría (prefijo 102). Si es la misma, copie su Código interno (U102) en la fila; si es otra, escriba su prefijo o un nombre distinto.',
+      'Ya existe Calidad en Rectoría. Si es la misma, copie su código interno U102 en la fila. Si es otra, póngale prefijo o un nombre distinto.',
     ]);
     const withPrefix = run(now, { ...input, units: [{ ...row, prefix: '104' }] });
     expect(withPrefix.errors).toEqual([
@@ -318,13 +318,13 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
         sheet: 'Organigrama',
         rowNumber: 2,
         column: 'Nombre',
-        message: 'Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+        message: 'Ya existe Calidad en Rectoría.',
       },
     ]);
     const sameUnit = run(now, { ...input, units: [{ ...row, prefix: '103', name: 'Calidad', type: 'Departamento' }] });
     expect(sameUnit.errors).toEqual([]);
     expect(sameUnit.plan.changes).toEqual([]);
-    expect(sameUnit.warnings.map((warning) => warning.message)).toContainEqual('El prefijo 103 ya existe: «Calidad». La fila se toma como esa unidad');
+    expect(sameUnit.warnings.map((warning) => warning.message)).toContainEqual('El prefijo 103 ya es de Calidad. La fila se toma como esa dependencia.');
   });
 
   it('nombre repetido en el primer nivel, dos filas nuevas iguales y la existente renombrada o archivada en el mismo archivo', () => {
@@ -332,7 +332,7 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     const row: UnitRowInput = { rowNumber: 2, prefix: null, name: 'Calidad', type: 'Oficina', parent: null, relation: null, headCenter: null, status: null, action: null, code: null };
     const input = (units: UnitRowInput[]): OrgChartInput => ({ units, centers: [], hasUnitSheet: true, hasCenterSheet: false });
     expect(run(now, input([row])).errors.map((error) => error.message)).toEqual([
-      'Ya existe «Calidad» en el primer nivel. Si es la misma, copie su Código interno (CALIDAD) en la fila; si es otra, escriba su prefijo o un nombre distinto.',
+      'Ya existe Calidad en el primer nivel. Si es la misma, copie su código interno CALIDAD en la fila. Si es otra, póngale prefijo o un nombre distinto.',
     ]);
     const existingRow: UnitRowInput = { ...row, rowNumber: 3, name: 'Calidad Académica', code: 'CALIDAD', type: null };
     const renamed = run(now, input([row, existingRow]));
@@ -351,7 +351,7 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
         sheet: 'Organigrama',
         rowNumber: 3,
         column: 'Nombre',
-        message: 'La fila 2 ya crea «Calidad» bajo Vicerrectoría Financiera. Si es la misma unidad, borre esta fila; si es otra, escriba su prefijo o un nombre distinto.',
+        message: 'La fila 2 ya crea Calidad en Vicerrectoría Financiera. Si es la misma, borre esta fila. Si es otra, póngale prefijo o un nombre distinto.',
       },
     ]);
     expect(twice.plan.changes.map((change) => change.kind)).toEqual(['CREATED', 'CREATED']);
@@ -368,7 +368,7 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     };
     const { plan, warnings } = run(baseUnits(), input);
     expect(plan.changes).toEqual([]);
-    expect(warnings.map((warning) => warning.message)).toContainEqual('El prefijo 43 ya existe: «Servicios Administrativos». La fila se toma como esa unidad');
+    expect(warnings.map((warning) => warning.message)).toContainEqual('El prefijo 43 ya es de Servicios Administrativos. La fila se toma como esa dependencia.');
   });
 
   it('plantilla: hoja Organigrama vacía (el ejemplo en Instrucciones); subida tal cual o con la fila de ejemplo vieja = 0 cambios', async () => {
@@ -389,7 +389,7 @@ describe('Excel del organigrama a prueba de archivos viejos (sello y merge de tr
     };
     const { plan, warnings } = run(now, oldTemplate);
     expect(plan.changes).toEqual([]);
-    expect(warnings.map((warning) => warning.message)).toContain('Es la fila de ejemplo de la plantilla: se ignora');
+    expect(warnings.map((warning) => warning.message)).toContain('Es la fila de ejemplo de la plantilla. Se ignora.');
   });
 
   it('archivo descargado hace más de 7 días: advertencia con los días', async () => {

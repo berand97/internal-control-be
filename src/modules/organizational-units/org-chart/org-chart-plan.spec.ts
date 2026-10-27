@@ -161,7 +161,7 @@ describe('plan del Excel del organigrama', () => {
       expect(plan.changes).toEqual([]);
       expect(plan.centers).toEqual([]);
       expect(plan.warnings).toEqual([{ sheet: 'Centros de costo', rowNumber: 1, column: null, message: IGNORED_CENTER_SHEET_WARNING }]);
-      expect(IGNORED_CENTER_SHEET_WARNING).toBe('La hoja Centros de costo se ignoró: los centros se administran en su propia pantalla');
+      expect(IGNORED_CENTER_SHEET_WARNING).toBe('No se leyó la hoja Centros de costo. Los centros de costo se editan en su propia pantalla.');
     });
 
     it('una previsualización guardada con filas de centros las descarta al planear (unitsOnly)', () => {
@@ -198,7 +198,7 @@ describe('plan del Excel del organigrama', () => {
         expect.objectContaining({
           rowNumber: 2,
           column: 'Centro propio',
-          message: 'Centro propio 4510 pendiente: el centro aún no existe; se amarrará solo cuando se cree',
+          message: 'El centro 4510 aún no existe. Quedará como centro propio cuando lo creen.',
         }),
       );
       expect(plan.units.find((op) => op.code !== 'U43' && op.codePrefix === '45')).toMatchObject({
@@ -228,9 +228,9 @@ describe('plan del Excel del organigrama', () => {
       expect.objectContaining({
         rowNumber: 2,
         column: 'Prefijo',
-        message: expect.stringMatching(/^Oficina X \(33\) depende de .* \(4\) pero conserva los códigos 33… de Vicerrectoría Académica$/),
+        message: expect.stringMatching(/^Oficina X quedó bajo .+, pero su prefijo 33 es de la rama de Vicerrectoría Académica\.$/),
       }),
-      expect.objectContaining({ rowNumber: 3, message: expect.stringContaining('pero sus códigos 53… no empiezan por 4') }),
+      expect.objectContaining({ rowNumber: 3, message: expect.stringContaining('pero su prefijo 53 no empieza por 4.') }),
     ]);
   });
 
@@ -245,8 +245,8 @@ describe('plan del Excel del organigrama', () => {
       }),
     );
     expect(plan.errors.map((issue) => issue.message)).toEqual([
-      'Un cuerpo colegiado (consejo) no lleva prefijo: no recibe centros de costo',
-      'Tiene 2 centros de costo activos: muévalos o márquelos también',
+      'Los consejos, comités y comisiones no llevan prefijo.',
+      'Tiene 2 centros de costo activos. Muévalos o márquelos también.',
     ]);
   });
 
@@ -280,16 +280,16 @@ describe('plan del Excel del organigrama', () => {
         parentKey: null,
         kinds: ['RECODED', 'RELOCATED'],
       });
-      expect(plan.warnings[0]?.message).toContain('centro padre 4120, que no existe');
+      expect(plan.warnings[0]?.message).toContain('El centro padre 4120 no existe. Queda sin centro padre.');
     });
 
     it('recodificar a un código que ya existe es error', () => {
       const plan = planOrgChart(baseSnapshot(), only({ centers: [centerRow(2, { code: '4352', name: 'X', previousCode: '4351' })] }));
-      expect(plan.errors[0]?.message).toContain('ya es del centro');
+      expect(plan.errors[0]?.message).toContain('El código 4352 ya es de CENTRO 4352.');
     });
 
     it('eliminar sin historia borra; con historia archiva; con activos es error (409 en el DELETE)', () => {
-      const snapshot = { ...baseSnapshot(), removal: new Map([['c4352', { history: 'Se archiva porque tiene historia: 3 movimientos de activos' }]]) };
+      const snapshot = { ...baseSnapshot(), removal: new Map([['c4352', { history: 'Tiene 3 movimientos de activos en su historial.' }]]) };
       const plan = planOrgChart(
         snapshot,
         only({
@@ -302,7 +302,7 @@ describe('plan del Excel del organigrama', () => {
       );
       expect(plan.centers.find((op) => op.key === 'c4351')).toMatchObject({ removal: 'DELETE', kinds: ['DELETED'] });
       expect(plan.centers.find((op) => op.key === 'c4352')).toMatchObject({ removal: 'ARCHIVE', kinds: ['ARCHIVED'] });
-      expect(plan.errors).toEqual([expect.objectContaining({ rowNumber: 4, message: 'Tiene 2 activos asignados: no se puede eliminar ni archivar' })]);
+      expect(plan.errors).toEqual([expect.objectContaining({ rowNumber: 4, message: 'Tiene 2 activos asignados. No se puede eliminar ni archivar.' })]);
     });
 
     it('un centro con hijos activos que no están en el archivo no se archiva', () => {
@@ -311,7 +311,7 @@ describe('plan del Excel del organigrama', () => {
         { ...snapshot, centers: snapshot.centers.map((item) => (item.id === 'c4350' ? { ...item, activeAssets: 0 } : item)) },
         only({ centers: [centerRow(2, { code: '4350', name: 'CENTRO 4350', action: 'ARCHIVAR' })] }),
       );
-      expect(plan.errors[0]?.message).toContain('Tiene 2 centros hijos activos (4351, 4352)');
+      expect(plan.errors[0]?.message).toContain('Tiene centros hijos activos (4351, 4352). Muévalos o márquelos también.');
     });
 
     it('unidad nueva bajo 4 con centros nuevos: los centros quedan en ella y con su padre', () => {
@@ -423,9 +423,9 @@ describe('plan del Excel del organigrama', () => {
       ]);
       expect(plan.changes[0]?.detail).toContain('bajo 4 · Vicerrectoría Financiera');
       expect(plan.warnings.map((issue) => [issue.rowNumber, issue.column, issue.message])).toEqual([
-        [2, 'Depende de', 'Depende de deducido del prefijo: 4'],
-        [4, 'Depende de', 'Depende de deducido del prefijo: 46'],
-        [5, 'Depende de', 'Depende de deducido del prefijo: 43'],
+        [2, 'Depende de', 'Quedó bajo Vicerrectoría Financiera por su prefijo.'],
+        [4, 'Depende de', 'Quedó bajo Departamento de Contabilidad por su prefijo.'],
+        [5, 'Depende de', 'Quedó bajo Departamento de Servicios Administrativos por su prefijo.'],
       ]);
     });
 
@@ -443,8 +443,8 @@ describe('plan del Excel del organigrama', () => {
       expect(plan.centers).toEqual([]);
       expect(plan.units[0]).toMatchObject({ code: 'U5', parentKey: 'u1', headCenterKey: 'c5010' });
       expect(plan.warnings.map((issue) => issue.message)).toEqual([
-        'Depende de deducido: la Rectoría 1',
-        'Centro propio deducido: 5010',
+        'Quedó bajo Rectoría.',
+        'Se tomó el centro propio 5010.',
       ]);
     });
 
@@ -467,8 +467,8 @@ describe('plan del Excel del organigrama', () => {
           ['CONSEJO_ACADEMICO', null, null],
         ]);
         expect(plan.warnings.map((issue) => [issue.rowNumber, issue.message])).toEqual([
-          [2, 'Sin Depende de: queda en la raíz'],
-          [3, 'Sin Depende de: queda en la raíz'],
+          [2, 'No dice de quién depende. Queda en el primer nivel.'],
+          [3, 'No dice de quién depende. Queda en el primer nivel.'],
         ]);
       }
     });
@@ -534,18 +534,18 @@ describe('plan del Excel del organigrama', () => {
         ['153', '15'],
       ]);
       const messages = plan.warnings.map((issue) => `${issue.rowNumber}: ${issue.message}`);
-      expect(messages).toContain('7: 1100 se tomó como prefijo 11');
-      expect(messages).toContain('10: 1210 se tomó como prefijo 121');
+      expect(messages).toContain('7: 1100 se tomó como el prefijo 11.');
+      expect(messages).toContain('10: 1210 se tomó como el prefijo 121.');
       expect(messages).toContain(
-        '2: Hay 2 cuadros de tipo Rectoría (1 RECTORÍA; 11 Rectoría): las filas nuevas de un número sin «Depende de» quedan en la raíz',
+        '2: Hay 2 rectorías (1 RECTORÍA, 11 Rectoría). Las filas nuevas de un solo número sin Depende de quedan en el primer nivel.',
       );
       expect(messages.some((message) => message.includes('ciclo'))).toBe(false);
       expect(plan.centers).toEqual([]);
       expect(plan.units.map((op) => (op.headCenterKey ? op.headCenterKey.slice(1) : null))).toEqual([
         '1010', null, null, null, null, null, '1110', null, '1210', '1220', null, '1310', null, '1410', null, '1510', '1520', '1530',
       ]);
-      expect(messages).toContain('17: Centro propio deducido: 1510');
-      expect(messages).toContain('13: 1310 tiene el mismo nombre que su jefe 1300; ¿es su Centro propio?');
+      expect(messages).toContain('17: Se tomó el centro propio 1510.');
+      expect(messages).toContain('13: 1310 se llama igual que su jefe 1300. Revise si es su centro propio.');
     });
 
     it('unidad nueva con el nombre de otra activa bajo el mismo jefe (sin tildes ni mayúsculas): error de fila', () => {
@@ -570,12 +570,12 @@ describe('plan del Excel del organigrama', () => {
         }),
       );
       expect(plan.errors.map((error) => `${error.rowNumber} ${error.column ?? ''}: ${error.message}`)).toEqual([
-        '2 Nombre: Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
-        '3 Nombre: La fila 4 también deja «Planeacion» bajo Rectoría. Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
-        '4 Nombre: La fila 3 también deja «Planeación» bajo Rectoría. Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+        '2 Nombre: Ya existe Calidad en Rectoría.',
+        '3 Nombre: La fila 4 repite el nombre Planeacion en Rectoría.',
+        '4 Nombre: La fila 3 repite el nombre Planeación en Rectoría.',
       ]);
       const names = plan.warnings.filter((warning) => warning.column === 'Nombre').map((warning) => `${warning.rowNumber}: ${warning.message}`);
-      expect(names).toEqual(['5: 1021 tiene el mismo nombre que su jefe 102; ¿es su Centro propio?']);
+      expect(names).toEqual(['5: 1021 se llama igual que su jefe 102. Revise si es su centro propio.']);
     });
 
     it('unidades que ya estaban repetidas: se pueden editar en otros campos; renombrar, mover o reactivar hacia el nombre repetido es error', () => {
@@ -602,18 +602,18 @@ describe('plan del Excel del organigrama', () => {
         only({ units: [unitRow(2, { prefix: '104', name: 'CALIDÁD', type: 'Oficina', parent: '1', code: 'U104' })] }),
       );
       expect(renamed.errors.map((error) => `${error.rowNumber} ${error.column ?? ''}: ${error.message}`)).toEqual([
-        '2 Nombre: Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+        '2 Nombre: Ya existe Calidad en Rectoría.',
       ]);
       const moved = planOrgChart(
         snapshot,
         only({ units: [unitRow(2, { prefix: '21', name: 'Calidad', type: 'Oficina', parent: '1', code: 'U21' })] }),
       );
-      expect(moved.errors.map((error) => error.message)).toContainEqual('Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.');
+      expect(moved.errors.map((error) => error.message)).toContainEqual('Ya existe Calidad en Rectoría.');
       const reactivated = planOrgChart(
         snapshot,
         only({ units: [unitRow(2, { prefix: '105', name: 'Calidad', type: 'Oficina', parent: '1', code: 'U105', status: 'Activa' })] }),
       );
-      expect(reactivated.errors.map((error) => error.message)).toContainEqual('Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.');
+      expect(reactivated.errors.map((error) => error.message)).toContainEqual('Ya existe Calidad en Rectoría.');
     });
 
     it('el prefijo 1000 o 1 sin código interno encuentra la Rectoría existente con prefijo 1', () => {
@@ -655,7 +655,7 @@ describe('plan del Excel del organigrama', () => {
       expect(plan.units.map((op) => [op.codePrefix, op.parentKey])).toEqual(
         ['411', '4115', '412', '4125', '413', '4135', '414', '4145', '415', '4155', '416', '4165'].map((prefix) => [prefix, 'u4']),
       );
-      expect(plan.warnings.map((issue) => issue.message)).toContain('Depende de 4010: el Centro propio de VICERRECTORÍA FINANCIERA (4)');
+      expect(plan.warnings.map((issue) => issue.message)).toContain('Quedó bajo VICERRECTORÍA FINANCIERA por su centro propio 4010.');
       expect(plan.units.map((op) => op.headCenterKey)).toEqual(FINANCE_CODES.map((code) => `c${code}`));
     });
 
@@ -691,8 +691,7 @@ describe('plan del Excel del organigrama', () => {
         expect.objectContaining({
           rowNumber: 3,
           column: 'Prefijo',
-          message:
-            'El prefijo 42 ya lo usa la fila 2 (DEPARTAMENTO DE PLANEACIÓN FINANCIERA): cada cuadro necesita uno distinto; si es una oficina de ese cuadro, deje el prefijo vacío o use más dígitos (421)',
+          message: 'El prefijo 42 ya está en la fila 2. Use más dígitos o déjelo vacío.',
         }),
       ]);
     });
@@ -720,7 +719,7 @@ describe('plan del Excel del organigrama', () => {
       expect(plan.errors).toEqual([
         expect.objectContaining({
           column: 'Depende de',
-          message: '4110 es un centro de costo pero ninguna unidad lo tiene como Centro propio; escriba el prefijo de la unidad, p. ej. 4',
+          message: '4110 es un centro de costo de VICERRECTORÍA FINANCIERA. Escriba su prefijo, 4.',
         }),
       ]);
     });
@@ -737,10 +736,10 @@ describe('plan del Excel del organigrama', () => {
       );
       expect(plan.errors).toEqual([]);
       expect(plan.warnings.find((issue) => issue.rowNumber === 2 && issue.column === 'Prefijo')?.message).toMatch(
-        /^OFICINA X \(53\) depende de .+ \(4\) pero conserva los códigos 53… de VICERRECTORÍA BIENESTAR$/,
+        /^OFICINA X quedó bajo .+, pero su prefijo 53 es de la rama de VICERRECTORÍA BIENESTAR\.$/,
       );
-      expect(plan.warnings.find((issue) => issue.rowNumber === 3 && issue.message.startsWith('OFICINA JURÍDICA (111)'))?.message).toMatch(
-        /pero sus códigos 111… no empiezan por 4$/,
+      expect(plan.warnings.find((issue) => issue.rowNumber === 3 && issue.message.startsWith('OFICINA JURÍDICA quedó bajo'))?.message).toMatch(
+        /pero su prefijo 111 no empieza por 4\.$/,
       );
       const nested = planOrgChart(
         financeSnapshot(),
@@ -801,7 +800,7 @@ describe('plan del Excel del organigrama', () => {
           sheet: 'Organigrama',
           rowNumber: 5,
           column: 'Color',
-          message: '«naranja» no es un color: use el formato #RRGGBB, por ejemplo #DE9927 (o NINGUNO para quitarlo)',
+          message: 'naranja no es un color válido. Use el formato #RRGGBB o escriba NINGUNO para quitarlo.',
         },
       ]);
       expect(plan.units).toEqual([]);
@@ -839,8 +838,8 @@ describe('plan del Excel del organigrama', () => {
         }),
       );
       expect(plan.errors.map((issue) => [issue.rowNumber, issue.message])).toEqual([
-        [2, 'Un cuerpo colegiado (comité) no lleva prefijo: no recibe centros de costo'],
-        [3, 'Un cuerpo colegiado (comisión) no tiene centro de costo propio'],
+        [2, 'Los consejos, comités y comisiones no llevan prefijo.'],
+        [3, 'Los consejos, comités y comisiones no llevan centro propio.'],
       ]);
       const ok = planOrgChart(
         baseSnapshot(),
@@ -874,7 +873,7 @@ describe('plan del Excel del organigrama', () => {
       expect(plan.errors.map((issue) => [issue.rowNumber, issue.message])).toEqual([
         [
           6,
-          'Tipo desconocido «División»: elija uno de la lista (Dependencia, Rectoría, Vicerrectoría, Dirección, Facultad, Departamento, Coordinación de programa, Oficina, Centro, Consejo, Comité, Comisión)',
+          'El tipo División no existe. Use uno de estos: Dependencia, Rectoría, Vicerrectoría, Dirección, Facultad, Departamento, Coordinación de programa, Oficina, Centro, Consejo, Comité, Comisión.',
         ],
       ]);
       const valid = planOrgChart(
@@ -924,11 +923,11 @@ describe('plan del Excel del organigrama', () => {
       const note = header?.getCell(typeColumn).note;
       const noteText = typeof note === 'string' ? note : (note?.texts ?? []).map((part) => part.text).join('');
       expect(noteText).toContain('Coordinación de programa');
-      expect(noteText).toContain('Consejo, Comité y Comisión son cuerpos colegiados');
+      expect(noteText).toContain('Consejo, Comité y Comisión van sin prefijo ni centro propio');
       expect(noteText).not.toContain('Consejo o comité');
       const lines: string[] = [];
       workbook.getWorksheet('Instrucciones')?.eachRow((row) => lines.push(String(row.getCell(1).value ?? '')));
-      expect(lines.join(' ')).toContain('Tipo (Estructura Orgánica, Acuerdo 008/2021): Dependencia, Rectoría');
+      expect(lines.join(' ')).toContain('Tipo, según la Estructura Orgánica (Acuerdo 008/2021). Opciones: Dependencia, Rectoría');
       const values: string[] = [];
       sheet?.eachRow((row, rowNumber) => {
         if (rowNumber > 1) {

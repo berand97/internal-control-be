@@ -45,40 +45,58 @@ const POLYMORPHIC: ReadonlyArray<readonly [string, string]> = [
   ['mail_outbox', 'entity_id'],
 ];
 
-const TABLE_LABELS: Readonly<Record<string, string>> = {
-  asset: 'activos (dados de baja)',
-  asset_movement: 'movimientos de activos',
-  asset_loan: 'préstamos',
-  asset_loan_item: 'ítems de préstamo',
-  asset_transfer: 'traslados',
-  asset_handover: 'entregas de activos',
-  asset_request: 'solicitudes de activos',
-  physical_inventory: 'tomas de inventario',
-  physical_inventory_scope: 'tomas de inventario',
-  physical_inventory_item: 'ítems de inventario',
-  physical_inventory_act: 'actas de inventario',
-  document: 'documentos',
-  generated_document: 'documentos generados',
-  mail_outbox: 'correos',
-  cost_center: 'centros de costo (inactivos)',
-  cost_center_placement: 'historial de ubicación',
-  organizational_unit: 'unidades (inactivas)',
+const TABLE_LABELS: Readonly<Record<string, readonly [string, string]>> = {
+  asset: ['activo dado de baja', 'activos dados de baja'],
+  asset_movement: ['movimiento de activos', 'movimientos de activos'],
+  asset_loan: ['préstamo', 'préstamos'],
+  asset_loan_item: ['ítem de préstamo', 'ítems de préstamo'],
+  asset_transfer: ['traslado', 'traslados'],
+  asset_handover: ['entrega de activos', 'entregas de activos'],
+  asset_request: ['solicitud de activos', 'solicitudes de activos'],
+  physical_inventory: ['toma de inventario', 'tomas de inventario'],
+  physical_inventory_scope: ['toma de inventario', 'tomas de inventario'],
+  physical_inventory_item: ['ítem de inventario', 'ítems de inventario'],
+  physical_inventory_act: ['acta de inventario', 'actas de inventario'],
+  document: ['documento', 'documentos'],
+  generated_document: ['documento generado', 'documentos generados'],
+  mail_outbox: ['correo', 'correos'],
+  cost_center: ['centro de costo archivado', 'centros de costo archivados'],
+  cost_center_placement: ['cambio de ubicación', 'cambios de ubicación'],
+  organizational_unit: ['dependencia archivada', 'dependencias archivadas'],
+};
+
+const counted = (count: number, singular: string, plural: string): string => `${count} ${count === 1 ? singular : plural}`;
+
+const listed = (parts: ReadonlyArray<string>): string =>
+  parts.length > 1 ? `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1] ?? ''}` : (parts[0] ?? '');
+
+const moveFirst = (count: number, feminine: boolean): string => {
+  const ending = `${feminine ? 'a' : 'o'}${count === 1 ? '' : 's'}`;
+  return `Muéval${ending} o archível${ending} primero.`;
+};
+
+const referenceLabel = (table: string, count: number): string => {
+  const [singular, plural] = TABLE_LABELS[table] ?? ['registro relacionado', 'registros relacionados'];
+  return count === 1 ? singular : plural;
 };
 
 const quoteIdent = (value: string): string => `"${value.replace(/"/g, '""')}"`;
 
 const describe = (references: ReadonlyArray<ReferenceCount>): string =>
-  references.map((reference) => `${reference.count} ${reference.label}`).join(', ');
+  listed(references.map((reference) => `${reference.count} ${reference.label}`));
 
 export const historyReason = (references: ReadonlyArray<ReferenceCount>): string | null =>
-  references.length > 0 ? `Se archiva porque tiene historia: ${describe(references)}` : null;
+  references.length > 0 ? `Tiene ${describe(references)} en su historial.` : null;
 
 export const decideCenterRemoval = (check: CenterRemovalCheck): RemovalVerdict => {
   if (check.activeAssets > 0) {
-    return { decision: 'BLOCKED', reason: `Tiene ${check.activeAssets} activos asignados` };
+    return { decision: 'BLOCKED', reason: `Tiene ${counted(check.activeAssets, 'activo asignado', 'activos asignados')}.` };
   }
   if (check.activeChildren > 0) {
-    return { decision: 'BLOCKED', reason: `Tiene ${check.activeChildren} centros hijos activos` };
+    return {
+      decision: 'BLOCKED',
+      reason: `Tiene ${counted(check.activeChildren, 'centro hijo activo', 'centros hijos activos')}. ${moveFirst(check.activeChildren, false)}`,
+    };
   }
   const history = historyReason(check.references);
   if (history) {
@@ -105,10 +123,14 @@ export const assertCenterRemovable = (check: CenterRemovalCheck): RemovalVerdict
 export const decideUnitRemoval = (check: UnitRemovalCheck): RemovalVerdict => {
   if (check.activeChildren > 0 || check.activeCenters > 0) {
     const parts = [
-      ...(check.activeChildren > 0 ? [`${check.activeChildren} unidades hijas activas`] : []),
-      ...(check.activeCenters > 0 ? [`${check.activeCenters} centros de costo activos`] : []),
+      ...(check.activeChildren > 0 ? [counted(check.activeChildren, 'dependencia activa', 'dependencias activas')] : []),
+      ...(check.activeCenters > 0 ? [counted(check.activeCenters, 'centro de costo activo', 'centros de costo activos')] : []),
     ];
-    return { decision: 'BLOCKED', reason: `Tiene ${parts.join(' y ')}` };
+    const onlyUnits = check.activeCenters === 0;
+    return {
+      decision: 'BLOCKED',
+      reason: `Tiene ${listed(parts)}. ${moveFirst(check.activeChildren + check.activeCenters, onlyUnits)}`,
+    };
   }
   const history = historyReason(check.references);
   if (history) {
@@ -198,7 +220,7 @@ export class StructureRemovalService {
         found.push({
           table: candidate.table_name,
           column: candidate.column_name,
-          label: TABLE_LABELS[candidate.table_name] ?? candidate.table_name,
+          label: referenceLabel(candidate.table_name, count),
           count,
         });
       }

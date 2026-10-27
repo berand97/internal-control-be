@@ -15,7 +15,7 @@ export const prefixRange = (prefix: string): { readonly from: string; readonly t
 
 export const prefixRangeMessage = (unitName: string, prefix: string): string => {
   const range = prefixRange(prefix);
-  return `Los centros de ${unitName} van de ${range.from} a ${range.to} (el código debe empezar por ${prefix})`;
+  return `Los centros de ${unitName} van de ${range.from} a ${range.to}. Use un código que empiece por ${prefix}.`;
 };
 
 export interface ParentCandidate {

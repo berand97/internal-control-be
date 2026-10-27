@@ -258,14 +258,14 @@ export class CostCentersService {
     if (center.parentId) {
       const parent = await this.costCentersRepository.findById(center.parentId);
       if (parent && !parent.isActive) {
-        const message = `No puede reactivarse: su centro padre ${parent.externalCode} · ${parent.name} está archivado. Reactive primero el centro padre.`;
+        const message = `Su centro padre ${parent.externalCode} · ${parent.name} está archivado. Reactívelo primero.`;
         throw new ApiException(ErrorCode.CostCenterParentInactive, message, [{ field: 'parentId', message }]);
       }
     }
     if (center.organizationalUnitId) {
       const unit = await this.costCentersRepository.findOrgUnitById(center.organizationalUnitId);
       if (unit && !unit.isActive) {
-        const message = `No puede reactivarse: su dependencia ${unit.name} está inactiva. Reactive primero la dependencia o cambie la ubicación del centro.`;
+        const message = `Su dependencia ${unit.name} está archivada. Reactívela primero o cambie la ubicación del centro.`;
         throw new ApiException(ErrorCode.CostCenterOrgUnitInactive, message, [{ field: 'organizationalUnitId', message }]);
       }
     }

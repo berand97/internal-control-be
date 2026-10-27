@@ -237,7 +237,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
           sheet: 'Centros de costo',
           rowNumber: 1,
           column: null,
-          message: 'La hoja Centros de costo se ignoró: los centros se administran en su propia pantalla',
+          message: 'No se leyó la hoja Centros de costo. Los centros de costo se editan en su propia pantalla.',
         },
       ]),
     );
@@ -290,7 +290,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     expect(previewed.body.data.errors).toEqual([expect.objectContaining({ column: 'Prefijo', message: expect.stringContaining('64') })]);
     expect(previewed.body.data.warnings).toContainEqual(
       expect.objectContaining({
-        message: 'Fuera de rango (641) depende de Departamento Excel renombrado (61) pero conserva los códigos 641… de Otra oficina',
+        message: 'Fuera de rango quedó bajo Departamento Excel renombrado, pero su prefijo 641 es de la rama de Otra oficina.',
       }),
     );
     const rejected = await confirm(previewed.body.data.previewId as string);
@@ -333,7 +333,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
     );
     const archived = await http().delete(`/api/v1/cost-centers/${withHistory}`).set(auth('admin'));
     expect(archived.status).toBe(200);
-    expect(archived.body.data).toMatchObject({ deleted: false, archived: true, reason: expect.stringContaining('activos (dados de baja)') });
+    expect(archived.body.data).toMatchObject({ deleted: false, archived: true, reason: 'Tiene 1 activo dado de baja en su historial.' });
 
     const tree = await http().get('/api/v1/cost-centers/tree').set(auth('admin'));
     expect(JSON.stringify(tree.body.data.roots)).not.toContain('"6170"');
@@ -362,7 +362,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       .send({ code: 'IT_OC_MAL', name: 'Mal prefijo', type: 'OFFICE', parentId: ids['u61'], codePrefix: '691' });
     expect(outOfParent.status).toBe(201);
     expect(outOfParent.body.data.warnings).toEqual([
-      'Mal prefijo (691) depende de Departamento Excel renombrado (61) pero conserva los códigos 691… de Unidad borrable',
+      'Mal prefijo quedó bajo Departamento Excel renombrado, pero su prefijo 691 es de la rama de Unidad borrable.',
     ]);
     const samePrefix = await http()
       .post('/api/v1/organizational-units')
@@ -496,7 +496,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expect(previewed.body.data.errors).toEqual([]);
       expect(previewed.body.data.summary.totalChanges).toBe(0);
       expect(previewed.body.data.warnings).toContainEqual(
-        expect.objectContaining({ column: 'Código interno', message: expect.stringContaining('«Unidad efímera» se eliminó el ') }),
+        expect.objectContaining({ column: 'Código interno', message: expect.stringContaining('Unidad efímera se eliminó el ') }),
       );
     });
   });
@@ -570,7 +570,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
 
       const invalid = await http().patch(`/api/v1/organizational-units/${ids['u6']}`).set(auth('admin')).send({ color: 'DE9927' });
       expect(invalid.status).toBe(400);
-      expect(JSON.stringify(invalid.body)).toContain('El color debe tener el formato #RRGGBB, por ejemplo #DE9927');
+      expect(JSON.stringify(invalid.body)).toContain('Use el formato #RRGGBB, como #DE9927.');
       expect(await colorOf(ids['u6'])).toBe('#de9927');
 
       const detail = await http().get(`/api/v1/organizational-units/${ids['u6']}`).set(auth('admin'));
@@ -636,7 +636,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expect(invalid.status).toBe(201);
       expect(invalid.body.data.canConfirm).toBe(false);
       expect(invalid.body.data.errors).toEqual([
-        expect.objectContaining({ column: 'Color', message: expect.stringContaining('«azul» no es un color') }),
+        expect.objectContaining({ column: 'Color', message: expect.stringContaining('azul no es un color válido.') }),
       ]);
 
       const changed = await preview(
@@ -689,7 +689,6 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
   });
 
   describe('unidades con el mismo nombre', () => {
-    const HINT = 'Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.';
     const create = (body: Record<string, unknown>) => http().post('/api/v1/organizational-units').set(auth('admin')).send(body);
 
     const stamplessFile = async (rows: ReadonlyArray<ReadonlyArray<string | null>>): Promise<Buffer> => {
@@ -722,7 +721,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
       expect(rejected.status).toBe(409);
       expect(rejected.body.error).toMatchObject({
         code: 'ORG_UNIT_NAME_DUPLICATE',
-        message: `Ya existe «Calidad» bajo Dirección Excel (prefijo 971). ${HINT}`,
+        message: 'Ya existe Calidad en Dirección Excel.',
         details: [{ field: 'name', message: first.body.data.id }],
       });
 
@@ -763,16 +762,15 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
         expect.objectContaining({
           column: 'Nombre',
           message: expect.stringMatching(
-            /^Ya existe «Calidad» bajo Dirección Excel \(prefijo 971, creada el \d{2}\/\d{2}\/\d{4}[^)]*\)\. Si es la misma, copie su Código interno \(IT_OC_CAL_971\) en la fila; si es otra, escriba su prefijo o un nombre distinto\./,
+            /^Ya existe Calidad en Dirección Excel \(creada el \d{2}\/\d{2}\/\d{4}[^)]*\)\. Si es la misma, copie su código interno IT_OC_CAL_971 en la fila\. Si es otra, póngale prefijo o un nombre distinto\./,
           ),
         }),
       );
-      const duplicates = errors.filter((error) => error.message.endsWith(HINT));
+      const duplicates = errors.filter((error) => /^Ya existe (Calidad|CALIDÁD) en Dirección Excel\.$/.test(error.message));
       expect(duplicates).toHaveLength(2);
       for (const error of duplicates) {
         expect(error).toMatchObject({ sheet: 'Organigrama', column: 'Nombre' });
-        expect(error.message).toMatch(/^Ya existe «(Calidad|CALIDÁD)» bajo Dirección Excel \(prefijo 97[12]\)\. /);
-      }
+              }
       expect(data.warnings.filter((warning: { message: string }) => warning.message.includes('¿Es otra unidad?'))).toEqual([]);
       expect((await confirm(data.previewId as string)).status).toBe(422);
       expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM organizational_unit WHERE code_prefix = '974'`)).toBe(0);
@@ -795,7 +793,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
         expect.objectContaining({
           rowNumber: 2,
           column: 'Nombre',
-          message: expect.stringContaining('Ya existe «Oficina Gemela» bajo Dirección Excel (creada el '),
+          message: expect.stringContaining('Ya existe Oficina Gemela en Dirección Excel (creada el '),
         }),
       ]);
       expect(again.body.data.summary.totalChanges).toBe(0);
@@ -813,7 +811,7 @@ describe('Excel del organigrama (HTTP real + PostgreSQL real)', () => {
           rowNumber: 3,
           column: 'Nombre',
           message:
-            'La fila 2 ya crea «Oficina Nueva Doble» bajo Dirección Excel. Si es la misma unidad, borre esta fila; si es otra, escriba su prefijo o un nombre distinto.',
+            'La fila 2 ya crea Oficina Nueva Doble en Dirección Excel. Si es la misma, borre esta fila. Si es otra, póngale prefijo o un nombre distinto.',
         },
       ]);
     });

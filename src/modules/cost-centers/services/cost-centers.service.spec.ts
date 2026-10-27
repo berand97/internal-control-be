@@ -103,7 +103,7 @@ describe('CostCentersService', () => {
     removal.inspectCostCenter.mockResolvedValue({ activeAssets: 0, activeChildren: 3, references: [] });
     await expect(service.update('cc-4300', { isActive: false }, actor)).rejects.toMatchObject({
       code: ErrorCode.HasDependentEntities,
-      message: 'Tiene 3 centros hijos activos',
+      message: 'Tiene 3 centros hijos activos. Muévalos o archívelos primero.',
     });
     expect(costCentersRepository.update).not.toHaveBeenCalled();
   });
@@ -115,7 +115,7 @@ describe('CostCentersService', () => {
     vi.mocked(costCentersRepository.findById).mockImplementation(async (id) => (id === 'cc-4300' ? parent : child));
     await expect(service.update('cc-4310', { isActive: true }, actor)).rejects.toMatchObject({
       code: ErrorCode.CostCenterParentInactive,
-      message: 'No puede reactivarse: su centro padre 4300 · Centro 4300 está archivado. Reactive primero el centro padre.',
+      message: 'Su centro padre 4300 · Centro 4300 está archivado. Reactívelo primero.',
     });
     expect(costCentersRepository.update).not.toHaveBeenCalled();
   });

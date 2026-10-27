@@ -243,11 +243,11 @@ export class CostCenterPlacementService {
         is_active: boolean;
       }>;
       if (!unit) {
-        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la unidad organizacional');
+        throw new ApiException(ErrorCode.ResourceNotFound, 'Esa dependencia no existe.');
       }
       if (!unit.is_active) {
-        throw new ApiException(ErrorCode.ValidationFailed, 'La unidad organizacional está inactiva', [
-          { field: 'organizationalUnitId', message: 'Unidad inactiva' },
+        throw new ApiException(ErrorCode.ValidationFailed, 'Esa dependencia está archivada. Elija otra.', [
+          { field: 'organizationalUnitId', message: 'Dependencia archivada.' },
         ]);
       }
     }
@@ -264,7 +264,7 @@ export class CostCenterPlacementService {
       if (count > 0) {
         throw new ApiException(
           ErrorCode.CostCenterGroupingHasAssets,
-          `El centro ${center.external_code} no puede quedar como agrupador: tiene ${count} activos asignados`,
+          `El centro ${center.external_code} tiene ${count === 1 ? '1 activo asignado' : `${count} activos asignados`}. No puede quedar como agrupador.`,
           [{ field: 'activeAssets', message: String(count) }],
         );
       }
@@ -553,13 +553,13 @@ export class CostCenterPlacementService {
       };
     }
     if (!unitId) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'Indique la unidad o el centro padre', [
-        { field: 'unitId', message: 'Requerido si no hay parentId' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'Elija la dependencia o el centro padre.', [
+        { field: 'unitId', message: 'Elija la dependencia o el centro padre.' },
       ]);
     }
     if (!prefix) {
-      throw new ApiException(ErrorCode.ValidationFailed, 'La unidad no tiene prefijo de código: indique un centro padre', [
-        { field: 'unitId', message: 'Unidad sin prefijo de código' },
+      throw new ApiException(ErrorCode.ValidationFailed, 'Esa dependencia no tiene prefijo. Elija un centro padre.', [
+        { field: 'unitId', message: 'Esa dependencia no tiene prefijo.' },
       ]);
     }
     const byUnit = suggestForUnitPrefix(prefix, used);
@@ -581,14 +581,14 @@ export class CostCenterPlacementService {
       unitId,
     ])) as Array<{ code_prefix: string | null }>;
     if (!unit) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe la unidad organizacional');
+      throw new ApiException(ErrorCode.ResourceNotFound, 'Esa dependencia no existe.');
     }
     return unit.code_prefix;
   }
 
   private async assertNoCycle(manager: EntityManager, costCenterId: string, parentId: string): Promise<void> {
     if (parentId === costCenterId) {
-      throw new ApiException(ErrorCode.CostCenterPlacementCycle, 'Un centro no puede ser su propio padre');
+      throw new ApiException(ErrorCode.CostCenterPlacementCycle, 'Un centro no puede ser su propio padre.');
     }
     const [parent] = (await manager.query('SELECT id FROM cost_center WHERE id = $1', [parentId])) as unknown[];
     if (!parent) {

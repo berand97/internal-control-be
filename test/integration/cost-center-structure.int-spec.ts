@@ -128,7 +128,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(outside.status).toBe(400);
     expect(outside.body.error.code).toBe('COST_CENTER_CODE_OUT_OF_UNIT_RANGE');
     expect(outside.body.error.message).toBe(
-      'Los centros de Vicerrectoría de Prueba Siete van de 7000 a 7999 (el código debe empezar por 7)',
+      'Los centros de Vicerrectoría de Prueba Siete van de 7000 a 7999. Use un código que empiece por 7.',
     );
 
     for (const [key, code, extra] of [
@@ -310,7 +310,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(blocked.status).toBe(406);
     expect(blocked.body.error).toMatchObject({
       code: 'HAS_DEPENDENT_ENTITIES',
-      message: 'La unidad tiene 1 centro de costo activo: muévalo a otra unidad o desactívelo antes de desactivar la unidad',
+      message: 'Tiene 1 centro de costo activo. Muévalo a otra dependencia o archívelo primero.',
       details: [{ field: 'activeCostCenters', message: '1' }],
     });
 
@@ -345,7 +345,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(blocked.status).toBe(406);
     expect(blocked.body.error).toMatchObject({
       code: 'HAS_DEPENDENT_ENTITIES',
-      message: 'Tiene 1 centros hijos activos',
+      message: 'Tiene 1 centro hijo activo. Muévalo o archívelo primero.',
       details: [{ field: 'activeChildren', message: '1' }],
     });
     expect(await scalar<boolean>(dataSource, 'SELECT is_active FROM cost_center WHERE id = $1', [parentId])).toBe(true);
@@ -355,7 +355,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(orphan.status).toBe(409);
     expect(orphan.body.error).toMatchObject({
       code: 'COST_CENTER_PARENT_INACTIVE',
-      message: `No puede reactivarse: su centro padre RP-${tag} · Padre de prueba está archivado. Reactive primero el centro padre.`,
+      message: `Su centro padre RP-${tag} · Padre de prueba está archivado. Reactívelo primero.`,
     });
 
     await dataSource.query('UPDATE cost_center SET parent_id = NULL, organizational_unit_id = $2 WHERE id = $1', [childId, unitId]);
@@ -363,7 +363,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(closedUnit.status).toBe(409);
     expect(closedUnit.body.error).toMatchObject({
       code: 'COST_CENTER_ORG_UNIT_INACTIVE',
-      message: 'No puede reactivarse: su dependencia Unidad cerrada está inactiva. Reactive primero la dependencia o cambie la ubicación del centro.',
+      message: 'Su dependencia Unidad cerrada está archivada. Reactívela primero o cambie la ubicación del centro.',
     });
     expect(await scalar<boolean>(dataSource, 'SELECT is_active FROM cost_center WHERE id = $1', [childId])).toBe(false);
 

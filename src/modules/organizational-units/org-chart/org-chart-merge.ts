@@ -93,7 +93,7 @@ export const formatWhen = (iso: string): string => WHEN.format(new Date(iso));
 const formatDay = (iso: string): string => DAY.format(new Date(iso));
 
 const byWhom = (info: ChangeInfo): string => (info.byName ? ` por ${info.byName}` : '');
-const shown = (value: string | null): string => (value && value.trim() !== '' ? `«${value}»` : '(vacío)');
+const shown = (value: string | null): string => (value && value.trim() !== '' ? value : '(vacío)');
 
 const keepValue = (column: StampColumn, unit: SnapshotUnit): string | null => (column === 'name' ? unit.name : null);
 
@@ -124,10 +124,14 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
   const fileDate = stamp?.exportedAt ?? input.fileCreatedAt ?? null;
   const fileAgeDays = stamp ? Math.max(0, Math.floor((context.now.getTime() - Date.parse(stamp.exportedAt)) / DAY_MS)) : null;
   if (fileAgeDays !== null && fileAgeDays > STALE_FILE_DAYS) {
-    warn(1, null, `Este archivo se descargó hace ${fileAgeDays} días (${formatDay(stamp?.exportedAt ?? '')}): si otras personas cambiaron el organigrama, descargue la versión actual`);
+    warn(
+      1,
+      null,
+      `Este archivo se descargó hace ${fileAgeDays} días, el ${formatDay(stamp?.exportedAt ?? '')}. Si alguien cambió el organigrama desde entonces, descargue la versión actual.`,
+    );
   }
   if (input.invalidStamp) {
-    warn(1, null, 'El sello oculto del archivo está dañado: se trata como un archivo sin sello');
+    warn(1, null, 'El sello oculto del archivo está dañado. Se revisará como un archivo sin sello.');
   }
 
   const unitByCode = new Map(context.units.map((unit) => [unit.code, unit]));
@@ -201,10 +205,10 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
       row.rowNumber,
       UNIT_HEADERS.status,
       !fileDate
-        ? `«${unit.name}» está archivada y el archivo no dice cuándo se hizo: no se reactiva. Para reactivarla descargue el organigrama actual y cambie allí su Estado`
+        ? `${unit.name} está archivada y no se reactiva. Para reactivarla, descargue el organigrama actual y cambie el Estado.`
         : archived
-          ? `«${unit.name}» se archivó el ${formatWhen(archived.at)}${byWhom(archived)}, después de que se hizo este archivo: no se reactiva. Para reactivarla descargue el organigrama actual y cambie allí su Estado`
-          : `«${unit.name}» está archivada y no se sabe desde cuándo: no se reactiva. Para reactivarla descargue el organigrama actual y cambie allí su Estado`,
+          ? `${unit.name} se archivó el ${formatWhen(archived.at)}${byWhom(archived)}, después de que se descargó este archivo. No se reactiva. Para reactivarla, descargue el organigrama actual y cambie el Estado.`
+          : `${unit.name} está archivada y no se reactiva. Para reactivarla, descargue el organigrama actual y cambie el Estado.`,
     );
     return { ...row, status: null };
   };
@@ -255,8 +259,8 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
         row.rowNumber,
         header,
         change
-          ? `${header} de «${unit.name}»: otra persona lo cambió el ${formatWhen(change.at)}${byWhom(change)} a ${shown(current[column])}; su archivo dice ${shown(file[column])}. Descargue el organigrama de nuevo y repita su cambio`
-          : `${header} de «${unit.name}»: cambió en el sistema a ${shown(current[column])} después de que descargó este archivo; su archivo dice ${shown(file[column])}. Descargue el organigrama de nuevo y repita su cambio`,
+          ? `El ${formatWhen(change.at)}${byWhom(change)} se cambió la columna ${header} de ${unit.name} a ${shown(current[column])}. Su archivo dice ${shown(file[column])}. Descargue el organigrama de nuevo y repita su cambio.`
+          : `La columna ${header} de ${unit.name} cambió a ${shown(current[column])} después de que descargó este archivo. Su archivo dice ${shown(file[column])}. Descargue el organigrama de nuevo y repita su cambio.`,
       );
     }
     if (!applies && row.action === null) {
@@ -270,7 +274,7 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
   const newRowBySibling = new Map<string, { readonly rowNumber: number; readonly name: string }>();
   for (const row of input.units) {
     if (isTemplateExample(row)) {
-      warn(row.rowNumber, null, 'Es la fila de ejemplo de la plantilla: se ignora');
+      warn(row.rowNumber, null, 'Es la fila de ejemplo de la plantilla. Se ignora.');
       continue;
     }
     if (row.code) {
@@ -281,8 +285,8 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
           row.rowNumber,
           UNIT_HEADERS.code,
           deleted
-            ? `«${deleted.name ?? row.name ?? row.code}» se eliminó el ${formatWhen(deleted.at)}${byWhom(deleted)}: no se vuelve a crear. Para crearla de nuevo borre su Código interno`
-            : `No hay ninguna unidad con Código interno ${row.code} (pudo eliminarse): no se crea. Para crearla como nueva borre su Código interno`,
+            ? `${deleted.name ?? row.name ?? row.code} se eliminó el ${formatWhen(deleted.at)}${byWhom(deleted)}. No se vuelve a crear. Para crearla de nuevo, borre su código interno.`
+            : `No hay ninguna dependencia con el código interno ${row.code}. Para crearla como nueva, borre su código interno.`,
         );
         continue;
       }
@@ -305,7 +309,7 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
         warn(
           row.rowNumber,
           UNIT_HEADERS.prefix,
-          `El prefijo ${prefix} ya existe: «${existing.name}»${createdNote(existing)}. La fila se toma como esa unidad`,
+          `El prefijo ${prefix} ya es de ${existing.name}${createdNote(existing)}. La fila se toma como esa dependencia.`,
         );
       }
       units.push(row);
@@ -321,7 +325,7 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
         fail(
           row.rowNumber,
           UNIT_HEADERS.name,
-          `La fila ${earlier.rowNumber} ya crea «${earlier.name}» ${place}. Si es la misma unidad, borre esta fila; si es otra, escriba su prefijo o un nombre distinto.`,
+          `La fila ${earlier.rowNumber} ya crea ${earlier.name} ${place}. Si es la misma, borre esta fila. Si es otra, póngale prefijo o un nombre distinto.`,
         );
         continue;
       }
@@ -337,8 +341,8 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
           row.rowNumber,
           UNIT_HEADERS.name,
           `${existingSiblingText(existing, parentName(existing.parentId), created ? [created] : [])}. ` +
-            `Si es la misma, copie su Código interno (${existing.code}) en la fila; si es otra, escriba su prefijo o un nombre distinto.` +
-            (afterFile ? ' Se creó después de que se hizo este archivo: si ya lo subió antes, esta fila ya está aplicada.' : ''),
+            `Si es la misma, copie su código interno ${existing.code} en la fila. Si es otra, póngale prefijo o un nombre distinto.` +
+            (afterFile ? ' Se creó después de que se descargó este archivo. Si ya lo subió antes, esta fila ya está aplicada.' : ''),
         );
         continue;
       }
@@ -350,7 +354,7 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
     warn(
       1,
       null,
-      'Este archivo no trae el sello de la descarga (se descargó antes de esta versión o se armó a mano): las filas con Código interno se aplican tal como vienen, aunque otra persona haya cambiado esas unidades después. Para no deshacer cambios ajenos, descargue el organigrama actual',
+      'Este archivo no tiene el sello de descarga. Las filas con código interno se aplican tal como vienen y pueden deshacer cambios de otras personas. Para evitarlo, descargue el organigrama actual.',
     );
   }
   return { input: { ...input, units }, errors, warnings, conflicts, fileAgeDays };

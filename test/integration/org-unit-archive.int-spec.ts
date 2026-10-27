@@ -128,7 +128,7 @@ describe('Unidades archivadas: nunca son padre (HTTP real + PostgreSQL real)', (
     expect(Object.keys(openapi.paths['/api/v1/organizational-units']?.post?.responses ?? {})).toContain('409');
     expect(created.body.error).toMatchObject({
       code: 'ORG_UNIT_PARENT_ARCHIVED',
-      message: 'La dependencia «Vicerrectoría Archivo» está archivada. Reactívela primero o elija otro padre.',
+      message: 'Vicerrectoría Archivo está archivada. Elija otra dependencia o reactívela primero.',
       details: [{ field: 'parentId', message: ids['vf'] }],
     });
 

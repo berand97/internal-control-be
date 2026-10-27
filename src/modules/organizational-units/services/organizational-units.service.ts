@@ -19,7 +19,7 @@ import {
 import { decideUnitRemoval, StructureRemovalService } from '../../cost-centers/services/structure-removal.service.js';
 import { StructureReconcilerService } from '../../cost-centers/services/structure-reconciler.service.js';
 import { partialScope } from '../../cost-centers/domain/structure-reconcile.js';
-import { isCollegiateBody, ORG_UNIT_TYPE_LABELS, OrgUnitType } from '../enums/org-unit-type.enum.js';
+import { isCollegiateBody, OrgUnitType } from '../enums/org-unit-type.enum.js';
 import { effectiveUnitColor } from '../domain/unit-color.js';
 import { duplicateSiblingError, sameUnitName } from '../domain/unit-name.js';
 import { CreateOrganizationalUnitDto } from '../dto/create-organizational-unit.dto.js';
@@ -210,7 +210,7 @@ export class OrganizationalUnitsService {
         await this.reconciler.reconcileWithin(
           manager,
           partialScope({ prefixes: [created.codePrefix], unitIds: [created.id] }),
-          { actorId: actor.id, reason: `Se creó la unidad ${unitLabel(created)}`, ip: null, userAgent: null },
+          { actorId: actor.id, reason: `Se creó la dependencia ${unitLabel(created)}`, ip: null, userAgent: null },
         );
         return created;
       });
@@ -296,7 +296,7 @@ export class OrganizationalUnitsService {
       ...(pathChanged ? { hierarchyPath: nextPath, hierarchyLevel: nextLevel } : {}),
     };
     const after: OrganizationalUnit = { ...unit, ...record };
-    const reconcileContext = { actorId: actor.id, reason: `Se editó la unidad ${unitLabel(after)}`, ip: null, userAgent: null };
+    const reconcileContext = { actorId: actor.id, reason: `Se editó la dependencia ${unitLabel(after)}`, ip: null, userAgent: null };
     try {
       await this.dataSource.transaction(async (manager) => {
         await this.unitsRepository.update(unit.id, record, manager);
@@ -407,26 +407,19 @@ export class OrganizationalUnitsService {
     if (!isCollegiateBody(type)) {
       return;
     }
-    const label = ORG_UNIT_TYPE_LABELS[type].toLowerCase();
     if (codePrefix) {
-      throw new ApiException(
-        ErrorCode.ValidationFailed,
-        `Un cuerpo colegiado (${label}) no lleva prefijo: no recibe centros de costo`,
-        [{ field: 'codePrefix', message: 'Sin prefijo para un consejo, comité o comisión' }],
-      );
+      throw new ApiException(ErrorCode.ValidationFailed, 'Los consejos, comités y comisiones no llevan prefijo.', [
+        { field: 'codePrefix', message: 'Deje el prefijo vacío.' },
+      ]);
     }
     const head = dto.headCostCenterCode ?? dto.headCostCenterId;
     if (head) {
-      throw new ApiException(
-        ErrorCode.ValidationFailed,
-        `Un cuerpo colegiado (${label}) no tiene centro de costo propio`,
-        [
-          {
-            field: dto.headCostCenterCode ? 'headCostCenterCode' : 'headCostCenterId',
-            message: 'Sin centro propio para un consejo, comité o comisión',
-          },
-        ],
-      );
+      throw new ApiException(ErrorCode.ValidationFailed, 'Los consejos, comités y comisiones no llevan centro propio.', [
+        {
+          field: dto.headCostCenterCode ? 'headCostCenterCode' : 'headCostCenterId',
+          message: 'Deje el centro propio vacío.',
+        },
+      ]);
     }
   }
 
@@ -506,7 +499,7 @@ export class OrganizationalUnitsService {
         partialScope({ prefixes: [unit.codePrefix], unitIds: verdict.decision === 'DELETE' ? [] : [unit.id] }),
         {
           actorId: actor.id,
-          reason: `Se ${verdict.decision === 'DELETE' ? 'eliminó' : 'archivó'} la unidad ${unitLabel(unit)}`,
+          reason: `Se ${verdict.decision === 'DELETE' ? 'eliminó' : 'archivó'} la dependencia ${unitLabel(unit)}`,
           ip: null,
           userAgent: null,
         },
@@ -535,7 +528,7 @@ export class OrganizationalUnitsService {
     if (parent && !parent.isActive) {
       throw new ApiException(
         ErrorCode.OrgUnitParentArchived,
-        `La dependencia «${parent.name}» está archivada. Reactívela primero o elija otro padre.`,
+        `${parent.name} está archivada. Elija otra dependencia o reactívela primero.`,
         [{ field: 'parentId', message: parent.id }],
       );
     }
@@ -546,7 +539,9 @@ export class OrganizationalUnitsService {
     if (children > 0) {
       throw new ApiException(
         ErrorCode.OrgUnitHasChildren,
-        children === 1 ? 'La unidad tiene 1 unidad hija activa' : `La unidad tiene ${children} unidades hijas activas`,
+        children === 1
+          ? 'Tiene 1 dependencia activa debajo. Muévala o archívela primero.'
+          : `Tiene ${children} dependencias activas debajo. Muévalas o archívelas primero.`,
         [{ field: 'activeChildren', message: String(children) }],
       );
     }
@@ -555,8 +550,8 @@ export class OrganizationalUnitsService {
       throw new ApiException(
         ErrorCode.HasDependentEntities,
         activeCenters === 1
-          ? 'La unidad tiene 1 centro de costo activo: muévalo a otra unidad o desactívelo antes de desactivar la unidad'
-          : `La unidad tiene ${activeCenters} centros de costo activos: muévalos a otra unidad o desactívelos antes de desactivar la unidad`,
+          ? 'Tiene 1 centro de costo activo. Muévalo a otra dependencia o archívelo primero.'
+          : `Tiene ${activeCenters} centros de costo activos. Muévalos a otra dependencia o archívelos primero.`,
         [{ field: 'activeCostCenters', message: String(activeCenters) }],
       );
     }
@@ -567,7 +562,7 @@ export class OrganizationalUnitsService {
     if (holder && holder.id !== unitId) {
       throw new ApiException(
         ErrorCode.OrgUnitCodePrefixExists,
-        `El prefijo ${codePrefix} ya es de la unidad ${holder.name}`,
+        `El prefijo ${codePrefix} ya es de ${holder.name}.`,
         [{ field: 'codePrefix', message: holder.code }],
       );
     }
@@ -602,7 +597,7 @@ export class OrganizationalUnitsService {
     }
     const code = await this.unitsRepository.costCenterCode(dto.headCostCenterId);
     if (code === null) {
-      throw new ApiException(ErrorCode.ResourceNotFound, 'No existe el centro de costo propio indicado', [
+      throw new ApiException(ErrorCode.ResourceNotFound, 'Ese centro de costo no existe.', [
         { field: 'headCostCenterId', message: dto.headCostCenterId },
       ]);
     }

@@ -112,7 +112,7 @@ describe('Conciliador de estructura (HTTP real + PostgreSQL real)', () => {
       headCostCenterId: null,
       headCostCenterCode: '5410',
       headCostCenterPending: true,
-      warnings: ['Centro propio 5410 pendiente: el centro aún no existe; se amarrará solo cuando se cree'],
+      warnings: ['El centro 5410 aún no existe. Quedará como centro propio cuando lo creen.'],
     });
     expectConforms('post', '/api/v1/organizational-units', 201, pending.body);
 
@@ -217,7 +217,7 @@ describe('Conciliador de estructura (HTTP real + PostgreSQL real)', () => {
     expect(moved.status, JSON.stringify(moved.body)).toBe(200);
     expectConforms('patch', '/api/v1/organizational-units/{id}', 200, moved.body);
     expect(moved.body.data.warnings).toEqual([
-      'Control Interno Recalcular (542) depende de Rectoría Recalcular (2) pero conserva los códigos 542… de Departamento Recalcular',
+      'Control Interno Recalcular quedó bajo Rectoría Recalcular, pero su prefijo 542 es de la rama de Departamento Recalcular.',
     ]);
     expect(await center('5420')).toMatchObject({ organizational_unit_id: ids['u542'] });
     const parentEvents = (await dataSource.query(

@@ -274,7 +274,7 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
   [ErrorCode.CostCenterOrgUnitMismatch]: {
     httpStatus: 400,
     action: 'CANCEL',
-    message: 'El centro de costo no pertenece a ese departamento',
+    message: 'Ese centro de costo no es de esa dependencia.',
   },
   [ErrorCode.MailNotConfigured]: {
     httpStatus: 406,
@@ -314,17 +314,17 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
   [ErrorCode.OrgUnitCodeAlreadyExists]: {
     httpStatus: 406,
     action: 'CANCEL',
-    message: 'Ya existe una unidad organizacional con ese código',
+    message: 'Ese código interno ya está en uso.',
   },
   [ErrorCode.OrgUnitHasChildren]: {
     httpStatus: 406,
     action: 'CANCEL',
-    message: 'La unidad tiene sub-unidades activas',
+    message: 'Tiene dependencias activas debajo. Muévalas o archívelas primero.',
   },
   [ErrorCode.OrgUnitCycle]: {
     httpStatus: 406,
     action: 'CANCEL',
-    message: 'La jerarquía organizacional no puede formar un ciclo',
+    message: 'Una dependencia no puede quedar debajo de sí misma.',
   },
   [ErrorCode.CostCenterExternalCodeExists]: {
     httpStatus: 406,
@@ -967,27 +967,27 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
   [ErrorCode.CostCenterPlacementCycle]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'Ese centro padre está por debajo de este centro: se formaría un ciclo',
+    message: 'Ese centro está debajo de este. Elija otro centro padre.',
   },
   [ErrorCode.CostCenterPlacementUnchanged]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'La ubicación indicada es la vigente: no hay nada que cambiar',
+    message: 'Esa ya es la ubicación actual.',
   },
   [ErrorCode.CostCenterPlacementRequired]: {
     httpStatus: 400,
     action: 'CANCEL',
-    message: 'La unidad y el centro padre se cambian con POST /cost-centers/{id}/placement, indicando el motivo',
+    message: 'La dependencia y el centro padre se cambian desde la ubicación del centro.',
   },
   [ErrorCode.CostCenterGroupingHasAssets]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'No puede quedar como agrupador: tiene activos asignados',
+    message: 'Tiene activos asignados. No puede quedar como agrupador.',
   },
   [ErrorCode.CostCenterCodeOutOfUnitRange]: {
     httpStatus: 400,
     action: 'CANCEL',
-    message: 'El código no está en el rango de la unidad',
+    message: 'El código no corresponde a la dependencia.',
   },
   [ErrorCode.CostCenterWithoutHead]: {
     httpStatus: 409,
@@ -1002,63 +1002,63 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
   [ErrorCode.CostCenterParentInactive]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'No puede reactivarse: su centro padre está archivado. Reactive primero el centro padre.',
+    message: 'Su centro padre está archivado. Reactívelo primero.',
   },
   [ErrorCode.CostCenterOrgUnitInactive]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'No puede reactivarse: su dependencia está inactiva. Reactive primero la dependencia.',
+    message: 'Su dependencia está archivada. Reactívela primero.',
   },
   [ErrorCode.OrgUnitCodePrefixExists]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'Otra unidad activa ya usa ese prefijo de código',
+    message: 'Ese prefijo ya es de otra dependencia.',
   },
   [ErrorCode.OrgUnitParentArchived]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'La dependencia padre está archivada. Reactívela primero o elija otro padre.',
+    message: 'Esa dependencia está archivada. Elija otra o reactívela primero.',
   },
   [ErrorCode.OrgUnitNameDuplicate]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'Ya existe otra unidad activa con ese nombre bajo la misma dependencia: use un nombre que las distinga.',
+    message: 'Ya existe una dependencia con ese nombre bajo el mismo jefe.',
   },
   [ErrorCode.OrgUnitPrefixOutOfParent]: {
     httpStatus: 400,
     action: 'CANCEL',
-    message: 'El prefijo no puede ser el mismo de la unidad de la que depende: agregue al menos un dígito',
+    message: 'El prefijo es el mismo de su jefe. Agregue al menos un dígito.',
   },
   [ErrorCode.OrgChartImportHasErrors]: {
     httpStatus: 422,
     action: 'CANCEL',
-    message: 'El archivo del organigrama tiene errores: corríjalos y vuelva a previsualizar',
+    message: 'El archivo tiene errores. Corríjalos y vuelva a subirlo.',
   },
   [ErrorCode.OrgChartImportStale]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'El organigrama cambió desde la previsualización: vuelva a previsualizar el archivo',
+    message: 'El organigrama cambió mientras revisaba el archivo. Vuelva a subirlo.',
   },
   [ErrorCode.OrgChartImportConflict]: {
     httpStatus: 409,
     action: 'CANCEL',
     message:
-      'Otra persona cambió las mismas unidades después de que usted descargó el archivo: descargue el organigrama de nuevo y repita sus cambios',
+      'Otra persona cambió estas dependencias después de que usted descargó el archivo. Descargue el organigrama de nuevo y repita sus cambios.',
   },
   [ErrorCode.OrgChartImportClosed]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'Esa previsualización ya se aplicó o venció: vuelva a previsualizar el archivo',
+    message: 'Esta revisión ya se aplicó o venció. Vuelva a subir el archivo.',
   },
   [ErrorCode.OrgChartInvalidFile]: {
     httpStatus: 400,
     action: 'CANCEL',
-    message: 'El archivo no es un Excel del organigrama: debe traer la hoja «Organigrama» con sus encabezados',
+    message: 'Este archivo no es el Excel del organigrama. Debe tener la hoja Organigrama con sus encabezados.',
   },
   [ErrorCode.StructureReconcileStale]: {
     httpStatus: 409,
     action: 'CANCEL',
-    message: 'La estructura cambió desde la vista previa del recálculo: vuelva a revisarla antes de aplicarla',
+    message: 'La estructura cambió desde la vista previa. Revísela de nuevo antes de aplicar.',
   },
   [ErrorCode.ImportJobNotRetryable]: {
     httpStatus: 409,

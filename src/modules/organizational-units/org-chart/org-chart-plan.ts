@@ -8,7 +8,7 @@ import {
   resolveCenterUnit,
 } from '../../cost-centers/domain/org-chart-rules.js';
 import { parseUnitColor } from '../domain/unit-color.js';
-import { DUPLICATE_SIBLING_HINT, duplicateSiblingError, sameUnitName, unitPlace } from '../domain/unit-name.js';
+import { duplicateSiblingError, sameUnitName, unitPlace } from '../domain/unit-name.js';
 import { HEAD_CENTER_CODE_PATTERN, UNIT_CODE_MAX, UNIT_CODE_PATTERN } from '../domain/unit-code.js';
 import {
   isCollegiateBody,
@@ -36,7 +36,10 @@ import {
   type UnitRowInput,
 } from './org-chart.types.js';
 
-export const IGNORED_CENTER_SHEET_WARNING = 'La hoja Centros de costo se ignoró: los centros se administran en su propia pantalla';
+export const IGNORED_CENTER_SHEET_WARNING = 'No se leyó la hoja Centros de costo. Los centros de costo se editan en su propia pantalla.';
+
+const assetsText = (count: number): string =>
+  count === 1 ? 'Tiene 1 activo asignado.' : `Tiene ${count} activos asignados.`;
 
 export type UnitChangeKind =
   | 'CREATED'
@@ -304,25 +307,25 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       const at = row.rowNumber;
       let valid = true;
       if (!row.name) {
-        unitError(at, UNIT_HEADERS.name, 'El nombre es obligatorio');
+        unitError(at, UNIT_HEADERS.name, 'Escriba el nombre.');
         valid = false;
       } else if (row.name.length > NAME_MAX) {
-        unitError(at, UNIT_HEADERS.name, `El nombre admite hasta ${NAME_MAX} caracteres`);
+        unitError(at, UNIT_HEADERS.name, `Use hasta ${NAME_MAX} caracteres.`);
         valid = false;
       }
       const prefixRemoved = row.prefix !== null && isNoneText(row.prefix);
       if (row.prefix && !prefixRemoved && !PREFIX_PATTERN.test(row.prefix)) {
-        unitError(at, UNIT_HEADERS.prefix, `«${row.prefix}» no es un prefijo: son de 1 a 4 dígitos`);
+        unitError(at, UNIT_HEADERS.prefix, `${row.prefix} no es un prefijo válido. Escriba de 1 a 4 números.`);
         valid = false;
       }
       const type = row.type ? parseUnitType(row.type) : undefined;
       if (row.type && !type) {
-        unitError(at, UNIT_HEADERS.type, `Tipo desconocido «${row.type}»: elija uno de la lista (${UNIT_TYPE_OPTIONS})`);
+        unitError(at, UNIT_HEADERS.type, `El tipo ${row.type} no existe. Use uno de estos: ${UNIT_TYPE_OPTIONS}.`);
         valid = false;
       }
       const relation = row.relation ? parseRelation(row.relation) : undefined;
       if (row.relation && !relation) {
-        unitError(at, UNIT_HEADERS.relation, `Línea desconocida «${row.relation ?? ''}»: Autoridad, Asesoría o Coordinación`);
+        unitError(at, UNIT_HEADERS.relation, `La línea ${row.relation ?? ''} no existe. Use Autoridad, Asesoría o Coordinación.`);
         valid = false;
       }
       const colorText = row.color ?? null;
@@ -332,18 +335,18 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         unitError(
           at,
           UNIT_HEADERS.color,
-          `«${colorText}» no es un color: use el formato #RRGGBB, por ejemplo #DE9927 (o NINGUNO para quitarlo)`,
+          `${colorText} no es un color válido. Use el formato #RRGGBB o escriba NINGUNO para quitarlo.`,
         );
         valid = false;
       }
       const status = row.status ? parseStatus(row.status) : undefined;
       if (row.status && status === undefined) {
-        unitError(at, UNIT_HEADERS.status, `Estado desconocido «${row.status}»: Activo o Archivado`);
+        unitError(at, UNIT_HEADERS.status, `El estado ${row.status} no existe. Use Activo o Archivado.`);
         valid = false;
       }
       const action: RowAction | undefined = row.action ? parseAction(row.action) : null;
       if (action === undefined) {
-        unitError(at, UNIT_HEADERS.action, `Acción desconocida «${row.action ?? ''}»: deje vacío, ELIMINAR o ARCHIVAR`);
+        unitError(at, UNIT_HEADERS.action, `La acción ${row.action ?? ''} no existe. Use ELIMINAR, ARCHIVAR o deje la celda vacía.`);
         valid = false;
       }
 
@@ -354,7 +357,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
           unitError(
             at,
             UNIT_HEADERS.code,
-            `«${row.code ?? ''}» no es un código interno válido (mayúsculas, dígitos y _, hasta ${UNIT_CODE_MAX})`,
+            `${row.code ?? ''} no es un código interno válido. Use mayúsculas sin tildes, números y guion bajo, hasta ${UNIT_CODE_MAX}.`,
           );
           valid = false;
         }
@@ -366,11 +369,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         continue;
       }
       if (!existing && action) {
-        unitWarning(at, UNIT_HEADERS.action, 'Fila nueva marcada para eliminar o archivar: se ignora');
+        unitWarning(at, UNIT_HEADERS.action, 'Esta fila es nueva y pide eliminar o archivar. Se ignora.');
         continue;
       }
       if (!existing && !type) {
-        unitError(at, UNIT_HEADERS.type, 'El tipo es obligatorio para una unidad nueva');
+        unitError(at, UNIT_HEADERS.type, 'Escriba el tipo de la dependencia nueva.');
         continue;
       }
       const filePrefix = prefixRemoved ? null : row.prefix;
@@ -388,12 +391,12 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       const key = existing ? existing.id : `${NEW}${code ?? ''}`;
       const previousRow = unitRows.get(key);
       if (previousRow !== undefined) {
-        unitError(at, existing ? UNIT_HEADERS.code : UNIT_HEADERS.prefix, `La unidad ya está en la fila ${previousRow}`);
+        unitError(at, existing ? UNIT_HEADERS.code : UNIT_HEADERS.prefix, `Esta dependencia ya está en la fila ${previousRow}.`);
         continue;
       }
       unitRows.set(key, at);
       if (filePrefix && prefix !== filePrefix) {
-        unitWarning(at, UNIT_HEADERS.prefix, `${filePrefix} se tomó como prefijo ${prefix ?? ''}`);
+        unitWarning(at, UNIT_HEADERS.prefix, `${filePrefix} se tomó como el prefijo ${prefix ?? ''}.`);
       }
       const current = units.get(key);
       units.set(key, {
@@ -430,35 +433,35 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       const at = row.rowNumber;
       let valid = true;
       if (!row.code) {
-        centerError(at, CENTER_HEADERS.code, 'El código es obligatorio');
+        centerError(at, CENTER_HEADERS.code, 'Escriba el código.');
         continue;
       }
       if (!CENTER_CODE_PATTERN.test(row.code)) {
         if (!centerByCode.has(row.code) || row.previousCode) {
-          centerError(at, CENTER_HEADERS.code, `«${row.code}» no es un código de centro de costo (solo dígitos)`);
+          centerError(at, CENTER_HEADERS.code, `${row.code} no es un código de centro de costo. Escriba solo números.`);
           continue;
         }
       }
       if (!row.name) {
-        centerError(at, CENTER_HEADERS.name, 'El nombre es obligatorio');
+        centerError(at, CENTER_HEADERS.name, 'Escriba el nombre.');
         valid = false;
       } else if (row.name.length > NAME_MAX) {
-        centerError(at, CENTER_HEADERS.name, `El nombre admite hasta ${NAME_MAX} caracteres`);
+        centerError(at, CENTER_HEADERS.name, `Use hasta ${NAME_MAX} caracteres.`);
         valid = false;
       }
       const movement = row.movement ? parseMovement(row.movement) : undefined;
       if (row.movement && movement === undefined) {
-        centerError(at, CENTER_HEADERS.movement, `Movimiento «${row.movement}»: use 1 (recibe movimientos) o 0 (agrupador)`);
+        centerError(at, CENTER_HEADERS.movement, `El movimiento ${row.movement} no existe. Use 1 si recibe movimientos o 0 si es agrupador.`);
         valid = false;
       }
       const status = row.status ? parseStatus(row.status) : undefined;
       if (row.status && status === undefined) {
-        centerError(at, CENTER_HEADERS.status, `Estado desconocido «${row.status}»: Activo o Archivado`);
+        centerError(at, CENTER_HEADERS.status, `El estado ${row.status} no existe. Use Activo o Archivado.`);
         valid = false;
       }
       const action: RowAction | undefined = row.action ? parseAction(row.action) : null;
       if (action === undefined) {
-        centerError(at, CENTER_HEADERS.action, `Acción desconocida «${row.action ?? ''}»: deje vacío, ELIMINAR o ARCHIVAR`);
+        centerError(at, CENTER_HEADERS.action, `La acción ${row.action ?? ''} no existe. Use ELIMINAR, ARCHIVAR o deje la celda vacía.`);
         valid = false;
       }
       const previousCode = row.previousCode && row.previousCode !== row.code ? row.previousCode : null;
@@ -466,17 +469,17 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       if (previousCode) {
         const previous = centerByCode.get(previousCode);
         if (!previous) {
-          centerError(at, CENTER_HEADERS.previousCode, `No existe el centro ${previousCode} para pasarlo al código ${row.code}`);
+          centerError(at, CENTER_HEADERS.previousCode, `No existe el centro ${previousCode}.`);
           valid = false;
         } else if (existing) {
-          centerError(at, CENTER_HEADERS.code, `El código ${row.code} ya es del centro «${existing.name}»: no se puede recodificar ${previousCode} a ese código`);
+          centerError(at, CENTER_HEADERS.code, `El código ${row.code} ya es de ${existing.name}.`);
           valid = false;
         }
         existing = previous;
       }
       const codeRow = codeRows.get(row.code);
       if (codeRow !== undefined) {
-        centerError(at, CENTER_HEADERS.code, `El código ${row.code} ya está en la fila ${codeRow}`);
+        centerError(at, CENTER_HEADERS.code, `El código ${row.code} ya está en la fila ${codeRow}.`);
         valid = false;
       }
       codeRows.set(row.code, at);
@@ -484,18 +487,18 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         continue;
       }
       if (!existing && action) {
-        centerWarning(at, CENTER_HEADERS.action, 'Fila nueva marcada para eliminar o archivar: se ignora');
+        centerWarning(at, CENTER_HEADERS.action, 'Esta fila es nueva y pide eliminar o archivar. Se ignora.');
         continue;
       }
       const key = existing ? existing.id : `${NEW}${row.code}`;
       const previousRow = centerRows.get(key);
       if (previousRow !== undefined) {
-        centerError(at, CENTER_HEADERS.previousCode, `El centro ya está en la fila ${previousRow}`);
+        centerError(at, CENTER_HEADERS.previousCode, `Este centro ya está en la fila ${previousRow}.`);
         continue;
       }
       centerRows.set(key, at);
       if (!isDetailCode(row.code)) {
-        centerWarning(at, CENTER_HEADERS.code, `El código ${row.code} no es de cuatro dígitos: no se le deriva centro padre`);
+        centerWarning(at, CENTER_HEADERS.code, `El código ${row.code} no tiene cuatro dígitos. Queda sin centro padre.`);
       }
       const current = centers.get(key);
       centers.set(key, {
@@ -544,7 +547,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         if (deduced) {
           unit.headCenterKey = deduced.key;
           unit.headCenterCode = deduced.code;
-          headIssues.push({ error: false, row: unit.rowNumber, message: `Centro propio deducido: ${deduced.code}` });
+          headIssues.push({ error: false, row: unit.rowNumber, message: `Se tomó el centro propio ${deduced.code}.` });
         }
       }
       continue;
@@ -553,7 +556,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       headIssues.push({
         error: true,
         row: unit.rowNumber,
-        message: `Un cuerpo colegiado (${ORG_UNIT_TYPE_LABELS[unit.unitType].toLowerCase()}) no tiene centro de costo propio`,
+        message: 'Los consejos, comités y comisiones no llevan centro propio.',
       });
       continue;
     }
@@ -563,7 +566,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         headIssues.push({
           error: true,
           row: unit.rowNumber,
-          message: `El centro propio debe ser un código de centro de costo de 1 a 20 dígitos: ${unit.headCenterText}`,
+          message: `${unit.headCenterText} no es un código de centro de costo. Escriba solo números, hasta 20.`,
         });
         continue;
       }
@@ -594,13 +597,9 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     const holder = finalPrefix.get(unit.codePrefix);
     if (holder) {
       const [inFile, other] = unit.rowNumber !== null ? [unit, holder] : [holder, unit];
-      const longer = unit.codePrefix.length < 4 ? ` (${unit.codePrefix}1)` : '';
-      const usedBy = other.rowNumber !== null ? `la fila ${other.rowNumber} (${other.name})` : `«${other.name}»`;
-      unitError(
-        inFile.rowNumber ?? 0,
-        UNIT_HEADERS.prefix,
-        `El prefijo ${unit.codePrefix} ya lo usa ${usedBy}: cada cuadro necesita uno distinto; si es una oficina de ese cuadro, deje el prefijo vacío o use más dígitos${longer}`,
-      );
+      const fix = unit.codePrefix.length < 4 ? 'Use más dígitos o déjelo vacío.' : 'Use otro o déjelo vacío.';
+      const usedBy = other.rowNumber !== null ? `ya está en la fila ${other.rowNumber}` : `ya es de ${other.name}`;
+      unitError(inFile.rowNumber ?? 0, UNIT_HEADERS.prefix, `El prefijo ${unit.codePrefix} ${usedBy}. ${fix}`);
       continue;
     }
     finalPrefix.set(unit.codePrefix, unit);
@@ -621,7 +620,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       }
       if (parent) {
         unit.parentKey = parent.key;
-        unitWarning(at, UNIT_HEADERS.parent, `Depende de deducido del prefijo: ${parent.codePrefix ?? parent.code}`);
+        unitWarning(at, UNIT_HEADERS.parent, `Quedó bajo ${parent.name} por su prefijo.`);
         return;
       }
     } else if (prefix) {
@@ -631,12 +630,12 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       parent = rectorates.length === 1 ? rectorates[0] : undefined;
       if (parent) {
         unit.parentKey = parent.key;
-        unitWarning(at, UNIT_HEADERS.parent, `Depende de deducido: la Rectoría ${parent.codePrefix ?? parent.code}`);
+        unitWarning(at, UNIT_HEADERS.parent, `Quedó bajo ${parent.name}.`);
         return;
       }
     }
     unit.parentKey = null;
-    unitWarning(at, UNIT_HEADERS.parent, 'Sin Depende de: queda en la raíz');
+    unitWarning(at, UNIT_HEADERS.parent, 'No dice de quién depende. Queda en el primer nivel.');
   };
 
   const liveRectorates = [...units.values()].filter((unit) => unit.unitType === OrgUnitType.Rectorate && isLiveUnit(unit));
@@ -648,9 +647,9 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     unitWarning(
       firstRectorateRow,
       UNIT_HEADERS.type,
-      `Hay ${liveRectorates.length} cuadros de tipo Rectoría (${liveRectorates
+      `Hay ${liveRectorates.length} rectorías (${liveRectorates
         .map((unit) => `${unit.codePrefix ? `${unit.codePrefix} ` : ''}${unit.name}`)
-        .join('; ')}): las filas nuevas de un número sin «Depende de» quedan en la raíz`,
+        .join(', ')}). Las filas nuevas de un solo número sin Depende de quedan en el primer nivel.`,
     );
   }
 
@@ -672,9 +671,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
   const unresolvedParentMessage = (text: string): string => {
     if (/^[0-9]+$/.test(text) && liveCenterByCode.has(text)) {
       const owner = resolveCenterUnit(text, prefixOwners)?.unit;
-      return `${text} es un centro de costo pero ninguna unidad lo tiene como Centro propio; escriba el prefijo de la unidad${owner?.codePrefix ? `, p. ej. ${owner.codePrefix}` : ''}`;
+      return owner?.codePrefix
+        ? `${text} es un centro de costo de ${owner.name}. Escriba su prefijo, ${owner.codePrefix}.`
+        : `${text} es un centro de costo. Escriba el prefijo de la dependencia.`;
     }
-    return `No hay ninguna unidad activa con prefijo, centro propio o código interno «${text}»`;
+    return `No hay ninguna dependencia activa con el prefijo o código ${text}.`;
   };
 
   for (const unit of units.values()) {
@@ -698,11 +699,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       continue;
     }
     if (parent.key === unit.key) {
-      unitError(unit.rowNumber, UNIT_HEADERS.parent, 'Una unidad no puede depender de sí misma');
+      unitError(unit.rowNumber, UNIT_HEADERS.parent, 'Una dependencia no puede depender de sí misma.');
       continue;
     }
     if (!isLiveUnit(parent) && isLiveUnit(unit)) {
-      unitError(unit.rowNumber, UNIT_HEADERS.parent, `«${parent.name}» está archivada o marcada para eliminar`);
+      unitError(unit.rowNumber, UNIT_HEADERS.parent, `${parent.name} está archivada o se va a quitar. Elija otra dependencia.`);
       continue;
     }
     unit.parentKey = parent.key;
@@ -710,7 +711,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       unitWarning(
         unit.rowNumber,
         UNIT_HEADERS.parent,
-        `Depende de ${text}: el Centro propio de ${parent.name}${parent.codePrefix ? ` (${parent.codePrefix})` : ''}`,
+        `Quedó bajo ${parent.name} por su centro propio ${text}.`,
       );
     }
   }
@@ -722,7 +723,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     }
     const own = unit.rawPrefix ?? unit.codePrefix ?? unit.code;
     const head = parent.rawPrefix ?? parent.codePrefix ?? parent.code;
-    unitWarning(unit.rowNumber, UNIT_HEADERS.name, `${own} tiene el mismo nombre que su jefe ${head}; ¿es su Centro propio?`);
+    unitWarning(unit.rowNumber, UNIT_HEADERS.name, `${own} se llama igual que su jefe ${head}. Revise si es su centro propio.`);
   }
 
   const keepsPlace = (unit: FinalUnit): boolean => {
@@ -750,7 +751,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       UNIT_HEADERS.name,
       keepsPlace(sibling) || sibling.rowNumber === null
         ? duplicateSiblingError(sibling, parentName)
-        : `La fila ${sibling.rowNumber} también deja «${sibling.name}» ${unitPlace(parentName)}. ${DUPLICATE_SIBLING_HINT}`,
+        : `La fila ${sibling.rowNumber} repite el nombre ${sibling.name} ${unitPlace(parentName)}.`,
     );
   }
 
@@ -763,7 +764,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     for (let depth = 0; current && depth < MAX_DEPTH; depth += 1) {
       if (current.key === unit.key) {
         cyclic.add(unit.key);
-        unitError(unit.rowNumber, UNIT_HEADERS.parent, 'Esa dependencia forma un ciclo (la unidad quedaría por debajo de sí misma)');
+        unitError(unit.rowNumber, UNIT_HEADERS.parent, 'Con ese jefe la dependencia quedaría debajo de sí misma.');
         break;
       }
       current = current.parentKey ? units.get(current.parentKey) : undefined;
@@ -778,7 +779,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       unitError(
         unit.rowNumber,
         UNIT_HEADERS.prefix,
-        `Un cuerpo colegiado (${ORG_UNIT_TYPE_LABELS[unit.unitType].toLowerCase()}) no lleva prefijo: no recibe centros de costo`,
+        'Los consejos, comités y comisiones no llevan prefijo.',
       );
       continue;
     }
@@ -823,11 +824,11 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     const at = center.rowNumber;
     const before = center.existingId ? snapshotCenters.get(center.existingId) : undefined;
     if (center.activeAssets > 0 && (center.removal !== null || !center.isActive)) {
-      centerError(at, center.removal ? CENTER_HEADERS.action : CENTER_HEADERS.status, `Tiene ${center.activeAssets} activos asignados: no se puede eliminar ni archivar`);
+      centerError(at, center.removal ? CENTER_HEADERS.action : CENTER_HEADERS.status, `${assetsText(center.activeAssets)} No se puede eliminar ni archivar.`);
       continue;
     }
     if (center.activeAssets > 0 && before?.hasMovement && !center.hasMovement) {
-      centerError(at, CENTER_HEADERS.movement, `Tiene ${center.activeAssets} activos asignados: no puede quedar como agrupador (0)`);
+      centerError(at, CENTER_HEADERS.movement, `${assetsText(center.activeAssets)} No puede quedar como agrupador.`);
       continue;
     }
     if (!isLiveCenter(center)) {
@@ -845,8 +846,8 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         at,
         CENTER_HEADERS.unit,
         center.unitKey
-          ? `Ninguna unidad tiene un prefijo con que empiece ${center.code}: conserva su unidad «${currentUnit?.name ?? ''}»`
-          : `Ninguna unidad tiene un prefijo con que empiece ${center.code}: queda sin unidad`,
+          ? `Ninguna dependencia tiene un prefijo que coincida con ${center.code}. Se queda en ${currentUnit?.name ?? ''}.`
+          : `Ninguna dependencia tiene un prefijo que coincida con ${center.code}. Queda sin dependencia.`,
       );
     }
     if (isDetailCode(center.code)) {
@@ -856,7 +857,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
         centerWarning(
           at,
           CENTER_HEADERS.parent,
-          `Le corresponde el centro padre ${resolution.missingParentCode}, que no existe: queda sin padre, en su unidad`,
+          `El centro padre ${resolution.missingParentCode} no existe. Queda sin centro padre.`,
         );
       }
     } else if (center.parentKey && !isLiveCenter(centers.get(center.parentKey))) {
@@ -875,7 +876,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       centerError(
         center.rowNumber,
         center.removal ? CENTER_HEADERS.action : CENTER_HEADERS.status,
-        `Tiene ${children.length} centros hijos activos (${children.map((child) => child.code).join(', ')}): muévalos o márquelos también`,
+        `Tiene centros hijos activos (${children.map((child) => child.code).join(', ')}). Muévalos o márquelos también.`,
       );
       continue;
     }
@@ -884,7 +885,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       if (history) {
         center.removal = 'ARCHIVE';
         center.isActive = false;
-        centerWarning(center.rowNumber, CENTER_HEADERS.action, `No se elimina: ${history}`);
+        centerWarning(center.rowNumber, CENTER_HEADERS.action, `Se archivará en vez de eliminarse. ${history}`);
       }
     }
   }
@@ -895,7 +896,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
   for (const unit of units.values()) {
     const head = unit.headCenterKey ? centers.get(unit.headCenterKey) : undefined;
     if (unit.rowNumber !== null && head && explicitHead.has(unit.key) && head.unitKey !== unit.key) {
-      unitWarning(unit.rowNumber, UNIT_HEADERS.headCenter, `El centro propio ${head.code} no queda en esta unidad`);
+      unitWarning(unit.rowNumber, UNIT_HEADERS.headCenter, `El centro propio ${head.code} no queda en esta dependencia.`);
     }
   }
 
@@ -911,13 +912,15 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     const liveCenters = [...centers.values()].filter((center) => center.unitKey === unit.key && isLiveCenter(center));
     if (children.length > 0 || liveCenters.length > 0) {
       const parts = [
-        ...(children.length > 0 ? [`${children.length} unidades hijas activas`] : []),
-        ...(liveCenters.length > 0 ? [`${liveCenters.length} centros de costo activos`] : []),
+        ...(children.length > 0 ? [`${children.length} ${children.length === 1 ? 'dependencia activa' : 'dependencias activas'}`] : []),
+        ...(liveCenters.length > 0
+          ? [`${liveCenters.length} ${liveCenters.length === 1 ? 'centro de costo activo' : 'centros de costo activos'}`]
+          : []),
       ];
       unitError(
         unit.rowNumber,
         unit.removal ? UNIT_HEADERS.action : UNIT_HEADERS.status,
-        `Tiene ${parts.join(' y ')}: muévalos o márquelos también`,
+        `Tiene ${parts.join(' y ')}. Muévalos o márquelos también.`,
       );
       continue;
     }
@@ -926,7 +929,7 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
       if (history) {
         unit.removal = 'ARCHIVE';
         unit.isActive = false;
-        unitWarning(unit.rowNumber, UNIT_HEADERS.action, `No se elimina: ${history}`);
+        unitWarning(unit.rowNumber, UNIT_HEADERS.action, `Se archivará en vez de eliminarse. ${history}`);
       }
     }
   }
@@ -956,14 +959,14 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     const details: string[] = [];
     if (!before) {
       kinds.push('CREATED');
-      details.push(`Nueva ${ORG_UNIT_TYPE_LABELS[unit.unitType].toLowerCase()} bajo ${unitLabel(unit.parentKey)}`);
+      details.push(`Se crea ${unit.parentKey ? `bajo ${unitLabel(unit.parentKey)}` : 'en el primer nivel'} como ${ORG_UNIT_TYPE_LABELS[unit.unitType]}`);
     } else if (unit.removal === 'DELETE') {
       kinds.push('DELETED');
       details.push('Se elimina');
     } else {
       if (before.name !== unit.name) {
         kinds.push('RENAMED');
-        details.push(`Nombre: «${before.name}» → «${unit.name}»`);
+        details.push(`Nombre: ${before.name} → ${unit.name}`);
       }
       if (before.unitType !== unit.unitType) {
         kinds.push('RETYPED');
@@ -1050,17 +1053,17 @@ export const planOrgChart = (snapshot: OrgChartSnapshot, input: OrgChartInput): 
     } else {
       if (before.externalCode !== center.code) {
         kinds.push('RECODED');
-        details.push(`Código: ${before.externalCode} → ${center.code} (conserva activos e historia)`);
+        details.push(`Código: ${before.externalCode} → ${center.code}`);
       }
       if (before.name !== center.name) {
         kinds.push('RENAMED');
-        details.push(`Nombre: «${before.name}» → «${center.name}»`);
+        details.push(`Nombre: ${before.name} → ${center.name}`);
       }
       if (before.unitId !== center.unitKey || before.parentId !== center.parentKey) {
         kinds.push('RELOCATED');
         details.push(
           [
-            ...(before.unitId !== center.unitKey ? [`Unidad: ${unitLabel(before.unitId)} → ${unitLabel(center.unitKey)}`] : []),
+            ...(before.unitId !== center.unitKey ? [`Dependencia: ${unitLabel(before.unitId)} → ${unitLabel(center.unitKey)}`] : []),
             ...(before.parentId !== center.parentKey
               ? [`Padre: ${centerLabel(before.parentId)} → ${centerLabel(center.parentKey)}`]
               : []),

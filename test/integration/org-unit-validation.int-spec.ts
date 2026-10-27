@@ -11,10 +11,8 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { createActor, openTestSession } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
 
-const HINT = 'Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.';
-const CODE_MESSAGE =
-  'El código interno debe empezar por una letra mayúscula y llevar solo letras mayúsculas sin tildes, dígitos y guion bajo (p. ej. OFICINA_CALIDAD)';
-const HEAD_MESSAGE = 'El código del centro propio debe tener de 1 a 20 dígitos, sin letras ni espacios';
+const CODE_MESSAGE = 'Use mayúsculas sin tildes, números y guion bajo. Debe empezar con letra.';
+const HEAD_MESSAGE = 'Escriba solo números, hasta 20.';
 
 describe('Validaciones de unidades: código, nombre repetido y advertencias por campo (HTTP real + PostgreSQL real)', () => {
   let app: NestExpressApplication;
@@ -94,7 +92,7 @@ describe('Validaciones de unidades: código, nombre repetido y advertencias por 
 
     const tooLong = await post({ code: 'A'.repeat(21), name: 'Oficina Código Validación', type: 'OFFICE' });
     expect(tooLong.status).toBe(400);
-    expect(tooLong.body.error.details).toEqual([{ field: 'code', message: 'El código interno admite hasta 20 caracteres' }]);
+    expect(tooLong.body.error.details).toEqual([{ field: 'code', message: 'Use hasta 20 caracteres.' }]);
 
     const patched = await patchUnit('root', { code: '9OFICINA' });
     expect(patched.status).toBe(400);
@@ -122,7 +120,7 @@ describe('Validaciones de unidades: código, nombre repetido y advertencias por 
     const pending = await patchUnit('root', { headCostCenterCode: code });
     expect(pending.status, JSON.stringify(pending.body)).toBe(200);
     expectConforms('patch', '/api/v1/organizational-units/{id}', 200, pending.body);
-    const message = `Centro propio ${code} pendiente: el centro aún no existe; se amarrará solo cuando se cree`;
+    const message = `El centro ${code} aún no existe. Quedará como centro propio cuando lo creen.`;
     expect(pending.body.data).toMatchObject({
       headCostCenterCode: code,
       headCostCenterPending: true,
@@ -138,7 +136,7 @@ describe('Validaciones de unidades: código, nombre repetido y advertencias por 
     expectConforms('post', '/api/v1/organizational-units', 201, created.body);
     const warnings = created.body.data.warnings as string[];
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatch(/^Oficina Fuera Validación \(9581\) depende de Dirección Validación \(96\) pero /);
+    expect(warnings[0]).toMatch(/^Oficina Fuera Validación quedó bajo Dirección Validación, pero su prefijo 9581 (no empieza por 96|es de la rama de .+)\.$/);
     expect(created.body.data.warningDetails).toEqual([
       { field: 'codePrefix', code: 'ORG_UNIT_PREFIX_OUTSIDE_PARENT', message: warnings[0] },
     ]);
@@ -151,7 +149,7 @@ describe('Validaciones de unidades: código, nombre repetido y advertencias por 
     expect(Object.keys(openapi.paths['/api/v1/organizational-units']?.post?.responses ?? {})).toContain('409');
     expect(created.body.error).toMatchObject({
       code: 'ORG_UNIT_NAME_DUPLICATE',
-      message: `Ya existe «Calidad Validación» bajo Dirección Validación. ${HINT}`,
+      message: 'Ya existe Calidad Validación en Dirección Validación.',
       details: [{ field: 'name', message: ids['cal'] }],
     });
 
@@ -159,7 +157,7 @@ describe('Validaciones de unidades: código, nombre repetido y advertencias por 
     expect(atRoot.status).toBe(409);
     expect(atRoot.body.error).toMatchObject({
       code: 'ORG_UNIT_NAME_DUPLICATE',
-      message: `Ya existe «Oficina Raíz Validación» en el primer nivel. ${HINT}`,
+      message: 'Ya existe Oficina Raíz Validación en el primer nivel.',
       details: [{ field: 'name', message: ids['root'] }],
     });
 

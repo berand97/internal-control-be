@@ -131,7 +131,7 @@ export class OrgChartService {
 
   async preview(file: OrgChartUpload | undefined, actor: AuthenticatedUser): Promise<OrgChartPreviewDto> {
     if (!file || file.buffer.length === 0) {
-      throw new ApiException(ErrorCode.OrgChartInvalidFile, 'Adjunte el archivo Excel del organigrama');
+      throw new ApiException(ErrorCode.OrgChartInvalidFile, 'Adjunte el Excel del organigrama.');
     }
     const input = await parseOrgChartWorkbook(file.buffer);
     const fileSha256 = createHash('sha256').update(file.buffer).digest('hex');
@@ -143,7 +143,7 @@ export class OrgChartService {
             sheet: UNIT_SHEET,
             rowNumber: 1,
             column: null,
-            message: `Este archivo ya se aplicó el ${formatWhen(fileAppliedBefore.at)}${fileAppliedBefore.by ? ` por ${fileAppliedBefore.by}` : ''}`,
+            message: `Este archivo ya se aplicó el ${formatWhen(fileAppliedBefore.at)}${fileAppliedBefore.by ? ` por ${fileAppliedBefore.by}` : ''}.`,
           },
           ...plan.warnings,
         ]
@@ -189,7 +189,7 @@ export class OrgChartService {
         [previewId],
       )) as Array<{ id: string; input_rows: OrgChartInput; plan_hash: string; status: string; expires_at: Date }>;
       if (!stored) {
-        throw new ApiException(ErrorCode.ResourceNotFound, 'No existe esa previsualización del organigrama');
+        throw new ApiException(ErrorCode.ResourceNotFound, 'Esa revisión ya no existe. Vuelva a subir el archivo.');
       }
       if (stored.status !== 'PREVIEWED' || stored.expires_at.getTime() < Date.now()) {
         throw new ApiException(ErrorCode.OrgChartImportClosed);
@@ -201,7 +201,7 @@ export class OrgChartService {
           undefined,
           plan.conflicts.slice(0, 50).map((conflict) => ({
             field: `${UNIT_SHEET}!${conflict.rowNumber}:${conflict.column}`,
-            message: `${conflict.unitName}: en el sistema ${conflict.currentValue ?? '(vacío)'}; su archivo ${conflict.fileValue ?? '(vacío)'}`,
+            message: `${conflict.unitName} dice ${conflict.currentValue ?? '(vacío)'} en el sistema y ${conflict.fileValue ?? '(vacío)'} en su archivo.`,
           })),
         );
       }
@@ -221,7 +221,7 @@ export class OrgChartService {
       if (plan.centers.length > 0 && !(await this.permissions.userHasPermission(actor.id, COST_CENTER_MANAGE))) {
         throw new ApiException(
           ErrorCode.InsufficientPermissions,
-          `El archivo cambia centros de costo: requiere permiso ${COST_CENTER_MANAGE}`,
+          'El archivo cambia centros de costo y usted no tiene permiso para hacerlo.',
         );
       }
       await this.apply(manager, plan, actor);
@@ -552,7 +552,7 @@ export class OrgChartService {
     const id = op.existingId ?? '';
     const verdict = decideCenterRemoval(await this.removal.inspectCostCenter(manager, id));
     if (verdict.decision === 'BLOCKED') {
-      throw new ApiException(ErrorCode.OrgChartImportStale, `El centro ${op.code} ya no se puede eliminar: ${verdict.reason ?? ''}`);
+      throw new ApiException(ErrorCode.OrgChartImportStale, `El centro ${op.code} ya no se puede eliminar. ${verdict.reason ?? ''}`.trim());
     }
     if (verdict.decision === 'ARCHIVE') {
       throw new ApiException(ErrorCode.OrgChartImportStale);
@@ -576,7 +576,7 @@ export class OrgChartService {
     const id = op.existingId ?? '';
     const verdict = decideUnitRemoval(await this.removal.inspectUnit(manager, id));
     if (verdict.decision !== 'DELETE') {
-      throw new ApiException(ErrorCode.OrgChartImportStale, `La unidad ${op.name} ya no se puede eliminar: ${verdict.reason ?? ''}`);
+      throw new ApiException(ErrorCode.OrgChartImportStale, `${op.name} ya no se puede eliminar. ${verdict.reason ?? ''}`.trim());
     }
     await this.removal.deleteUnit(manager, id);
     await this.auditLogs.record(

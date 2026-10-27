@@ -39,7 +39,7 @@ describe('color de la unidad', () => {
     });
     const errors = await validate(created);
     expect(errors.map((error) => error.property)).toEqual(['color']);
-    expect(UNIT_COLOR_MESSAGE).toBe('El color debe tener el formato #RRGGBB, por ejemplo #DE9927');
+    expect(UNIT_COLOR_MESSAGE).toBe('Use el formato #RRGGBB, como #DE9927.');
   });
 
   it('Excel: acepta con o sin #, cualquier mayúscula; lo demás no es color', () => {

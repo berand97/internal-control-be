@@ -27,6 +27,8 @@ import {
   UNIT_CODE_PATTERN,
   UNIT_CODE_REQUIRED_MESSAGE,
   UNIT_CODE_TEXT_MESSAGE,
+  UNIT_NAME_LENGTH_MESSAGE,
+  UNIT_NAME_REQUIRED_MESSAGE,
 } from '../domain/unit-code.js';
 
 export class CreateOrganizationalUnitDto {
@@ -38,9 +40,9 @@ export class CreateOrganizationalUnitDto {
   readonly code!: string;
 
   @ApiProperty({ example: 'Departamento de Control Interno', maxLength: 200 })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(200)
+  @IsString({ message: UNIT_NAME_REQUIRED_MESSAGE })
+  @IsNotEmpty({ message: UNIT_NAME_REQUIRED_MESSAGE })
+  @MaxLength(200, { message: UNIT_NAME_LENGTH_MESSAGE })
   readonly name!: string;
 
   @ApiProperty({
@@ -49,7 +51,7 @@ export class CreateOrganizationalUnitDto {
     example: OrgUnitType.Department,
     description: ORG_UNIT_TYPE_DESCRIPTION,
   })
-  @IsIn(ORG_UNIT_TYPES)
+  @IsIn(ORG_UNIT_TYPES, { message: 'Elija un tipo de la lista.' })
   readonly type!: OrgUnitType;
 
   @ApiPropertyOptional({
@@ -59,12 +61,12 @@ export class CreateOrganizationalUnitDto {
   })
   @Transform(({ value }: { value: unknown }) => (value === '' ? null : value))
   @IsOptional()
-  @IsUUID('4')
+  @IsUUID('4', { message: 'Elija una dependencia de la lista.' })
   readonly parentId?: string | null;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()
-  @IsBoolean()
+  @IsBoolean({ message: 'Indique si la dependencia está activa.' })
   readonly isActive?: boolean;
 
   @ApiPropertyOptional({
@@ -77,7 +79,7 @@ export class CreateOrganizationalUnitDto {
   })
   @Transform(({ value }: { value: unknown }) => (value === '' ? null : value))
   @IsOptional()
-  @Matches(/^[0-9]{1,4}$/, { message: 'El prefijo son de 1 a 4 dígitos' })
+  @Matches(/^[0-9]{1,4}$/, { message: 'Escriba de 1 a 4 números.' })
   readonly codePrefix?: string | null;
 
   @ApiPropertyOptional({
@@ -86,7 +88,7 @@ export class CreateOrganizationalUnitDto {
     description: 'Línea del organigrama hacia su padre (por defecto AUTHORITY)',
   })
   @IsOptional()
-  @IsIn(ORG_RELATION_TYPES)
+  @IsIn(ORG_RELATION_TYPES, { message: 'Elija una línea de la lista.' })
   readonly relationType?: OrgRelationType;
 
   @ApiPropertyOptional({
@@ -97,7 +99,7 @@ export class CreateOrganizationalUnitDto {
   })
   @Transform(({ value }: { value: unknown }) => (value === '' ? null : value))
   @IsOptional()
-  @IsUUID('4')
+  @IsUUID('4', { message: 'Elija un centro de costo de la lista.' })
   readonly headCostCenterId?: string | null;
 
   @ApiPropertyOptional({

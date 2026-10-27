@@ -1,6 +1,6 @@
 export const UNIT_COLOR_PATTERN = /^#[0-9a-f]{6}$/;
 
-export const UNIT_COLOR_MESSAGE = 'El color debe tener el formato #RRGGBB, por ejemplo #DE9927';
+export const UNIT_COLOR_MESSAGE = 'Use el formato #RRGGBB, como #DE9927.';
 
 export const normalizeUnitColorInput = (value: unknown): unknown => {
   if (typeof value !== 'string') {

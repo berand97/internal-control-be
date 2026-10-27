@@ -142,7 +142,7 @@ export class OrganizationalUnitSaveResponseDto extends OrganizationalUnitRespons
     type: [String],
     description:
       'Advertencias en español llano; vacío si no hay ninguna. No impiden guardar. Son los mismos textos de warningDetails, en el mismo orden.',
-    example: ['Centro propio 1510 pendiente: el centro aún no existe; se amarrará solo cuando se cree'],
+    example: ['El centro 1510 aún no existe. Quedará como centro propio cuando lo creen.'],
   })
   readonly warnings!: ReadonlyArray<string>;
 

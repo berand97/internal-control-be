@@ -97,8 +97,8 @@ describe('prefijo jerárquico de unidades', () => {
     expect(childPrefixError('43', null)).toBeNull();
   });
   it('rechaza otro dígito inicial o el mismo largo', () => {
-    expect(childPrefixError('53', '4')).toBe('El prefijo 53 no empieza por el de su jefe (4)');
-    expect(childPrefixError('4', '4')).toBe('El prefijo 4 debe tener más dígitos que el de su jefe (4)');
+    expect(childPrefixError('53', '4')).toBe('El prefijo 53 no empieza por 4, el de su jefe.');
+    expect(childPrefixError('4', '4')).toBe('El prefijo 4 es el mismo de su jefe. Agregue al menos un dígito.');
   });
 });
 
@@ -127,7 +127,7 @@ describe('excepción del prefijo jerárquico', () => {
   it('53 bajo 4 con la unidad 5: advertencia que nombra a la dueña de los códigos', () => {
     expect(checkUnitPrefix('53', '4', new Map([['4', 'VICERRECTORÍA FINANCIERA'], ['5', 'VICERRECTORÍA BIENESTAR']]))).toEqual({
       level: 'WARNING',
-      message: 'La unidad (53) depende de su jefe (4) pero conserva los códigos 53… de VICERRECTORÍA BIENESTAR',
+      message: 'La dependencia quedó bajo su jefe, pero su prefijo 53 es de la rama de VICERRECTORÍA BIENESTAR.',
     });
   });
   it('Control Interno (432) movido de Contabilidad (43) a Rectoría (1): advertencia, nunca error', () => {
@@ -138,7 +138,7 @@ describe('excepción del prefijo jerárquico', () => {
       }),
     ).toEqual({
       level: 'WARNING',
-      message: 'Control Interno (432) depende de Rectoría (1) pero conserva los códigos 432… de Contabilidad',
+      message: 'Control Interno quedó bajo Rectoría, pero su prefijo 432 es de la rama de Contabilidad.',
     });
   });
   it('el mismo prefijo de su jefe sigue siendo error', () => {

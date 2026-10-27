@@ -68,99 +68,97 @@ const UNIT_COLUMNS: ReadonlyArray<ColumnSpec> = [
     header: UNIT_HEADERS.prefix,
     width: 10,
     readOnly: false,
-    note: 'Los números que identifican este cuadro del organigrama. Una dependencia empieza por los números de su jefe y lleva más. Ej.: Vicerrectoría Financiera = 4; Servicios Administrativos (depende de ella) = 43; Logística = 4115. Puede escribir el código de Contabilidad completo: 1200 se toma como 12 y 1210 como 121 (se quitan los ceros del final). Los códigos de sus centros de costo empiezan por estos números (4350 es de la 43). Cada cuadro lleva números distintos. Vacío: una fila que ya existía conserva los suyos; para quitarlos escriba NINGUNO. Consejos, comités y comisiones van vacíos.',
+    note: 'Los números de la dependencia. Empiezan por los de su jefe y llevan más dígitos. Por ejemplo, Vicerrectoría Financiera es 4, Servicios Administrativos es 43 y Logística es 4115. Puede escribir el código contable completo. 1200 se toma como 12 y 1210 como 121. Los códigos de sus centros de costo empiezan por estos números. Cada dependencia lleva números distintos. Si lo deja vacío, una fila existente conserva los suyos. Para quitarlos escriba NINGUNO. Consejos, comités y comisiones van sin números.',
   },
   {
     header: UNIT_HEADERS.name,
     width: 52,
     readOnly: false,
-    note: 'Nombre del cuadro tal como aparece en el organigrama. Obligatorio. Ej.: Departamento de Servicios Administrativos.',
+    note: 'Nombre de la dependencia tal como aparece en el organigrama. Es obligatorio.',
   },
   {
     header: UNIT_HEADERS.type,
     width: 24,
     readOnly: false,
     list: ORG_UNIT_TYPES.map((type) => ORG_UNIT_TYPE_LABELS[type]),
-    note: `Qué clase de cuadro es, según la Estructura Orgánica (Acuerdo 008/2021): ${UNIT_TYPE_OPTIONS}. Obligatorio en filas nuevas. Dependencia sirve para cualquier instancia académica o administrativa que no encaje en otro tipo. Consejo, Comité y Comisión son cuerpos colegiados: no llevan prefijo ni centro propio. Ej.: Tesorería = Departamento; Control Interno = Oficina; Comité de Inventarios = Comité.`,
+    note: `Tipo de dependencia según la Estructura Orgánica (Acuerdo 008/2021). Opciones: ${UNIT_TYPE_OPTIONS}. Es obligatorio en filas nuevas. Use Dependencia cuando ningún otro tipo encaje. Consejo, Comité y Comisión van sin prefijo ni centro propio.`,
   },
   {
     header: UNIT_HEADERS.parent,
     width: 14,
     readOnly: false,
-    note: 'De qué cuadro cuelga (su jefe en el organigrama). Escriba los números (prefijo) del jefe, su código de Contabilidad (1200 = 12) o el código de su centro propio (4010 = Vicerrectoría Financiera); si el jefe no tiene números, su Código interno. Ej.: Servicios Administrativos (43) depende de 4. Si lo deja vacío: una fila que ya existía conserva su jefe; una nueva se ubica sola por sus números (43 → 4; 431 → 43) y, si tiene un solo número (ej.: 5), queda bajo la Rectoría. Para que no dependa de nadie escriba RAÍZ.',
+    note: 'El jefe de la dependencia en el organigrama. Escriba su prefijo, su código contable (1200 es 12) o el código de su centro propio (4010 es Vicerrectoría Financiera). Si el jefe no tiene prefijo, escriba su código interno. Si lo deja vacío, una fila existente conserva su jefe y una nueva se ubica por su prefijo (43 queda bajo 4). Una fila nueva de un solo número queda bajo la Rectoría. Para dejarla en el primer nivel escriba RAÍZ.',
   },
   {
     header: UNIT_HEADERS.relation,
     width: 16,
     readOnly: false,
     list: ORG_RELATION_TYPES.map((type) => ORG_RELATION_TYPE_LABELS[type]),
-    note: 'Tipo de raya que lo une con su jefe, como en el organigrama impreso. Autoridad (línea continua): depende directamente, la mayoría. Asesoría (punteada): aconseja, no está en la cadena de mando (ej.: Revisoría Fiscal). Coordinación (rayas): coordina con otro (ej.: TAPH Bucaramanga). Vacío: una fila que ya existía conserva la suya; una nueva queda en Autoridad.',
+    note: 'La línea que la une con su jefe. Autoridad es la línea continua y la más común. Asesoría es punteada, como la de Revisoría Fiscal. Coordinación es la línea de rayas. Si lo deja vacío, una fila existente conserva la suya y una nueva queda en Autoridad.',
   },
   {
     header: UNIT_HEADERS.headCenter,
     width: 14,
     readOnly: false,
-    note: 'El código del centro de costo que corresponde al cuadro mismo (la oficina del jefe). Debe ser un centro activo que ya exista en el sistema (los centros se administran en la pantalla Centros de costo). Ej.: Vicerrectoría Financiera → 4010; Facultad de Administración → 2510 (Decanatura). Puede no tener (Servicios Administrativos). Vacío: una fila que ya existía conserva el que tenía; una nueva cuyo Prefijo se escribió con el código de 4 dígitos de un centro toma ese centro (1510 → 1510); una nueva de un solo número toma el de ese número seguido de 010 si existe (5 → 5010). Para quitarlo escriba NINGUNO.',
+    note: 'Código del centro de costo de la oficina del jefe. Por ejemplo, Vicerrectoría Financiera tiene el 4010 y la Facultad de Administración el 2510. Puede quedar vacío. Si el centro aún no existe, queda pendiente hasta que lo creen. Si lo deja vacío, una fila existente conserva el suyo. Una fila nueva escrita con el código de un centro (1510) toma ese centro, y una de un solo número toma el que termina en 010 (5 toma 5010). Para quitarlo escriba NINGUNO.',
   },
   {
     header: UNIT_HEADERS.color,
     width: 12,
     readOnly: false,
-    note: 'Color base de la rama en el organigrama, en formato #RRGGBB (ej.: #DE9927). Sus dependencias toman tonos más suaves del mismo color. Vacío: deja el que tenga. NINGUNO: lo quita y hereda el de su jefe.',
+    note: 'Color de la rama en el organigrama, en formato #RRGGBB, como #DE9927. Las dependencias de abajo toman tonos más suaves. Si lo deja vacío, conserva el que tenga. Para quitarlo escriba NINGUNO y tomará el color de su jefe.',
   },
   {
     header: UNIT_HEADERS.status,
     width: 12,
     readOnly: false,
     list: [STATUS_ACTIVE, STATUS_ARCHIVED],
-    note: 'Activo: el cuadro existe hoy. Archivado: ya no existe, pero se guarda su historia. Vacío: no cambia (una fila nueva queda Activa).',
+    note: 'Activo si la dependencia existe hoy. Archivado si ya no existe pero se guarda su historia. Si lo deja vacío, no cambia. Una fila nueva queda Activa.',
   },
   {
     header: UNIT_HEADERS.action,
     width: 12,
     readOnly: false,
     list: [ACTION_DELETE, ACTION_ARCHIVE],
-    note: 'Solo para quitar algo. Vacío: la fila se crea o se actualiza. ELIMINAR: se borra (si tiene historia, se archiva). ARCHIVAR: se desactiva. Borrar la fila del Excel NO borra nada en el sistema.',
+    note: 'Úsela para quitar una dependencia. ELIMINAR la borra, o la archiva si tiene historial. ARCHIVAR la desactiva. Si la deja vacía, la fila se crea o se actualiza. Borrar la fila del Excel no borra nada.',
   },
   {
     header: UNIT_HEADERS.code,
     width: 22,
     readOnly: true,
-    note: 'Lo usa el sistema para reconocer la fila. No lo cambie. En filas nuevas déjelo vacío: se llena solo.',
+    note: 'El sistema lo usa para reconocer la fila. No lo cambie. En filas nuevas déjelo vacío.',
   },
 ];
 
 const INSTRUCTIONS: ReadonlyArray<string> = [
-  'Excel del organigrama (unidades organizacionales)',
+  'Excel del organigrama',
   '',
-  '1. Cambie lo que necesite y vuelva a subir el archivo. Primero verá una revisión de los cambios (todavía no cambia nada) y luego los confirma.',
-  '2. Cada encabezado tiene un comentario que explica la columna: pase el mouse por encima.',
-  '3. Las columnas grises las calcula el sistema y no se editan.',
-  '4. Borrar una fila del Excel NO borra nada en el sistema. Para quitar algo escriba ELIMINAR o ARCHIVAR en la columna Acción.',
-  '   ELIMINAR solo borra si no hay historia; si la hay, archiva.',
-  '   No se puede quitar un cuadro que todavía tenga dependencias o centros de costo activos.',
-  '5. Números (prefijo) de cada cuadro: 1 número para la Rectoría y las vicerrectorías (4 = Vicerrectoría Financiera);',
-  '   una dependencia empieza por los de su jefe y lleva más (43 = Servicios Administrativos, bajo 4; 4115 = Logística).',
-  '   Si un cuadro se mueve a otro jefe conserva sus números (Control Interno 432 bajo la Rectoría): solo es una advertencia.',
-  '   Puede escribir el código de Contabilidad completo: 1200 se toma como 12 y 1210 como 121. Consejos, comités y comisiones van sin números.',
-  '   En «Depende de» sirven los números del jefe, su código de Contabilidad (1200) o el de su centro propio (4010 = Vicerrectoría Financiera).',
-  '6. Los centros de costo no se editan en este archivo: se administran en la pantalla Centros de costo.',
-  '   «Depende de» acepta el código de un centro que ya exista. «Centro propio» acepta también uno que aún no exista:',
-  '   queda pendiente y se amarra solo cuando el centro se cree.',
-  '7. Celdas vacías: una fila que ya existía conserva lo que tenía (números, de quién depende, línea, centro propio, estado).',
-  '   Para que un cuadro no dependa de nadie escriba RAÍZ en «Depende de»; para quitarle los números o el centro propio, NINGUNO.',
-  '8. Filas nuevas: deje vacío «Código interno». Si no llena «Depende de», el sistema lo ubica por sus números (43 → 4; 431 → 43);',
-  '   con un solo número (ej.: 5) queda bajo la Rectoría. Si no llena «Centro propio», el cuadro 5 toma el centro 5010 si existe,',
-  '   y un cuadro escrito con el código de un centro existente (1510) toma ese centro.',
-  '   La revisión le muestra cada valor que el sistema completó.',
-  '   Si bajo el mismo jefe ya hay un cuadro con el mismo nombre, una fila nueva sin números se rechaza: si es el mismo,',
-  '   copie su Código interno en la fila; si es otro, escríbale sus números o un nombre distinto.',
-  '9. Color: el color base de la rama en el organigrama, en formato #RRGGBB (ej.: #DE9927). Sus dependencias toman tonos',
-  '   más suaves del mismo color. Vacío: deja el que tenga; NINGUNO: lo quita y el cuadro hereda el color de su jefe.',
-  `10. Tipo (Estructura Orgánica, Acuerdo 008/2021): ${UNIT_TYPE_OPTIONS}.`,
-  '   Dependencia es la instancia académica o administrativa genérica. Consejo, Comité y Comisión son cuerpos colegiados:',
-  '   van sin números y sin centro propio. Archivos viejos: «Consejo o comité» se lee como Consejo, «Área» y «Otro» como',
-  '   Dependencia y «Programa» como Coordinación de programa.',
+  '1. Haga sus cambios y suba el archivo. Primero verá una revisión de los cambios y luego los confirma.',
+  '2. Pase el mouse sobre cada encabezado para ver qué va en esa columna.',
+  '3. Las columnas grises las llena el sistema. No las edite.',
+  '4. Borrar una fila del Excel no borra nada. Para quitar una dependencia escriba ELIMINAR o ARCHIVAR en la columna Acción.',
+  '   ELIMINAR la archiva si tiene historial.',
+  '   No se puede quitar una dependencia que tenga dependencias o centros de costo activos.',
+  '5. Prefijo. La Rectoría y las vicerrectorías llevan un número (4 es Vicerrectoría Financiera).',
+  '   Las demás empiezan por el de su jefe y llevan más dígitos (43 es Servicios Administrativos, bajo 4).',
+  '   Si una dependencia pasa a otro jefe conserva su prefijo. El sistema le avisa, pero no lo impide.',
+  '   Puede escribir el código contable completo. 1200 se toma como 12 y 1210 como 121.',
+  '   Consejos, comités y comisiones van sin prefijo.',
+  '6. Depende de. Escriba el prefijo del jefe, su código contable (1200) o el de su centro propio (4010).',
+  '7. Los centros de costo se editan en su propia pantalla, no en este archivo.',
+  '   Centro propio acepta un centro que aún no existe. Queda pendiente hasta que lo creen.',
+  '8. Celdas vacías. Una fila existente conserva lo que tenía.',
+  '   Para dejar una dependencia en el primer nivel escriba RAÍZ en Depende de. Para quitar el prefijo o el centro propio escriba NINGUNO.',
+  '9. Filas nuevas. Deje vacío el código interno. Si no llena Depende de, el sistema la ubica por su prefijo (43 queda bajo 4).',
+  '   Con un solo número (5) queda bajo la Rectoría. Si no llena Centro propio, la 5 toma el centro 5010 si existe.',
+  '   La revisión le muestra cada valor que llenó el sistema.',
+  '   Si ya hay una dependencia con el mismo nombre bajo el mismo jefe, la fila nueva sin prefijo se rechaza.',
+  '   Si es la misma, copie su código interno. Si es otra, póngale prefijo o un nombre distinto.',
+  '10. Color. Formato #RRGGBB, como #DE9927. Las dependencias de abajo toman tonos más suaves.',
+  '   Vacío conserva el que tenga. NINGUNO lo quita y la dependencia toma el color de su jefe.',
+  `11. Tipo, según la Estructura Orgánica (Acuerdo 008/2021). Opciones: ${UNIT_TYPE_OPTIONS}.`,
+  '   Use Dependencia cuando ningún otro tipo encaje. Consejo, Comité y Comisión van sin prefijo ni centro propio.',
+  '   En archivos viejos, Consejo o comité se lee como Consejo, Área y Otro como Dependencia, y Programa como Coordinación de programa.',
 ];
 
 const columnLetter = (index: number): string => String.fromCharCode(65 + index);
@@ -220,7 +218,7 @@ const fillSheet = async (
         formulae: [`"${spec.list.join(',')}"`],
         showErrorMessage: true,
         errorTitle: spec.header,
-        error: `Elija un valor de la lista: ${spec.list.join(', ')}`,
+        error: 'Elija un valor de la lista.',
       });
     }
   });
@@ -260,7 +258,7 @@ export const TEMPLATE_EXAMPLE: StampValues = {
 
 const EXAMPLE_LINES: ReadonlyArray<string> = [
   '',
-  'Ejemplo de una fila (escríbala en la hoja Organigrama solo si de verdad quiere crear o cambiar ese cuadro):',
+  'Ejemplo de una fila. Cópiela en la hoja Organigrama solo si quiere crear esa dependencia.',
   `   Prefijo ${TEMPLATE_EXAMPLE.prefix ?? ''} · Nombre ${TEMPLATE_EXAMPLE.name ?? ''} · Tipo ${TEMPLATE_EXAMPLE.type ?? ''} · Depende de (vacío) · Línea ${TEMPLATE_EXAMPLE.relation ?? ''} · Centro propio ${TEMPLATE_EXAMPLE.headCenter ?? ''} · Color (vacío) · Estado ${TEMPLATE_EXAMPLE.status ?? ''} · Código interno (vacío)`,
 ];
 
@@ -375,7 +373,7 @@ export const parseOrgChartWorkbook = async (content: Buffer): Promise<OrgChartIn
     if (error instanceof ApiException) {
       throw error;
     }
-    throw new ApiException(ErrorCode.OrgChartInvalidFile, 'No se pudo leer el archivo: debe ser un Excel (.xlsx)');
+    throw new ApiException(ErrorCode.OrgChartInvalidFile, 'No se pudo leer el archivo. Suba un Excel (.xlsx).');
   }
   const unitSheet = findSheet(sheets, UNIT_SHEET);
   const units: UnitRowInput[] = [];

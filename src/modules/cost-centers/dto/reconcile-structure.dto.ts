@@ -7,6 +7,6 @@ export class ReconcileStructureDto {
     example: '3f1c…',
   })
   @IsOptional()
-  @Matches(/^[0-9a-f]{64}$/, { message: 'expectedHash es el hash de la vista previa (64 caracteres hexadecimales)' })
+  @Matches(/^[0-9a-f]{64}$/, { message: 'La vista previa no es válida. Ábrala de nuevo.' })
   readonly expectedHash?: string;
 }

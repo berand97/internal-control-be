@@ -227,7 +227,7 @@ describe('OrganizationalUnitsService', () => {
     vi.mocked(unitsRepository.countActiveCostCenters).mockResolvedValue(3);
     await expect(service.remove('1', actor)).rejects.toMatchObject({
       code: ErrorCode.HasDependentEntities,
-      message: 'La unidad tiene 3 centros de costo activos: muévalos a otra unidad o desactívelos antes de desactivar la unidad',
+      message: 'Tiene 3 centros de costo activos. Muévalos a otra dependencia o archívelos primero.',
       details: [{ field: 'activeCostCenters', message: '3' }],
     });
     expect(unitsRepository.deactivate).not.toHaveBeenCalled();
@@ -238,12 +238,12 @@ describe('OrganizationalUnitsService', () => {
     removal.inspectUnit.mockResolvedValue({
       activeChildren: 0,
       activeCenters: 0,
-      references: [{ table: 'cost_center', column: 'organizational_unit_id', label: 'centros de costo (inactivos)', count: 2 }],
+      references: [{ table: 'cost_center', column: 'organizational_unit_id', label: 'centros de costo archivados', count: 2 }],
     });
     await expect(service.remove('1', actor)).resolves.toEqual({
       deleted: false,
       archived: true,
-      reason: 'Se archiva porque tiene historia: 2 centros de costo (inactivos)',
+      reason: 'Tiene 2 centros de costo archivados en su historial.',
     });
     expect(unitsRepository.countActiveCostCenters).toHaveBeenCalledWith('1');
     expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('SET is_active = FALSE'), ['1']);
@@ -268,12 +268,12 @@ describe('OrganizationalUnitsService', () => {
       service.create({ code: 'DSA', name: 'Servicios', type: OrgUnitType.Department, parentId: '1', codePrefix: '53' }, actor),
     ).resolves.toMatchObject({
       codePrefix: '53',
-      warnings: ['Servicios (53) depende de VF (4) pero conserva los códigos 53… de VB'],
+      warnings: ['Servicios quedó bajo VF, pero su prefijo 53 es de la rama de VB.'],
       warningDetails: [
         {
           field: 'codePrefix',
           code: 'ORG_UNIT_PREFIX_OUTSIDE_PARENT',
-          message: 'Servicios (53) depende de VF (4) pero conserva los códigos 53… de VB',
+          message: 'Servicios quedó bajo VF, pero su prefijo 53 es de la rama de VB.',
         },
       ],
     });
@@ -302,7 +302,7 @@ describe('OrganizationalUnitsService', () => {
         {
           field: 'headCostCenterCode',
           code: 'ORG_UNIT_HEAD_CENTER_PENDING',
-          message: 'Centro propio 1510 pendiente: el centro aún no existe; se amarrará solo cuando se cree',
+          message: 'El centro 1510 aún no existe. Quedará como centro propio cuando lo creen.',
         },
       ],
     });
@@ -394,8 +394,7 @@ describe('OrganizationalUnitsService', () => {
       service.create({ code: 'CAL2', name: '  CALIDÁD ', type: OrgUnitType.Department, parentId: '1' }, actor),
     ).rejects.toMatchObject({
       code: ErrorCode.OrgUnitNameDuplicate,
-      message:
-        'Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+      message: 'Ya existe Calidad en Rectoría.',
       details: [{ field: 'name', message: '2' }],
     });
     expect(unitsRepository.insert).not.toHaveBeenCalled();
@@ -415,8 +414,7 @@ describe('OrganizationalUnitsService', () => {
     vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
     await expect(service.create({ code: 'CAL5', name: 'calidad', type: OrgUnitType.Department }, actor)).rejects.toMatchObject({
       code: ErrorCode.OrgUnitNameDuplicate,
-      message:
-        'Ya existe «Calidad» en el primer nivel. Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+      message: 'Ya existe Calidad en el primer nivel.',
       details: [{ field: 'name', message: '3' }],
     });
   });
@@ -453,8 +451,7 @@ describe('OrganizationalUnitsService', () => {
     it('renombrar: 409 con el id de la hermana', async () => {
       await expect(service.update('4', { name: 'Calidád' }, actor)).rejects.toMatchObject({
         code: ErrorCode.OrgUnitNameDuplicate,
-        message:
-          'Ya existe «Calidad» bajo Rectoría (prefijo 102). Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+        message: 'Ya existe Calidad en Rectoría.',
         details: [{ field: 'name', message: '2' }],
       });
       expect(unitsRepository.update).not.toHaveBeenCalled();
@@ -464,8 +461,7 @@ describe('OrganizationalUnitsService', () => {
     it('mover bajo otra dependencia donde ya hay una con ese nombre: 409', async () => {
       await expect(service.update('3', { parentId: '4' }, actor)).rejects.toMatchObject({
         code: ErrorCode.OrgUnitNameDuplicate,
-        message:
-          'Ya existe «Calidad» bajo Vicerrectoría Financiera. Dos unidades activas bajo la misma dependencia no pueden llamarse igual: use un nombre que las distinga.',
+        message: 'Ya existe Calidad en Vicerrectoría Financiera.',
         details: [{ field: 'name', message: '5' }],
       });
       expect(unitsRepository.update).not.toHaveBeenCalled();
@@ -489,19 +485,15 @@ describe('OrganizationalUnitsService', () => {
     ).rejects.toMatchObject({ code: ErrorCode.ValidationFailed });
   });
 
-  it.each([
-    [OrgUnitType.Council, 'consejo'],
-    [OrgUnitType.Committee, 'comité'],
-    [OrgUnitType.Commission, 'comisión'],
-  ])('%s es cuerpo colegiado: sin prefijo ni centro propio; sin ellos se crea', async (type, label) => {
+  it.each([OrgUnitType.Council, OrgUnitType.Committee, OrgUnitType.Commission])('%s es cuerpo colegiado: sin prefijo ni centro propio; sin ellos se crea', async (type) => {
     await expect(service.create({ code: 'CC', name: 'Cuerpo', type, codePrefix: '7' }, actor)).rejects.toMatchObject({
       code: ErrorCode.ValidationFailed,
-      message: `Un cuerpo colegiado (${label}) no lleva prefijo: no recibe centros de costo`,
+      message: 'Los consejos, comités y comisiones no llevan prefijo.',
       details: [{ field: 'codePrefix' }],
     });
     await expect(service.create({ code: 'CC', name: 'Cuerpo', type, headCostCenterCode: '4010' }, actor)).rejects.toMatchObject({
       code: ErrorCode.ValidationFailed,
-      message: `Un cuerpo colegiado (${label}) no tiene centro de costo propio`,
+      message: 'Los consejos, comités y comisiones no llevan centro propio.',
       details: [{ field: 'headCostCenterCode' }],
     });
     vi.mocked(unitsRepository.insert).mockImplementation(async (record) => Object.assign(new OrganizationalUnit(), { id: '9', ...record }));
@@ -547,7 +539,7 @@ describe('OrganizationalUnitsService', () => {
       vi.mocked(unitsRepository.findById).mockImplementation(async (id) => items.find((item) => item.id === id) ?? null);
     const parentArchived = {
       code: ErrorCode.OrgUnitParentArchived,
-      message: 'La dependencia «Vicerrectoría Financiera» está archivada. Reactívela primero o elija otro padre.',
+      message: 'Vicerrectoría Financiera está archivada. Elija otra dependencia o reactívela primero.',
       details: [{ field: 'parentId', message: '1' }],
     };
 
