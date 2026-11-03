@@ -26,7 +26,13 @@ import {
 import { StorageService } from '../../../shared/storage/storage.service.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
-import { costCenterFilter, type ReadableCostCenterScope } from '../../roles/services/cost-center-scope.js';
+import {
+  costCenterFilter,
+  type ReadableCostCenterScope,
+  requireReadableScope,
+} from '../../roles/services/cost-center-scope.js';
+import { PermissionsService } from '../../roles/services/permissions.service.js';
+import { ASSET_READ_GLOBAL, ASSET_READ_SCOPED } from '../asset-read-scope.guard.js';
 import type {
   AssetPhotoGalleryItemDto,
   AssetPhotoGalleryResponseDto,
@@ -63,6 +69,11 @@ export interface PhotoContent {
   readonly etag: string;
   readonly fileName: string;
   read(): Promise<Buffer>;
+}
+
+export interface CreatePhotoRefs {
+  readonly stagedPhotoToken?: string | undefined;
+  readonly photoFileId?: string | undefined;
 }
 
 export interface GalleryQuery {
@@ -122,6 +133,10 @@ interface GalleryRow {
   readonly origin_asset_code: string | null;
   readonly linked_asset_codes: string[] | null;
 }
+
+const READABLE_FILE = `($2::uuid[] IS NULL OR f.cost_center_id = ANY($2::uuid[]) OR EXISTS (
+    SELECT 1 FROM asset_photo ph JOIN asset a ON a.id = ph.asset_id
+    WHERE ph.file_id = f.id AND ph.unlinked_at IS NULL AND a.current_cost_center_id = ANY($2::uuid[])))`;
 
 const PHOTO_SELECT = `
   SELECT ph.id, ph.asset_id, ph.file_id, ph.file_url, ph.is_primary, ph.caption, ph.uploaded_at,
@@ -194,6 +209,7 @@ export class AssetPhotosService {
     private readonly storage: StorageService,
     @Inject('AuditLogsRepository')
     private readonly auditLogs: AuditLogsRepository,
+    private readonly permissions: PermissionsService,
   ) {}
 
   async upload(
@@ -380,10 +396,7 @@ export class AssetPhotosService {
     const [row] = (await this.dataSource.query(
       `SELECT f.storage_driver, f.storage_key, f.thumb_key, f.sha256, f.content_type
        FROM photo_file f
-       WHERE f.id = $1
-         AND ($2::uuid[] IS NULL OR f.cost_center_id = ANY($2::uuid[]) OR EXISTS (
-           SELECT 1 FROM asset_photo ph JOIN asset a ON a.id = ph.asset_id
-           WHERE ph.file_id = f.id AND ph.unlinked_at IS NULL AND a.current_cost_center_id = ANY($2::uuid[])))`,
+       WHERE f.id = $1 AND ${READABLE_FILE}`,
       [fileId, costCenterFilter(scope)],
     )) as StoredFileRow[];
     if (!row) {
@@ -477,6 +490,41 @@ export class AssetPhotosService {
     return this.photo(assetId, photoId);
   }
 
+  async attachOnCreate(
+    manager: EntityManager,
+    assetId: string,
+    refs: CreatePhotoRefs,
+    actor: AuthenticatedUser,
+  ): Promise<void> {
+    if (refs.stagedPhotoToken) {
+      await this.finalizeStaged(refs.stagedPhotoToken, assetId, actor, { primary: true }, manager).catch(
+        (error: unknown) => {
+          if (error instanceof ApiException && error.code === ErrorCode.AssetPhotoStagedNotFound) {
+            throw new ApiException(ErrorCode.AssetPhotoTokenInvalid, undefined, [
+              { field: 'stagedPhotoToken', message: 'Vencida, ya usada o de otro usuario' },
+            ]);
+          }
+          throw error;
+        },
+      );
+      return;
+    }
+    if (refs.photoFileId) {
+      await this.linkReadableFile(manager, assetId, refs.photoFileId, actor);
+    }
+  }
+
+  async discardFinalizedStaged(token: string): Promise<void> {
+    const [row] = (await this.dataSource.query(
+      `SELECT id, storage_driver, storage_key, sha256, content_type, width, height
+       FROM photo_staged_upload WHERE id = $1 AND finalized_at IS NOT NULL`,
+      [token],
+    )) as StagedRow[];
+    if (row) {
+      await this.removeStaged(row);
+    }
+  }
+
   async purgeStaged(olderThan: Date): Promise<number> {
     const rows = (await this.dataSource.query(
       `SELECT id, storage_driver, storage_key, sha256, content_type, width, height
@@ -493,6 +541,29 @@ export class AssetPhotosService {
       }
     }
     return removed;
+  }
+
+  private async linkReadableFile(
+    manager: EntityManager,
+    assetId: string,
+    photoFileId: string,
+    actor: AuthenticatedUser,
+  ): Promise<void> {
+    const scope = requireReadableScope(
+      await this.permissions.costCenterScope(actor.id, ASSET_READ_GLOBAL, ASSET_READ_SCOPED),
+    );
+    const [file] = (await manager.query(
+      `SELECT f.id, f.sha256 FROM photo_file f WHERE f.id = $1 AND ${READABLE_FILE}`,
+      [photoFileId, costCenterFilter(scope)],
+    )) as Array<{ id: string; sha256: string }>;
+    if (!file) {
+      throw new ApiException(ErrorCode.AssetPhotoFileNotFound, undefined, [
+        { field: 'photoFileId', message: 'No existe o está fuera de su alcance' },
+      ]);
+    }
+    const asset = await this.lockAsset(manager, assetId);
+    const id = await this.attach(manager, asset.id, file.id, file.sha256, actor, { primary: true });
+    await this.audit(AuditAction.AssetPhotoLinked, ASSET_ENTITY, asset.id, actor, { photoId: id, fileId: file.id }, manager);
   }
 
   private async removeStaged(row: StagedRow): Promise<boolean> {

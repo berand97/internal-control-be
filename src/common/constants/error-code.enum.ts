@@ -102,6 +102,8 @@ export enum ErrorCode {
   AssetPhotoAlreadyLinked = 'ASSET_PHOTO_ALREADY_LINKED',
   AssetPhotoStagedNotFound = 'ASSET_PHOTO_STAGED_NOT_FOUND',
   AssetPhotoKeyConflict = 'ASSET_PHOTO_KEY_CONFLICT',
+  AssetPhotoTokenInvalid = 'ASSET_PHOTO_TOKEN_INVALID',
+  AssetPhotoFileNotFound = 'ASSET_PHOTO_FILE_NOT_FOUND',
   StorageUnavailable = 'STORAGE_UNAVAILABLE',
   StorageNotConfigured = 'STORAGE_NOT_CONFIGURED',
   StorageOauthRequired = 'STORAGE_OAUTH_REQUIRED',
