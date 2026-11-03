@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
-import { bogotaDate, daysBetween, planReminders, type ReminderStatus } from '../domain/inventory-schedule.js';
+import { daysBetween, planReminders, type ReminderStatus } from '../domain/inventory-schedule.js';
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { InventoryNoticesService, type NoticeInventory } from './inventory-notices.service.js';
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 export interface ReminderView {
   readonly id: string;
@@ -134,7 +135,7 @@ export class InventoryRemindersService {
         responsibleUserId: inventory?.responsible_user_id ?? '',
       };
       const sent = await this.notices.send(manager, subject, 'REMINDER', {
-        daysUntilStart: daysBetween(bogotaDate(now), subject.plannedStartDate),
+        daysUntilStart: daysBetween(localeIsoDate(now), subject.plannedStartDate),
       });
       const status: ReminderOutcome = sent.outboxIds.length > 0 ? 'SENT' : 'NO_RECIPIENT';
       await this.finish(manager, claimed.id, status, sent.outboxIds);
@@ -151,7 +152,7 @@ export class InventoryRemindersService {
     inventory: InventoryRow | undefined,
     now: Date,
   ): Promise<'SEND' | 'SKIPPED' | 'SUPERSEDED'> {
-    if (!inventory || inventory.status !== 'PLANNED' || inventory.start < bogotaDate(now)) {
+    if (!inventory || inventory.status !== 'PLANNED' || inventory.start < localeIsoDate(now)) {
       return 'SKIPPED';
     }
     if (Number(inventory.reschedule_count) !== Number(claimed.schedule_rev)) {

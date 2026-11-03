@@ -16,8 +16,7 @@ import {
   writeOffItemReason,
 } from '../domain/write-off.js';
 import { type WriteOffRow, WriteOffsService } from './write-offs.service.js';
-
-const bogotaDate = (date: Date): string => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(date);
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 @Injectable()
 export class WriteOffActLifecycle implements OnModuleInit {
@@ -77,7 +76,7 @@ export class WriteOffActLifecycle implements OnModuleInit {
       'SELECT asset_id AS "assetId", state, notes, movement_id FROM asset_write_off_item WHERE write_off_id = $1 ORDER BY line_number',
       [writeOff.id],
     )) as Array<{ assetId: string; state: WriteOffItemState; notes: string | null; movement_id: string | null }>;
-    const writtenOffAt = bogotaDate(new Date());
+    const writtenOffAt = localeIsoDate(new Date());
     for (const { assetId, state, notes } of items.filter((item) => item.movement_id === null)) {
       const reason = writeOffItemReason(state, notes);
       await this.assetState.apply(

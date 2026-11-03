@@ -4,14 +4,6 @@ export const SQL_BOGOTA_TODAY = `(now() AT TIME ZONE '${LOAN_TIME_ZONE}')::date`
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-export const bogotaDate = (instant: Date): string =>
-  new Intl.DateTimeFormat('en-CA', {
-    timeZone: LOAN_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(instant);
-
 interface CalendarDate {
   readonly year: number;
   readonly month: number;

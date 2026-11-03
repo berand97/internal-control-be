@@ -20,7 +20,6 @@ import {
   assertInventoryTransition,
   exceedsUnverifiedThreshold,
 } from '../domain/inventory-transitions.js';
-import { bogotaDate } from '../domain/inventory-schedule.js';
 import { scopeSql } from '../domain/inventory-scope-sql.js';
 import {
   CloseInventoryDto,
@@ -42,6 +41,7 @@ import { type ItemViewContext, mergeFrozenReport, toItemView, toProgressView, to
 import { InventorySignerHeadService } from './inventory-signer-head.service.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
 import { inventorySummary, inventorySummaryUserIds, loadResponsibleNames } from './inventory-summary.js';
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 const ENTITY_TYPE = 'INVENTORY';
 
@@ -178,7 +178,7 @@ export class InventoriesService {
         await itemRepository.save(rows.slice(index, index + 500));
       }
       inventory.status = InventoryStatus.InProgress;
-      inventory.actualStartDate = bogotaDate(now);
+      inventory.actualStartDate = localeIsoDate(now);
       inventory.snapshotTakenAt = now;
       await manager.getRepository(PhysicalInventory).save(inventory);
       await this.auditLogsRepository.record(
@@ -376,7 +376,7 @@ export class InventoriesService {
       const report = toReportView(items, context);
       const now = new Date();
       inventory.status = InventoryStatus.Closed;
-      inventory.actualEndDate = bogotaDate(now);
+      inventory.actualEndDate = localeIsoDate(now);
       inventory.closedAt = now;
       inventory.closedBy = actor.id;
       inventory.discrepancyReport = report;

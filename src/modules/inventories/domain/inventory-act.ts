@@ -1,6 +1,7 @@
 import { PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
 import { VerificationResult } from '../enums/verification-result.js';
 import type { AssetValuation, ReconciliationBasis } from './inventory-valuation.js';
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 export const INVENTORY_ACT_FORMAT_KEY = 'OCI-21-37';
 export const INVENTORY_ACT_ENTITY_TYPE = 'PHYSICAL_INVENTORY_ACT';
@@ -123,11 +124,6 @@ export const formatLongDate = (isoDate: string | null): string => {
   );
 };
 
-const bogotaIsoDate = (instant: Date): string =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(
-    instant,
-  );
-
 const sumOrNull = (values: ReadonlyArray<number | null>): number | null =>
   values.some((value) => value === null) ? null : values.reduce<number>((total, value) => total + (value ?? 0), 0);
 
@@ -244,7 +240,7 @@ export const buildInventoryActContent = (input: ActInput): ActContent => {
       fechaProgramadaFin: formatLongDate(input.plannedEndDate),
       fechaInicio: formatLongDate(input.actualStartDate),
       fechaCierre: formatLongDate(input.actualEndDate),
-      fechaAprobacion: formatLongDate(bogotaIsoDate(input.approvedAt)),
+      fechaAprobacion: formatLongDate(localeIsoDate(input.approvedAt)),
       corteContable: cutText,
       fuenteCorte: basis.kind === 'ACCOUNTING_CUT' ? (basis.sourceLabel ?? '') : '',
       baseConciliacion: basis.kind === 'ACCOUNTING_CUT' ? 'Corte contable' : 'Estado del sistema',

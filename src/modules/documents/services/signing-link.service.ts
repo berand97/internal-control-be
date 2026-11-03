@@ -15,6 +15,7 @@ import {
   type SignerCandidate,
   type TurnChannel,
 } from '../domain/signing-channel.js';
+import { localeDateTime } from '../../../shared/dates/locale-iso-date.js';
 
 export const sha256Hex = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -61,9 +62,6 @@ export const linkState = (link: SigningLinkRow, now = new Date()): SigningLinkSt
 };
 
 const OPEN = 'consumed_at IS NULL AND invalidated_at IS NULL';
-
-const bogotaDateTime = (date: Date): string =>
-  new Intl.DateTimeFormat('es-CO', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Bogota' }).format(date);
 
 @Injectable()
 export class SigningLinkService {
@@ -277,7 +275,7 @@ export class SigningLinkService {
     try {
       const delivered = await this.mail.sendSigningLink(link.email, {
         url: this.signingUrl(token),
-        expiresAt: bogotaDateTime(new Date(expiresAt)),
+        expiresAt: localeDateTime(new Date(expiresAt)),
         formatName: format ? `${format.sgcCode ?? format.key} · ${format.name}` : link.format_key,
         number: link.number,
         signerName: link.signer_name ?? '',

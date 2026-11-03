@@ -56,7 +56,6 @@ import { CostCenterResponseDto } from './dto/responses/cost-center.response.dto.
 import { StructureRemovalResultDto } from './dto/responses/structure-removal.response.dto.js';
 import { UpdateCostCenterDto } from './dto/update-cost-center.dto.js';
 import {
-  bogotaDate,
   buildCostCenterExportWorkbook,
   costCenterExportRows,
   XLSX_MIME,
@@ -69,6 +68,7 @@ import {
 import { CostCentersService } from './services/cost-centers.service.js';
 import { StructureReconcilerService } from './services/structure-reconciler.service.js';
 import { StructureReconcileResultDto } from './dto/responses/structure-reconcile.responses.js';
+import { localeIsoDate } from '../../shared/dates/locale-iso-date.js';
 
 const meta = (ip: string | undefined, userAgent: string | undefined): RequestMeta => ({
   ip: ip ?? null,
@@ -164,7 +164,7 @@ export class CostCentersController {
     const tree = await this.placements.tree(at, query.includeArchived ?? false);
     const body = await buildCostCenterExportWorkbook(costCenterExportRows(tree.roots));
     response.setHeader('Content-Type', XLSX_MIME);
-    response.setHeader('Content-Disposition', `attachment; filename="centros-de-costo-${query.at ?? bogotaDate()}.xlsx"`);
+    response.setHeader('Content-Disposition', `attachment; filename="centros-de-costo-${query.at ?? localeIsoDate()}.xlsx"`);
     response.setHeader('Cache-Control', 'no-store');
     response.send(body);
   }

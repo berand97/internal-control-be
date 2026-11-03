@@ -12,11 +12,12 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
-import { bogotaDate, longSpanishDate, usageBetween } from '../../src/modules/loans/domain/loan-dates.js';
+import { longSpanishDate, usageBetween } from '../../src/modules/loans/domain/loan-dates.js';
 import { LoansService } from '../../src/modules/loans/services/loans.service.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
 import { assignTestHead, grantControlSigner, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 const FORMAT = 'OCI-01-65';
 const TEMPLATE = 'templates/formats/OCI-01-65-v2.docx';
@@ -402,7 +403,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
   });
 
   it('aprobación: director (global) y jefe del centro de ORIGEN aprueban; jefe de otro centro 404; solicitante 403; sin centros 403', async () => {
-    const today = bogotaDate(new Date());
+    const today = localeIsoDate(new Date());
     const [a1, a2] = [await asset(`LP-${tag}-A01`, 'VIDEOBEAM APROBACION'), await asset(`LP-${tag}-A02`, 'PORTATIL APROBACION')];
     const byDirector = await requestLoan([a1 ?? ''], addDays(today, 30));
     const byHead = await requestLoan([a2 ?? ''], addDays(today, 30));
@@ -449,7 +450,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
   it('entrega transaccional: si un activo falla a mitad, nada cambia (activos, movimientos, préstamo, eventos, outbox)', async () => {
     const first = await asset(`LP-${tag}-B01`, 'CAMARA ENTREGA FALLIDA');
     const second = await asset(`LP-${tag}-B02`, 'TRIPODE ENTREGA FALLIDA');
-    const id = await requestLoan([first, second], addDays(bogotaDate(new Date()), 20));
+    const id = await requestLoan([first, second], addDays(localeIsoDate(new Date()), 20));
     await approve(id, 'director').expect(200);
     await dataSource.query(`UPDATE asset SET operational_status = 'IN_MAINTENANCE' WHERE id = $1`, [second]);
 
@@ -481,7 +482,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
 
   it('dos entregas concurrentes del mismo préstamo: una gana, la otra 406, sin movimientos ni actas duplicadas', async () => {
     const assets = [await asset(`LP-${tag}-C01`, 'PARLANTE CONCURRENTE'), await asset(`LP-${tag}-C02`, 'MICROFONO CONCURRENTE')];
-    const id = await requestLoan(assets, addDays(bogotaDate(new Date()), 15));
+    const id = await requestLoan(assets, addDays(localeIsoDate(new Date()), 15));
     await approve(id, 'director').expect(200);
 
     const results = await Promise.all([deliver(id), deliver(id), deliver(id)]);
@@ -514,7 +515,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       for (const [index, code] of codes.entries()) {
         assets.push(await asset(code, descriptions[index] ?? ''));
       }
-      expectedReturnDate = addDays(bogotaDate(new Date()), 259);
+      expectedReturnDate = addDays(localeIsoDate(new Date()), 259);
       loanId = await requestLoan(assets, expectedReturnDate);
       await approve(loanId, 'jefeA').expect(200);
 
@@ -530,7 +531,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect(data.deliveryAct).toMatchObject({ status: 'PENDING', formatKey: FORMAT, documentId: null, retryable: false });
       requestId = data.deliveryAct.requestId;
       expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
-      const estimated = usageBetween(bogotaDate(new Date(data.deliveredAt)), expectedReturnDate);
+      const estimated = usageBetween(localeIsoDate(new Date(data.deliveredAt)), expectedReturnDate);
       expect(data.estimatedUsage).toEqual(estimated);
       expect(data.actualUsage).toMatchObject({ years: 0, months: 0, days: 0 });
 
@@ -559,7 +560,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
         movementIds: Object.fromEntries(recorded.map((item) => [item.asset_id, item.id])),
         signers: { ENTREGA: users['entrega']?.personId, AUDITA: users['audita']?.personId },
         fields: {
-          fechaEntrega: longSpanishDate(bogotaDate(new Date(data.deliveredAt))),
+          fechaEntrega: longSpanishDate(localeIsoDate(new Date(data.deliveredAt))),
           fechaEstimadaDevolucion: longSpanishDate(expectedReturnDate),
           tiempoUso: estimated?.text,
         },
@@ -586,7 +587,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
           await engine.uploadTemplate(
             FORMAT,
             { buffer: await readFile(TEMPLATE), originalname: 'OCI-01-65-v2.docx' },
-            { sgcVersion: '2', effectiveDate: bogotaDate(new Date()) },
+            { sgcVersion: '2', effectiveDate: localeIsoDate(new Date()) },
             users['director']?.userId ?? null,
           )
         ).id ?? '';
@@ -627,7 +628,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       }
       expect(text).toContain(`C.C. ${users['recibe']?.documentNumber}`);
       expect(text).toContain(`C.C. ${users['entrega']?.documentNumber}`);
-      const deliveredDay = bogotaDate(new Date(loan.deliveredAt));
+      const deliveredDay = localeIsoDate(new Date(loan.deliveredAt));
       const usage = usageBetween(deliveredDay, expectedReturnDate);
       expect(text).toContain(`Tiempo de uso estimado:${usage?.text}`);
       expect(text).toContain(`Fecha de entrega: ${longSpanishDate(deliveredDay)}`);
@@ -752,7 +753,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect(lostItem?.returnCondition).toBe('LOST');
       const lostReturnedAt = new Date(lostItem?.returnedAt ?? '');
       expect(new Date(data.actualReturnDate).getTime()).toBe(Math.max(damagedAt.getTime(), lostReturnedAt.getTime()));
-      expect(data.actualUsage).toEqual(usageBetween(bogotaDate(deliveredAt), bogotaDate(new Date(data.actualReturnDate))));
+      expect(data.actualUsage).toEqual(usageBetween(localeIsoDate(deliveredAt), localeIsoDate(new Date(data.actualReturnDate))));
 
       expect(await assetRow(good ?? '')).toEqual({ operational_status: 'IN_USE', physical_condition: 'GOOD' });
       expect(await assetRow(damaged ?? '')).toEqual({ operational_status: 'IN_USE', physical_condition: 'FAIR' });
@@ -779,7 +780,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
   });
 
   it('vencidos en SQL: ACTIVE vencidos aunque el job no los haya marcado, OVERDUE, días de atraso; el job solo marca ACTIVE vencidos', async () => {
-    const today = bogotaDate(new Date());
+    const today = localeIsoDate(new Date());
     const insert = (status: string, expected: string) =>
       scalar<string>(
         dataSource,
@@ -850,7 +851,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       for (const code of codes) {
         ids.push(await asset(code, `EQUIPO ${code}`));
       }
-      const id = await requestLoan(ids, addDays(bogotaDate(new Date()), 30));
+      const id = await requestLoan(ids, addDays(localeIsoDate(new Date()), 30));
       await approve(id, 'director').expect(200);
       await deliver(id).expect(200);
       await drain();
@@ -864,7 +865,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       for (const code of codes) {
         ids.push(await asset(code, `EQUIPO ${code}`));
       }
-      const id = await requestLoan(ids, addDays(bogotaDate(new Date()), 30));
+      const id = await requestLoan(ids, addDays(localeIsoDate(new Date()), 30));
       await approve(id, 'director').expect(200);
       await deliver(id).expect(200);
       await dataSource.query(`UPDATE asset_loan SET status = 'ACTIVE' WHERE id = $1`, [id]);
@@ -872,7 +873,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
     };
 
     it('lectura por alcance: global ve todo; loan:read:org_unit ve origen o destino (en la consulta); fuera de alcance 404 idéntico', async () => {
-      const id = await requestLoan([await asset(`LP-${tag}-S01`, 'ESCANER ALCANCE')], addDays(bogotaDate(new Date()), 10));
+      const id = await requestLoan([await asset(`LP-${tag}-S01`, 'ESCANER ALCANCE')], addDays(localeIsoDate(new Date()), 10));
       const get = (who: string, loanId = id) => http().get(`/api/v1/loans/${loanId}`).set(auth(who));
       const listIds = async (who: string) =>
         ((await http().get('/api/v1/loans').query({ pageSize: 100 }).set(auth(who)).expect(200)).body.data.items as Array<{ id: string }>).map(
@@ -909,7 +910,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
           .send({
             assets: [shared],
             targetCostCenterId: centerB,
-            expectedReturnDate: addDays(bogotaDate(new Date()), 20),
+            expectedReturnDate: addDays(localeIsoDate(new Date()), 20),
             justification: 'Solicitud concurrente del mismo activo para prueba',
             contactPerson: users['recibe']?.personId,
           });
@@ -1075,7 +1076,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
       expect((await sign(loan.documentId, 1, 'entrega')).status).toBe(406);
       const again = await http().post(`/api/v1/loans/${loan.id}/undo-delivery`).set(auth('director')).send({ reason: 'Otra vez' });
       expect([again.status, again.body.error.code]).toEqual([406, 'INVALID_LOAN_STATE_TRANSITION']);
-      loanIds.push(await requestLoan(loan.assets, addDays(bogotaDate(new Date()), 5)));
+      loanIds.push(await requestLoan(loan.assets, addDays(localeIsoDate(new Date()), 5)));
     });
 
     it('préstamo parcialmente devuelto: los pendientes se devuelven después o se declaran perdidos hasta cerrar el préstamo', async () => {
@@ -1166,9 +1167,9 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
 
       await dataSource.query(`UPDATE asset_loan SET status = 'OVERDUE', expected_return_date = $2 WHERE id = $1`, [
         loan.id,
-        addDays(bogotaDate(new Date()), -2),
+        addDays(localeIsoDate(new Date()), -2),
       ]);
-      await ask('solicitante', addDays(bogotaDate(new Date()), 10)).expect(200);
+      await ask('solicitante', addDays(localeIsoDate(new Date()), 10)).expect(200);
       const reopened = await http().post(`/api/v1/loans/${loan.id}/extension/approve`).set(auth('director')).send({}).expect(200);
       expect(reopened.body.data.status).toBe('ACTIVE');
     });
@@ -1203,7 +1204,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
   it('separación de funciones: quien recibe no firma por Control Interno salvo sustituto con el permiso vigente, impreso en el acta', async () => {
     const tag = randomUUID().slice(0, 6).toUpperCase();
     const assetId = await asset(`SOD-${tag}`, `EQUIPO SOD ${tag}`);
-    const id = await requestLoan([assetId], addDays(bogotaDate(new Date()), 30));
+    const id = await requestLoan([assetId], addDays(localeIsoDate(new Date()), 30));
     await approve(id, 'director').expect(200);
     const body = { deliveredByPersonId: users['entrega']?.personId, controlInternoPersonId: users['recibe']?.personId };
     const duplicated = await http().post(`/api/v1/loans/${id}/deliver`).set(auth('director')).send(body);
@@ -1235,7 +1236,7 @@ describe('Préstamos: entrega transaccional, acta OCI-01-65 por el outbox, aprob
   it('regla del firmante de Control Interno: AUDITA sin act:sign_control:global se rechaza antes de mover los activos', async () => {
     const tag = randomUUID().slice(0, 6).toUpperCase();
     const assetId = await asset(`CI-${tag}`, `EQUIPO CI ${tag}`);
-    const id = await requestLoan([assetId], addDays(bogotaDate(new Date()), 30));
+    const id = await requestLoan([assetId], addDays(localeIsoDate(new Date()), 30));
     await approve(id, 'director').expect(200);
     const rejected = await http()
       .post(`/api/v1/loans/${id}/deliver`)

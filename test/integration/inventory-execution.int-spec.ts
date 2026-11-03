@@ -10,9 +10,10 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { addDays, bogotaDate } from '../../src/modules/inventories/domain/inventory-schedule.js';
+import { addDays } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import { discardInventoryActRequests, openTestSession, scalar, withTemporaryHead } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 interface Who {
   readonly personId: string;
@@ -45,7 +46,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
   let outsiderExecutor: Who;
   let outsiderHead: Who;
   let base: { categoryId: string; acquisitionTypeId: string; roomA: string; roomB: string; otherCenter: string };
-  const today = bogotaDate(new Date());
+  const today = localeIsoDate(new Date());
 
   const http = () => request(app.getHttpServer());
   const as = (who: Who) => ({ Authorization: `Bearer ${who.token}` });

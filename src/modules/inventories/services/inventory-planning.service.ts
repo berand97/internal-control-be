@@ -7,7 +7,6 @@ import type { AppConfig } from '../../../config/configuration.js';
 import { validAt } from '../../cost-centers/domain/placement-at.js';
 import {
   MAX_CALENDAR_DAYS,
-  bogotaDate,
   compareCoverage,
   daysBetween,
   notFoundRate,
@@ -18,6 +17,7 @@ import type { InventoryCalendarQueryDto } from '../dto/inventory.dto.js';
 import { InventoryScopeType } from '../enums/inventory-scope.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
 import { InventoryConflictsService, type InventoryConflict } from './inventory-conflicts.service.js';
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 interface CalendarRow {
   id: string;
@@ -173,7 +173,7 @@ export class InventoryPlanningService {
   }
 
   async coverage() {
-    const today = bogotaDate(new Date());
+    const today = localeIsoDate(new Date());
     const rows = (await this.dataSource.query(
       `WITH centers AS (
          SELECT a.current_cost_center_id AS id, count(*)::int AS assets

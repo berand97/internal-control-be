@@ -8,7 +8,7 @@ import { UserStatus } from '../../auth/enums/user-status.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import { AppUser } from '../../auth/entities/app-user.entity.js';
 import { assertInventoryTransition } from '../domain/inventory-transitions.js';
-import { DEFAULT_REMINDER_OFFSETS_DAYS, bogotaDate } from '../domain/inventory-schedule.js';
+import { DEFAULT_REMINDER_OFFSETS_DAYS } from '../domain/inventory-schedule.js';
 import type { CancelInventoryDto, CreateInventoryDto, RescheduleInventoryDto } from '../dto/inventory.dto.js';
 import { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 import { PhysicalInventoryScope } from '../entities/physical-inventory-scope.entity.js';
@@ -24,6 +24,7 @@ import {
 } from './inventory-notices.service.js';
 import { InventoryRemindersService, type ReminderView } from './inventory-reminders.service.js';
 import { inventorySummary, inventorySummaryUserIds, loadResponsibleNames, type InventorySummary } from './inventory-summary.js';
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 export type InventoryScheduleResult = InventorySummary & {
   readonly reminders: ReadonlyArray<ReminderView>;
@@ -138,7 +139,7 @@ export class InventorySchedulesService {
     const end = day(dto.plannedEndDate);
     this.assertRange(start, end);
     const now = new Date();
-    if (start < bogotaDate(now)) {
+    if (start < localeIsoDate(now)) {
       throw new ApiException(ErrorCode.ValidationFailed, 'La nueva fecha de inicio no puede ser anterior a hoy.', [
         { field: 'plannedStartDate', message: 'Debe ser hoy o una fecha futura.' },
       ]);
@@ -306,7 +307,7 @@ export class InventorySchedulesService {
         message: `Los recordatorios de ${skipped.join(', ')} ${skipped.length === 1 && skipped[0] === 1 ? 'día' : 'días'} antes ya pasaron y no se enviarán.`,
       });
     }
-    if (start < bogotaDate(now)) {
+    if (start < localeIsoDate(now)) {
       warnings.push({ code: 'START_IN_PAST', message: 'La fecha de inicio ya pasó.' });
     }
     return warnings;

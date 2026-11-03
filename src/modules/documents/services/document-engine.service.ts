@@ -41,8 +41,9 @@ import {
 } from '../domain/signer-separation.js';
 import { PDF_CONVERTER, type PdfConverter } from '../pdf/pdf-converter.js';
 import { SIGNATURE_PROVIDER, type SignatureProvider, type SignatureRequest } from '../signature/signature-provider.js';
-import { bogotaToday, DocumentFormatCatalogService } from './document-format-catalog.service.js';
+import { DocumentFormatCatalogService } from './document-format-catalog.service.js';
 import { linkState, newSecret, sha256Hex, SigningLinkService, type SigningLinkRow } from './signing-link.service.js';
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 export interface VoidForEntityInput {
   readonly entityType: string;
@@ -329,7 +330,7 @@ export class DocumentEngineService {
     meta: { readonly sgcVersion?: string; readonly effectiveDate: string },
     actorId: string | null,
   ) {
-    const today = bogotaToday();
+    const today = localeIsoDate();
     const format = await this.catalog.current(formatKey, this.dataSource.manager, meta.effectiveDate > today ? meta.effectiveDate : today);
     if (!format.sgcCode) {
       throw new ApiException(ErrorCode.DocumentFormatNotReady, `El formato ${format.key} aún no tiene código SGC.`);
@@ -854,7 +855,6 @@ export class DocumentEngineService {
     return this.detail(documentId, actor);
   }
 
-
   async voidForEntity(manager: EntityManager, input: VoidForEntityInput): Promise<VoidForEntityResult> {
     const reason = input.reason.trim();
     if (!input.entityType.trim() || !input.entityId.trim() || !reason) {
@@ -898,7 +898,6 @@ export class DocumentEngineService {
     }
     return { cancelledRequestIds: cancelled.map((row) => row.id), voidedDocumentIds: voided };
   }
-
 
   private async linkContext(manager: EntityManager, token: string, lock: boolean) {
     const link = await this.links.findByToken(manager, token, lock);

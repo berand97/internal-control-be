@@ -13,14 +13,7 @@ import {
   type SignerSpec,
 } from '../domain/document-formats.js';
 import { DocumentLifecycleRegistry } from '../lifecycle/document-lifecycle.registry.js';
-
-export const bogotaToday = (instant: Date = new Date()): string =>
-  new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Bogota',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(instant);
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 export const FORMAT_KEY_PATTERN = /^[A-Z0-9][A-Z0-9_-]{1,39}$/;
 export const SIGNER_ROLE_PATTERN = /^[A-Z][A-Z0-9_]{0,39}$/;
@@ -145,7 +138,7 @@ export class DocumentFormatCatalogService {
   async current(
     key: string,
     manager: EntityManager = this.dataSource.manager,
-    date: string = bogotaToday(),
+    date: string = localeIsoDate(),
   ): Promise<DocumentFormat> {
     const format = await this.find(key, manager, date);
     if (!format) {
@@ -160,7 +153,7 @@ export class DocumentFormatCatalogService {
   async find(
     key: string,
     manager: EntityManager = this.dataSource.manager,
-    date: string = bogotaToday(),
+    date: string = localeIsoDate(),
   ): Promise<DocumentFormat | undefined> {
     const [row] = (await manager.query(
       `${VERSION_SELECT}
@@ -173,7 +166,7 @@ export class DocumentFormatCatalogService {
 
   async currentAll(
     manager: EntityManager = this.dataSource.manager,
-    date: string = bogotaToday(),
+    date: string = localeIsoDate(),
   ): Promise<DocumentFormat[]> {
     const rows = (await manager.query(
       `SELECT DISTINCT ON (v.format_key) * FROM (${VERSION_SELECT}) v
@@ -217,7 +210,7 @@ export class DocumentFormatCatalogService {
 
   async scheduled(
     key: string,
-    date: string = bogotaToday(),
+    date: string = localeIsoDate(),
   ): Promise<DocumentFormat | undefined> {
     const [row] = (await this.dataSource.query(
       `${VERSION_SELECT} WHERE v.format_key = $1 AND v.effective_from > $2::date
@@ -235,7 +228,7 @@ export class DocumentFormatCatalogService {
         `El formato ${key} no existe.`,
       );
     }
-    const today = bogotaToday();
+    const today = localeIsoDate();
     const rows = (await this.dataSource.query(
       `SELECT h.*, (SELECT count(*)::int FROM document d WHERE d.format_version_id = h.id) AS document_count
        FROM (${VERSION_SELECT} WHERE v.format_key = $1) h
@@ -268,7 +261,7 @@ export class DocumentFormatCatalogService {
     actorId: string | null,
   ): Promise<DocumentFormat> {
     const key = input.key.trim();
-    const today = bogotaToday();
+    const today = localeIsoDate();
     const errors: ErrorDetail[] = [];
     if (!FORMAT_KEY_PATTERN.test(key)) {
       errors.push({
@@ -332,7 +325,7 @@ export class DocumentFormatCatalogService {
     input: FormatVersionInput,
     actorId: string | null,
   ): Promise<DocumentFormat> {
-    const today = bogotaToday();
+    const today = localeIsoDate();
     const effectiveFrom = input.effectiveFrom ?? today;
     const errors = this.versionErrors(input);
     if (DATE_PATTERN.test(effectiveFrom) && effectiveFrom < today) {

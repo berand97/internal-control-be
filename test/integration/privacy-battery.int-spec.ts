@@ -15,6 +15,7 @@ import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js'
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 const LOAN_FORMAT = 'OCI-01-65';
 
@@ -32,9 +33,8 @@ interface Probe {
   readonly list?: boolean;
 }
 
-const bogotaToday = (): string => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 const plusDays = (days: number): string => {
-  const date = new Date(`${bogotaToday()}T12:00:00Z`);
+  const date = new Date(`${localeIsoDate()}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 };
@@ -193,7 +193,7 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
         await engine.uploadTemplate(
           LOAN_FORMAT,
           { buffer: await readFile('templates/formats/OCI-01-65-v2.docx'), originalname: 'OCI-01-65.docx' },
-          { sgcVersion: '8', effectiveDate: bogotaToday() },
+          { sgcVersion: '8', effectiveDate: localeIsoDate() },
           director.userId,
         )
       ).id ?? '';
@@ -245,7 +245,7 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
         name: `Toma privada ${tag}`,
         scope: 'COST_CENTER',
         scopeId: centerB,
-        plannedStartDate: bogotaToday(),
+        plannedStartDate: localeIsoDate(),
         plannedEndDate: plusDays(2),
         responsibleUserId: director.userId,
         reminderOffsetsDays: [],
@@ -263,7 +263,7 @@ describe('Batería de privacidad: un jefe del centro A no ve activos del centro 
           requestingCostCenterId: centerC,
           ownerCostCenterId: centerB,
           description: 'Solicitud ajena de la batería',
-          startDate: bogotaToday(),
+          startDate: localeIsoDate(),
           expectedReturnDate: plusDays(3),
         })
         .expect(201)

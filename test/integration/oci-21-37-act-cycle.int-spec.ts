@@ -17,14 +17,12 @@ import { DocumentEngineService } from '../../src/modules/documents/services/docu
 import type { StorageDriver } from '../../src/config/configuration.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
 import { formatMoney } from '../../src/modules/inventories/domain/inventory-act.js';
-import {
-  addDays,
-  bogotaDate,
-} from '../../src/modules/inventories/domain/inventory-schedule.js';
+import { addDays } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import { SAMPLE } from '../../scripts/formats/build-oci-21-37-template.mjs';
 import { findLeftovers } from '../../scripts/formats/template-leftovers.mjs';
 import { openTestSession, scalar, useSharedStorage, withTemporaryHead } from './helpers.js';
 import { pdfText, sampleLeftovers, squash } from './pdf-text.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 const ACT_FORMAT = 'OCI-21-37';
 const TEMPLATE = 'templates/formats/OCI-21-37-v2.docx';
@@ -53,7 +51,7 @@ describe
       let base: { categoryId: string; acquisitionTypeId: string; room: string };
       let templateId = '';
       let sequenceBefore: string | undefined;
-      const today = bogotaDate(new Date());
+      const today = localeIsoDate(new Date());
 
       const http = () => request(app.getHttpServer());
       const as = (who: Who) => ({ Authorization: `Bearer ${who.token}` });

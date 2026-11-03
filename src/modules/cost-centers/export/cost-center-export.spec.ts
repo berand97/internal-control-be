@@ -2,7 +2,6 @@ import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
 import type { CostCenterTreeNodeDto } from '../dto/responses/cost-center-structure.responses.js';
 import {
-  bogotaDate,
   buildCostCenterExportWorkbook,
   COST_CENTER_EXPORT_HEADERS,
   COST_CENTER_EXPORT_SHEET,
@@ -96,9 +95,5 @@ describe('exportación de centros de costo', () => {
       'Activo',
     ]);
     expect(sheet?.rowCount).toBe(4);
-  });
-
-  it('la fecha del archivo es la de Bogotá', () => {
-    expect(bogotaDate(new Date('2026-10-19T03:00:00Z'))).toBe('2026-10-18');
   });
 });
