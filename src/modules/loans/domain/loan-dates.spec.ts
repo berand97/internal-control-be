@@ -1,4 +1,4 @@
-import { bogotaDate, daysOverdue, formatUsage, longSpanishDate, usageBetween } from './loan-dates.js';
+import { daysOverdue, formatUsage, longSpanishDate, usageBetween } from './loan-dates.js';
 
 describe('usageBetween: tiempo de uso del préstamo', () => {
   it('reproduce el ejemplo institucional del OCI-01-65', () => {
@@ -55,11 +55,6 @@ describe('daysOverdue', () => {
 });
 
 describe('fechas en America/Bogota', () => {
-  it('bogotaDate usa el día de Bogotá, no el UTC', () => {
-    expect(bogotaDate(new Date('2026-09-26T03:00:00Z'))).toBe('2026-09-25');
-    expect(bogotaDate(new Date('2026-09-26T05:00:00Z'))).toBe('2026-09-26');
-  });
-
   it('longSpanishDate escribe la fecha como documento.fecha del motor de actas', () => {
     const engineLongDate = (date: Date): string =>
       new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Bogota' })

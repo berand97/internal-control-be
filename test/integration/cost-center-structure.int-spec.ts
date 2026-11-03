@@ -10,12 +10,12 @@ import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { bogotaDate } from '../../src/modules/cost-centers/export/cost-center-export.js';
 import { userDisplayNameSubquery } from '../../src/modules/persons/services/cost-center-heads.service.js';
 import { ExcelImportService } from '../../src/modules/staging/services/excel-import.service.js';
 import { ImportJobsService } from '../../src/modules/staging/services/import-jobs.service.js';
 import { createActor, openTestSession, scalar } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 type Cell = string | number | null;
 
@@ -489,7 +489,7 @@ describe('Estructura de centros de costo con historial (HTTP real + PostgreSQL r
     expect(roots.some((node) => node.id === ids['c7200'])).toBe(false);
     expect(root).toMatchObject({ acceptsAssets: false });
 
-    const today = bogotaDate();
+    const today = localeIsoDate();
     const exported = await http()
       .get('/api/v1/cost-centers/export')
       .query({ at: today, includeArchived: 'true' })

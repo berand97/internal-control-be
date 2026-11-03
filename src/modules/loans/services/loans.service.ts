@@ -38,7 +38,6 @@ import {
   requireReadScope,
 } from '../domain/loan-approval.js';
 import {
-  bogotaDate,
   daysOverdue,
   longSpanishDate,
   SQL_BOGOTA_TODAY,
@@ -73,6 +72,7 @@ import {
   type LoanStatus,
   OPEN_LOAN_STATUSES,
 } from '../enums/loan-status.js';
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 const LOANABLE: ReadonlyArray<OperationalStatus> = [
   OperationalStatus.InUse,
@@ -235,7 +235,7 @@ export class LoansService {
       .skip((page - 1) * pageSize)
       .take(pageSize)
       .getMany();
-    const today = bogotaDate(new Date());
+    const today = localeIsoDate(new Date());
     return {
       items: rows.map((row) => this.toSummary(row, today)),
       page,
@@ -259,7 +259,7 @@ export class LoansService {
       .orderBy('l.expected_return_date', 'ASC')
       .addOrderBy('l.id', 'ASC')
       .getRawAndEntities<{ days_overdue: number | string }>();
-    const today = bogotaDate(new Date());
+    const today = localeIsoDate(new Date());
     return entities.map((row, index) => ({
       ...this.toSummary(row, today),
       daysOverdue: Number(raw[index]?.days_overdue ?? 0),
@@ -297,7 +297,7 @@ export class LoansService {
     const attachments = await this.attachments.find({ where: { loanId: id } });
     const returnFormat = await this.documents.formatReadiness(LOAN_RETURN_FORMAT);
     return {
-      ...this.toSummary(loan, bogotaDate(new Date())),
+      ...this.toSummary(loan, localeIsoDate(new Date())),
       items: items
         .map((item) => ({
           id: item.id,
@@ -618,7 +618,7 @@ export class LoansService {
        WHERE i.loan_id = $1 ORDER BY a.internal_code, a.id`,
       [loan.id],
     )) as LoanDeliveryOptionsDto['items'];
-    const today = bogotaDate(new Date());
+    const today = localeIsoDate(new Date());
     return {
       loanId: loan.id,
       status: loan.status,
@@ -683,7 +683,7 @@ export class LoansService {
     {
       const loan = await this.lockLoan(manager, id);
       assertLoanTransition(loan.status, 'PENDING_SIGNATURES');
-      const today = bogotaDate(new Date());
+      const today = localeIsoDate(new Date());
       if (loan.startDate && today < loan.startDate) {
         throw new ApiException(
           ErrorCode.LoanNotStarted,
@@ -712,7 +712,7 @@ export class LoansService {
       );
 
       const deliveredAt = new Date();
-      const deliveryDay = bogotaDate(deliveredAt);
+      const deliveryDay = localeIsoDate(deliveredAt);
       const estimated = usageBetween(deliveryDay, loan.expectedReturnDate);
       if (!estimated) {
         throw new ApiException(
@@ -1167,8 +1167,8 @@ export class LoansService {
           loan.deliveryDocumentId,
         ])) as Array<{ number: string }>)
       : [];
-    const deliveryDay = loan.deliveredAt ? bogotaDate(loan.deliveredAt) : null;
-    const returnDay = bogotaDate(lastReturn);
+    const deliveryDay = loan.deliveredAt ? localeIsoDate(loan.deliveredAt) : null;
+    const returnDay = localeIsoDate(lastReturn);
     const count = (condition: LoanReturnCondition | null) => received.filter((item) => item.returnCondition === condition).length;
     return {
       formatKey: LOAN_RETURN_FORMAT,
@@ -1181,7 +1181,7 @@ export class LoansService {
       signers,
       fields: {
         fechaDevolucion: longSpanishDate(returnDay),
-        fechaRecepcion: longSpanishDate(bogotaDate(receivedAt)),
+        fechaRecepcion: longSpanishDate(localeIsoDate(receivedAt)),
         fechaEntrega: deliveryDay ? longSpanishDate(deliveryDay) : '',
         fechaEstimadaDevolucion: longSpanishDate(loan.expectedReturnDate),
         tiempoUsoReal: deliveryDay ? (usageBetween(deliveryDay, returnDay)?.text ?? '') : '',
@@ -1199,7 +1199,7 @@ export class LoansService {
           item.assetId,
           {
             condicionDevolucion: item.returnCondition ? RETURN_CONDITION_LABELS[item.returnCondition] : '',
-            fechaDevolucion: item.returnedAt ? longSpanishDate(bogotaDate(item.returnedAt)) : '',
+            fechaDevolucion: item.returnedAt ? longSpanishDate(localeIsoDate(item.returnedAt)) : '',
             estadoEntrega: item.conditionOnDelivery
               ? (PHYSICAL_CONDITION_LABELS[item.conditionOnDelivery] ?? item.conditionOnDelivery)
               : 'Sin verificar',
@@ -1219,7 +1219,7 @@ export class LoansService {
         throw new ApiException(ErrorCode.InvalidLoanStateTransition);
       }
       const requested = dto.expectedReturnDate.slice(0, 10);
-      if (requested <= loan.expectedReturnDate || requested < bogotaDate(new Date())) {
+      if (requested <= loan.expectedReturnDate || requested < localeIsoDate(new Date())) {
         throw new ApiException(
           ErrorCode.ValidationFailed,
           'La nueva fecha debe ser posterior a la actual y no puede haber pasado.',
@@ -1254,7 +1254,7 @@ export class LoansService {
       if (!requested) {
         throw new ApiException(ErrorCode.LoanNoPendingExtension);
       }
-      const reopened = loan.status === 'OVERDUE' && requested >= bogotaDate(new Date());
+      const reopened = loan.status === 'OVERDUE' && requested >= localeIsoDate(new Date());
       if (reopened) {
         assertLoanTransition(loan.status, 'ACTIVE');
       }
@@ -1518,8 +1518,8 @@ export class LoansService {
   }
 
   private toSummary(loan: AssetLoan, today: string) {
-    const deliveryDay = loan.deliveredAt ? bogotaDate(loan.deliveredAt) : null;
-    const endDay = loan.actualReturnDate ? bogotaDate(loan.actualReturnDate) : today;
+    const deliveryDay = loan.deliveredAt ? localeIsoDate(loan.deliveredAt) : null;
+    const endDay = loan.actualReturnDate ? localeIsoDate(loan.actualReturnDate) : today;
     const candidate = LOAN_OVERDUE_CANDIDATE_STATUSES.includes(loan.status);
     return {
       id: loan.id,

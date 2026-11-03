@@ -12,10 +12,11 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
-import { bogotaDate, longSpanishDate } from '../../src/modules/loans/domain/loan-dates.js';
+import { longSpanishDate } from '../../src/modules/loans/domain/loan-dates.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
 import { assignTestHead, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 const FORMAT = 'LOAN_RETURN';
 
@@ -180,7 +181,7 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     const uploaded = await http()
       .post(`/api/v1/documents/formats/${FORMAT}/templates`)
       .set(auth('director'))
-      .field('effectiveDate', bogotaDate(new Date()))
+      .field('effectiveDate', localeIsoDate(new Date()))
       .attach('file', fixtureTemplate(), 'acta-devolucion-prueba.docx')
       .expect(201);
     templateId = uploaded.body.data.id as string;
@@ -297,11 +298,11 @@ describe('Acta de devolución LOAN_RETURN con formato de prueba: se encola en la
     expect(text).toContain(`CODIGO|PRUEBA-DEV|NUMERO|${act.number}|`);
     expect(text).toContain(`ORIGEN|DA-${tag} ALMACEN ORIGEN PRUEBA|`);
     expect(text).toContain(`DESTINO|DB-${tag} AULA DESTINO PRUEBA|`);
-    expect(text).toContain(`FECHAS|${longSpanishDate(bogotaDate(deliveredAt))}|`);
+    expect(text).toContain(`FECHAS|${longSpanishDate(localeIsoDate(deliveredAt))}|`);
     expect(text).toContain('ACTA|OCI-01-65||');
     expect(text).toContain('TOTALES|2|0|0|2|');
     expect(text).toContain('OBS|Devuelto con la pantalla rayada|');
-    expect(text).toContain(`PORTATIL DEVOLUCION|Dañado|${longSpanishDate(bogotaDate(damagedAt))}|Bueno|`);
+    expect(text).toContain(`PORTATIL DEVOLUCION|Dañado|${longSpanishDate(localeIsoDate(damagedAt))}|Bueno|`);
     expect(text).toContain('MOUSE DEVOLUCION|Bueno|');
     expect(text).toContain(`DEVUELVE|${users['contacto']?.fullName}|DOCENTE QUE DEVUELVE|`);
     expect(text).toContain(`RECIBE_ORIGEN|${users['receptor']?.fullName}|ALMACENISTA DE ORIGEN|`);

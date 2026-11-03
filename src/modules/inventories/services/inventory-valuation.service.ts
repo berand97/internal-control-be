@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
-import { bogotaDate } from '../domain/inventory-schedule.js';
 import {
   type AssetIdentity,
   type AssetValuation,
@@ -12,6 +11,7 @@ import type { PhysicalInventoryItem } from '../entities/physical-inventory-item.
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
 import type { ItemViewContext } from './inventory-item-view.js';
 import { loadResponsibleNames } from './inventory-summary.js';
+import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
 
 interface CutRow {
   readonly id: string;
@@ -45,7 +45,7 @@ export class InventoryValuationService {
       sourceLabel: cut?.source_label ?? null,
       snapshotAt: inventory.snapshotTakenAt ?? null,
       snapshotDate,
-      valuationDate: cut?.cut_date ?? snapshotDate ?? bogotaDate(new Date()),
+      valuationDate: cut?.cut_date ?? snapshotDate ?? localeIsoDate(new Date()),
     };
   }
 

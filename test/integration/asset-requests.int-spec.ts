@@ -19,6 +19,7 @@ import { DocumentEngineService } from '../../src/modules/documents/services/docu
 import { conform, type Schema } from './openapi-conform.js';
 import { createPermissionRole, scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 const LOAN_FORMAT = 'OCI-01-65';
 const TRANSFER_FORMAT = 'OCI-17-89';
@@ -29,9 +30,8 @@ interface Actor {
   token: string;
 }
 
-const bogotaToday = (): string => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 const plusDays = (days: number): string => {
-  const date = new Date(`${bogotaToday()}T12:00:00Z`);
+  const date = new Date(`${localeIsoDate()}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 };
@@ -123,7 +123,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     ownerCostCenterId: owner,
     description: 'Dos portátiles para la inducción',
     note: 'Ojalá los de serie SN-123',
-    startDate: bogotaToday(),
+    startDate: localeIsoDate(),
     expectedReturnDate: plusDays(10),
     ...overrides,
   });
@@ -193,7 +193,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       const uploaded = await engine.uploadTemplate(
         format,
         { buffer: await readFile(file), originalname: `${format}.docx` },
-        { sgcVersion: '9', effectiveDate: bogotaToday() },
+        { sgcVersion: '9', effectiveDate: localeIsoDate() },
         director.userId,
       );
       templateIds.push(uploaded.id ?? '');
@@ -373,7 +373,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expectConforms('post', '/api/v1/asset-requests/{id}/generate', 200, generated.body);
     expect(generated.body.data).toMatchObject({
       status: 'LOAN_SCHEDULED',
-      document: { kind: 'LOAN', status: 'APPROVED', startDate: bogotaToday(), documentId: null },
+      document: { kind: 'LOAN', status: 'APPROVED', startDate: localeIsoDate(), documentId: null },
     });
     const loanId = generated.body.data.document.id as string;
     const loan = await scalar<Record<string, string>>(
@@ -389,7 +389,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       requested_by: requester.userId,
       target_cost_center_id: requesting,
       source_cost_center_id: owner,
-      start_date: bogotaToday(),
+      start_date: localeIsoDate(),
     });
     expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [first])).toBe('IN_USE');
     expect(await scalar<number>(dataSource, `SELECT count(*)::int FROM asset_movement WHERE asset_id = $1 AND movement_type::text = 'LOAN'`, [first])).toBe(0);
@@ -404,7 +404,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       .set(auth(ownerHead))
       .send({ deliveredByPersonId: ownerHead.personId, controlInternoPersonId: auditor.personId, assetNotes: { [first]: 'Con cargador' } })
       .expect(200);
-    expect(delivered.body.data).toMatchObject({ status: 'PENDING_SIGNATURES', startDate: bogotaToday() });
+    expect(delivered.body.data).toMatchObject({ status: 'PENDING_SIGNATURES', startDate: localeIsoDate() });
     expect(await scalar<string>(dataSource, 'SELECT operational_status::text FROM asset WHERE id = $1', [first])).toBe('ON_LOAN');
     expect(await scalar<string>(dataSource, 'SELECT status FROM asset_request WHERE id = $1', [id])).toBe('DOCUMENT_GENERATED');
     await engine.processPending(1000);
@@ -525,7 +525,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       receiver: { personId: string; name: string } | null;
       items: Array<Record<string, unknown>>;
     };
-    expect(options.body.data).toMatchObject({ loanId, status: 'APPROVED', startDate: bogotaToday(), canDeliverNow: true });
+    expect(options.body.data).toMatchObject({ loanId, status: 'APPROVED', startDate: localeIsoDate(), canDeliverNow: true });
     expect(data.deliverer).toEqual({ personId: plainHead.personId, name: 'Jefa sin permisos Solicitud' });
     expect(data.receiver).toEqual({ personId: requester.personId, name: 'Solicitante Solicitud' });
     expect(data.items).toEqual([{ assetId, code: expect.stringMatching(/^SOL-/), description: expect.stringContaining('PORTATIL') }]);
@@ -685,7 +685,7 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
     expect((await detail(second.id)).status).toBe('CLOSED_LOAN_CANCELLED');
 
     const third = await scheduled();
-    await dataSource.query('UPDATE asset_loan SET start_date = $2 WHERE id = $1', [third.loanId, bogotaToday()]);
+    await dataSource.query('UPDATE asset_loan SET start_date = $2 WHERE id = $1', [third.loanId, localeIsoDate()]);
     const delivered = await http()
       .post(`/api/v1/loans/${third.loanId}/deliver`)
       .set(auth(director))
@@ -790,8 +790,8 @@ describe('Solicitud de activos entre centros (HTTP real + PostgreSQL real)', () 
       (await notices(ownerHead.userId, id)).filter((row) => row.type === 'ASSET_REQUEST_LOAN_STARTS').length;
     await service.noticeLoanStarts();
     expect(await startNotices()).toBe(0);
-    await dataSource.query('UPDATE asset_loan SET start_date = $2 WHERE id = $1', [loanId, bogotaToday()]);
-    await dataSource.query('UPDATE asset_request SET start_date = $2 WHERE id = $1', [id, bogotaToday()]);
+    await dataSource.query('UPDATE asset_loan SET start_date = $2 WHERE id = $1', [loanId, localeIsoDate()]);
+    await dataSource.query('UPDATE asset_request SET start_date = $2 WHERE id = $1', [id, localeIsoDate()]);
     expect(await service.noticeLoanStarts()).toBeGreaterThanOrEqual(1);
     expect(await startNotices()).toBe(2);
     await service.noticeLoanStarts();

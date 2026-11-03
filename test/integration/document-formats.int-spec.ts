@@ -9,9 +9,9 @@ import { AppModule } from '../../src/app.module.js';
 import { createAppValidationPipe } from '../../src/common/pipes/app-validation.pipe.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js';
-import { bogotaToday } from '../../src/modules/documents/services/document-format-catalog.service.js';
 import { scalar, useSharedStorage } from './helpers.js';
 import { DocxTextPdfConverter, pdfText, squash } from './pdf-text.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 const TEMPLATE = 'templates/formats/OCI-01-55-v2.docx';
 
@@ -91,7 +91,7 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
     http()
       .post(`/api/v1/documents/formats/${key}/templates`)
       .set(auth('director'))
-      .field('effectiveDate', bogotaToday())
+      .field('effectiveDate', localeIsoDate())
       .attach('file', TEMPLATE, 'plantilla-prueba.docx');
 
   const generate = (key: string, signers: Record<string, string | undefined>) =>
@@ -160,7 +160,7 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
       sgcCode: 'PRUEBA-FMT',
       version: '1',
       versionNumber: 1,
-      effectiveFrom: bogotaToday(),
+      effectiveFrom: localeIsoDate(),
       ready: true,
       activeTemplate: null,
       lastIssuedNumber: null,
@@ -303,9 +303,9 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
     const past = await http()
       .post(`/api/v1/documents/formats/${FREE}/versions`)
       .set(auth('director'))
-      .send({ ...baseVersion, signers: v2Signers, effectiveFrom: addDays(bogotaToday(), -1) });
+      .send({ ...baseVersion, signers: v2Signers, effectiveFrom: addDays(localeIsoDate(), -1) });
     expect([past.status, past.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
-    const tomorrow = addDays(bogotaToday(), 1);
+    const tomorrow = addDays(localeIsoDate(), 1);
     const scheduled = await http()
       .post(`/api/v1/documents/formats/${FREE}/versions`)
       .set(auth('director'))

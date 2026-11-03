@@ -72,6 +72,3 @@ export const buildCostCenterExportWorkbook = async (rows: ReadonlyArray<CostCent
   sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: COST_CENTER_EXPORT_HEADERS.length } };
   return Buffer.from(await workbook.xlsx.writeBuffer());
 };
-
-export const bogotaDate = (at: Date = new Date()): string =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);

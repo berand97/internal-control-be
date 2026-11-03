@@ -10,13 +10,14 @@ import { createAppValidationPipe } from '../../src/common/pipes/app-validation.p
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
-import { addDays, bogotaDate, reminderDueAt } from '../../src/modules/inventories/domain/inventory-schedule.js';
+import { addDays, reminderDueAt } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import { InventoriesService } from '../../src/modules/inventories/services/inventories.service.js';
 import { InventoryRemindersService } from '../../src/modules/inventories/services/inventory-reminders.service.js';
 import { MailOutboxService } from '../../src/shared/mail/mail-outbox.service.js';
 import { MailService } from '../../src/shared/mail/mail.service.js';
 import { openTestSession, scalar, withTemporaryHead } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 interface Who {
   readonly personId: string;
@@ -44,7 +45,7 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
   let responsible: Who;
   let base: { categoryId: string; acquisitionTypeId: string; roomA: string; roomB: string };
   const inventoryIds: string[] = [];
-  const today = bogotaDate(new Date());
+  const today = localeIsoDate(new Date());
   const day = (offset: number) => addDays(today, offset);
 
   const http = () => request(app.getHttpServer());

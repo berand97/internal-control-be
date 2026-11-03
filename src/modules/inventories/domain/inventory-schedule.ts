@@ -28,14 +28,6 @@ export const addDays = (date: string, days: number): string => fromUtcMs(toUtcMs
 
 export const daysBetween = (from: string, to: string): number => Math.round((toUtcMs(to) - toUtcMs(from)) / DAY_MS);
 
-export const bogotaDate = (instant: Date): string =>
-  new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Bogota',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(instant);
-
 export const reminderDueAt = (plannedStartDate: string, offsetDays: number): Date => {
   const day = addDays(plannedStartDate, -offsetDays);
   const hour = String(REMINDER_SEND_HOUR_BOGOTA).padStart(2, '0');

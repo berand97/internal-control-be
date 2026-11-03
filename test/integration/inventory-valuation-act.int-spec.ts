@@ -14,12 +14,13 @@ import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { PDF_CONVERTER } from '../../src/modules/documents/pdf/pdf-converter.js';
 import { DocumentEngineService } from '../../src/modules/documents/services/document-engine.service.js';
 import { formatMoney } from '../../src/modules/inventories/domain/inventory-act.js';
-import { addDays, bogotaDate } from '../../src/modules/inventories/domain/inventory-schedule.js';
+import { addDays } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import type { StorageDriver } from '../../src/config/configuration.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
 import { assignTestHead, createPermissionRole, openTestSession, scalar, useSharedStorage, withTemporaryHead } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 import { conform, type Schema } from './openapi-conform.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
 const ACT_FORMAT = 'OCI-21-37';
 
@@ -85,7 +86,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
   let base: { categoryId: string; acquisitionTypeId: string; roomA: string; roomB: string };
   let templateId = '';
   let sequenceBefore: string | undefined;
-  const today = bogotaDate(new Date());
+  const today = localeIsoDate(new Date());
   const [year = 2026, month = 1] = today.split('-').map(Number);
 
   const http = () => request(app.getHttpServer());
