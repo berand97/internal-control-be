@@ -1,4 +1,4 @@
-export type AuthFactor = 'PASSWORD' | 'MFA';
+export type AuthFactor = 'PASSWORD' | 'MFA' | 'PASSWORD_IP' | 'IP_FAILURES';
 
 export interface LockoutPolicy {
   readonly threshold: number;
@@ -26,6 +26,20 @@ export const LOCKOUT_POLICIES: Readonly<Record<AuthFactor, LockoutPolicy>> = {
     maxLockMs: 4 * HOUR,
     levelResetMs: 24 * HOUR,
   },
+  PASSWORD_IP: {
+    threshold: 5,
+    windowMs: 15 * MINUTE,
+    baseLockMs: 15 * MINUTE,
+    maxLockMs: HOUR,
+    levelResetMs: 24 * HOUR,
+  },
+  IP_FAILURES: {
+    threshold: 50,
+    windowMs: 15 * MINUTE,
+    baseLockMs: 15 * MINUTE,
+    maxLockMs: HOUR,
+    levelResetMs: 24 * HOUR,
+  },
 };
 
 export interface LockoutState {
@@ -41,8 +55,10 @@ export const isLocked = (state: LockoutState | null, now: Date): boolean =>
   state.lockedUntil !== null &&
   state.lockedUntil.getTime() > now.getTime();
 
-export const lockDurationMs = (policy: LockoutPolicy, lockLevel: number): number =>
-  Math.min(policy.baseLockMs * 2 ** lockLevel, policy.maxLockMs);
+export const lockDurationMs = (
+  policy: LockoutPolicy,
+  lockLevel: number,
+): number => Math.min(policy.baseLockMs * 2 ** lockLevel, policy.maxLockMs);
 
 export const countAttempt = (
   state: LockoutState | null,

@@ -58,9 +58,10 @@ import { AuthService } from './services/auth.service.js';
 import { MfaAccountService } from './services/mfa-account.service.js';
 import { RefreshCookieService } from './services/refresh-cookie.service.js';
 
-const AUTH_THROTTLE = { default: { limit: 5, ttl: 900_000 } } as const;
 const MFA_THROTTLE = { default: { limit: 3, ttl: 300_000 } } as const;
-const FORGOT_PASSWORD_THROTTLE = { default: { limit: 3, ttl: 3_600_000 } } as const;
+const FORGOT_PASSWORD_THROTTLE = {
+  default: { limit: 3, ttl: 3_600_000 },
+} as const;
 
 @ApiTags(OpenApiTag.Auth)
 @ApiExtraModels(
@@ -93,7 +94,6 @@ export class AuthController {
   @Post('login')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @Throttle(AUTH_THROTTLE)
   @ApiOperation({
     summary: 'Iniciar sesión',
     description:
@@ -136,9 +136,7 @@ export class AuthController {
     @Ip() ipAddress: string,
     @Headers('user-agent') userAgent: string | undefined,
   ): Promise<
-    | LoginResponseDto
-    | MfaChallengeResponseDto
-    | MfaSetupRequiredResponseDto
+    LoginResponseDto | MfaChallengeResponseDto | MfaSetupRequiredResponseDto
   > {
     const outcome = await this.authService.login(dto, {
       ipAddress,
@@ -297,14 +295,10 @@ export class AuthController {
     @Ip() ipAddress: string,
     @Headers('user-agent') userAgent: string | undefined,
   ): Promise<MfaSetupConfirmedResponseDto> {
-    const outcome = await this.authService.confirmMfaSetup(
-      dto,
-      authorization,
-      {
-        ipAddress,
-        userAgent: userAgent ?? null,
-      },
-    );
+    const outcome = await this.authService.confirmMfaSetup(dto, authorization, {
+      ipAddress,
+      userAgent: userAgent ?? null,
+    });
     this.refreshCookieService.attach(res, outcome.refreshToken);
     return outcome.response;
   }

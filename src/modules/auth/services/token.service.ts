@@ -156,6 +156,29 @@ export class TokenService {
     }
   }
 
+  mfaFlowTokenSubject(authorizationHeader: string | undefined): string | null {
+    if (
+      authorizationHeader === undefined ||
+      !authorizationHeader.startsWith(BEARER_PREFIX)
+    ) {
+      return null;
+    }
+    const jwtConfig = this.config.getOrThrow('jwt', { infer: true });
+    try {
+      const decoded: unknown = jwt.verify(
+        authorizationHeader.slice(BEARER_PREFIX.length),
+        jwtConfig.accessSecret,
+        { issuer: jwtConfig.issuer, audience: jwtConfig.audience },
+      );
+      return isMfaChallengeTokenPayload(decoded) ||
+        isMfaSetupTokenPayload(decoded)
+        ? decoded.sub
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   verifyMfaSetupToken(
     authorizationHeader: string | undefined,
   ): MfaSetupTokenPayload {

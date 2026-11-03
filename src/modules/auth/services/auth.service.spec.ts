@@ -87,6 +87,7 @@ describe('AuthService', () => {
   };
   let lockout: {
     registerAttempt: ReturnType<typeof vi.fn>;
+    lockedUntil: ReturnType<typeof vi.fn>;
     clear: ReturnType<typeof vi.fn>;
   };
   let service: AuthService;
@@ -100,7 +101,10 @@ describe('AuthService', () => {
       findByIdWithPerson: vi.fn(),
       findActiveRoleCodes: vi.fn().mockResolvedValue(['VIEWER']),
       findActiveRoles: vi.fn(async (userId: string) =>
-        (await authUsersRepository.findActiveRoleCodes(userId)).map((code) => ({ code, name: `Rol ${code}` })),
+        (await authUsersRepository.findActiveRoleCodes(userId)).map((code) => ({
+          code,
+          name: `Rol ${code}`,
+        })),
       ),
       findActiveScopes: vi.fn().mockResolvedValue([]),
       markLoggedIn: vi.fn(),
@@ -198,6 +202,7 @@ describe('AuthService', () => {
         lockedNow: false,
         lockedUntil: null,
       }),
+      lockedUntil: vi.fn().mockResolvedValue(null),
       clear: vi.fn().mockResolvedValue(undefined),
     };
     service = new AuthService(
@@ -247,7 +252,8 @@ describe('AuthService', () => {
         )
         .catch((caught: unknown) => caught);
       expect(error).toMatchObject({ code: ErrorCode.AccountTemporarilyLocked });
-      const retryAfter = (error as { retryAfterSeconds: number }).retryAfterSeconds;
+      const retryAfter = (error as { retryAfterSeconds: number })
+        .retryAfterSeconds;
       expect(retryAfter).toBeGreaterThan(55);
       expect(retryAfter).toBeLessThanOrEqual(60);
       expect(hashService.verify).not.toHaveBeenCalled();
@@ -277,10 +283,61 @@ describe('AuthService', () => {
       await expect(
         service.login({ username: 'nadie.existe', password: 'x' }, context),
       ).rejects.toMatchObject({ code: ErrorCode.InvalidCredentials });
-      const [subject, factor] = lockout.registerAttempt.mock.calls[0] as [string, string];
+      const [subject, factor] = lockout.registerAttempt.mock.calls[0] as [
+        string,
+        string,
+      ];
       expect(factor).toBe('PASSWORD');
       expect(subject).toMatch(/^id:[0-9a-f]{64}$/);
       expect(hashService.runDummyVerification).toHaveBeenCalled();
+    });
+
+    it('una contraseña incorrecta suma fallo a la IP con la cuenta y a la IP sola', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser(),
+      );
+      vi.mocked(hashService.verify).mockResolvedValue(false);
+      await expect(
+        service.login({ username: 'juliana.perez', password: 'mala' }, context),
+      ).rejects.toMatchObject({ code: ErrorCode.InvalidCredentials });
+      const factors = lockout.registerAttempt.mock.calls.map(
+        (call) => (call as [string, string])[1],
+      );
+      expect(factors).toEqual(['PASSWORD', 'PASSWORD_IP', 'IP_FAILURES']);
+    });
+
+    it('un login correcto no suma fallos a la IP y borra el de la IP con la cuenta', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser(),
+      );
+      await service.login(
+        { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+        context,
+      );
+      const factors = lockout.registerAttempt.mock.calls.map(
+        (call) => (call as [string, string])[1],
+      );
+      expect(factors).toEqual(['PASSWORD']);
+      expect(lockout.clear).toHaveBeenCalledWith(
+        expect.stringMatching(/^ipa:[0-9a-f]{64}$/),
+        'PASSWORD_IP',
+      );
+    });
+
+    it('con la IP bloqueada responde 429 sin verificar la contraseña ni contar el intento', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
+        buildUser(),
+      );
+      lockout.lockedUntil.mockResolvedValueOnce(null);
+      lockout.lockedUntil.mockResolvedValueOnce(new Date(Date.now() + 60_000));
+      await expect(
+        service.login(
+          { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.AccountTemporarilyLocked });
+      expect(hashService.verify).not.toHaveBeenCalled();
+      expect(lockout.registerAttempt).not.toHaveBeenCalled();
     });
 
     it('un login correcto borra el contador de contraseña', async () => {
@@ -355,7 +412,10 @@ describe('AuthService', () => {
         buildUser(),
       );
       await service.login(
-        { username: 'juliana.perez@unac.edu.co', password: 'C0ntraseña-Segura!' },
+        {
+          username: 'juliana.perez@unac.edu.co',
+          password: 'C0ntraseña-Segura!',
+        },
         context,
       );
       expect(authUsersRepository.findByEmailWithPerson).toHaveBeenCalledWith(
@@ -398,12 +458,15 @@ describe('AuthService', () => {
         UserStatus.Inactive,
         UserStatus.PendingActivation,
       ]) {
-        vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
-          buildUser({ status }),
-        );
+        vi.mocked(
+          authUsersRepository.findByUsernameWithPerson,
+        ).mockResolvedValue(buildUser({ status }));
         hashService.verify.mockResolvedValue(false);
         await expect(
-          service.login({ username: 'juliana.perez', password: 'mala' }, context),
+          service.login(
+            { username: 'juliana.perez', password: 'mala' },
+            context,
+          ),
         ).rejects.toMatchObject({ code: ErrorCode.InvalidCredentials });
       }
     });
@@ -457,15 +520,17 @@ describe('AuthService', () => {
       vi.mocked(authUsersRepository.findActiveRoleCodes).mockResolvedValue([
         'FIRMANTE_CONTROL',
       ]);
-      vi.mocked(authUsersRepository.findEffectivePermissions).mockResolvedValue([
-        {
-          code: 'act:sign_control:global',
-          module: 'ASSET',
-          resourceType: 'act',
-          action: 'sign_control',
-          scopeLevel: 'GLOBAL',
-        },
-      ]);
+      vi.mocked(authUsersRepository.findEffectivePermissions).mockResolvedValue(
+        [
+          {
+            code: 'act:sign_control:global',
+            module: 'ASSET',
+            resourceType: 'act',
+            action: 'sign_control',
+            scopeLevel: 'GLOBAL',
+          },
+        ],
+      );
       const outcome = await service.login(
         { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
         context,
@@ -635,9 +700,9 @@ describe('AuthService', () => {
           context,
         ),
       ).rejects.toMatchObject({ code: ErrorCode.MfaCodeInvalid });
-      expect(JSON.stringify(vi.mocked(auditLogsRepository.record).mock.calls)).not.toContain(
-        'ZZZZ',
-      );
+      expect(
+        JSON.stringify(vi.mocked(auditLogsRepository.record).mock.calls),
+      ).not.toContain('ZZZZ');
     });
   });
 
@@ -722,7 +787,9 @@ describe('AuthService', () => {
   describe('logout', () => {
     it('revoca todas las familias del usuario e invalida la caché de sesión', async () => {
       await service.logout(actor, context);
-      expect(refreshTokenFamiliesRepository.revokeAllForUser).toHaveBeenCalled();
+      expect(
+        refreshTokenFamiliesRepository.revokeAllForUser,
+      ).toHaveBeenCalled();
       expect(sessions.invalidate).toHaveBeenCalledWith('user-1');
     });
   });
@@ -746,11 +813,15 @@ describe('AuthService', () => {
       );
       expect(auditLogsRepository.record).not.toHaveBeenCalled();
       release();
-      await vi.waitFor(() => expect(auditLogsRepository.record).toHaveBeenCalled());
+      await vi.waitFor(() =>
+        expect(auditLogsRepository.record).toHaveBeenCalled(),
+      );
     });
 
     it('con un correo desconocido no crea token ni envía nada', async () => {
-      vi.mocked(authUsersRepository.findByEmailWithPerson).mockResolvedValue(null);
+      vi.mocked(authUsersRepository.findByEmailWithPerson).mockResolvedValue(
+        null,
+      );
       await expect(
         service.forgotPassword({ email: 'nadie@unac.edu.co' }, context),
       ).resolves.toBeNull();
@@ -779,10 +850,12 @@ describe('AuthService', () => {
         'user-1',
         'new-hash',
       );
-      expect(authUsersRepository.activateAfterPasswordReset).toHaveBeenCalledWith(
-        'user-1',
-      );
-      expect(refreshTokenFamiliesRepository.revokeAllForUser).toHaveBeenCalled();
+      expect(
+        authUsersRepository.activateAfterPasswordReset,
+      ).toHaveBeenCalledWith('user-1');
+      expect(
+        refreshTokenFamiliesRepository.revokeAllForUser,
+      ).toHaveBeenCalled();
     });
 
     it('rechaza reutilizar la contraseña temporal', async () => {
@@ -806,7 +879,10 @@ describe('AuthService', () => {
 describe('requiresMfaEnrollment', () => {
   it('SUPER_ADMIN (rol raíz) siempre lo exige, por nombre', () => {
     expect(
-      requiresMfaEnrollment({ roleCodes: ['SUPER_ADMIN'], permissionCodes: [] }),
+      requiresMfaEnrollment({
+        roleCodes: ['SUPER_ADMIN'],
+        permissionCodes: [],
+      }),
     ).toBe(true);
   });
 

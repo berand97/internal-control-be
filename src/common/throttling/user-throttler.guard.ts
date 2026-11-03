@@ -29,18 +29,32 @@ export class UserThrottlerGuard extends ThrottlerGuard {
     this.userLimit = config.getOrThrow('throttleUserLimit', { infer: true });
   }
 
-  protected override async handleRequest(requestProps: ThrottlerRequest): Promise<boolean> {
+  protected override async handleRequest(
+    requestProps: ThrottlerRequest,
+  ): Promise<boolean> {
     const { context, throttler } = requestProps;
-    const strict = this.reflector.getAllAndOverride<unknown>(`${THROTTLER_LIMIT}${throttler.name ?? 'default'}`, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (strict !== undefined) {
-      return super.handleRequest(requestProps);
-    }
+    const strict = this.reflector.getAllAndOverride<unknown>(
+      `${THROTTLER_LIMIT}${throttler.name ?? 'default'}`,
+      [context.getHandler(), context.getClass()],
+    );
     const { req } = this.getRequestResponse(context);
-    const header = (req['headers'] as Record<string, unknown> | undefined)?.['authorization'];
-    const userId = this.tokens.accessTokenSubject(typeof header === 'string' ? header : undefined);
+    const header = (req['headers'] as Record<string, unknown> | undefined)?.[
+      'authorization'
+    ];
+    const authorization = typeof header === 'string' ? header : undefined;
+    if (strict !== undefined) {
+      const strictUserId =
+        this.tokens.accessTokenSubject(authorization) ??
+        this.tokens.mfaFlowTokenSubject(authorization);
+      if (strictUserId === null) {
+        return super.handleRequest(requestProps);
+      }
+      return super.handleRequest({
+        ...requestProps,
+        getTracker: () => Promise.resolve(`user:${strictUserId}`),
+      });
+    }
+    const userId = this.tokens.accessTokenSubject(authorization);
     if (userId === null) {
       return super.handleRequest(requestProps);
     }

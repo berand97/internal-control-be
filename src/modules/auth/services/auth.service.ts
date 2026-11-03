@@ -33,9 +33,15 @@ import type { PasswordResetTokensRepository } from '../repositories/password-res
 import type { RefreshTokenFamiliesRepository } from '../repositories/refresh-token-families.repository.interface.js';
 import type { RefreshTokenPayload } from '../types/token-payloads.type.js';
 import type { AuthFactor } from './auth-lockout.policy.js';
-import { AuthLockoutService, type AttemptOutcome } from './auth-lockout.service.js';
+import {
+  AuthLockoutService,
+  type AttemptOutcome,
+} from './auth-lockout.service.js';
 import { isInvitationExpired } from './invitation-policy.js';
-import { MfaAccountService, type MfaProofMethod } from './mfa-account.service.js';
+import {
+  MfaAccountService,
+  type MfaProofMethod,
+} from './mfa-account.service.js';
 import { MfaService } from './mfa.service.js';
 import { SessionStateService } from './session-state.service.js';
 import { TokenService } from './token.service.js';
@@ -63,9 +69,7 @@ export interface MfaSetupOutcome {
 }
 
 export type LoginOutcome =
-  | AuthenticatedLoginOutcome
-  | MfaChallengeOutcome
-  | MfaSetupOutcome;
+  AuthenticatedLoginOutcome | MfaChallengeOutcome | MfaSetupOutcome;
 
 export interface RefreshOutcome {
   readonly response: RefreshResponseDto;
@@ -104,7 +108,9 @@ export class AuthService implements OnModuleInit {
 
   onModuleInit(): void {
     if (this.skipMfaAtLogin()) {
-      this.logger.warn('AUTH_SKIP_MFA activo: el login no pide el autenticador. Solo para desarrollo.');
+      this.logger.warn(
+        'AUTH_SKIP_MFA activo: el login no pide el autenticador. Solo para desarrollo.',
+      );
     }
   }
 
@@ -121,6 +127,18 @@ export class AuthService implements OnModuleInit {
     const lockSubject = user
       ? AuthLockoutService.subjectForUser(user.id)
       : AuthLockoutService.subjectForUnknownIdentifier(dto.username);
+    const clientIp = context.ipAddress ?? 'unknown';
+    const ipSubject = AuthLockoutService.subjectForIp(clientIp);
+    const ipAccountSubject = AuthLockoutService.subjectForIpAndAccount(
+      clientIp,
+      lockSubject,
+    );
+    await this.assertLoginNotBlockedByIp(
+      ipSubject,
+      ipAccountSubject,
+      user?.id ?? null,
+      context,
+    );
     const attempt = await this.lockout.registerAttempt(lockSubject, 'PASSWORD');
     if (!attempt.allowed) {
       await this.recordAudit(
@@ -136,6 +154,12 @@ export class AuthService implements OnModuleInit {
     if (!user) {
       await this.hashService.runDummyVerification(dto.password);
       await this.auditLockIfOpened(attempt, null, context, 'PASSWORD');
+      await this.registerLoginFailureByIp(
+        ipSubject,
+        ipAccountSubject,
+        null,
+        context,
+      );
       await this.recordAudit(
         AuditAction.LoginFailed,
         NIL_ENTITY_ID,
@@ -165,9 +189,16 @@ export class AuthService implements OnModuleInit {
         },
       );
       await this.auditLockIfOpened(attempt, user.id, context, 'PASSWORD');
+      await this.registerLoginFailureByIp(
+        ipSubject,
+        ipAccountSubject,
+        user.id,
+        context,
+      );
       throw new ApiException(ErrorCode.InvalidCredentials);
     }
     await this.lockout.clear(lockSubject, 'PASSWORD');
+    await this.lockout.clear(ipAccountSubject, 'PASSWORD_IP');
     this.assertAccountUsable(user);
 
     if (this.skipMfaAtLogin()) {
@@ -399,13 +430,14 @@ export class AuthService implements OnModuleInit {
       throw new ApiException(ErrorCode.Unauthorized);
     }
 
-    const [roleDetails, scopes, lastLogins, granted, catalog] = await Promise.all([
-      this.authUsersRepository.findActiveRoles(user.id),
-      this.authUsersRepository.findActiveScopes(user.id),
-      this.auditLogsRepository.findLastLogins(user.id, LAST_LOGINS_LIMIT),
-      this.authUsersRepository.findEffectivePermissions(user.id),
-      this.navigationService.listActiveDefinitions(),
-    ]);
+    const [roleDetails, scopes, lastLogins, granted, catalog] =
+      await Promise.all([
+        this.authUsersRepository.findActiveRoles(user.id),
+        this.authUsersRepository.findActiveScopes(user.id),
+        this.auditLogsRepository.findLastLogins(user.id, LAST_LOGINS_LIMIT),
+        this.authUsersRepository.findEffectivePermissions(user.id),
+        this.navigationService.listActiveDefinitions(),
+      ]);
 
     const roles = roleDetails.map((role) => role.code);
     const mfa = await this.mfaAccount.status(user, dbUser, {
@@ -752,6 +784,47 @@ export class AuthService implements OnModuleInit {
       throw AccountLockedException.until(attempt.lockedUntil);
     }
     return attempt;
+  }
+
+  private async assertLoginNotBlockedByIp(
+    ipSubject: string,
+    ipAccountSubject: string,
+    userId: string | null,
+    context: AuthRequestContext,
+  ): Promise<void> {
+    const blocks: ReadonlyArray<readonly [string, AuthFactor]> = [
+      [ipAccountSubject, 'PASSWORD_IP'],
+      [ipSubject, 'IP_FAILURES'],
+    ];
+    for (const [subject, factor] of blocks) {
+      const lockedUntil = await this.lockout.lockedUntil(subject, factor);
+      if (lockedUntil !== null) {
+        await this.recordAudit(
+          AuditAction.LoginFailed,
+          userId ?? NIL_ENTITY_ID,
+          userId,
+          context,
+          { reason: 'ACCOUNT_LOCKED', factor },
+        );
+        throw AccountLockedException.until(lockedUntil);
+      }
+    }
+  }
+
+  private async registerLoginFailureByIp(
+    ipSubject: string,
+    ipAccountSubject: string,
+    userId: string | null,
+    context: AuthRequestContext,
+  ): Promise<void> {
+    const failures: ReadonlyArray<readonly [string, AuthFactor]> = [
+      [ipAccountSubject, 'PASSWORD_IP'],
+      [ipSubject, 'IP_FAILURES'],
+    ];
+    for (const [subject, factor] of failures) {
+      const outcome = await this.lockout.registerAttempt(subject, factor);
+      await this.auditLockIfOpened(outcome, userId, context, factor);
+    }
   }
 
   private async auditLockIfOpened(

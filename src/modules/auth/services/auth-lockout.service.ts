@@ -40,6 +40,37 @@ export class AuthLockoutService {
     return `id:${digest}`;
   }
 
+  static subjectForIp(ipAddress: string): string {
+    return `ip:${ipAddress}`;
+  }
+
+  static subjectForIpAndAccount(
+    ipAddress: string,
+    accountSubject: string,
+  ): string {
+    const digest = createHash('sha256')
+      .update(`auth-lockout-ip-account:${ipAddress}:${accountSubject}`)
+      .digest('hex');
+    return `ipa:${digest}`;
+  }
+
+  async lockedUntil(
+    subject: string,
+    factor: AuthFactor,
+    now: Date = new Date(),
+  ): Promise<Date | null> {
+    const rows = (await this.dataSource.query(
+      'SELECT locked_until FROM auth_attempt_lockout WHERE subject = $1 AND factor = $2',
+      [subject, factor],
+    )) as Array<{ readonly locked_until: Date | null }>;
+    const lockedUntil = rows[0]?.locked_until
+      ? new Date(rows[0].locked_until)
+      : null;
+    return lockedUntil !== null && lockedUntil.getTime() > now.getTime()
+      ? lockedUntil
+      : null;
+  }
+
   async registerAttempt(
     subject: string,
     factor: AuthFactor,
