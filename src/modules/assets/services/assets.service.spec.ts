@@ -1,6 +1,7 @@
 import type { DataSource } from 'typeorm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode } from '../../../common/constants/error-code.enum.js';
+import { ApiException } from '../../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
 import type { CategoriesRepository } from '../../categories/repositories/categories.repository.interface.js';
@@ -14,10 +15,12 @@ import { DynamicFieldsService } from '../../dynamic-fields/services/dynamic-fiel
 import type { LocationsRepository } from '../../locations/repositories/locations.repository.interface.js';
 import { AcquisitionType } from '../entities/acquisition-type.entity.js';
 import { Asset } from '../entities/asset.entity.js';
+import { ImportMode } from '../enums/import-mode.enum.js';
 import { OperationalStatus } from '../enums/operational-status.enum.js';
 import { PhysicalCondition } from '../enums/physical-condition.enum.js';
 import type { AssetsRepository } from '../repositories/assets.repository.interface.js';
 import type { MovementsService } from '../../movements/services/movements.service.js';
+import type { AssetPhotosService } from './asset-photos.service.js';
 import { AssetStateService } from './asset-state.service.js';
 import { AssetsService } from './assets.service.js';
 
@@ -124,6 +127,7 @@ describe('AssetsService', () => {
   let manager: { getRepository: () => { findOne: ReturnType<typeof vi.fn> } };
   let service: AssetsService;
   let headlessCenters: ReturnType<typeof vi.fn>;
+  let photos: Pick<AssetPhotosService, 'attachOnCreate' | 'discardFinalizedStaged'>;
 
   beforeEach(() => {
     assetsRepository = {
@@ -219,6 +223,10 @@ describe('AssetsService', () => {
       findLastLogins: vi.fn(),
     };
     movementsService = { record: vi.fn().mockResolvedValue({}) };
+    photos = {
+      attachOnCreate: vi.fn().mockResolvedValue(undefined),
+      discardFinalizedStaged: vi.fn().mockResolvedValue(undefined),
+    };
     manager = {
       getRepository: () => ({ findOne: vi.fn().mockResolvedValue(asset()) }),
     };
@@ -243,7 +251,81 @@ describe('AssetsService', () => {
         movementsService as MovementsService,
         auditLogsRepository,
       ),
+      photos as AssetPhotosService,
     );
+  });
+
+  const newAsset = {
+    description: 'Portátil Dell',
+    categoryId: 'cat-1',
+    costCenterId: 'cc-1',
+    acquisitionTypeId: 'acq-1',
+    acquisitionDate: '2026-03-15',
+    serialNumber: 'SN-1',
+    customValues: { ramGB: 16 },
+  };
+  const token = '6f1c2b8e-3d4a-4f5b-9c6d-7e8f9a0b1c2d';
+  const fileId = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
+  it('con foto pendiente la termina dentro de la misma transacción y luego borra el temporal', async () => {
+    vi.mocked(assetsRepository.insert).mockResolvedValue(asset());
+    await service.create({ ...newAsset, stagedPhotoToken: token }, actor);
+    expect(photos.attachOnCreate).toHaveBeenCalledWith(
+      manager,
+      'asset-1',
+      expect.objectContaining({ stagedPhotoToken: token }),
+      actor,
+    );
+    expect(photos.discardFinalizedStaged).toHaveBeenCalledWith(token);
+  });
+
+  it('con una foto de la galería la vincula y no toca temporales', async () => {
+    vi.mocked(assetsRepository.insert).mockResolvedValue(asset());
+    await service.create({ ...newAsset, photoFileId: fileId }, actor);
+    expect(photos.attachOnCreate).toHaveBeenCalledWith(
+      manager,
+      'asset-1',
+      expect.objectContaining({ photoFileId: fileId }),
+      actor,
+    );
+    expect(photos.discardFinalizedStaged).not.toHaveBeenCalled();
+  });
+
+  it('si el token de la foto no sirve, el alta falla con ese error', async () => {
+    vi.mocked(assetsRepository.insert).mockResolvedValue(asset());
+    vi.mocked(photos.attachOnCreate).mockRejectedValue(new ApiException(ErrorCode.AssetPhotoTokenInvalid));
+    await expect(service.create({ ...newAsset, stagedPhotoToken: token }, actor)).rejects.toMatchObject({
+      code: ErrorCode.AssetPhotoTokenInvalid,
+    });
+    expect(photos.discardFinalizedStaged).not.toHaveBeenCalled();
+  });
+
+  it('la categoría que exige foto acepta foto pendiente o de la galería', async () => {
+    const withPhoto = category();
+    withPhoto.requiresPhoto = true;
+    vi.mocked(categoriesRepository.findById).mockResolvedValue(withPhoto);
+    vi.mocked(assetsRepository.insert).mockResolvedValue(asset());
+    await expect(service.create(newAsset, actor)).rejects.toMatchObject({ code: ErrorCode.AssetPhotoRequired });
+    await service.create({ ...newAsset, stagedPhotoToken: token }, actor);
+    await service.create({ ...newAsset, photoFileId: fileId }, actor);
+    expect(photos.attachOnCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it('no acepta dos fotos a la vez', async () => {
+    await expect(
+      service.create({ ...newAsset, stagedPhotoToken: token, photoFileId: fileId }, actor),
+    ).rejects.toMatchObject({ code: ErrorCode.ValidationFailed, message: 'Elija una sola foto para el activo.' });
+    await expect(
+      service.create({ ...newAsset, photoUrl: 'https://fotos/1.jpg', photoFileId: fileId }, actor),
+    ).rejects.toMatchObject({ code: ErrorCode.ValidationFailed });
+    expect(assetsRepository.insert).not.toHaveBeenCalled();
+  });
+
+  it('el alta masiva no acepta fotos pendientes ni de la galería', async () => {
+    await expect(
+      service.bulkCreate([{ ...newAsset, stagedPhotoToken: token }], ImportMode.AllOrNothing, actor),
+    ).rejects.toMatchObject({ code: ErrorCode.ValidationFailed });
+    expect(photos.attachOnCreate).not.toHaveBeenCalled();
   });
 
   it('crea un activo con campos dinámicos requeridos', async () => {

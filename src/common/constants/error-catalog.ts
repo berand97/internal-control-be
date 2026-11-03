@@ -493,6 +493,16 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'RETRY',
     message: 'No pudimos guardar la foto. Intente de nuevo.',
   },
+  [ErrorCode.AssetPhotoTokenInvalid]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'La foto que subió ya no sirve. Súbala de nuevo.',
+  },
+  [ErrorCode.AssetPhotoFileNotFound]: {
+    httpStatus: 404,
+    action: 'CANCEL',
+    message: 'No encontramos esa foto en la galería.',
+  },
   [ErrorCode.StorageUnavailable]: {
     httpStatus: 424,
     action: 'RETRY',

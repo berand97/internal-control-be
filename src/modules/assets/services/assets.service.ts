@@ -56,6 +56,7 @@ import {
   type AssetMovementSpec,
   AssetStateService,
 } from './asset-state.service.js';
+import { AssetPhotosService } from './asset-photos.service.js';
 import { MovementsService } from '../../movements/services/movements.service.js';
 
 const ENTITY_TYPE = 'ASSET';
@@ -89,6 +90,7 @@ export class AssetsService {
     private readonly movementsService: MovementsService,
     private readonly dataSource: DataSource,
     private readonly assetState: AssetStateService,
+    private readonly photos: AssetPhotosService,
   ) {}
 
   async listAcquisitionTypes(): Promise<
@@ -163,20 +165,29 @@ export class AssetsService {
     dto: CreateAssetDto,
     actor: AuthenticatedUser,
   ): Promise<AssetResponseDto> {
-    const asset = await this.persistNew(dto, actor, (created, manager) =>
-      this.auditLogsRepository.record(
-        {
-          action: AuditAction.AssetCreated,
-          entityType: ENTITY_TYPE,
-          entityId: created.id,
-          performedBy: actor.id,
-          ipAddress: null,
-          userAgent: null,
-          changes: { internalCode: created.internalCode },
-        },
-        manager,
-      ),
+    const asset = await this.persistNew(
+      dto,
+      actor,
+      async (created, manager) => {
+        await this.auditLogsRepository.record(
+          {
+            action: AuditAction.AssetCreated,
+            entityType: ENTITY_TYPE,
+            entityId: created.id,
+            performedBy: actor.id,
+            ipAddress: null,
+            userAgent: null,
+            changes: { internalCode: created.internalCode },
+          },
+          manager,
+        );
+        await this.photos.attachOnCreate(manager, created.id, dto, actor);
+      },
+      true,
     );
+    if (dto.stagedPhotoToken) {
+      await this.photos.discardFinalizedStaged(dto.stagedPhotoToken);
+    }
     return this.toDetail(asset);
   }
 
@@ -591,8 +602,9 @@ export class AssetsService {
     dto: CreateAssetDto,
     actor: AuthenticatedUser,
     afterInsert?: (asset: Asset, manager: EntityManager) => Promise<void>,
+    acceptsPhotoRefs = false,
   ): Promise<Asset> {
-    const prepared = await this.prepareNew(dto);
+    const prepared = await this.prepareNew(dto, acceptsPhotoRefs);
     try {
       return await this.dataSource.transaction((manager) =>
         this.insertNew(manager, dto, actor, prepared, REGISTRATION_DEFAULTS, afterInsert),
@@ -629,7 +641,7 @@ export class AssetsService {
     }
   }
 
-  private async prepareNew(dto: CreateAssetDto) {
+  private async prepareNew(dto: CreateAssetDto, acceptsPhotoRefs = false) {
     const category = await this.requireCategory(dto.categoryId);
     await this.requireCostCenter(dto.costCenterId);
     await assertCostCenterHasHead(this.dataSource, dto.costCenterId);
@@ -645,7 +657,8 @@ export class AssetsService {
     if (category.requiresSerialNumber && !dto.serialNumber) {
       throw new ApiException(ErrorCode.AssetSerialRequired);
     }
-    if (category.requiresPhoto && !dto.photoUrl) {
+    assertPhotoChoice(dto, acceptsPhotoRefs);
+    if (category.requiresPhoto && !dto.photoUrl && !dto.stagedPhotoToken && !dto.photoFileId) {
       throw new ApiException(ErrorCode.AssetPhotoRequired);
     }
     const fields = await this.dynamicFieldsService.effectiveFields(
@@ -991,6 +1004,20 @@ const assertMutable = (asset: Asset): void => {
   assertNotWrittenOff(asset);
   if (asset.operationalStatus === OperationalStatus.OnLoan) {
     throw new ApiException(ErrorCode.AssetCannotBeModified);
+  }
+};
+
+const assertPhotoChoice = (dto: CreateAssetDto, acceptsPhotoRefs: boolean): void => {
+  const refs = [dto.stagedPhotoToken, dto.photoFileId].filter(Boolean);
+  if (refs.length > 0 && !acceptsPhotoRefs) {
+    throw new ApiException(ErrorCode.ValidationFailed, 'Agregue la foto a cada activo después de crearlo.', [
+      { field: dto.stagedPhotoToken ? 'stagedPhotoToken' : 'photoFileId', message: 'Solo se acepta al registrar un activo' },
+    ]);
+  }
+  if (refs.length + (dto.photoUrl ? 1 : 0) > 1) {
+    throw new ApiException(ErrorCode.ValidationFailed, 'Elija una sola foto para el activo.', [
+      { field: dto.stagedPhotoToken ? 'stagedPhotoToken' : 'photoFileId', message: 'Envíe solo una foto' },
+    ]);
   }
 };
 

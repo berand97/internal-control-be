@@ -3,7 +3,17 @@ import { Transform } from 'class-transformer';
 import { Equals, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { CreateAssetDto } from './create-asset.dto.js';
 
-export class UpdateAssetDto extends PartialType(OmitType(CreateAssetDto, ['responsibleId'] as const)) {
+export class UpdateAssetDto extends PartialType(
+  OmitType(CreateAssetDto, ['photoUrl', 'stagedPhotoToken', 'photoFileId', 'responsibleId'] as const),
+) {
+  @ApiPropertyOptional({
+    deprecated: true,
+    description: 'Obsoleto. Para cambiar fotos use /assets/{id}/photos. Se acepta por ahora',
+  })
+  @IsOptional()
+  @IsString()
+  readonly photoUrl?: string;
+
   @ApiHideProperty()
   @Equals(undefined, { message: 'El responsable se cambia con un acta de entrega.' })
   readonly responsibleId?: never;

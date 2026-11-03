@@ -95,10 +95,33 @@ export class CreateAssetDto {
   @IsString()
   readonly notes?: string;
 
-  @ApiPropertyOptional({ description: 'URL de la foto principal' })
+  @ApiPropertyOptional({
+    deprecated: true,
+    description: 'Obsoleto. Use stagedPhotoToken o photoFileId. Se acepta por ahora y la importación CSV lo sigue usando',
+  })
   @IsOptional()
   @IsString()
   readonly photoUrl?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Token de POST /asset-photos/staged. La foto queda como principal en assets/<año>/<centro>/<activo>_<fecha>_<n>.<ext>. ' +
+      'Vencido, ya usado o de otro usuario: 400 ASSET_PHOTO_TOKEN_INVALID. No se combina con photoFileId ni photoUrl',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  readonly stagedPhotoToken?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Foto de la galería (GET /asset-photos) que queda como principal. Debe estar en el alcance de lectura del usuario: ' +
+      'si no, 404 ASSET_PHOTO_FILE_NOT_FOUND. No se combina con stagedPhotoToken ni photoUrl',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  readonly photoFileId?: string;
 
   @ApiPropertyOptional({
     example: { ramGB: 16, procesador: 'Intel i7', sistemaOperativo: 'Windows' },
