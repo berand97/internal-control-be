@@ -151,7 +151,7 @@ export class InventoryNoticesService {
     if (inventory.scopeType !== InventoryScopeType.CostCenter) {
       warnings.push({
         code: 'NO_HEAD_FOR_SCOPE',
-        message: `La toma es de ${scope.label} y no hay un jefe de centro de costo a quien avisar. Solo el responsable recibe la notificación.`,
+        message: `La toma es de ${scope.label} y no hay un jefe de centro de costo a quien avisar. Solo el auditor responsable recibe la notificación.`,
       });
     } else if (emailPersonIds.length === 0) {
       warnings.push({

@@ -14,6 +14,9 @@ import { USER_DISPLAY_NAME_SQL } from './inventory-summary.js';
 
 const EXECUTE_PERMISSION = 'inventory:execute:global';
 
+/** Roles de Control Interno: el auditor responsable debe pertenecer a esta oficina, no al área auditada. */
+const CONTROL_INTERNO_ROLES = ['INTERNAL_CONTROL_DIRECTOR', 'AUDITOR'] as const;
+
 const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
 
 @Injectable()
@@ -26,10 +29,19 @@ export class InventoryResponsibleCandidatesService {
         { field: 'scopeId', message: 'Elija el alcance de la toma.' },
       ]);
     }
-    const params: unknown[] = [EXECUTE_PERMISSION];
+    const params: unknown[] = [EXECUTE_PERMISSION, [...CONTROL_INTERNO_ROLES]];
     const where = [
       `u.status = 'ACTIVE'`,
       `EXISTS (SELECT 1 FROM v_user_effective_permissions v WHERE v.user_id = u.id AND v.permission_code = $1)`,
+      `EXISTS (
+         SELECT 1 FROM user_role ur
+         JOIN role r ON r.id = ur.role_id
+         WHERE ur.user_id = u.id
+           AND ur.revoked_at IS NULL
+           AND ur.valid_from <= NOW()
+           AND (ur.valid_until IS NULL OR ur.valid_until > NOW())
+           AND r.code = ANY($2::text[])
+       )`,
     ];
     const q = query.q?.trim();
     if (q) {

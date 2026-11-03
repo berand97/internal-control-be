@@ -591,7 +591,7 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     expect(item?.responsible).toEqual(expected);
   });
 
-  it('candidatos a responsable: activos con inventory:execute:global; con alcance, sin jefes ni custodios auditados', async () => {
+  it('candidatos a responsable: solo Control Interno con inventory:execute:global; con alcance, sin auditados', async () => {
     const tag = randomUUID().slice(0, 6);
     const withRole = async (label: string, role: string | null) => {
       const who = await person(`Cand${tag}${label}`, true);
@@ -603,14 +603,16 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
       }
       return who;
     };
-    const free = await withRole('A', 'DEPARTMENT_HEAD');
+    const free = await withRole('A', 'INTERNAL_CONTROL_DIRECTOR');
     const headOf = await withRole('B', 'DEPARTMENT_HEAD');
     const keeper = await withRole('C', 'DEPARTMENT_HEAD');
     await withRole('D', 'VIEWER');
-    const inactive = await withRole('E', 'DEPARTMENT_HEAD');
+    const inactive = await withRole('E', 'INTERNAL_CONTROL_DIRECTOR');
+    const ciButHead = await withRole('F', 'INTERNAL_CONTROL_DIRECTOR');
     await dataSource.query(`UPDATE app_user SET status = 'INACTIVE' WHERE id = $1`, [inactive.userId]);
     const centerId = await center('Centro candidatos');
     await head(headOf.personId, centerId);
+    await head(ciButHead.personId, centerId);
     const asset = await newAsset(centerId, base.roomA);
     await dataSource.query('UPDATE asset SET current_responsible_id = $1 WHERE id = $2', [keeper.personId, asset.id]);
 
@@ -621,17 +623,53 @@ describe('Programación de tomas físicas: avisos, recordatorios, calendario y c
     const all = await candidates({});
     expect(all.status).toBe(200);
     expectConforms('get', '/api/v1/inventories/responsible-candidates', 200, all.body);
-    expect(ids(all.body)).toEqual([free.userId, headOf.userId, keeper.userId]);
+    expect(ids(all.body)).toEqual([free.userId, ciButHead.userId]);
     expect(all.body.data.items[0]).toEqual({ id: free.userId, name: `Cand${tag}A Programación`, username: expect.stringMatching(/^prog\./) });
+    expect(ids(all.body)).not.toContain(headOf.userId);
+    expect(ids(all.body)).not.toContain(keeper.userId);
 
     const scoped = await candidates({ scope: 'COST_CENTER', scopeId: centerId });
     expect(ids(scoped.body)).toEqual([free.userId]);
     const paged = await candidates({ pageSize: 1, page: 2 });
-    expect(ids(paged.body)).toEqual([headOf.userId]);
-    expect(paged.body.data.pagination).toMatchObject({ page: 2, pageSize: 1, totalItems: 3, totalPages: 3 });
+    expect(ids(paged.body)).toEqual([ciButHead.userId]);
+    expect(paged.body.data.pagination).toMatchObject({ page: 2, pageSize: 1, totalItems: 2, totalPages: 2 });
 
     expect((await candidates({ scope: 'COST_CENTER' })).status).toBe(400);
-    expect((await candidates({}, free.token ?? '')).status).toBe(403);
+    expect((await candidates({}, headOf.token ?? '')).status).toBe(403);
+  });
+
+  it('jefes del alcance: centro con jefe, sin jefe y alcance incompleto', async () => {
+    const tag = randomUUID().slice(0, 6);
+    const jefe = await person(`Head${tag}`, true);
+    const centerWith = await center(`Centro con jefe ${tag}`);
+    const centerWithout = await center(`Centro sin jefe ${tag}`);
+    await head(jefe.personId, centerWith);
+
+    const heads = (query: Record<string, unknown>, token = director.token ?? '') =>
+      http()
+        .get('/api/v1/inventories/scope-heads')
+        .query(query)
+        .set({ Authorization: `Bearer ${token}` });
+
+    const withHead = await heads({ scope: 'COST_CENTER', scopeId: centerWith });
+    expect(withHead.status).toBe(200);
+    expectConforms('get', '/api/v1/inventories/scope-heads', 200, withHead.body);
+    expect(withHead.body.data.items).toEqual([
+      { personId: jefe.personId, name: `Head${tag} Programación` },
+    ]);
+
+    const without = await heads({ scope: 'COST_CENTER', scopeId: centerWithout });
+    expect(without.status).toBe(200);
+    expect(without.body.data.items).toEqual([]);
+
+    const global = await heads({ scope: 'GLOBAL' });
+    expect(global.status).toBe(200);
+    expect(global.body.data.items).toEqual([]);
+
+    expect((await heads({ scope: 'COST_CENTER' })).status).toBe(400);
+    expect((await heads({ scope: 'COST_CENTER', scopeId: centerWith }, jefe.token ?? '')).status).toBe(
+      403,
+    );
   });
 
   it('calendario y cobertura resuelven la unidad del centro a la fecha: inicio de cada toma, hoy y cierre de la última', async () => {

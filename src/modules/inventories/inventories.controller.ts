@@ -61,6 +61,10 @@ import {
   QueryInventoryResponsibleCandidatesDto,
 } from './dto/inventory-responsible-candidates.dto.js';
 import {
+  InventoryScopeHeadsResponseDto,
+  QueryInventoryScopeHeadsDto,
+} from './dto/inventory-scope-heads.dto.js';
+import {
   InventoryAccountingCutResponseDto,
   InventoryActDto,
   InventoryActStateDto,
@@ -84,6 +88,7 @@ import { InventorySurplusService } from './services/inventory-surplus.service.js
 import { InventoryCorrectionsService } from './services/inventory-corrections.service.js';
 import { InventoryPlanningService } from './services/inventory-planning.service.js';
 import { InventoryResponsibleCandidatesService } from './services/inventory-responsible-candidates.service.js';
+import { InventoryScopeHeadsService } from './services/inventory-scope-heads.service.js';
 import { InventorySchedulesService } from './services/inventory-schedules.service.js';
 import { InventoryReadAccess } from './services/inventory-read-access.service.js';
 import { InventorySignerHeadService } from './services/inventory-signer-head.service.js';
@@ -93,7 +98,7 @@ const READ_ACCESS_RULE =
   'con todos los centros de la toma (de un solo centro de costo) en su alcance. Si no, 404 RESOURCE_NOT_FOUND, igual que una toma inexistente.';
 
 const ACTOR_RULE =
-  'Solo el responsable de la toma o quien tenga inventory:create:global (403 INVENTORY_ACTOR_NOT_ALLOWED), y nunca un ' +
+  'Solo el auditor responsable o quien tenga inventory:create:global (403 INVENTORY_ACTOR_NOT_ALLOWED), y nunca un ' +
   'jefe vigente de un centro auditado ni el custodio de activos del alcance (403 INVENTORY_CONFLICT_OF_INTEREST).';
 
 @ApiTags(OpenApiTag.Inventories)
@@ -104,6 +109,7 @@ const ACTOR_RULE =
   InventoryScheduleResponseDto,
   InventoryCancelResponseDto,
   InventoryResponsibleCandidatesPageDto,
+  InventoryScopeHeadsResponseDto,
   InventoryCalendarResponseDto,
   InventoryCoverageResponseDto,
   InventorySummaryDto,
@@ -134,6 +140,7 @@ export class InventoriesController {
     private readonly surplus: InventorySurplusService,
     private readonly act: InventoryActService,
     private readonly responsibleCandidates: InventoryResponsibleCandidatesService,
+    private readonly scopeHeads: InventoryScopeHeadsService,
     private readonly readAccess: InventoryReadAccess,
     private readonly signerHead: InventorySignerHeadService,
   ) {}
@@ -162,16 +169,30 @@ export class InventoriesController {
   @Get('responsible-candidates')
   @RequirePermission('inventory:create:global')
   @ApiOperation({
-    summary: 'Candidatos a responsable de una toma',
+    summary: 'Candidatos a auditor responsable de una toma',
     description:
-      'Usuarios activos con inventory:execute:global (sin él no podrían operar la toma), paginados y filtrables por ' +
-      'nombre o usuario (q). Con scope/scopeId excluye a quien sería auditado por la toma: jefe vigente de un centro ' +
-      'auditado o custodio de un activo del alcance (misma regla que InventoryActorPolicy, sobre el alcance de hoy). ' +
-      'Requiere inventory:create:global, no user:read:global.',
+      'Usuarios activos de Control Interno (INTERNAL_CONTROL_DIRECTOR o AUDITOR) con inventory:execute:global, ' +
+      'paginados y filtrables por nombre o usuario (q). El auditor responsable opera la toma y pide la ' +
+      'reconciliación. Con scope/scopeId también excluye a quien sería auditado (jefe vigente del centro o ' +
+      'custodio de un activo del alcance). Requiere inventory:create:global, no user:read:global.',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryResponsibleCandidatesPageDto) })
   listResponsibleCandidates(@Query() query: QueryInventoryResponsibleCandidatesDto) {
     return this.responsibleCandidates.list(query);
+  }
+
+  @Get('scope-heads')
+  @RequirePermission('inventory:create:global')
+  @ApiOperation({
+    summary: 'Jefes del área auditada según el alcance',
+    description:
+      'Jefes vigentes (cost_center_head) del centro elegido, o de los centros con activos del alcance ' +
+      '(ORG_UNIT / LOCATION). GLOBAL no tiene un solo jefe: lista vacía. Solo lectura para quien programa. ' +
+      'Requiere inventory:create:global.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryScopeHeadsResponseDto) })
+  listScopeHeads(@Query() query: QueryInventoryScopeHeadsDto) {
+    return this.scopeHeads.list(query);
   }
 
   @Get('coverage')

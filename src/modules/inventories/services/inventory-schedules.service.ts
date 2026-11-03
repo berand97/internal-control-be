@@ -58,8 +58,13 @@ export class InventorySchedulesService {
     const start = day(dto.plannedStartDate);
     const end = day(dto.plannedEndDate);
     this.assertRange(start, end);
-    const offsets = [...(dto.reminderOffsetsDays ?? DEFAULT_REMINDER_OFFSETS_DAYS)].sort((left, right) => right - left);
     const now = new Date();
+    if (start < localeIsoDate(now)) {
+      throw new ApiException(ErrorCode.ValidationFailed, 'La fecha de inicio no puede ser anterior a hoy.', [
+        { field: 'plannedStartDate', message: 'Debe ser hoy o una fecha futura.' },
+      ]);
+    }
+    const offsets = [...(dto.reminderOffsetsDays ?? DEFAULT_REMINDER_OFFSETS_DAYS)].sort((left, right) => right - left);
     return this.dataSource.transaction(async (manager) => {
       await this.requireActiveUser(manager, dto.responsibleUserId);
       const code = await this.inventories.nextCode(manager);

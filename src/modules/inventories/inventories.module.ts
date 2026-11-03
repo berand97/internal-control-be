@@ -38,6 +38,7 @@ import { InventoryNoticesService } from './services/inventory-notices.service.js
 import { InventoryPlanningService } from './services/inventory-planning.service.js';
 import { InventoryRemindersService } from './services/inventory-reminders.service.js';
 import { InventoryResponsibleCandidatesService } from './services/inventory-responsible-candidates.service.js';
+import { InventoryScopeHeadsService } from './services/inventory-scope-heads.service.js';
 import { InventorySchedulesService } from './services/inventory-schedules.service.js';
 
 @Module({
@@ -76,6 +77,7 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
     InventoryRemindersService,
     InventorySchedulesService,
     InventoryResponsibleCandidatesService,
+    InventoryScopeHeadsService,
     InventoryPlanningService,
     InventoryRemindersJob,
     InventoryValuationService,
