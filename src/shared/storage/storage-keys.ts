@@ -123,3 +123,51 @@ export const emailImageKey = (id: string, extension: 'png' | 'jpg'): string =>
   finish(`${EMAIL_IMAGE_KEY_PREFIX}${checked(id, UUID)}.${extension}`);
 
 export const isPublicKey = (key: string): boolean => key.startsWith(PUBLIC_KEY_PREFIX);
+
+export const ASSET_PHOTO_KEY_PREFIX = 'assets/';
+export const ASSET_PHOTO_THUMB_PREFIX = 'assets/miniaturas/';
+export const ASSET_PHOTO_STAGED_PREFIX = 'assets/_pendientes/';
+
+export type AssetPhotoExtension = 'jpg' | 'png' | 'webp';
+
+export interface AssetPhotoKeyInput {
+  readonly uploadedAt: Date;
+  readonly costCenterCode: string;
+  readonly assetCode: string;
+  readonly seq: number;
+  readonly ext: AssetPhotoExtension;
+}
+
+export const storageDate = (instant: Date): string => {
+  if (!(instant instanceof Date) || Number.isNaN(instant.getTime())) {
+    throw invalid();
+  }
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instant);
+  return checked(date, ISO_DATE);
+};
+
+const assetPhotoPath = (input: Omit<AssetPhotoKeyInput, 'ext'>): string => {
+  if (!Number.isSafeInteger(input.seq) || input.seq < 1) {
+    throw invalid();
+  }
+  return `${storageYear(input.uploadedAt)}/${safeKeySegment(input.costCenterCode)}/${safeKeySegment(input.assetCode)}_${storageDate(input.uploadedAt)}_${input.seq}`;
+};
+
+const PHOTO_EXTENSIONS: ReadonlyArray<AssetPhotoExtension> = ['jpg', 'png', 'webp'];
+
+export const assetPhotoKey = (input: AssetPhotoKeyInput): string => {
+  if (!PHOTO_EXTENSIONS.includes(input.ext)) {
+    throw invalid();
+  }
+  return finish(`${ASSET_PHOTO_KEY_PREFIX}${assetPhotoPath(input)}.${input.ext}`);
+};
+
+export const assetPhotoThumbKey = (input: Omit<AssetPhotoKeyInput, 'ext'>): string =>
+  finish(`${ASSET_PHOTO_THUMB_PREFIX}${assetPhotoPath(input)}.webp`);
+
+export const assetPhotoStagedKey = (id: string): string => finish(`${ASSET_PHOTO_STAGED_PREFIX}${checked(id, UUID)}`);

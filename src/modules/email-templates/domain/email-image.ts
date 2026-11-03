@@ -1,4 +1,9 @@
-import sharp, { type Metadata } from 'sharp';
+import {
+  detectImageType,
+  ImageRejectedError,
+  type ImageRejection,
+  processImage,
+} from '../../../shared/images/image-processing.js';
 import type { EmailAssetMime } from '../entities/email-asset.entity.js';
 
 export const EMAIL_IMAGE_LIMITS = {
@@ -8,17 +13,9 @@ export const EMAIL_IMAGE_LIMITS = {
   maxStoredHeight: 2000,
 } as const;
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff]);
-
 export const detectImageMime = (bytes: Buffer): EmailAssetMime | null => {
-  if (bytes.length >= PNG_SIGNATURE.length && bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
-    return 'image/png';
-  }
-  if (bytes.length >= JPEG_SIGNATURE.length && bytes.subarray(0, JPEG_SIGNATURE.length).equals(JPEG_SIGNATURE)) {
-    return 'image/jpeg';
-  }
-  return null;
+  const mime = detectImageType(bytes);
+  return mime === 'image/png' || mime === 'image/jpeg' ? mime : null;
 };
 
 export type EmailImageRejection = 'NOT_PNG_OR_JPEG' | 'UNREADABLE' | 'TOO_MANY_PIXELS';
@@ -36,51 +33,32 @@ export interface ProcessedEmailImage {
   readonly height: number;
 }
 
-const SHARP_FORMAT: Record<EmailAssetMime, string> = { 'image/png': 'png', 'image/jpeg': 'jpeg' };
+const EMAIL_REJECTION: Readonly<Record<ImageRejection, EmailImageRejection>> = {
+  UNSUPPORTED_TYPE: 'NOT_PNG_OR_JPEG',
+  UNREADABLE: 'UNREADABLE',
+  TOO_MANY_PIXELS: 'TOO_MANY_PIXELS',
+};
 
-const sharpInput = (bytes: Buffer) =>
-  sharp(bytes, { failOn: 'error', animated: false, limitInputPixels: EMAIL_IMAGE_LIMITS.maxInputPixels });
-
-const isPixelLimitError = (error: unknown): boolean => error instanceof Error && /pixel limit/i.test(error.message);
-
-const rejectionFor = (error: unknown): EmailImageRejectedError =>
-  new EmailImageRejectedError(isPixelLimitError(error) ? 'TOO_MANY_PIXELS' : 'UNREADABLE');
+const EMAIL_MIMES: ReadonlyArray<EmailAssetMime> = ['image/png', 'image/jpeg'];
 
 export const processEmailImage = async (bytes: Buffer): Promise<ProcessedEmailImage> => {
-  const mime = detectImageMime(bytes);
-  if (mime === null) {
-    throw new EmailImageRejectedError('NOT_PNG_OR_JPEG');
-  }
-  let metadata: Metadata;
   try {
-    metadata = await sharpInput(bytes).metadata();
-  } catch (error) {
-    throw rejectionFor(error);
-  }
-  if (metadata.format !== SHARP_FORMAT[mime]) {
-    throw new EmailImageRejectedError('NOT_PNG_OR_JPEG');
-  }
-  if (!metadata.width || !metadata.height) {
-    throw new EmailImageRejectedError('UNREADABLE');
-  }
-  if (metadata.width * metadata.height > EMAIL_IMAGE_LIMITS.maxInputPixels) {
-    throw new EmailImageRejectedError('TOO_MANY_PIXELS');
-  }
-  try {
-    const pipeline = sharpInput(bytes).rotate().resize({
-      width: EMAIL_IMAGE_LIMITS.maxStoredWidth,
-      height: EMAIL_IMAGE_LIMITS.maxStoredHeight,
-      fit: 'inside',
-      withoutEnlargement: true,
+    const processed = await processImage(bytes, {
+      allowed: EMAIL_MIMES,
+      maxWidth: EMAIL_IMAGE_LIMITS.maxStoredWidth,
+      maxHeight: EMAIL_IMAGE_LIMITS.maxStoredHeight,
+      maxInputPixels: EMAIL_IMAGE_LIMITS.maxInputPixels,
     });
-    const encoded =
-      mime === 'image/png'
-        ? pipeline.png({ compressionLevel: 9, adaptiveFiltering: true })
-        : pipeline.jpeg({ quality: 85, mozjpeg: true });
-    const { data, info } = await encoded.toBuffer({ resolveWithObject: true });
-    return { mime, content: data, width: info.width, height: info.height };
+    const mime = EMAIL_MIMES.find((item) => item === processed.mime);
+    if (!mime) {
+      throw new EmailImageRejectedError('NOT_PNG_OR_JPEG');
+    }
+    return { mime, content: processed.content, width: processed.width, height: processed.height };
   } catch (error) {
-    throw rejectionFor(error);
+    if (error instanceof ImageRejectedError) {
+      throw new EmailImageRejectedError(EMAIL_REJECTION[error.reason]);
+    }
+    throw error;
   }
 };
 
