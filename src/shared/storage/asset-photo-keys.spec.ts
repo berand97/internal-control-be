@@ -4,7 +4,9 @@ import {
   assetPhotoKey,
   assetPhotoStagedKey,
   assetPhotoThumbKey,
+  assetPhotoStem,
   isPublicKey,
+  nextPhotoSequence,
   storageDate,
 } from './storage-keys.js';
 
@@ -62,5 +64,33 @@ describe('llaves de fotos de activos', () => {
     expect(() => assetPhotoKey({ ...base, uploadedAt: new Date('x'), ext: 'jpg' })).toThrow(
       expect.objectContaining(invalid),
     );
+  });
+});
+
+describe('secuencia de fotos por activo y día', () => {
+  const stem = assetPhotoStem(base);
+
+  it('la raíz no incluye el número ni la extensión', () => {
+    expect(stem).toBe('assets/2026/4310/UNAC-000123_2026-06-15_');
+  });
+
+  it('sin fotos ese día empieza en 1', () => {
+    expect(nextPhotoSequence(stem, [])).toBe(1);
+  });
+
+  it('sigue después del mayor, aunque falten números o cambie la extensión', () => {
+    expect(nextPhotoSequence(stem, [`${stem}1.jpg`, `${stem}4.webp`, `${stem}2.png`])).toBe(5);
+  });
+
+  it('ignora llaves de otro activo, otro día o con otra forma', () => {
+    expect(
+      nextPhotoSequence(stem, [
+        'assets/2026/4310/UNAC-0001234_2026-06-15_9.jpg',
+        'assets/2026/4310/UNAC-000123_2026-06-16_7.jpg',
+        `${stem}x.jpg`,
+        `${stem}3.gif`,
+        `${stem}3.jpg.bak`,
+      ]),
+    ).toBe(1);
   });
 });

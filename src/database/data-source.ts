@@ -20,6 +20,8 @@ import { AssetPriceZeroReason } from '../modules/assets/entities/asset-price-zer
 import { AssetImportBatch } from '../modules/assets/entities/asset-import-batch.entity.js';
 import { AssetMovement } from '../modules/assets/entities/asset-movement.entity.js';
 import { AssetPhoto } from '../modules/assets/entities/asset-photo.entity.js';
+import { PhotoFile } from '../modules/assets/entities/photo-file.entity.js';
+import { PhotoStagedUpload } from '../modules/assets/entities/photo-staged-upload.entity.js';
 import { QrTokenRotationLog } from '../modules/qr-tokens/entities/qr-token-rotation-log.entity.js';
 import { EmailTemplate } from '../modules/email-templates/entities/email-template.entity.js';
 import { EmailAsset } from '../modules/email-templates/entities/email-asset.entity.js';
@@ -88,6 +90,8 @@ const dataSource = new DataSource({
     AssetCustomValue,
     AssetMovement,
     AssetPhoto,
+    PhotoFile,
+    PhotoStagedUpload,
     AssetImportBatch,
     AssetIdentifier,
     AssetPriceZeroReason,

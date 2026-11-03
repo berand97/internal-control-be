@@ -151,12 +151,29 @@ export const storageDate = (instant: Date): string => {
   return checked(date, ISO_DATE);
 };
 
+const assetPhotoStemPath = (input: Omit<AssetPhotoKeyInput, 'ext' | 'seq'>): string =>
+  `${storageYear(input.uploadedAt)}/${safeKeySegment(input.costCenterCode)}/${safeKeySegment(input.assetCode)}_${storageDate(input.uploadedAt)}_`;
+
+export const assetPhotoStem = (input: Omit<AssetPhotoKeyInput, 'ext' | 'seq'>): string =>
+  `${ASSET_PHOTO_KEY_PREFIX}${assetPhotoStemPath(input)}`;
+
 const assetPhotoPath = (input: Omit<AssetPhotoKeyInput, 'ext'>): string => {
   if (!Number.isSafeInteger(input.seq) || input.seq < 1) {
     throw invalid();
   }
-  return `${storageYear(input.uploadedAt)}/${safeKeySegment(input.costCenterCode)}/${safeKeySegment(input.assetCode)}_${storageDate(input.uploadedAt)}_${input.seq}`;
+  return `${assetPhotoStemPath(input)}${input.seq}`;
 };
+
+const SEQUENCE_SUFFIX = /^(\d{1,9})\.(jpg|png|webp)$/;
+
+export const nextPhotoSequence = (stem: string, existingKeys: ReadonlyArray<string>): number =>
+  existingKeys.reduce((highest, key) => {
+    if (!key.startsWith(stem)) {
+      return highest;
+    }
+    const match = SEQUENCE_SUFFIX.exec(key.slice(stem.length));
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0) + 1;
 
 const PHOTO_EXTENSIONS: ReadonlyArray<AssetPhotoExtension> = ['jpg', 'png', 'webp'];
 
