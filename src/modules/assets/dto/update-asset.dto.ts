@@ -1,9 +1,11 @@
-import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
+import { ApiHideProperty, ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Equals, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { CreateAssetDto } from './create-asset.dto.js';
 
-export class UpdateAssetDto extends PartialType(OmitType(CreateAssetDto, ['photoUrl', 'stagedPhotoToken', 'photoFileId'] as const)) {
+export class UpdateAssetDto extends PartialType(
+  OmitType(CreateAssetDto, ['photoUrl', 'stagedPhotoToken', 'photoFileId', 'responsibleId'] as const),
+) {
   @ApiPropertyOptional({
     deprecated: true,
     description: 'Obsoleto. Para cambiar fotos use /assets/{id}/photos. Se acepta por ahora',
@@ -11,6 +13,10 @@ export class UpdateAssetDto extends PartialType(OmitType(CreateAssetDto, ['photo
   @IsOptional()
   @IsString()
   readonly photoUrl?: string;
+
+  @ApiHideProperty()
+  @Equals(undefined, { message: 'El responsable se cambia con un acta de entrega.' })
+  readonly responsibleId?: never;
 
   @ApiPropertyOptional({
     minLength: 3,

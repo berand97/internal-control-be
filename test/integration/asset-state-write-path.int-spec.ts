@@ -47,9 +47,9 @@ describe('Camino único de escritura del activo (PostgreSQL real)', () => {
     await moduleRef.close();
   });
 
-  const newAsset = () =>
+  const newAsset = (extra: { responsibleId?: string } = {}) =>
     assets.create(
-      { ...base, description: `Activo ${randomUUID().slice(0, 6)}`, acquisitionDate: '2022-03-01' },
+      { ...base, ...extra, description: `Activo ${randomUUID().slice(0, 6)}`, acquisitionDate: '2022-03-01' },
       actor,
     );
 
@@ -105,29 +105,28 @@ describe('Camino único de escritura del activo (PostgreSQL real)', () => {
     expect(await snapshot(asset.id)).toEqual(before);
   });
 
-  it('PATCH con un responsable inexistente no deja rastro parcial', async () => {
+  it('PATCH con una ubicación inexistente no deja rastro parcial', async () => {
     const asset = await newAsset();
     const before = await snapshot(asset.id);
     await expect(
-      assets.update(asset.id, { responsibleId: randomUUID() }, actor),
+      assets.update(asset.id, { locationId: randomUUID() }, actor),
     ).rejects.toThrow();
     expect(await snapshot(asset.id)).toEqual(before);
   });
 
-  it('PATCH de responsable y ubicación ahora registra el movimiento', async () => {
-    const asset = await newAsset();
+  it('el detalle y la lista traen el nombre del responsable y PATCH no lo cambia', async () => {
     const person = await newPerson();
-    await assets.update(asset.id, { responsibleId: person }, actor);
-    const [movement] = (await dataSource.query(
-      `SELECT movement_type, from_responsible_id, to_responsible_id
-       FROM asset_movement WHERE asset_id = $1 ORDER BY created_at DESC LIMIT 1`,
-      [asset.id],
-    )) as Array<{ movement_type: string; from_responsible_id: string | null; to_responsible_id: string }>;
-    expect(movement).toEqual({
-      movement_type: 'ASSIGNMENT',
-      from_responsible_id: null,
-      to_responsible_id: person,
-    });
+    const asset = await newAsset({ responsibleId: person });
+    expect(asset).toMatchObject({ responsibleId: person, responsibleName: 'Responsable Prueba' });
+    const updated = await assets.update(asset.id, { description: 'Descripción corregida' }, actor);
+    expect(updated).toMatchObject({ responsibleId: person, responsibleName: 'Responsable Prueba' });
+    const list = await assets.list(
+      { page: 1, pageSize: 5, sortOrder: 'desc', costCenterId: base.costCenterId },
+      { kind: 'GLOBAL' },
+    );
+    expect(list.items.find((item) => item.id === asset.id)).toMatchObject({ responsibleName: 'Responsable Prueba' });
+    const unassigned = await newAsset();
+    expect(unassigned.responsibleName).toBeNull();
   });
 
   it('acepta executedAt histórico y mantiene la cadena por orden de inserción', async () => {
