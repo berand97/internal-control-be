@@ -104,7 +104,12 @@ const EVENTS_SQL = `
     WHERE da.asset_id = $1 AND da.movement_id IS NULL
     UNION ALL
     SELECT 'PHOTO', CASE WHEN p.is_primary THEN 'PRIMARY_PHOTO' ELSE 'PHOTO' END, p.id::text, p.uploaded_at,
-           'INSTANT', 3, p.uploaded_by, NULL, jsonb_build_object('caption', p.caption)
+           'INSTANT', 3, coalesce(p.linked_by, p.uploaded_by), NULL,
+           jsonb_build_object('caption', p.caption, 'photoId', p.id, 'fileId', p.file_id, 'unlinkedAt', p.unlinked_at,
+             'contentUrl', CASE WHEN p.file_id IS NOT NULL AND p.unlinked_at IS NULL
+               THEN '/assets/' || p.asset_id || '/photos/' || p.id || '/content' END,
+             'thumbnailUrl', CASE WHEN p.file_id IS NOT NULL AND p.unlinked_at IS NULL
+               THEN '/assets/' || p.asset_id || '/photos/' || p.id || '/thumbnail' END)
     FROM asset_photo p
     WHERE p.asset_id = $1
     UNION ALL
@@ -236,6 +241,9 @@ export class AssetTimelineService {
         return `${format?.name ?? row.type} ${row.document_number ?? ''}`.trim();
       }
       case 'PHOTO':
+        if (text('unlinkedAt')) {
+          return 'Foto que luego se quitó del activo';
+        }
         return row.type === 'PRIMARY_PHOTO' ? 'Foto principal' : text('caption') ? `Foto: ${text('caption')}` : 'Foto';
       case 'INVENTORY':
         return `Incluido en la toma física ${text('inventoryCode') ?? ''}: ${INVENTORY_LABELS[row.type] ?? row.type}`.trim();

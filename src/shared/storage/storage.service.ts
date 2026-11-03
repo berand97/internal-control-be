@@ -154,6 +154,11 @@ export class StorageService {
     return (await this.resolveAdapter()).delete(key);
   }
 
+  async deleteFrom(driver: StorageDriver, key: string): Promise<void> {
+    assertPrivateKey(key);
+    return (await this.resolveAdapter(driver)).delete(key);
+  }
+
   async exists(key: string): Promise<boolean> {
     assertSafeStorageKey(key);
     return (await this.resolveAdapter()).exists(key);

@@ -473,6 +473,26 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Ese tipo de archivo no está permitido.',
   },
+  [ErrorCode.AssetPhotoInvalidImage]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'La foto está dañada o es demasiado grande.',
+  },
+  [ErrorCode.AssetPhotoAlreadyLinked]: {
+    httpStatus: 409,
+    action: 'CANCEL',
+    message: 'Esta foto ya está en el activo.',
+  },
+  [ErrorCode.AssetPhotoStagedNotFound]: {
+    httpStatus: 404,
+    action: 'CANCEL',
+    message: 'La foto que subió venció. Súbala de nuevo.',
+  },
+  [ErrorCode.AssetPhotoKeyConflict]: {
+    httpStatus: 409,
+    action: 'RETRY',
+    message: 'No pudimos guardar la foto. Intente de nuevo.',
+  },
   [ErrorCode.StorageUnavailable]: {
     httpStatus: 424,
     action: 'RETRY',

@@ -98,6 +98,10 @@ export enum ErrorCode {
 
   FileTooLarge = 'FILE_TOO_LARGE',
   FileTypeNotAllowed = 'FILE_TYPE_NOT_ALLOWED',
+  AssetPhotoInvalidImage = 'ASSET_PHOTO_INVALID_IMAGE',
+  AssetPhotoAlreadyLinked = 'ASSET_PHOTO_ALREADY_LINKED',
+  AssetPhotoStagedNotFound = 'ASSET_PHOTO_STAGED_NOT_FOUND',
+  AssetPhotoKeyConflict = 'ASSET_PHOTO_KEY_CONFLICT',
   StorageUnavailable = 'STORAGE_UNAVAILABLE',
   StorageNotConfigured = 'STORAGE_NOT_CONFIGURED',
   StorageOauthRequired = 'STORAGE_OAUTH_REQUIRED',
