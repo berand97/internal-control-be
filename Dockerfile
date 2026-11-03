@@ -28,7 +28,7 @@ WORKDIR /app
 
 COPY . .
 RUN pnpm run build \
-  && pnpm prune --prod
+  && pnpm prune --prod --ignore-scripts
 
 # -----------------------------------------------------------------------------
 # 3) Runtime mínimo
