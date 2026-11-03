@@ -158,6 +158,9 @@ export class AssetResponseDto {
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true })
   readonly responsibleId!: string | null;
 
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre y apellidos del responsable actual' })
+  readonly responsibleName!: string | null;
+
   @ApiProperty({ format: 'uuid' })
   readonly acquisitionTypeId!: string;
 
@@ -231,6 +234,7 @@ export class AssetResponseDto {
     asset: Asset,
     identifiers: ReadonlyArray<AssetIdentifier>,
     extras?: {
+      readonly responsibleName?: string | null;
       readonly category?: AssetNamedRefDto;
       readonly costCenter?: AssetNamedRefDto;
       readonly location?: AssetNamedRefDto | null;
@@ -251,6 +255,7 @@ export class AssetResponseDto {
       costCenterId: asset.costCenterId,
       locationId: asset.locationId,
       responsibleId: asset.responsibleId,
+      responsibleName: extras?.responsibleName ?? null,
       acquisitionTypeId: asset.acquisitionTypeId,
       acquisitionDate: asset.acquisitionDate
         ? String(asset.acquisitionDate).slice(0, 10)

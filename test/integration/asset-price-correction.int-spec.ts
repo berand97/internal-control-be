@@ -186,6 +186,38 @@ describe('Edición del activo: corrección del precio de compra y campos que ant
     ]);
   });
 
+  it('PATCH no acepta el responsable: 400 con el motivo y el responsable sigue igual; el detalle trae su nombre', async () => {
+    const id = await rawAsset(100);
+    const person = await scalar<string>(
+      dataSource,
+      `INSERT INTO person (first_name, last_name, email) VALUES ('Marta', 'Ríos Prueba', $1) RETURNING id`,
+      [`marta.${randomUUID().slice(0, 8)}@unac.edu.co`],
+    );
+    await dataSource.query('UPDATE asset SET current_responsible_id = $2 WHERE id = $1', [id, person]);
+
+    const other = await scalar<string>(
+      dataSource,
+      `INSERT INTO person (first_name, last_name, email) VALUES ('Otra', 'Persona', $1) RETURNING id`,
+      [`otra.${randomUUID().slice(0, 8)}@unac.edu.co`],
+    );
+    const rejected = await patch(id, { responsibleId: other, description: 'Cambio de responsable' });
+    expect([rejected.status, rejected.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect(rejected.body.error.details).toEqual([
+      { field: 'responsibleId', message: 'El responsable se cambia con un acta de entrega.' },
+    ]);
+    expect(await scalar<string>(dataSource, 'SELECT current_responsible_id FROM asset WHERE id = $1', [id])).toBe(person);
+
+    const detail = await http().get(`/api/v1/assets/${id}`).set(auth('director')).expect(200);
+    expectConforms('get', '/api/v1/assets/{id}', 200, detail.body);
+    expect(detail.body.data).toMatchObject({ responsibleId: person, responsibleName: 'Marta Ríos Prueba' });
+    expect(JSON.stringify(detail.body.data)).not.toContain('@unac.edu.co');
+
+    const list = await http().get('/api/v1/assets').query({ costCenterId: centerA, pageSize: 100 }).set(auth('director')).expect(200);
+    expectConforms('get', '/api/v1/assets', 200, list.body);
+    const items = list.body.data.items as Array<{ id: string; responsibleName: string | null }>;
+    expect(items.find((item) => item.id === id)?.responsibleName).toBe('Marta Ríos Prueba');
+  });
+
   it('un activo sin motivo de precio cero trae priceZeroReason null en el detalle; la lista no lo trae', async () => {
     const id = await rawAsset(0);
     const detail = await http().get(`/api/v1/assets/${id}`).set(auth('director')).expect(200);

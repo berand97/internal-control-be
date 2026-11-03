@@ -415,6 +415,18 @@ export class TypeOrmAssetsRepository implements AssetsRepository {
     return this.acquisitionTypes.findOne({ where: { code } });
   }
 
+  async findPersonNames(personIds: ReadonlyArray<string>): Promise<ReadonlyMap<string, string>> {
+    if (personIds.length === 0) {
+      return new Map();
+    }
+    const rows = (await this.dataSource.query(
+      `SELECT id, nullif(trim(concat_ws(' ', first_name, last_name)), '') AS name
+       FROM person WHERE id = ANY($1::uuid[])`,
+      [personIds],
+    )) as Array<{ id: string; name: string | null }>;
+    return new Map(rows.flatMap((row) => (row.name ? [[row.id, row.name] as const] : [])));
+  }
+
   async countActiveLoans(assetId: string): Promise<number> {
     const rows: unknown = await this.dataSource.query(
       `

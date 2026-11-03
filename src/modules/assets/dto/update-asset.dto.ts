@@ -1,9 +1,13 @@
-import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { ApiHideProperty, ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Equals, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { CreateAssetDto } from './create-asset.dto.js';
 
-export class UpdateAssetDto extends PartialType(CreateAssetDto) {
+export class UpdateAssetDto extends PartialType(OmitType(CreateAssetDto, ['responsibleId'] as const)) {
+  @ApiHideProperty()
+  @Equals(undefined, { message: 'El responsable se cambia con un acta de entrega.' })
+  readonly responsibleId?: never;
+
   @ApiPropertyOptional({
     minLength: 3,
     maxLength: 500,
