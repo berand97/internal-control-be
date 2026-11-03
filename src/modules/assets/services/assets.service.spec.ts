@@ -159,6 +159,7 @@ describe('AssetsService', () => {
       countActiveLoans: vi.fn().mockResolvedValue(0),
       findActiveLoans: vi.fn().mockResolvedValue([]),
       findPriceZeroClassification: vi.fn().mockResolvedValue(null),
+      findPersonNames: vi.fn().mockResolvedValue(new Map()),
       findIdentifiers: vi.fn().mockResolvedValue([]),
       countOpenInventories: vi.fn().mockResolvedValue(0),
       countOpenWriteOffs: vi.fn().mockResolvedValue(0),

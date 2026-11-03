@@ -128,11 +128,16 @@ export class AssetsService {
         ? { dataQualityFlags: query.dataQualityFlags }
         : {}),
     });
-    const identifiers = await this.assetsRepository.findIdentifiers(
-      items.map((item) => item.id),
-    );
+    const [identifiers, responsibleNames] = await Promise.all([
+      this.assetsRepository.findIdentifiers(items.map((item) => item.id)),
+      this.assetsRepository.findPersonNames(responsibleIdsOf(items)),
+    ]);
     return {
-      items: items.map((item) => AssetResponseDto.from(item, identifiers)),
+      items: items.map((item) =>
+        AssetResponseDto.from(item, identifiers, {
+          responsibleName: responsibleNameOf(item, responsibleNames),
+        }),
+      ),
       page,
       pageSize,
       total,
@@ -206,13 +211,18 @@ export class AssetsService {
         changes: { createdCount: created.length, errorCount: errors.length },
       });
     }
-    const createdIdentifiers = await this.assetsRepository.findIdentifiers(
-      created.map((item) => item.id),
-    );
+    const [createdIdentifiers, responsibleNames] = await Promise.all([
+      this.assetsRepository.findIdentifiers(created.map((item) => item.id)),
+      this.assetsRepository.findPersonNames(responsibleIdsOf(created)),
+    ]);
     return {
       createdCount: created.length,
       errors,
-      items: created.map((item) => AssetResponseDto.from(item, createdIdentifiers)),
+      items: created.map((item) =>
+        AssetResponseDto.from(item, createdIdentifiers, {
+          responsibleName: responsibleNameOf(item, responsibleNames),
+        }),
+      ),
     };
   }
 
@@ -330,9 +340,6 @@ export class AssetsService {
             ? { serialNumber: dto.serialNumber || null }
             : {}),
           ...(dto.locationId !== undefined ? { locationId: dto.locationId } : {}),
-          ...(dto.responsibleId !== undefined
-            ? { responsibleId: dto.responsibleId }
-            : {}),
           ...(dto.physicalCondition !== undefined
             ? { physicalCondition: dto.physicalCondition }
             : {}),
@@ -837,7 +844,7 @@ export class AssetsService {
   }
 
   private async toDetail(asset: Asset): Promise<AssetResponseDto> {
-    const [category, costCenter, location, custom, movements, loans, identifiers, priceZeroReason] =
+    const [category, costCenter, location, custom, movements, loans, identifiers, priceZeroReason, responsibleNames] =
       await Promise.all([
         this.assetsRepository.findNamedCategory(asset.categoryId),
         this.assetsRepository.findNamedCostCenter(asset.costCenterId),
@@ -849,8 +856,10 @@ export class AssetsService {
         this.assetsRepository.findActiveLoans(asset.id),
         this.assetsRepository.findIdentifiers([asset.id]),
         this.assetsRepository.findPriceZeroClassification(asset.id),
+        this.assetsRepository.findPersonNames(responsibleIdsOf([asset])),
       ]);
     return AssetResponseDto.from(asset, identifiers, {
+      responsibleName: responsibleNameOf(asset, responsibleNames),
       ...(category ? { category } : {}),
       ...(costCenter ? { costCenter } : {}),
       location: location,
@@ -1023,6 +1032,13 @@ const assertAcquisitionUnchanged = (asset: Asset, dto: UpdateAssetDto): void => 
   }
 };
 
+const responsibleIdsOf = (assets: ReadonlyArray<Asset>): ReadonlyArray<string> => [
+  ...new Set(assets.flatMap((asset) => (asset.responsibleId ? [asset.responsibleId] : []))),
+];
+
+const responsibleNameOf = (asset: Asset, names: ReadonlyMap<string, string>): string | null =>
+  asset.responsibleId ? (names.get(asset.responsibleId) ?? null) : null;
+
 const auditChanges = (dto: UpdateAssetDto, priceChange: PriceChange | null): Record<string, unknown> => {
   const { priceChangeReason: _reason, acquisitionPrice: _price, ...rest } = dto;
   return { ...rest, ...(priceChange ? { acquisitionPrice: priceChange } : {}) };
@@ -1034,13 +1050,11 @@ const editMovement = (
 ): AssetMovementSpec | null => {
   const changed = <T>(next: T | undefined, current: T): boolean =>
     next !== undefined && next !== current;
-  const type = changed(dto.responsibleId, asset.responsibleId)
-    ? MovementType.Assignment
-    : changed(dto.locationId, asset.locationId)
-      ? MovementType.Relocation
-      : changed(dto.physicalCondition, asset.physicalCondition)
-        ? MovementType.ConditionChange
-        : null;
+  const type = changed(dto.locationId, asset.locationId)
+    ? MovementType.Relocation
+    : changed(dto.physicalCondition, asset.physicalCondition)
+      ? MovementType.ConditionChange
+      : null;
   return type
     ? { type, reason: 'Edición del activo', documentReference: null }
     : null;

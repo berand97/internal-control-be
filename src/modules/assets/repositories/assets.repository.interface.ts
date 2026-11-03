@@ -194,6 +194,7 @@ export interface AssetsRepository {
   countOpenInventories(assetId: string): Promise<number>;
   countOpenWriteOffs(assetId: string): Promise<number>;
   findPriceZeroClassification(assetId: string): Promise<AssetPriceZeroClassificationRecord | null>;
+  findPersonNames(personIds: ReadonlyArray<string>): Promise<ReadonlyMap<string, string>>;
   saveImportBatch(record: {
     readonly filename: string;
     readonly payload: unknown;
