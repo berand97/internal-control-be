@@ -106,7 +106,7 @@ export const FEATURE_CATALOG: ReadonlyArray<FeatureDefinition> = [
     label: 'Activos',
     core: false,
     resourceTypes: ['asset', 'asset_price_zero_reason'],
-    pathPrefixes: ['/assets'],
+    pathPrefixes: ['/assets', '/asset-photos'],
   },
   {
     code: 'qr-tokens',

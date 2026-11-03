@@ -10,7 +10,9 @@ import { Location } from '../locations/entities/location.entity.js';
 import { LocationsModule } from '../locations/locations.module.js';
 import { MovementsModule } from '../movements/movements.module.js';
 import { RolesModule } from '../roles/roles.module.js';
+import { StorageModule } from '../../shared/storage/storage.module.js';
 import { AssetReadScopeGuard } from './asset-read-scope.guard.js';
+import { AssetPhotoGalleryController, AssetPhotosController } from './asset-photos.controller.js';
 import { AssetPriceZeroController } from './asset-price-zero.controller.js';
 import { AssetsController } from './assets.controller.js';
 import { AcquisitionType } from './entities/acquisition-type.entity.js';
@@ -19,10 +21,14 @@ import { AssetIdentifier } from './entities/asset-identifier.entity.js';
 import { AssetImportBatch } from './entities/asset-import-batch.entity.js';
 import { AssetMovement } from './entities/asset-movement.entity.js';
 import { AssetPhoto } from './entities/asset-photo.entity.js';
+import { PhotoFile } from './entities/photo-file.entity.js';
+import { PhotoStagedUpload } from './entities/photo-staged-upload.entity.js';
+import { AssetPhotoStagedCleanupJob } from './jobs/asset-photo-staged-cleanup.job.js';
 import { AssetPriceZeroReason } from './entities/asset-price-zero-reason.entity.js';
 import { Asset } from './entities/asset.entity.js';
 import { TypeOrmAssetsRepository } from './repositories/assets.repository.js';
 import { AssetStateService } from './services/asset-state.service.js';
+import { AssetPhotosService } from './services/asset-photos.service.js';
 import { AssetPriceZeroService } from './services/asset-price-zero.service.js';
 import { AssetTimelineService } from './services/asset-timeline.service.js';
 import { AssetsService } from './services/assets.service.js';
@@ -36,11 +42,14 @@ import { AssetsService } from './services/assets.service.js';
     DynamicFieldsModule,
     MovementsModule,
     RolesModule,
+    StorageModule,
     TypeOrmModule.forFeature([
       Asset,
       AssetCustomValue,
       AssetMovement,
       AssetPhoto,
+      PhotoFile,
+      PhotoStagedUpload,
       AssetImportBatch,
       AssetIdentifier,
       AssetPriceZeroReason,
@@ -50,15 +59,17 @@ import { AssetsService } from './services/assets.service.js';
       Location,
     ]),
   ],
-  controllers: [AssetPriceZeroController, AssetsController],
+  controllers: [AssetPriceZeroController, AssetPhotosController, AssetPhotoGalleryController, AssetsController],
   providers: [
     AssetsService,
     AssetTimelineService,
     AssetPriceZeroService,
+    AssetPhotosService,
+    AssetPhotoStagedCleanupJob,
     AssetStateService,
     AssetReadScopeGuard,
     { provide: 'AssetsRepository', useClass: TypeOrmAssetsRepository },
   ],
-  exports: ['AssetsRepository', AssetsService, AssetStateService],
+  exports: ['AssetsRepository', AssetsService, AssetStateService, AssetPhotosService],
 })
 export class AssetsModule {}

@@ -23,6 +23,7 @@ export const UPLOAD_LIMITS = {
   ASSET_CSV: { maxFileBytes: 5 * MIB },
   DOCX_TEMPLATE: { maxFileBytes: 10 * MIB },
   EMAIL_IMAGE: { maxFileBytes: 1 * MIB },
+  ASSET_PHOTO: { maxFileBytes: 10 * MIB },
 } as const satisfies Record<string, UploadLimits>;
 
 export const BoundedFileInterceptor = (
