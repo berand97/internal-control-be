@@ -1,5 +1,9 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import {
+  ThrottlerStorage,
+  type ThrottlerStorageService,
+} from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -33,11 +37,14 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
   };
 
   const post = (path: string, token?: string) => {
-    const call = request(app.getHttpServer()).post(`/api/v1${path}`).set('X-Forwarded-For', nextIp());
+    const call = request(app.getHttpServer())
+      .post(`/api/v1${path}`)
+      .set('X-Forwarded-For', nextIp());
     return token ? call.set('Authorization', `Bearer ${token}`) : call;
   };
 
-  const login = (username: string, password: string) => post('/auth/login').send({ username, password });
+  const login = (username: string, password: string) =>
+    post('/auth/login').send({ username, password });
 
   const createUser = async (): Promise<TestUser> => {
     const suffix = randomUUID().slice(0, 8);
@@ -58,7 +65,11 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
     const [row] = (await dataSource.query(
       'SELECT failed_count, lock_level, locked_until FROM auth_attempt_lockout WHERE subject = $1 AND factor = $2',
       [subject, factor],
-    )) as Array<{ failed_count: number; lock_level: number; locked_until: Date | null }>;
+    )) as Array<{
+      failed_count: number;
+      lock_level: number;
+      locked_until: Date | null;
+    }>;
     return row ?? null;
   };
 
@@ -71,9 +82,16 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
     );
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
     app = moduleRef.createNestApplication<NestExpressApplication>();
-    applyTrustProxy(app, app.get(ConfigService<AppConfig, true>).getOrThrow('trustProxy', { infer: true }));
+    applyTrustProxy(
+      app,
+      app
+        .get(ConfigService<AppConfig, true>)
+        .getOrThrow('trustProxy', { infer: true }),
+    );
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
@@ -157,14 +175,20 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
         const seen: Array<{ status: number; code: string }> = [];
         for (let attempt = 0; attempt < 6; attempt += 1) {
           const response = await login(username, WRONG_PASSWORD);
-          seen.push({ status: response.status, code: response.body.error?.code as string });
+          seen.push({
+            status: response.status,
+            code: response.body.error?.code as string,
+          });
         }
         return seen;
       };
       const ghostSeq = await sequence(ghost);
       const realSeq = await sequence(real.username);
       expect(ghostSeq).toEqual(realSeq);
-      expect(ghostSeq.at(-1)).toEqual({ status: 429, code: 'ACCOUNT_TEMPORARILY_LOCKED' });
+      expect(ghostSeq.at(-1)).toEqual({
+        status: 429,
+        code: 'ACCOUNT_TEMPORARILY_LOCKED',
+      });
       const stored = (await dataSource.query(
         `SELECT subject FROM auth_attempt_lockout WHERE subject LIKE 'id:%'`,
       )) as Array<{ subject: string }>;
@@ -193,7 +217,11 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
   });
 
   describe('segundo factor', () => {
-    const enrolledUser = async (): Promise<{ user: TestUser; secret: string; codes: string[] }> => {
+    const enrolledUser = async (): Promise<{
+      user: TestUser;
+      secret: string;
+      codes: string[];
+    }> => {
       const user = await createUser();
       const session = await login(user.username, PASSWORD);
       expect(session.status).toBe(200);
@@ -201,41 +229,73 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       const started = await post('/auth/me/mfa/enrollment', token).send({});
       expect(started.status).toBe(200);
       const secret = started.body.data.secret as string;
-      const confirmed = await post('/auth/me/mfa/enrollment/confirm', token).send({ code: await freshTotp(secret) });
+      const confirmed = await post(
+        '/auth/me/mfa/enrollment/confirm',
+        token,
+      ).send({ code: await freshTotp(secret) });
       expect(confirmed.status).toBe(200);
-      await dataSource.query('UPDATE app_user SET mfa_last_totp_step = NULL WHERE id = $1', [user.id]);
-      return { user, secret, codes: confirmed.body.data.recoveryCodes as string[] };
+      await dataSource.query(
+        'UPDATE app_user SET mfa_last_totp_step = NULL WHERE id = $1',
+        [user.id],
+      );
+      return {
+        user,
+        secret,
+        codes: confirmed.body.data.recoveryCodes as string[],
+      };
     };
 
     const challenge = async (user: TestUser): Promise<string> => {
+      const throttlerStorage =
+        app.get<ThrottlerStorageService>(ThrottlerStorage);
+      throttlerStorage.storage.clear();
       const response = await login(user.username, PASSWORD);
       expect(response.body.data).toMatchObject({ requiresMfa: true });
       return response.body.data.mfaChallengeToken as string;
     };
 
     const wrongTotp = async (secret: string): Promise<string> =>
-      String((Number(await freshTotp(secret)) + 500_000) % 1_000_000).padStart(6, '0');
+      String((Number(await freshTotp(secret)) + 500_000) % 1_000_000).padStart(
+        6,
+        '0',
+      );
 
     it('5 TOTP erróneos con desafíos e IP distintos bloquean MFA, aunque el siguiente código sea correcto', async () => {
       const { user, secret, codes } = await enrolledUser();
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        const response = await post('/auth/mfa/verify', await challenge(user)).send({ code: await wrongTotp(secret) });
+        const response = await post(
+          '/auth/mfa/verify',
+          await challenge(user),
+        ).send({ code: await wrongTotp(secret) });
         expect(response.status).toBe(401);
         expect(response.body.error.code).toBe('MFA_CODE_INVALID');
       }
-      const blocked = await post('/auth/mfa/verify', await challenge(user)).send({ code: await freshTotp(secret) });
+      const blocked = await post(
+        '/auth/mfa/verify',
+        await challenge(user),
+      ).send({ code: await freshTotp(secret) });
       expect(blocked.status).toBe(429);
       expect(blocked.body.error.code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
       expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
 
-      const recovery = await post('/auth/mfa/recovery', await challenge(user)).send({ recoveryCode: codes[0] });
+      const recovery = await post(
+        '/auth/mfa/recovery',
+        await challenge(user),
+      ).send({ recoveryCode: codes[0] });
       expect(recovery.status).toBe(429);
       expect(
-        await scalar<number>(dataSource, 'SELECT count(*)::int FROM mfa_recovery_code WHERE user_id = $1 AND used_at IS NULL', [user.id]),
+        await scalar<number>(
+          dataSource,
+          'SELECT count(*)::int FROM mfa_recovery_code WHERE user_id = $1 AND used_at IS NULL',
+          [user.id],
+        ),
       ).toBe(codes.length);
 
       await expireLock(`user:${user.id}`, 'MFA');
-      const verified = await post('/auth/mfa/verify', await challenge(user)).send({ code: await freshTotp(secret) });
+      const verified = await post(
+        '/auth/mfa/verify',
+        await challenge(user),
+      ).send({ code: await freshTotp(secret) });
       expect(verified.status).toBe(200);
       expect(await lockRow(`user:${user.id}`, 'MFA')).toBeNull();
     });
@@ -243,12 +303,17 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
     it('los códigos de recuperación erróneos cuentan para el mismo bloqueo', async () => {
       const { user } = await enrolledUser();
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        const response = await post('/auth/mfa/recovery', await challenge(user)).send({ recoveryCode: 'ZZZZ-ZZZZ-ZZZZ' });
+        const response = await post(
+          '/auth/mfa/recovery',
+          await challenge(user),
+        ).send({ recoveryCode: 'ZZZZ-ZZZZ-ZZZZ' });
         expect(response.status).toBe(401);
       }
       const row = await lockRow(`user:${user.id}`, 'MFA');
       expect(row?.lock_level).toBe(1);
-      expect(new Date(row?.locked_until ?? 0).getTime()).toBeGreaterThan(Date.now());
-    });
+      expect(new Date(row?.locked_until ?? 0).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+    }, 90_000);
   });
 });

@@ -42,12 +42,16 @@ describe('Límite de peticiones: por usuario autenticado, por IP sin sesión (HT
   };
 
   const ping = (ip: string, token?: string) => {
-    const call = request(app.getHttpServer()).get('/api/v1').set('X-Forwarded-For', ip);
+    const call = request(app.getHttpServer())
+      .get('/api/v1')
+      .set('X-Forwarded-For', ip);
     return token ? call.set('Authorization', `Bearer ${token}`) : call;
   };
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
     app = moduleRef.createNestApplication<NestExpressApplication>();
     const config = app.get(ConfigService<AppConfig, true>);
     applyTrustProxy(app, config.getOrThrow('trustProxy', { infer: true }));
@@ -84,7 +88,9 @@ describe('Límite de peticiones: por usuario autenticado, por IP sin sesión (HT
   it('sin sesión (o con un token inválido) sigue contando por IP con el límite general', async () => {
     const ip = '203.0.113.60';
     for (let hit = 0; hit < THROTTLE_IP_LIMIT; hit += 1) {
-      expect((await ping(ip, hit % 2 === 0 ? undefined : 'no-es-un-jwt')).status).toBe(200);
+      expect(
+        (await ping(ip, hit % 2 === 0 ? undefined : 'no-es-un-jwt')).status,
+      ).toBe(200);
     }
     const blocked = await ping(ip);
     expect(blocked.status).toBe(429);
@@ -92,19 +98,23 @@ describe('Límite de peticiones: por usuario autenticado, por IP sin sesión (HT
     expect((await ping('203.0.113.61')).status).toBe(200);
   });
 
-  it('el login conserva su límite estricto por IP aunque la petición traiga un access token válido', async () => {
+  it('el login bloquea la IP tras 50 fallos aunque la petición traiga un access token válido', async () => {
     const { token } = await user();
     const login = (ip: string) =>
       request(app.getHttpServer())
         .post('/api/v1/auth/login')
         .set('X-Forwarded-For', ip)
         .set('Authorization', `Bearer ${token}`)
-        .send({ username: `no.existe.${randomUUID().slice(0, 8)}`, password: 'Clave-Incorrecta-1' });
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+        .send({
+          username: `no.existe.${randomUUID().slice(0, 8)}`,
+          password: 'Clave-Incorrecta-1',
+        });
+    for (let attempt = 0; attempt < 50; attempt += 1) {
       expect((await login('203.0.113.70')).status).toBe(401);
     }
     const blocked = await login('203.0.113.70');
     expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
     expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
     expect((await login('203.0.113.71')).status).toBe(401);
   });

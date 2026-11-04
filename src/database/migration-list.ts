@@ -170,4 +170,5 @@ export const MIGRATIONS: ReadonlyArray<MigrationClass> = [
   AssetWriteOffs1767226100000,
   WriteOffOfficialAct1767226110000,
   AssetPhotoFiles1767226120000,
+  AuthLockoutIpFactors1767226130000,
 ];

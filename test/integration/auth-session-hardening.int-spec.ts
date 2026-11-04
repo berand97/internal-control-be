@@ -49,7 +49,11 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
     token?: string,
     ip = nextIp(),
   ) => {
-    const pending = withGrantReason(method, path, http()[method](`/api/v1${path}`).set('X-Forwarded-For', ip));
+    const pending = withGrantReason(
+      method,
+      path,
+      http()[method](`/api/v1${path}`).set('X-Forwarded-For', ip),
+    );
     return token ? pending.set('Authorization', `Bearer ${token}`) : pending;
   };
   const login = (username: string, password: string, ip = nextIp()) =>
@@ -619,7 +623,9 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
         'SELECT revocation_reason FROM user_role WHERE id = $1',
         [firstId],
       );
-      expect(reason).toBe('Se revocó porque se revocó el rol original de la delegación.');
+      expect(reason).toBe(
+        'Se revocó porque se revocó el rol original de la delegación.',
+      );
     });
   });
 
@@ -845,7 +851,13 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       expect(fresh.body.data.user.mustChangePassword).toBe(true);
       expect(fresh.body.data.user.roles).toEqual(['VIEWER']);
       expect(fresh.body.data.user.roleDetails).toEqual([
-        { code: 'VIEWER', name: await scalar<string>(dataSource, `SELECT name FROM role WHERE code = 'VIEWER'`) },
+        {
+          code: 'VIEWER',
+          name: await scalar<string>(
+            dataSource,
+            `SELECT name FROM role WHERE code = 'VIEWER'`,
+          ),
+        },
       ]);
       const pendingToken = fresh.body.data.accessToken as string;
 
@@ -924,19 +936,25 @@ describe('Endurecimiento de sesión, rango y MFA (HTTP real + PostgreSQL real)',
       );
     });
 
-    it('el throttler por IP sigue respondiendo TOO_MANY_ATTEMPTS', async () => {
+    it('50 fallos de login desde una misma IP la bloquean con ACCOUNT_TEMPORARILY_LOCKED', async () => {
       const ip = nextIp();
-      let last: request.Response | null = null;
-      for (let attempt = 0; attempt < 6; attempt += 1) {
-        last = await login(
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const failed = await login(
           `nadie.${randomUUID().slice(0, 8)}`,
           WRONG_PASSWORD,
           ip,
         );
+        expect(failed.status).toBe(401);
       }
-      expect(last?.status).toBe(429);
-      expect(last?.body.error.code).toBe('TOO_MANY_ATTEMPTS');
-    });
+      const blocked = await login(
+        `nadie.${randomUUID().slice(0, 8)}`,
+        WRONG_PASSWORD,
+        ip,
+      );
+      expect(blocked.status).toBe(429);
+      expect(blocked.body.error.code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
+      expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
+    }, 180_000);
 
     it('un origen no permitido no recibe las cabeceras CORS', async () => {
       const response = await call('get', '/auth/me').set(
