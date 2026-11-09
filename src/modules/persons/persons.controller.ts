@@ -35,7 +35,7 @@ export class PersonsController {
   @Get()
   @ApiOperation({
     summary: 'Buscar personas para asignarlas a un acta (quién recibe, quién firma, reasignación de turnos)',
-    description: `Solo lectura, solo personas activas. Requiere alguno de: ${PERSON_DIRECTORY_PERMISSIONS.join(', ')}. search busca en el nombre completo y por prefijo del documento. hasActiveUser y mfaEnabled dicen si la persona podrá firmar su turno.`,
+    description: `Solo lectura, solo personas activas. Requiere alguno de: ${PERSON_DIRECTORY_PERMISSIONS.join(', ')}. search busca en el nombre completo y por prefijo del documento. hasUser limita a con/sin cualquier cuenta; hasActiveUser a con/sin usuario ACTIVE. En cada ítem, hasActiveUser y mfaEnabled dicen si la persona podrá firmar su turno.`,
   })
   @ApiOkResponse({ schema: envelopedSchema(PersonDirectoryResponseDto) })
   async list(@Query() query: QueryPersonDirectoryDto, @CurrentUser() actor: AuthenticatedUser) {
@@ -44,6 +44,8 @@ export class PersonsController {
       page: query.page,
       pageSize: query.pageSize,
       ...(query.search ? { search: query.search } : {}),
+      ...(query.hasActiveUser === undefined ? {} : { hasActiveUser: query.hasActiveUser }),
+      ...(query.hasUser === undefined ? {} : { hasUser: query.hasUser }),
     });
   }
 }

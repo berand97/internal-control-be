@@ -5,7 +5,11 @@ import { ApiException } from '../../../common/exceptions/api.exception.js';
 import { PermissionsService } from '../../roles/services/permissions.service.js';
 import type { PersonDirectoryItemDto, PersonDirectoryResponseDto } from '../dto/person-directory.dto.js';
 
-export const PERSON_DIRECTORY_PERMISSIONS = ['asset:update:global', 'loan:update:global'] as const;
+export const PERSON_DIRECTORY_PERMISSIONS = [
+  'asset:update:global',
+  'loan:update:global',
+  'cost_center:read:global',
+] as const;
 
 const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
 
@@ -28,23 +32,45 @@ export class PersonDirectoryService {
     );
   }
 
-  async search(query: { readonly search?: string; readonly page: number; readonly pageSize: number }): Promise<PersonDirectoryResponseDto> {
+  async search(query: {
+    readonly search?: string;
+    readonly hasActiveUser?: boolean;
+    readonly hasUser?: boolean;
+    readonly page: number;
+    readonly pageSize: number;
+  }): Promise<PersonDirectoryResponseDto> {
     const term = query.search?.trim() ? query.search.trim() : null;
-    const params = [term === null ? null : `%${escapeLike(term)}%`, term === null ? null : `${escapeLike(term)}%`];
+    const hasActiveUser = query.hasActiveUser ?? null;
+    const hasUser = query.hasUser ?? null;
+    const params = [
+      term === null ? null : `%${escapeLike(term)}%`,
+      term === null ? null : `${escapeLike(term)}%`,
+      hasActiveUser,
+      hasUser,
+    ];
     const where = `p.is_active
-      AND ($1::text IS NULL OR (p.first_name || ' ' || p.last_name) ILIKE $1 OR p.document_number LIKE $2)`;
-    const [count] = (await this.dataSource.query(`SELECT count(*)::int AS total FROM person p WHERE ${where}`, params)) as Array<{
+      AND ($1::text IS NULL OR (p.first_name || ' ' || p.last_name) ILIKE $1 OR p.document_number LIKE $2)
+      AND ($3::boolean IS NULL OR (u_active.id IS NOT NULL) = $3)
+      AND ($4::boolean IS NULL OR (u_any.id IS NOT NULL) = $4)`;
+    const from = `FROM person p
+       LEFT JOIN app_user u_any ON u_any.person_id = p.id
+       LEFT JOIN app_user u_active ON u_active.person_id = p.id AND u_active.status = 'ACTIVE'`;
+    const [count] = (await this.dataSource.query(
+      `SELECT count(*)::int AS total ${from} WHERE ${where}`,
+      params,
+    )) as Array<{
       total: number;
     }>;
     const items = (await this.dataSource.query(
       `SELECT p.id, trim(p.first_name || ' ' || p.last_name) AS name, p.document_type AS "documentType", p.document_number AS "documentNumber",
               p.position_title AS "positionTitle", p.email,
-              (u.id IS NOT NULL) AS "hasActiveUser", coalesce(u.mfa_enabled, FALSE) AS "mfaEnabled"
-       FROM person p
-       LEFT JOIN app_user u ON u.person_id = p.id AND u.status = 'ACTIVE'
+              (u_any.id IS NOT NULL) AS "hasUser",
+              (u_active.id IS NOT NULL) AS "hasActiveUser",
+              coalesce(u_active.mfa_enabled, FALSE) AS "mfaEnabled"
+       ${from}
        WHERE ${where}
        ORDER BY p.first_name, p.last_name, p.id
-       LIMIT $3 OFFSET $4`,
+       LIMIT $5 OFFSET $6`,
       [...params, query.pageSize, (query.page - 1) * query.pageSize],
     )) as PersonDirectoryItemDto[];
     const total = count?.total ?? 0;

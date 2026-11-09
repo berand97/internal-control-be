@@ -70,7 +70,7 @@ const READ_SCOPE_DESCRIPTION =
 const READ_FORBIDDEN_RESPONSE = {
   status: 403,
   description:
-    'INSUFFICIENT_PERMISSIONS: no tiene asset:read:global ni asset:read:org_unit. SCOPE_NO_COST_CENTER: tiene asset:read:org_unit pero ninguna asignación vigente con alcance COST_CENTER. SCOPE_ORG_UNIT_UNRESOLVED: tiene asset:read:org_unit solo por asignaciones con alcance ORG_UNIT, que aún no dan centros de costo. Las dos últimas traen action CONTACT_SUPPORT.',
+    'INSUFFICIENT_PERMISSIONS: no tiene asset:read:global ni asset:read:org_unit. SCOPE_NO_COST_CENTER: tiene asset:read:org_unit pero ninguna asignación vigente con alcance COST_CENTER ni jefatura vigente. SCOPE_ORG_UNIT_UNRESOLVED: tiene asset:read:org_unit con alcance ORG_UNIT pero esa dependencia (ni sus hijas) tiene centros de costo activos. Las dos últimas traen action CONTACT_SUPPORT.',
   content: {
     'application/json': {
       schema: errorEnvelopeSchema(),

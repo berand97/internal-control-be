@@ -42,6 +42,14 @@ export class TypeOrmUsersRepository implements UsersRepository {
     return this.users.findOne({ where: { username } });
   }
 
+  findByPersonId(personId: string): Promise<AppUser | null> {
+    return this.users.findOne({ where: { personId } });
+  }
+
+  findPersonById(id: string): Promise<Person | null> {
+    return this.persons.findOne({ where: { id } });
+  }
+
   findPersonByEmail(email: string): Promise<Person | null> {
     return this.persons.findOne({ where: { email } });
   }

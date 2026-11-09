@@ -37,6 +37,7 @@ import { PermissionsService } from '../../roles/services/permissions.service.js'
 import { RolePrivilegePolicy } from '../../roles/services/role-privilege.policy.js';
 import { AssignUserRoleDto } from '../dto/assign-user-role.dto.js';
 import { CreateUserDto } from '../dto/create-user.dto.js';
+import { InvitePersonDto } from '../dto/invite-person.dto.js';
 import { DelegateUserRoleDto } from '../dto/delegate-user-role.dto.js';
 import { RevokeUserRoleDto } from '../dto/revoke-user-role.dto.js';
 import { QueryUsersDto } from '../dto/query-users.dto.js';
@@ -201,6 +202,97 @@ export class UsersService {
           email: dto.email,
           invitation: invitationSent,
           roleId: role.id,
+          organizationalUnitId: affiliation.organizationalUnitId,
+          costCenterId: affiliation.costCenterId,
+        },
+      });
+      return UserDetailResponseDto.fromDetail(user, [assignment], [], invitationSent);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ApiException(ErrorCode.UsernameAlreadyExists);
+      }
+      throw error;
+    }
+  }
+
+  async inviteFromPerson(
+    dto: InvitePersonDto,
+    actor: AuthenticatedUser,
+  ): Promise<UserDetailResponseDto> {
+    const person = await this.usersRepository.findPersonById(dto.personId);
+    if (!person || !person.isActive) {
+      throw new ApiException(ErrorCode.ResourceNotFound);
+    }
+    const existingAccount = await this.usersRepository.findByPersonId(person.id);
+    if (existingAccount) {
+      throw new ApiException(
+        ErrorCode.InvalidState,
+        'Esta persona ya tiene cuenta. Revísela en Usuarios o reenvíe la invitación.',
+      );
+    }
+    const username = person.email;
+    const existingUsername = await this.usersRepository.findByUsername(username);
+    if (existingUsername) {
+      throw new ApiException(ErrorCode.UsernameAlreadyExists);
+    }
+
+    const affiliation = await this.resolveAffiliation({
+      organizationalUnitId:
+        dto.organizationalUnitId ?? person.organizationalUnitId ?? null,
+      costCenterId: dto.costCenterId ?? person.costCenterId ?? null,
+    });
+    const role = await this.requireAssignableRole(dto.roleId, actor);
+    const temporaryPassword = generateTemporaryPassword();
+    const passwordHash = await this.hashService.hash(temporaryPassword);
+
+    try {
+      if (
+        affiliation.organizationalUnitId !== person.organizationalUnitId ||
+        affiliation.costCenterId !== person.costCenterId
+      ) {
+        await this.usersRepository.updatePerson(person.id, {
+          organizationalUnitId: affiliation.organizationalUnitId,
+          costCenterId: affiliation.costCenterId,
+        });
+        person.organizationalUnitId = affiliation.organizationalUnitId;
+        person.costCenterId = affiliation.costCenterId;
+      }
+
+      const user = await this.usersRepository.insertUser({
+        personId: person.id,
+        username,
+        passwordHash,
+        status: UserStatus.PendingActivation,
+        mustChangePassword: true,
+        invitationExpiresAt: invitationExpiryFrom(new Date()),
+      });
+      user.person = person;
+
+      const assignment = await this.insertScopedRole(user, role, actor);
+      const fullName = `${person.firstName} ${person.lastName}`.trim();
+      const invitationSent = await this.mailService.sendUserInvitation(
+        person.email,
+        username,
+        temporaryPassword,
+        {
+          roleName: role.name,
+          fullName,
+        },
+      );
+      await this.auditLogsRepository.record({
+        action: AuditAction.UserCreated,
+        entityType: USER_ENTITY_TYPE,
+        entityId: user.id,
+        performedBy: actor.id,
+        ipAddress: null,
+        userAgent: null,
+        changes: {
+          username,
+          email: person.email,
+          invitation: invitationSent,
+          roleId: role.id,
+          personId: person.id,
+          fromExistingPerson: true,
           organizationalUnitId: affiliation.organizationalUnitId,
           costCenterId: affiliation.costCenterId,
         },

@@ -35,6 +35,7 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-user.ty
 import { requestOrigin } from '../../common/types/request-origin.type.js';
 import { AssignUserRoleDto } from './dto/assign-user-role.dto.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
+import { InvitePersonDto } from './dto/invite-person.dto.js';
 import { DelegateUserRoleDto } from './dto/delegate-user-role.dto.js';
 import { RevokeUserRoleDto } from './dto/revoke-user-role.dto.js';
 import { QueryUsersDto } from './dto/query-users.dto.js';
@@ -113,6 +114,23 @@ export class UsersController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
     return this.usersService.create(dto, user);
+  }
+
+  @Post('from-person')
+  @RequirePermission('user:manage:global')
+  @ApiOperation({
+    summary: 'Crear cuenta e invitar a una persona ya existente',
+    description:
+      'No crea otra ficha de persona. Usa el correo de la persona como usuario, crea la cuenta en PENDING_ACTIVATION, genera contraseña temporal y envía la invitación. 406 INVALID_STATE si esa persona ya tiene cuenta.',
+  })
+  @ApiResponse({ status: 201, schema: envelopedSchema(UserDetailResponseDto) })
+  @ApiResponse({ status: 404, schema: errorEnvelopeSchema() })
+  @ApiResponse({ status: 406, schema: errorEnvelopeSchema() })
+  inviteFromPerson(
+    @Body() dto: InvitePersonDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<UserDetailResponseDto> {
+    return this.usersService.inviteFromPerson(dto, user);
   }
 
   @Post(':id/resend-invitation')

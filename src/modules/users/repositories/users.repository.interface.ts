@@ -58,6 +58,8 @@ export interface CreateUserRoleRecord {
 export interface UsersRepository {
   findByIdWithPerson(id: string): Promise<AppUser | null>;
   findByUsername(username: string): Promise<AppUser | null>;
+  findByPersonId(personId: string): Promise<AppUser | null>;
+  findPersonById(id: string): Promise<Person | null>;
   findPersonByEmail(email: string): Promise<Person | null>;
   findPersonByDocument(
     documentType: string,

@@ -26,6 +26,7 @@ describe('PermissionsService', () => {
     repository = {
       findEffectivePermissions: vi.fn().mockResolvedValue(permissions),
       findHeadedCostCenterIds: vi.fn().mockResolvedValue([]),
+      findCostCenterIdsUnderOrgUnits: vi.fn().mockResolvedValue([]),
     };
     cache = new PermissionsCache();
     service = new PermissionsService(repository, cache);
@@ -149,5 +150,25 @@ describe('PermissionsService', () => {
     await expect(
       service.costCenterScope('user-1', 'asset:read:global', 'asset:read:org_unit'),
     ).resolves.toEqual({ kind: 'COST_CENTERS', costCenterIds: ['cc-9'] });
+  });
+
+  it('un alcance ORG_UNIT resuelve a los centros bajo esa dependencia', async () => {
+    vi.mocked(repository.findCostCenterIdsUnderOrgUnits).mockResolvedValue(['cc-a', 'cc-b']);
+    vi.mocked(repository.findEffectivePermissions).mockResolvedValue([
+      { permissionCode: 'asset:read:org_unit', userScopeType: 'ORG_UNIT', userScopeId: 'ou-1' },
+    ]);
+    await expect(
+      service.costCenterScope('user-1', 'asset:read:global', 'asset:read:org_unit'),
+    ).resolves.toEqual({ kind: 'COST_CENTERS', costCenterIds: ['cc-a', 'cc-b'] });
+    expect(repository.findCostCenterIdsUnderOrgUnits).toHaveBeenCalledWith(['ou-1']);
+  });
+
+  it('si la dependencia no tiene centros, el alcance ORG_UNIT sigue sin resolverse', async () => {
+    vi.mocked(repository.findEffectivePermissions).mockResolvedValue([
+      { permissionCode: 'asset:read:org_unit', userScopeType: 'ORG_UNIT', userScopeId: 'ou-1' },
+    ]);
+    await expect(
+      service.costCenterScope('user-1', 'asset:read:global', 'asset:read:org_unit'),
+    ).resolves.toEqual({ kind: 'EMPTY', reason: 'ORG_UNIT_UNRESOLVED' });
   });
 });

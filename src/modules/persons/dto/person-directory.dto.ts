@@ -1,6 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+
+const toBoolean = ({ value }: { value: unknown }): unknown => {
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  return value;
+};
 
 export class QueryPersonDirectoryDto {
   @ApiPropertyOptional({ description: 'Parte del nombre completo o prefijo del número de documento' })
@@ -8,6 +18,22 @@ export class QueryPersonDirectoryDto {
   @IsString()
   @MaxLength(100)
   readonly search?: string;
+
+  @ApiPropertyOptional({
+    description: 'true: solo con usuario ACTIVE; false: solo sin usuario ACTIVE; omitir: todas',
+  })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  readonly hasActiveUser?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'true: solo con alguna cuenta (cualquier estado); false: sin cuenta; omitir: todas',
+  })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  readonly hasUser?: boolean;
 
   @ApiPropertyOptional({ type: 'integer', minimum: 1, default: 1 })
   @IsOptional()
@@ -47,6 +73,9 @@ export class PersonDirectoryItemDto {
 
   @ApiProperty()
   readonly email!: string;
+
+  @ApiProperty({ description: 'Tiene alguna cuenta en app_user, en cualquier estado' })
+  readonly hasUser!: boolean;
 
   @ApiProperty({ description: 'Tiene un usuario del sistema en estado ACTIVE' })
   readonly hasActiveUser!: boolean;

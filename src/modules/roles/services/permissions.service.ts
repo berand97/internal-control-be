@@ -62,12 +62,11 @@ export class PermissionsService {
     if (base.kind === 'GLOBAL' || base.kind === 'DENIED') {
       return base;
     }
-    return resolveCostCenterScope(
-      permissions,
-      globalCode,
-      scopedCode,
-      await this.getHeadedCostCenterIds(userId),
-    );
+    const extra = [
+      ...(await this.getHeadedCostCenterIds(userId)),
+      ...(await this.getOrgUnitCostCenterIds(permissions, scopedCode)),
+    ];
+    return resolveCostCenterScope(permissions, globalCode, scopedCode, extra);
   }
 
   private async getHeadedCostCenterIds(
@@ -80,6 +79,27 @@ export class PermissionsService {
     const fresh = await this.repository.findHeadedCostCenterIds(userId);
     this.cache.setHeadedCostCenters(userId, fresh, CACHE_TTL_SECONDS);
     return fresh;
+  }
+
+  private async getOrgUnitCostCenterIds(
+    permissions: ReadonlyArray<EffectivePermission>,
+    scopedCode: string,
+  ): Promise<ReadonlyArray<string>> {
+    const orgUnitIds = [
+      ...new Set(
+        permissions.flatMap((permission) =>
+          permission.permissionCode === scopedCode &&
+          permission.userScopeType === 'ORG_UNIT' &&
+          permission.userScopeId
+            ? [permission.userScopeId]
+            : [],
+        ),
+      ),
+    ];
+    if (orgUnitIds.length === 0) {
+      return [];
+    }
+    return this.repository.findCostCenterIdsUnderOrgUnits(orgUnitIds);
   }
 
   async getEffectivePermissions(

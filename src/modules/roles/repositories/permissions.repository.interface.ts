@@ -6,4 +6,8 @@ export interface PermissionsRepository {
   ): Promise<ReadonlyArray<EffectivePermission>>;
 
   findHeadedCostCenterIds(userId: string): Promise<ReadonlyArray<string>>;
+
+  findCostCenterIdsUnderOrgUnits(
+    orgUnitIds: ReadonlyArray<string>,
+  ): Promise<ReadonlyArray<string>>;
 }

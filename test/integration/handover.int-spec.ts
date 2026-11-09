@@ -778,6 +778,7 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
       documentNumber: expect.any(String),
       positionTitle: null,
       email: expect.stringMatching(/^sin\.cuenta\./),
+      hasUser: false,
       hasActiveUser: false,
       mfaEnabled: false,
     });
@@ -792,6 +793,37 @@ describe('Acta de entrega y asignación OCI-01-55: la entrega da responsable a l
     expect(paged.items).toHaveLength(1);
     expect(paged.hasNext).toBe(true);
     expect((await http().get('/api/v1/persons?search=%25').set(auth(director)).expect(200)).body.data.items).toEqual([]);
+
+    const withoutAccount = (
+      await http().get('/api/v1/persons?search=zacar&hasActiveUser=false').set(auth(director)).expect(200)
+    ).body.data.items as Array<{ id: string; hasActiveUser: boolean }>;
+    expect(withoutAccount.every((item) => item.hasActiveUser === false)).toBe(true);
+    expect(withoutAccount.map((item) => item.id)).toContain(withoutUser);
+    expect(withoutAccount.map((item) => item.id)).not.toContain(noMfa.personId);
+
+    const withAccount = (
+      await http().get('/api/v1/persons?search=zacar&hasActiveUser=true').set(auth(director)).expect(200)
+    ).body.data.items as Array<{ id: string }>;
+    expect(withAccount.map((item) => item.id)).not.toContain(withoutUser);
+
+    const costCenterReader = await actor('Centros', { mfa: true });
+    const readerRoleId = await scalar<string>(
+      dataSource,
+      `INSERT INTO role (code, name, description, is_system)
+       VALUES ($1, 'Lectura centros', 'Prueba directorio de personas', FALSE) RETURNING id`,
+      [`CC_READ_${randomUUID().slice(0, 8)}`],
+    );
+    await dataSource.query(
+      `INSERT INTO role_permission (role_id, permission_id)
+       SELECT $1, id FROM permission WHERE code = 'cost_center:read:global'`,
+      [readerRoleId],
+    );
+    await dataSource.query(
+      `INSERT INTO user_role (user_id, role_id, scope_type) VALUES ($1, $2, 'GLOBAL')`,
+      [costCenterReader.userId, readerRoleId],
+    );
+    await http().get('/api/v1/persons?pageSize=1').set(auth(costCenterReader)).expect(200);
+
     const denied = await http().get('/api/v1/persons').set(auth(outsider)).expect(403);
     expect(denied.body.error.code).toBe('INSUFFICIENT_PERMISSIONS');
   });

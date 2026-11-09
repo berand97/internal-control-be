@@ -54,4 +54,35 @@ export class TypeOrmPermissionsRepository implements PermissionsRepository {
     );
     return rows.map((row) => row.cost_center_id);
   }
+
+  async findCostCenterIdsUnderOrgUnits(
+    orgUnitIds: ReadonlyArray<string>,
+  ): Promise<ReadonlyArray<string>> {
+    if (orgUnitIds.length === 0) {
+      return [];
+    }
+    const rows = await this.dataSource.query<Array<{ id: string }>>(
+      `
+      SELECT DISTINCT cc.id
+      FROM cost_center cc
+      JOIN organizational_unit u ON u.id = cc.organizational_unit_id
+      WHERE cc.is_active
+        AND EXISTS (
+          SELECT 1
+          FROM organizational_unit scope
+          WHERE scope.id = ANY($1::uuid[])
+            AND (
+              u.id = scope.id
+              OR (
+                scope.hierarchy_path IS NOT NULL
+                AND u.hierarchy_path LIKE scope.hierarchy_path || '/%'
+              )
+            )
+        )
+      ORDER BY cc.id
+      `,
+      [[...orgUnitIds]],
+    );
+    return rows.map((row) => row.id);
+  }
 }

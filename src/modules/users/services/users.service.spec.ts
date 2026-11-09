@@ -101,6 +101,8 @@ describe('UsersService', () => {
     usersRepository = {
       findByIdWithPerson: vi.fn(),
       findByUsername: vi.fn().mockResolvedValue(null),
+      findByPersonId: vi.fn().mockResolvedValue(null),
+      findPersonById: vi.fn().mockResolvedValue(null),
       findPersonByEmail: vi.fn().mockResolvedValue(null),
       findPersonByDocument: vi.fn().mockResolvedValue(null),
       list: vi.fn(),
@@ -520,6 +522,53 @@ describe('UsersService', () => {
       }),
     );
     expect(result.invitationSent).toBe(true);
+  });
+
+  it('invita a una persona existente sin crear otra ficha', async () => {
+    const person = new Person();
+    person.id = 'person-exist';
+    person.firstName = 'Ana';
+    person.lastName = 'Ruiz';
+    person.email = 'ana.ruiz@unac.edu.co';
+    person.isActive = true;
+    person.organizationalUnitId = 'ou-1';
+    person.costCenterId = null;
+    vi.mocked(usersRepository.findPersonById).mockResolvedValue(person);
+    const created = buildUser('user-from-person');
+    created.status = UserStatus.PendingActivation;
+    created.mustChangePassword = true;
+    created.username = 'ana.ruiz@unac.edu.co';
+    created.personId = person.id;
+    created.person = person;
+    vi.mocked(usersRepository.insertUser).mockResolvedValue(created);
+
+    const result = await service.inviteFromPerson(
+      { personId: person.id, roleId: 'role-viewer' },
+      actor,
+    );
+
+    expect(usersRepository.insertPerson).not.toHaveBeenCalled();
+    expect(usersRepository.insertUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        personId: person.id,
+        username: 'ana.ruiz@unac.edu.co',
+        status: UserStatus.PendingActivation,
+      }),
+    );
+    expect(mailService.sendUserInvitation).toHaveBeenCalled();
+    expect(result.invitationSent).toBe(true);
+  });
+
+  it('no invita si la persona ya tiene cuenta', async () => {
+    const person = new Person();
+    person.id = 'person-exist';
+    person.isActive = true;
+    person.email = 'ana.ruiz@unac.edu.co';
+    vi.mocked(usersRepository.findPersonById).mockResolvedValue(person);
+    vi.mocked(usersRepository.findByPersonId).mockResolvedValue(buildUser('existing'));
+    await expect(
+      service.inviteFromPerson({ personId: person.id, roleId: 'role-viewer' }, actor),
+    ).rejects.toMatchObject({ code: ErrorCode.InvalidState });
   });
 
   it('exige departamento o centro de costo al crear', async () => {
