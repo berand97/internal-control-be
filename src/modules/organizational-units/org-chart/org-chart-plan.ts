@@ -21,6 +21,8 @@ import {
   CENTER_HEADERS,
   CENTER_SHEET,
   type CenterRowInput,
+  isBlankCenterRow,
+  isBlankUnitRow,
   normalizeText,
   type OrgChartInput,
   type OrgChartSnapshot,
@@ -191,17 +193,9 @@ interface FinalCenter {
   activeAssets: number;
 }
 
-const isBlankUnitRow = (row: UnitRowInput): boolean =>
-  [row.prefix, row.name, row.type, row.parent, row.relation, row.headCenter, row.color ?? null, row.status, row.action, row.code].every(
-    (value) => value === null,
-  );
-
 const isRootText = (text: string): boolean => normalizeText(text) === 'raiz';
 
 const isNoneText = (text: string): boolean => ['ninguno', 'ninguna'].includes(normalizeText(text));
-
-const isBlankCenterRow = (row: CenterRowInput): boolean =>
-  [row.code, row.name, row.movement, row.status, row.action, row.previousCode].every((value) => value === null);
 
 const asciiSlug = (name: string): string =>
   name

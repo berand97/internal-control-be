@@ -64,6 +64,9 @@ export interface UpdateAssetRecord {
   readonly operationalStatus?: OperationalStatus;
   readonly notes?: string | null;
   readonly insurancePolicyNumber?: string | null;
+  readonly depreciationMethod?: DepreciationMethod;
+  readonly usefulLifeYears?: number | null;
+  readonly salvageValue?: string;
   readonly writtenOffAt?: string | null;
   readonly writeOffReason?: string | null;
   readonly writeOffDocument?: string | null;

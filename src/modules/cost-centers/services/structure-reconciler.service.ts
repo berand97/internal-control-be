@@ -160,17 +160,23 @@ export class StructureReconcilerService {
     const manager = this.dataSource.manager;
     const state = await this.loadState(manager);
     const plan = planStructureReconcile(state);
-    const prefixed = state.units
-      .filter((unit) => unit.isActive && unit.codePrefix)
+    const activeUnits = state.units.filter((unit) => unit.isActive);
+    const prefixed = activeUnits
+      .filter((unit) => unit.codePrefix)
       .map((unit) => ({ ...unit, codePrefix: unit.codePrefix ?? '' }));
+    const hasActiveUnits = activeUnits.length > 0;
     return {
       pendingHeadCenters: state.units
         .filter((unit) => unit.isActive && unit.headCostCenterId === null && unit.headCostCenterCode !== null)
         .map((unit) => ({ unitId: unit.id, unitName: unit.name, prefix: unit.codePrefix, code: unit.headCostCenterCode ?? '' })),
-      centersWithoutUnit: state.centers
-        .filter((center) => center.isActive && !longestPrefix(center.code, prefixed))
-        .map((center) => ({ id: center.id, code: center.code, name: center.name })),
-      mismatches: await this.placements.prefixMismatches(),
+      centersWithoutUnit: hasActiveUnits
+        ? state.centers
+            .filter((center) => center.isActive && !longestPrefix(center.code, prefixed))
+            .map((center) => ({ id: center.id, code: center.code, name: center.name }))
+        : [],
+      mismatches: hasActiveUnits
+        ? (await this.placements.prefixMismatches()).filter((row) => row.reason !== 'NO_UNIT')
+        : [],
       manualExceptions: plan.manualExceptions,
       unitsUnderArchivedParent: (await manager.query(
         `SELECT u.id, u.code, u.name, u.code_prefix AS "codePrefix", p.id AS "parentId", p.name AS "parentName"

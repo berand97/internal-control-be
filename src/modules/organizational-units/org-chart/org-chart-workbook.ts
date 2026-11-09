@@ -25,6 +25,7 @@ import {
   CENTER_SHEET,
   cellText,
   INSTRUCTIONS_SHEET,
+  isBlankUnitRow,
   normalizeText,
   type OrgChartInput,
   STATUS_ACTIVE,
@@ -50,7 +51,7 @@ export interface ExportUnitRow {
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-const SPARE_ROWS = 500;
+const SPARE_ROWS = 40;
 const HEADER_FILL = 'FF1F4E78';
 const READ_ONLY_FILL = 'FFE7E6E6';
 const READ_ONLY_HEADER_FILL = 'FF808080';
@@ -199,16 +200,18 @@ const fillSheet = async (
       }
     });
   });
-  const lastEditable = rows.length + 1 + SPARE_ROWS;
+  const lastData = rows.length + 1;
+  const lastEditable = lastData + SPARE_ROWS;
   columns.forEach((spec, index) => {
     const letter = columnLetter(index);
     if (!spec.readOnly) {
-      for (let rowNumber = 2; rowNumber <= lastEditable; rowNumber += 1) {
+      for (let rowNumber = 2; rowNumber <= lastData; rowNumber += 1) {
+        sheet.getCell(`${letter}${rowNumber}`).protection = { locked: false };
+      }
+      for (let rowNumber = lastData + 1; rowNumber <= lastEditable; rowNumber += 1) {
         const cell = sheet.getCell(`${letter}${rowNumber}`);
         cell.protection = { locked: false };
-        if (rowNumber > rows.length + 1) {
-          cell.numFmt = '@';
-        }
+        cell.numFmt = '@';
       }
     }
     if (spec.list) {
@@ -400,7 +403,7 @@ export const parseOrgChartWorkbook = async (content: Buffer): Promise<OrgChartIn
           action: read(row.cells, 'action'),
           code: read(row.cells, 'code'),
         };
-        if (Object.entries(unitRow).some(([field, value]) => field !== 'rowNumber' && value !== null)) {
+        if (!isBlankUnitRow(unitRow)) {
           units.push(unitRow);
         }
       }

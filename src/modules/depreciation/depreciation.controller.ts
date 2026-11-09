@@ -56,11 +56,34 @@ export class DepreciationController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Calcular (o regenerar) el snapshot de un período',
+    description: 'Rechaza con DEPRECIATION_PERIOD_CLOSED si el período ya está cerrado.',
   })
   calculate(
     @Body() dto: CalculateDepreciationDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.depreciationService.calculate(dto, actor);
+  }
+
+  @Post('close')
+  @RequirePermission('depreciation:close:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cerrar un período de depreciación' })
+  close(
+    @Body() dto: CalculateDepreciationDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.depreciationService.close(dto, actor);
+  }
+
+  @Post('reopen')
+  @RequirePermission('depreciation:reopen:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reabrir un período de depreciación cerrado' })
+  reopen(
+    @Body() dto: CalculateDepreciationDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.depreciationService.reopen(dto, actor);
   }
 }

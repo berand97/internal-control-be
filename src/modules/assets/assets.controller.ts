@@ -57,6 +57,7 @@ import {
   AssetListResponseDto,
   AssetResponseDto,
 } from './dto/responses/asset.response.dto.js';
+import { ConfigureAssetAccountingDto } from './dto/configure-asset-accounting.dto.js';
 import { UpdateAssetDto } from './dto/update-asset.dto.js';
 import { WriteOffAssetDto } from './dto/write-off-asset.dto.js';
 import { ImportMode } from './enums/import-mode.enum.js';
@@ -297,6 +298,22 @@ export class AssetsController {
       dto.mode ?? ImportMode.AllOrNothing,
       user,
     );
+  }
+
+  @Patch(':id/accounting')
+  @RequirePermission('depreciation:configure:global')
+  @ApiOperation({
+    summary: 'Configurar depreciación del activo',
+    description:
+      'Años de vida útil, método y valor residual. Aplica a cálculos futuros; no muta períodos cerrados ni regenera históricos.',
+  })
+  @ApiResponse({ status: 200, schema: envelopedSchema(AssetResponseDto) })
+  configureAccounting(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: ConfigureAssetAccountingDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<AssetResponseDto> {
+    return this.assetsService.configureAccounting(id, dto, user);
   }
 
   @Patch(':id')

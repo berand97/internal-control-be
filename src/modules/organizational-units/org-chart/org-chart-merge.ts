@@ -17,6 +17,7 @@ import {
 } from './org-chart-stamp.js';
 import { exportValues, TEMPLATE_EXAMPLE } from './org-chart-workbook.js';
 import {
+  isBlankUnitRow,
   normalizeText,
   type OrgChartInput,
   parseStatus,
@@ -273,6 +274,9 @@ export const mergeOrgChartInput = (input: OrgChartInput, context: MergeContext):
   let stamplessCodes = 0;
   const newRowBySibling = new Map<string, { readonly rowNumber: number; readonly name: string }>();
   for (const row of input.units) {
+    if (isBlankUnitRow(row)) {
+      continue;
+    }
     if (isTemplateExample(row)) {
       warn(row.rowNumber, null, 'Es la fila de ejemplo de la plantilla. Se ignora.');
       continue;

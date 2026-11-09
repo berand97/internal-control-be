@@ -112,4 +112,19 @@ describe('CategoriesService', () => {
       code: ErrorCode.AssetCategoryHasAssets,
     });
   });
+
+  it('configura solo años y método de depreciación', async () => {
+    const root = category('1', 'MUEBLES', null);
+    vi.mocked(categoriesRepository.findById).mockResolvedValue(root);
+    vi.mocked(categoriesRepository.update).mockResolvedValue(undefined);
+    await service.configureAccounting(
+      '1',
+      { depreciationYears: 8, depreciationMethod: DepreciationMethod.None },
+      actor,
+    );
+    expect(categoriesRepository.update).toHaveBeenCalledWith('1', {
+      depreciationYears: 8,
+      depreciationMethod: DepreciationMethod.None,
+    });
+  });
 });

@@ -30,6 +30,7 @@ import {
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
+import { ConfigureCategoryAccountingDto } from './dto/configure-category-accounting.dto.js';
 import { CreateCategoryDto } from './dto/create-category.dto.js';
 import { QueryCategoriesDto } from './dto/query-categories.dto.js';
 import { CategoryTreeResponseDto } from './dto/responses/category-tree.response.dto.js';
@@ -88,6 +89,22 @@ export class CategoriesController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<CategoryResponseDto> {
     return this.categoriesService.create(dto, user);
+  }
+
+  @Patch(':id/accounting')
+  @RequirePermission('depreciation:configure:global')
+  @ApiOperation({
+    summary: 'Configurar depreciación de la categoría',
+    description:
+      'Solo años de vida útil y método. No recalcula depreciaciones ya registradas; aplica a altas nuevas.',
+  })
+  @ApiResponse({ status: 200, schema: envelopedSchema(CategoryResponseDto) })
+  configureAccounting(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: ConfigureCategoryAccountingDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<CategoryResponseDto> {
+    return this.categoriesService.configureAccounting(id, dto, user);
   }
 
   @Patch(':id')

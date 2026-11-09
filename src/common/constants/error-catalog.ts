@@ -963,6 +963,21 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'El periodo de depreciación no es válido.',
   },
+  [ErrorCode.DepreciationPeriodClosed]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'El periodo de depreciación está cerrado. Reábralo antes de recalcular.',
+  },
+  [ErrorCode.DepreciationPeriodOpen]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'El periodo de depreciación ya está abierto.',
+  },
+  [ErrorCode.DepreciationPeriodEmpty]: {
+    httpStatus: 406,
+    action: 'CANCEL',
+    message: 'No hay snapshots de depreciación para ese periodo. Calcúlelo antes de cerrarlo.',
+  },
   [ErrorCode.ModuleUnavailable]: {
     httpStatus: 503,
     action: 'CANCEL',

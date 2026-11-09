@@ -1,0 +1,18 @@
+meta {
+  name: reopen
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/depreciation/reopen
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "year": 2026,
+    "month": 1
+  }
+}

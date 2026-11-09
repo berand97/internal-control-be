@@ -1,0 +1,18 @@
+meta {
+  name: close
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/depreciation/close
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "year": 2026,
+    "month": 1
+  }
+}

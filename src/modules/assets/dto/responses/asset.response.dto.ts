@@ -188,6 +188,9 @@ export class AssetResponseDto {
   @ApiProperty({ type: 'integer', nullable: true })
   readonly usefulLifeYears!: number | null;
 
+  @ApiProperty({ type: 'string', example: '0.00' })
+  readonly salvageValue!: string;
+
   @ApiProperty({ type: 'string', nullable: true })
   readonly notes!: string | null;
 
@@ -267,6 +270,7 @@ export class AssetResponseDto {
       physicalCondition: asset.physicalCondition,
       depreciationMethod: asset.depreciationMethod,
       usefulLifeYears: asset.usefulLifeYears,
+      salvageValue: asset.salvageValue,
       notes: asset.notes,
       writtenOffAt: asset.writtenOffAt
         ? String(asset.writtenOffAt).slice(0, 10)

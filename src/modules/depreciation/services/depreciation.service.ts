@@ -18,6 +18,9 @@ import {
 } from '../dto/depreciation.dto.js';
 import { AssetDepreciation } from '../entities/asset-depreciation.entity.js';
 
+const periodEntityId = (year: number, month: number): string =>
+  `${String(year)}-${String(month).padStart(2, '0')}`;
+
 @Injectable()
 export class DepreciationService {
   constructor(
@@ -31,6 +34,9 @@ export class DepreciationService {
 
   async calculate(dto: CalculateDepreciationDto, actor: AuthenticatedUser | null) {
     this.assertPeriod(dto.year, dto.month);
+    if (await this.isPeriodClosed(dto.year, dto.month)) {
+      throw new ApiException(ErrorCode.DepreciationPeriodClosed);
+    }
     const assets = await this.assets.find();
     const dated = assets.filter(
       (asset): asset is typeof asset & { acquisitionDate: string } =>
@@ -74,28 +80,81 @@ export class DepreciationService {
         await repo.save(rows.slice(index, index + 500));
       }
     });
-    if (actor) {
-      await this.auditLogsRepository.record({
-        action: AuditAction.DepreciationCalculated,
-        entityType: 'DEPRECIATION',
-        entityId: actor.id,
-        performedBy: actor.id,
-        ipAddress: null,
-        userAgent: null,
-        changes: {
-          year: dto.year,
-          month: dto.month,
-          calculated: result.snapshots.length,
-          excluded: result.excluded.length,
-        },
-      });
-    }
+    await this.auditLogsRepository.record({
+      action: AuditAction.DepreciationCalculated,
+      entityType: 'DEPRECIATION',
+      entityId: periodEntityId(dto.year, dto.month),
+      performedBy: actor?.id ?? null,
+      ipAddress: null,
+      userAgent: null,
+      changes: {
+        year: dto.year,
+        month: dto.month,
+        calculated: result.snapshots.length,
+        excluded: result.excluded.length,
+      },
+    });
     return {
       year: dto.year,
       month: dto.month,
       calculated: result.snapshots.length,
       excluded: result.excluded,
+      isClosed: false,
     };
+  }
+
+  async close(dto: CalculateDepreciationDto, actor: AuthenticatedUser) {
+    this.assertPeriod(dto.year, dto.month);
+    const count = await this.snapshots.count({
+      where: { periodYear: dto.year, periodMonth: dto.month },
+    });
+    if (count === 0) {
+      throw new ApiException(ErrorCode.DepreciationPeriodEmpty);
+    }
+    if (await this.isPeriodClosed(dto.year, dto.month)) {
+      throw new ApiException(ErrorCode.DepreciationPeriodClosed);
+    }
+    await this.snapshots.update(
+      { periodYear: dto.year, periodMonth: dto.month },
+      { isClosed: true },
+    );
+    await this.auditLogsRepository.record({
+      action: AuditAction.DepreciationClosed,
+      entityType: 'DEPRECIATION',
+      entityId: periodEntityId(dto.year, dto.month),
+      performedBy: actor.id,
+      ipAddress: null,
+      userAgent: null,
+      changes: { year: dto.year, month: dto.month, rows: count },
+    });
+    return { year: dto.year, month: dto.month, isClosed: true, rows: count };
+  }
+
+  async reopen(dto: CalculateDepreciationDto, actor: AuthenticatedUser) {
+    this.assertPeriod(dto.year, dto.month);
+    const count = await this.snapshots.count({
+      where: { periodYear: dto.year, periodMonth: dto.month },
+    });
+    if (count === 0) {
+      throw new ApiException(ErrorCode.DepreciationPeriodEmpty);
+    }
+    if (!(await this.isPeriodClosed(dto.year, dto.month))) {
+      throw new ApiException(ErrorCode.DepreciationPeriodOpen);
+    }
+    await this.snapshots.update(
+      { periodYear: dto.year, periodMonth: dto.month },
+      { isClosed: false },
+    );
+    await this.auditLogsRepository.record({
+      action: AuditAction.DepreciationReopened,
+      entityType: 'DEPRECIATION',
+      entityId: periodEntityId(dto.year, dto.month),
+      performedBy: actor.id,
+      ipAddress: null,
+      userAgent: null,
+      changes: { year: dto.year, month: dto.month, rows: count },
+    });
+    return { year: dto.year, month: dto.month, isClosed: false, rows: count };
   }
 
   async list(query: QueryDepreciationDto) {
@@ -138,6 +197,7 @@ export class DepreciationService {
 
   async summary(year: number, month: number) {
     this.assertPeriod(year, month);
+    const isClosed = await this.isPeriodClosed(year, month);
     const rows: unknown = await this.snapshots.manager.query(
       `
       SELECT
@@ -158,6 +218,7 @@ export class DepreciationService {
     return {
       year,
       month,
+      isClosed,
       groups: Array.isArray(rows) ? rows : [],
     };
   }
@@ -183,6 +244,12 @@ export class DepreciationService {
     const month = now.getMonth() === 0 ? 12 : now.getMonth();
     const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
     await this.calculate({ year, month }, null);
+  }
+
+  private async isPeriodClosed(year: number, month: number): Promise<boolean> {
+    return this.snapshots.exists({
+      where: { periodYear: year, periodMonth: month, isClosed: true },
+    });
   }
 
   private assertPeriod(year: number, month: number): void {

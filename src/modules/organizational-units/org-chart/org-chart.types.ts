@@ -69,6 +69,14 @@ export interface CenterRowInput {
   readonly previousCode: string | null;
 }
 
+export const isBlankUnitRow = (row: UnitRowInput): boolean =>
+  [row.prefix, row.name, row.type, row.parent, row.relation, row.headCenter, row.color ?? null, row.status, row.action, row.code].every(
+    (value) => value === null,
+  );
+
+export const isBlankCenterRow = (row: CenterRowInput): boolean =>
+  [row.code, row.name, row.movement, row.status, row.action, row.previousCode].every((value) => value === null);
+
 export interface OrgChartInput {
   readonly units: ReadonlyArray<UnitRowInput>;
   readonly centers: ReadonlyArray<CenterRowInput>;

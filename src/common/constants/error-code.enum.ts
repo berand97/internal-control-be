@@ -197,6 +197,9 @@ export enum ErrorCode {
   AssetPriceZeroReasonExists = 'ASSET_PRICE_ZERO_REASON_EXISTS',
   AssetPriceNotZero = 'ASSET_PRICE_NOT_ZERO',
   DepreciationInvalidPeriod = 'DEPRECIATION_INVALID_PERIOD',
+  DepreciationPeriodClosed = 'DEPRECIATION_PERIOD_CLOSED',
+  DepreciationPeriodOpen = 'DEPRECIATION_PERIOD_OPEN',
+  DepreciationPeriodEmpty = 'DEPRECIATION_PERIOD_EMPTY',
 
   ModuleUnavailable = 'MODULE_UNAVAILABLE',
   FeatureUnknown = 'FEATURE_UNKNOWN',

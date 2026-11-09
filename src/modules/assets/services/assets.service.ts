@@ -38,6 +38,7 @@ import {
   AssetMovementResponseDto,
   AssetResponseDto,
 } from '../dto/responses/asset.response.dto.js';
+import { ConfigureAssetAccountingDto } from '../dto/configure-asset-accounting.dto.js';
 import { UpdateAssetDto } from '../dto/update-asset.dto.js';
 import { AssetIdentifier } from '../entities/asset-identifier.entity.js';
 import { Asset as AssetEntity } from '../entities/asset.entity.js';
@@ -296,6 +297,55 @@ export class AssetsService {
     );
     await this.assetsRepository.markImportCommitted(previewId);
     return result;
+  }
+
+  async configureAccounting(
+    id: string,
+    dto: ConfigureAssetAccountingDto,
+    actor: AuthenticatedUser,
+  ): Promise<AssetResponseDto> {
+    if (
+      dto.usefulLifeYears === undefined &&
+      dto.depreciationMethod === undefined &&
+      dto.salvageValue === undefined
+    ) {
+      throw new ApiException(ErrorCode.ValidationFailed);
+    }
+    const asset = await this.requireMutable(id);
+    const changes: Record<string, unknown> = {};
+    if (dto.usefulLifeYears !== undefined) {
+      changes.usefulLifeYears = { from: asset.usefulLifeYears, to: dto.usefulLifeYears };
+    }
+    if (dto.depreciationMethod !== undefined) {
+      changes.depreciationMethod = {
+        from: asset.depreciationMethod,
+        to: dto.depreciationMethod,
+      };
+    }
+    if (dto.salvageValue !== undefined) {
+      changes.salvageValue = {
+        from: asset.salvageValue,
+        to: dto.salvageValue.toFixed(2),
+      };
+    }
+    const updated = await this.assetState.apply({
+      assetId: asset.id,
+      actorId: actor.id,
+      patch: {
+        ...(dto.usefulLifeYears !== undefined
+          ? { usefulLifeYears: dto.usefulLifeYears }
+          : {}),
+        ...(dto.depreciationMethod !== undefined
+          ? { depreciationMethod: dto.depreciationMethod }
+          : {}),
+        ...(dto.salvageValue !== undefined
+          ? { salvageValue: dto.salvageValue.toFixed(2) }
+          : {}),
+      },
+      guard: assertMutable,
+      audit: { action: AuditAction.AssetUpdated, changes },
+    });
+    return this.toDetail(updated);
   }
 
   async update(

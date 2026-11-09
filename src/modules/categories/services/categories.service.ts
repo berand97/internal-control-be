@@ -8,6 +8,7 @@ import {
 import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type.js';
 import { AuditAction } from '../../auth/enums/audit-action.enum.js';
 import type { AuditLogsRepository } from '../../auth/repositories/audit-logs.repository.interface.js';
+import { ConfigureCategoryAccountingDto } from '../dto/configure-category-accounting.dto.js';
 import { CreateCategoryDto } from '../dto/create-category.dto.js';
 import { QueryCategoriesDto } from '../dto/query-categories.dto.js';
 import { CategoryTreeResponseDto } from '../dto/responses/category-tree.response.dto.js';
@@ -101,6 +102,42 @@ export class CategoriesService {
       }
       throw error;
     }
+  }
+
+  async configureAccounting(
+    id: string,
+    dto: ConfigureCategoryAccountingDto,
+    actor: AuthenticatedUser,
+  ): Promise<CategoryResponseDto> {
+    if (dto.depreciationYears === undefined && dto.depreciationMethod === undefined) {
+      throw new ApiException(ErrorCode.ValidationFailed);
+    }
+    await this.requireCategory(id);
+    await this.categoriesRepository.update(id, {
+      ...(dto.depreciationYears !== undefined
+        ? { depreciationYears: dto.depreciationYears }
+        : {}),
+      ...(dto.depreciationMethod !== undefined
+        ? { depreciationMethod: dto.depreciationMethod }
+        : {}),
+    });
+    const changes: Record<string, unknown> = {};
+    if (dto.depreciationYears !== undefined) {
+      changes.depreciationYears = dto.depreciationYears;
+    }
+    if (dto.depreciationMethod !== undefined) {
+      changes.depreciationMethod = dto.depreciationMethod;
+    }
+    await this.auditLogsRepository.record({
+      action: AuditAction.CategoryUpdated,
+      entityType: CATEGORY_ENTITY_TYPE,
+      entityId: id,
+      performedBy: actor.id,
+      ipAddress: null,
+      userAgent: null,
+      changes,
+    });
+    return CategoryResponseDto.from(await this.requireCategory(id));
   }
 
   async update(

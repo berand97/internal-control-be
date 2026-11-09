@@ -118,6 +118,8 @@ export enum AuditAction {
   PriceZeroReasonSet = 'PRICE_ZERO_REASON',
   AccountingCutCreated = 'ACC_CUT_CREATED',
   DepreciationCalculated = 'DEPR_CALCULATED',
+  DepreciationClosed = 'DEPR_CLOSED',
+  DepreciationReopened = 'DEPR_REOPENED',
   FeatureCircuitOpened = 'FEATURE_CIRCUIT_OPEN',
   FeatureCircuitRecovered = 'FEATURE_RECOVERED',
 }
