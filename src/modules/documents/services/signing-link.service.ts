@@ -107,7 +107,11 @@ export class SigningLinkService {
   }
 
   async channel(manager: EntityManager, role: string, personId: string | null): Promise<TurnChannel> {
-    return channelFor(role, await this.candidate(manager, personId));
+    return channelFor(role, await this.candidate(manager, personId), this.channelOptions());
+  }
+
+  private channelOptions(): { readonly skipMfaRequirement: boolean } {
+    return { skipMfaRequirement: this.config.getOrThrow('auth', { infer: true }).skipMfaAtLogin };
   }
 
   async currentTurn(
@@ -140,7 +144,7 @@ export class SigningLinkService {
         return;
       }
       const candidate = await this.candidate(manager, current.signer_person_id);
-      if (channelFor(current.role, candidate).channel !== 'EMAIL_LINK' || !candidate?.email) {
+      if (channelFor(current.role, candidate, this.channelOptions()).channel !== 'EMAIL_LINK' || !candidate?.email) {
         return;
       }
       const [previous] = (await manager.query(
@@ -170,7 +174,7 @@ export class SigningLinkService {
         throw new ApiException(ErrorCode.SignatureLinkNotApplicable, 'No es el turno actual del acta.');
       }
       const candidate = await this.candidate(manager, current.signer_person_id);
-      const channel = channelFor(current.role, candidate);
+      const channel = channelFor(current.role, candidate, this.channelOptions());
       if (channel.blockedBy) {
         throw new ApiException(channel.blockedBy);
       }

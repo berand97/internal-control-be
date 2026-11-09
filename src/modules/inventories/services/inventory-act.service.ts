@@ -102,7 +102,7 @@ export class InventoryActService implements OnModuleInit {
         {
           formatKey: INVENTORY_ACT_FORMAT_KEY,
           process: 'Tomas físicas de inventario',
-          signers: { RESPONSABLE: 'RESPONSIBLE', AUDITA: 'REQUEST' },
+          signers: 'ANY',
         },
       ],
       onGenerated: (manager, event) => this.onGenerated(manager, event),
@@ -118,11 +118,23 @@ export class InventoryActService implements OnModuleInit {
     });
   }
 
-  async enqueueOnApproval(manager: EntityManager, inventory: PhysicalInventory, approver: AuthenticatedUser): Promise<void> {
+  async enqueueOnApproval(
+    manager: EntityManager,
+    inventory: PhysicalInventory,
+    approver: AuthenticatedUser,
+    accountingSignerPersonId?: string | null,
+  ): Promise<void> {
     await this.signerHead.sync(manager, inventory, approver);
     const acts = await this.orderedActs(manager, inventory.id);
     for (const act of acts.filter((row) => !row.documentRequestId)) {
-      const outcome = await this.tryEnqueue(manager, inventory, act, approver.id);
+      const outcome = await this.tryEnqueue(
+        manager,
+        inventory,
+        act,
+        approver.id,
+        undefined,
+        { accountingSignerPersonId: accountingSignerPersonId ?? null },
+      );
       this.applyOutcome(act, outcome);
       await manager.getRepository(PhysicalInventoryAct).save(act);
       await this.auditEnqueue(manager, inventory, act, approver.id, outcome);
@@ -143,15 +155,35 @@ export class InventoryActService implements OnModuleInit {
         throw new ApiException(ErrorCode.ResourceNotFound);
       }
       const act = await this.signerHead.actFor(manager, inventory.id, costCenterId);
-      if (inventory.status !== InventoryStatus.Reconciled || act.documentRequestId) {
+      if (act.documentRequestId) {
+        throw new ApiException(ErrorCode.InvalidState, 'El acta de este centro ya se solicitó.');
+      }
+      if (
+        inventory.status !== InventoryStatus.Closed &&
+        inventory.status !== InventoryStatus.Reconciled
+      ) {
         throw new ApiException(
           ErrorCode.InvalidState,
-          'El acta se genera cuando la toma está conciliada y solo una vez.',
+          'El acta se genera con la toma cerrada.',
         );
       }
-      const result = await this.tryEnqueue(manager, inventory, act, inventory.reconcileApprovedBy ?? actor.id, signerSubstitutions, {
-        rethrowSignerErrors: true,
-      });
+      if (inventory.status === InventoryStatus.Closed) {
+        const now = new Date();
+        inventory.status = InventoryStatus.Reconciled;
+        inventory.reconcileRequestedAt = inventory.reconcileRequestedAt ?? now;
+        inventory.reconcileRequestedBy = inventory.reconcileRequestedBy ?? actor.id;
+        inventory.reconcileApprovedAt = now;
+        inventory.reconcileApprovedBy = actor.id;
+        await manager.getRepository(PhysicalInventory).save(inventory);
+      }
+      const result = await this.tryEnqueue(
+        manager,
+        inventory,
+        act,
+        inventory.reconcileApprovedBy ?? actor.id,
+        signerSubstitutions,
+        { rethrowSignerErrors: true },
+      );
       this.applyOutcome(act, result);
       await manager.getRepository(PhysicalInventoryAct).save(act);
       await this.auditEnqueue(manager, inventory, act, actor.id, result);
@@ -252,7 +284,7 @@ export class InventoryActService implements OnModuleInit {
             : null,
         issuable,
         warnings,
-        ...(await this.state(act)),
+        ...(await this.state(act, closed)),
       });
     }
     return views;
@@ -268,7 +300,7 @@ export class InventoryActService implements OnModuleInit {
     return ids.map((row) => rows.find((act) => act.id === row.id) as PhysicalInventoryAct);
   }
 
-  private async state(act: PhysicalInventoryAct): Promise<InventoryActState> {
+  private async state(act: PhysicalInventoryAct, closed = false): Promise<InventoryActState> {
     const base = { ...this.noneState(), requestId: act.documentRequestId, documentId: act.documentId };
     if (!act.documentRequestId) {
       if (act.blockedCode) {
@@ -280,6 +312,17 @@ export class InventoryActService implements OnModuleInit {
           retryable: true,
           retryAction: 'ENQUEUE',
           blockedAt: act.blockedAt ? new Date(act.blockedAt).toISOString() : null,
+        };
+      }
+      if (closed && act.signerHeadPersonId) {
+        return {
+          ...base,
+          generation: 'NOT_ENQUEUED',
+          reason: null,
+          message: 'El acta aún no se encoló. Solicítela para generar el documento.',
+          retryable: true,
+          retryAction: 'ENQUEUE',
+          blockedAt: null,
         };
       }
       return base;
@@ -359,7 +402,10 @@ export class InventoryActService implements OnModuleInit {
     act: PhysicalInventoryAct,
     approverUserId: string,
     signerSubstitutions?: SignerSubstitutionsInput,
-    options: { readonly rethrowSignerErrors?: boolean } = {},
+    options: {
+      readonly rethrowSignerErrors?: boolean;
+      readonly accountingSignerPersonId?: string | null;
+    } = {},
   ): Promise<EnqueueOutcome> {
     const readiness = await this.engine.formatReadiness(INVENTORY_ACT_FORMAT_KEY, manager).catch((error: unknown) => ({
       ready: false,
@@ -387,7 +433,14 @@ export class InventoryActService implements OnModuleInit {
     await manager.query('SAVEPOINT inventory_act');
     try {
       const approverPersonId = await this.personOf(manager, approverUserId);
-      const payload = await this.payload(manager, inventory, act, signerHeadPersonId, approverPersonId);
+      const payload = await this.payload(
+        manager,
+        inventory,
+        act,
+        signerHeadPersonId,
+        approverPersonId,
+        options.accountingSignerPersonId ?? null,
+      );
       const requestId = await this.engine.enqueue(
         manager,
         signerSubstitutions && Object.keys(signerSubstitutions).length > 0 ? { ...payload, signerSubstitutions } : payload,
@@ -423,6 +476,7 @@ export class InventoryActService implements OnModuleInit {
     act: PhysicalInventoryAct,
     responsiblePersonId: string,
     approverPersonId: string,
+    accountingSignerPersonId: string | null = null,
   ): Promise<DocumentRequestPayload> {
     const costCenterId = act.costCenterId as string;
     const rows = (await manager.query(
@@ -494,7 +548,10 @@ export class InventoryActService implements OnModuleInit {
       entityId: act.id,
       costCenterId,
       responsiblePersonId,
-      signers: { AUDITA: approverPersonId },
+      signers: {
+        AUDITA: approverPersonId,
+        ...(accountingSignerPersonId ? { CONTABILIDAD: accountingSignerPersonId } : {}),
+      },
       assetIds: content.assetIds,
       assetNotes: content.assetNotes,
       assetFields: content.assetFields,

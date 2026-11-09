@@ -98,9 +98,14 @@ describe('Enlace de verificación del documento', () => {
   });
 
   it('la aplicación no arranca en producción sin la variable', async () => {
-    const saved = { NODE_ENV: process.env['NODE_ENV'], SIGNATURE_VERIFY_URL: process.env['SIGNATURE_VERIFY_URL'] };
+    const saved = {
+      NODE_ENV: process.env['NODE_ENV'],
+      SIGNATURE_VERIFY_URL: process.env['SIGNATURE_VERIFY_URL'],
+      AUTH_SKIP_MFA: process.env['AUTH_SKIP_MFA'],
+    };
     process.env['NODE_ENV'] = 'production';
     delete process.env['SIGNATURE_VERIFY_URL'];
+    process.env['AUTH_SKIP_MFA'] = 'false';
     vi.resetModules();
     try {
       const boot = async () => {

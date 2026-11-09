@@ -12,10 +12,14 @@ const person = (overrides: Partial<SignerCandidate> = {}): SignerCandidate => ({
 });
 
 describe('channelFor: los tres caminos de firma', () => {
-  it('Control Interno exige usuario activo con MFA, sin excepción', () => {
+  it('Control Interno exige usuario activo con MFA, salvo skipMfaRequirement de desarrollo', () => {
     for (const role of ['AUDITA', 'CONTROL_INTERNO']) {
       expect(channelFor(role, person({ userStatus: 'ACTIVE', mfaEnabled: true }))).toEqual({ channel: 'SESSION_MFA', blockedBy: null });
       expect(channelFor(role, person({ userStatus: 'ACTIVE' })).blockedBy).toBe('SIGNATURE_MFA_REQUIRED');
+      expect(channelFor(role, person({ userStatus: 'ACTIVE' }), { skipMfaRequirement: true })).toEqual({
+        channel: 'SESSION',
+        blockedBy: null,
+      });
       expect(channelFor(role, person()).blockedBy).toBe('SIGNATURE_NO_CHANNEL');
       expect(channelFor(role, person({ userStatus: 'SUSPENDED', mfaEnabled: true })).blockedBy).toBe('SIGNATURE_NO_CHANNEL');
     }

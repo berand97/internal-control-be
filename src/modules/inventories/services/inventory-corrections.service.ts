@@ -21,6 +21,7 @@ import { PhysicalInventoryItem } from '../entities/physical-inventory-item.entit
 import { InventoryStatus } from '../enums/inventory-status.js';
 import { VerificationResult } from '../enums/verification-result.js';
 import { InventoryActorPolicy } from './inventory-actor-policy.service.js';
+import { InventoryAssetEffectsService } from './inventory-asset-effects.service.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
 import { toItemView } from './inventory-item-view.js';
 import { loadResponsibleNames, type ResponsibleNames } from './inventory-summary.js';
@@ -58,6 +59,7 @@ export class InventoryCorrectionsService {
     private readonly actorPolicy: InventoryActorPolicy,
     private readonly catalogs: InventoryCatalogsService,
     private readonly valuation: InventoryValuationService,
+    private readonly assetEffects: InventoryAssetEffectsService,
     @Inject('AuditLogsRepository')
     private readonly auditLogs: AuditLogsRepository,
   ) {}
@@ -70,6 +72,7 @@ export class InventoryCorrectionsService {
       throw new ApiException(ErrorCode.InvalidState, 'Un sobrante no se corrige. Anúlelo y regístrelo de nuevo si hace falta.');
     }
     const before = snapshot(item);
+    const previousResult = item.verificationResult;
     await this.applyResult(item, dto, actor);
     if (dto.result === VerificationResult.Pending || dto.findingCategory === null) {
       item.findingCategoryCode = null;
@@ -81,7 +84,16 @@ export class InventoryCorrectionsService {
     if (comparable(before) === comparable(after)) {
       throw invalid('result', 'La corrección no cambia nada.');
     }
-    const correction = await this.persist(inventory, item, 'CORRECT', before, after, dto.reason, actor);
+    const correction = await this.persist(
+      inventory,
+      item,
+      'CORRECT',
+      before,
+      after,
+      dto.reason,
+      actor,
+      previousResult,
+    );
     return { item: toItemView(item, await this.valuation.viewContext(inventory, [item])), correction: await this.withName(correction) };
   }
 
@@ -96,7 +108,7 @@ export class InventoryCorrectionsService {
     item.voidedAt = new Date();
     item.findingCategoryCode = null;
     const after = snapshot(item);
-    const correction = await this.persist(inventory, item, 'VOID', before, after, dto.reason, actor);
+    const correction = await this.persist(inventory, item, 'VOID', before, after, dto.reason, actor, before.result);
     return { item: toItemView(item, await this.valuation.viewContext(inventory, [item])), correction: await this.withName(correction) };
   }
 
@@ -216,9 +228,13 @@ export class InventoryCorrectionsService {
     after: ReturnType<typeof snapshot>,
     reason: string,
     actor: AuthenticatedUser,
+    previousResult: VerificationResult,
   ): Promise<InventoryItemCorrection> {
     return this.dataSource.transaction(async (manager) => {
       await manager.getRepository(PhysicalInventoryItem).save(item);
+      if (kind === 'CORRECT') {
+        await this.assetEffects.applyCorrectionEffects(inventory, previousResult, item, actor, manager);
+      }
       const correction = await manager.getRepository(InventoryItemCorrection).save(
         manager.getRepository(InventoryItemCorrection).create({
           itemId: item.id,

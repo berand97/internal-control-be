@@ -25,6 +25,7 @@ export const loadResponsibleNames = async (
 export const inventorySummaryUserIds = (inventory: PhysicalInventory): Array<string | null | undefined> => [
   inventory.responsibleUserId,
   inventory.closedBy,
+  inventory.fieldCloseCapturedBy,
   inventory.reconcileRequestedBy,
   inventory.reconcileApprovedBy,
   inventory.cancelledBy,

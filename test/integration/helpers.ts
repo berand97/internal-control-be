@@ -114,6 +114,15 @@ export const scalar = async <T>(
   return Object.values(row)[0] as T;
 };
 
+export const ENCARGADO_CLOSE_SIGNATURE = `data:image/png;base64,${'A'.repeat(820)}`;
+
+export const inventoryCloseBody = (
+  body: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  encargadoSignaturePng: ENCARGADO_CLOSE_SIGNATURE,
+  ...body,
+});
+
 export const SHARED_STORAGE_DIR = join(tmpdir(), 'control-interno-it-storage');
 
 export const useSharedStorage = async (dataSource: DataSource): Promise<string> => {

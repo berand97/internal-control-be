@@ -20,7 +20,7 @@ import { formatMoney } from '../../src/modules/inventories/domain/inventory-act.
 import { addDays } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import { SAMPLE } from '../../scripts/formats/build-oci-21-37-template.mjs';
 import { findLeftovers } from '../../scripts/formats/template-leftovers.mjs';
-import { openTestSession, scalar, useSharedStorage, withTemporaryHead } from './helpers.js';
+import { openTestSession, scalar, useSharedStorage, withTemporaryHead, inventoryCloseBody } from './helpers.js';
 import { pdfText, sampleLeftovers, squash } from './pdf-text.js';
 import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
@@ -47,7 +47,6 @@ describe
       let dataSource: DataSource;
       let engine: DocumentEngineService;
       let director: Who;
-      let approver: Who;
       let base: { categoryId: string; acquisitionTypeId: string; room: string };
       let templateId = '';
       let sequenceBefore: string | undefined;
@@ -238,11 +237,12 @@ describe
             })
           ).status,
         ).toBe(200);
-        const closed = await post(responsible, `/${id}/close`, {
+        const closed = await post(responsible, `/${id}/close`, inventoryCloseBody({
           allowUnverified: true,
           ...(attendedByName ? { attendedByName } : {}),
-        });
+        }));
         expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+        expect(closed.body.data.status).toBe('RECONCILED');
         return id;
       };
 
@@ -332,13 +332,6 @@ describe
           'Pruebas Acta',
           'Directora de Control Interno',
           'INTERNAL_CONTROL_DIRECTOR',
-        );
-        approver = await person(
-          'Laura Milena',
-          'Quintero Ruiz',
-          'Jefe de Control Interno',
-          'INTERNAL_CONTROL_DIRECTOR',
-          true,
         );
         const uploaded = await engine.uploadTemplate(
           ACT_FORMAT,
@@ -443,6 +436,7 @@ describe
           'Gómez Tobón',
           'Profesional de Control Interno',
           'INTERNAL_CONTROL_DIRECTOR',
+          true,
         );
         const id = await executed(centerId, responsible, [
           { assetId: desk, action: 'FOUND', category: 'AU' },
@@ -462,13 +456,7 @@ describe
           { assetId: projector, action: 'MISSING', category: 'ANE' },
           { assetId: phone, action: 'SKIP' },
         ], 'Asistente de la decanatura');
-        expect((await post(responsible, `/${id}/reconcile`)).status).toBe(200);
-        const approved = await post(approver, `/${id}/reconcile/approve`);
-        expect(approved.status, JSON.stringify(approved.body)).toBe(200);
-        expect(approved.body.data).toMatchObject({
-          status: 'RECONCILED',
-          act: { generation: 'PENDING' },
-        });
+        expect((await detail(id)).act).toMatchObject({ generation: 'PENDING' });
 
         const { text, pages, number, docx, documentId } = await generated(
           id,
@@ -497,7 +485,7 @@ describe
           'Porcentaje calculado sobre el precio de compra',
           'El valor en libros es otro dato y no entra en el porcentaje',
           `Total 4 ${money(8_100_000)} 100,00 % Sin dato`,
-          'Laura Milena Quintero Ruiz',
+          'Andrés Felipe Gómez Tobón',
           'PORTATIL LENOVO THINKPAD E14 CORE I7 16GB',
           'No se ubicó en la oficina ni en la bodega',
           'Archivador metálico sin placa',
@@ -528,12 +516,12 @@ describe
         const rubric = `data:image/png;base64,${(await QRCode.toBuffer('rubrica', { width: 120 })).toString('base64')}`;
         const early = await http()
           .post(`/api/v1/documents/${documentId}/signatures/2`)
-          .set(as(approver))
+          .set(as(responsible))
           .send({ rubric });
         expect(early.status).not.toBe(200);
         for (const [order, who] of [
           [1, head],
-          [2, approver],
+          [2, responsible],
         ] as const) {
           const signed = await http()
             .post(`/api/v1/documents/${documentId}/signatures/${order}`)
@@ -565,7 +553,7 @@ describe
         );
       });
 
-      it('separación de funciones: si el jefe que firma como ENCARGADO aprueba, el acta lleva la sustitución de Control Interno con su motivo', async () => {
+      it('separación de funciones: si quien cierra queda como ENCARGADO, el acta lleva la sustitución de Control Interno con su motivo', async () => {
         const centerId = await center('OFICINA DE ADMISIONES');
         const cabinet = await newAsset(
           centerId,
@@ -573,7 +561,6 @@ describe
           870_000,
         );
         await depreciation(cabinet, 410_000);
-        await headOf(centerId, approver);
         const responsible = await person(
           'Mateo',
           'Arango Vélez',
@@ -583,17 +570,21 @@ describe
         const id = await executed(centerId, responsible, [
           { assetId: cabinet, action: 'FOUND', category: 'AU' },
         ]);
-        expect((await post(responsible, `/${id}/reconcile`)).status).toBe(200);
-        const approved = await post(approver, `/${id}/reconcile/approve`);
-        expect(approved.body.data.act).toMatchObject({
+        expect((await detail(id)).act).toMatchObject({
           generation: 'NOT_ENQUEUED',
-          reason: 'ENQUEUE_FAILED',
+          reason: 'NO_COST_CENTER_HEAD',
         });
+        await headOf(centerId, responsible);
+        const assigned = await http()
+          .put(`/api/v1/inventories/${id}/signer-head`)
+          .set(as(responsible))
+          .send({ signerHeadPersonId: responsible.personId });
+        expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
         const enqueued = await post(director, `/${id}/act/enqueue`, {
           signerSubstitutions: {
             AUDITA: {
               personId: director.personId,
-              reason: 'La jefa del centro aprobó la conciliación',
+              reason: 'Quien cerró firma también como Encargado',
             },
           },
         });
@@ -602,7 +593,7 @@ describe
         const { text } = await generated(id, 'acta-oci-21-37-sustitucion');
         expect(sampleLeftovers(text, SAMPLE, { numbers: true })).toEqual([]);
         expect(text).toContain(
-          'Sustitución de firmante (separación de funciones): firma por Control Interno Directora Pruebas Acta en lugar de Laura Milena Quintero Ruiz, que firma el acta como Responsable. Motivo: La jefa del centro aprobó la conciliación',
+          'Sustitución de firmante (separación de funciones): firma por Control Interno Directora Pruebas Acta en lugar de Mateo Arango Vélez, que firma el acta como Responsable. Motivo: Quien cerró firma también como Encargado',
         );
       });
 
@@ -661,16 +652,13 @@ describe
           (await post(responsible, `/${id}/report-unexpected`, { notes: 'Fuente de poder sin placa', locationId: lab, condition: 'GOOD' }))
             .status,
         ).toBe(200);
-        const closed = await post(responsible, `/${id}/close`, {
+        const blocked = await post(responsible, `/${id}/close`, inventoryCloseBody({
           allowUnverified: true,
           attendedBy: [
             { costCenterId: faculty, name: 'Laboratorista de la facultad' },
             { costCenterId: systems, name: 'Técnico de soporte' },
           ],
-        });
-        expect(closed.status, JSON.stringify(closed.body)).toBe(200);
-        expect(closed.body.data.acts).toHaveLength(3);
-        const blocked = await post(responsible, `/${id}/reconcile`);
+        }));
         expect([blocked.status, blocked.body.error.code]).toEqual([409, 'INVENTORY_UNASSIGNED_SURPLUS']);
         const surplusId = ((await detail(id)).items as unknown as Array<{ id: string; notes: string | null }>).find(
           (item) => item.notes === 'Fuente de poder sin placa',
@@ -680,9 +668,16 @@ describe
           .set(as(responsible))
           .send({ costCenterId: faculty });
         expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
-        expect((await post(responsible, `/${id}/reconcile`)).status).toBe(200);
-        const approved = await post(approver, `/${id}/reconcile/approve`);
-        expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+        const closed = await post(responsible, `/${id}/close`, inventoryCloseBody({
+          allowUnverified: true,
+          attendedBy: [
+            { costCenterId: faculty, name: 'Laboratorista de la facultad' },
+            { costCenterId: systems, name: 'Técnico de soporte' },
+          ],
+        }));
+        expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+        expect(closed.body.data.status).toBe('RECONCILED');
+        expect(closed.body.data.acts).toHaveLength(3);
         await engine.processPending(1000);
         const acts = new Map(
           ((await detail(id)) as unknown as { acts: Array<Record<string, unknown> & { costCenter: { id: string } }> }).acts.map(

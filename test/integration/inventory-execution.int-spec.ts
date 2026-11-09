@@ -11,7 +11,7 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { addDays } from '../../src/modules/inventories/domain/inventory-schedule.js';
-import { discardInventoryActRequests, openTestSession, scalar, withTemporaryHead } from './helpers.js';
+import { discardInventoryActRequests, inventoryCloseBody, openTestSession, scalar, withTemporaryHead } from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
 import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
@@ -41,7 +41,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
   let dataSource: DataSource;
   let openapi: OpenAPIObject;
   let director: Who;
-  let approver: Who;
   let responsible: Who;
   let outsiderExecutor: Who;
   let outsiderHead: Who;
@@ -180,7 +179,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       otherCenter,
     };
     director = await person('Directora', 'INTERNAL_CONTROL_DIRECTOR');
-    approver = await person('Aprobador', 'INTERNAL_CONTROL_DIRECTOR');
     responsible = await person('Responsable', 'DEPARTMENT_HEAD', otherCenter);
     outsiderExecutor = await person('Custodio', 'DEPARTMENT_HEAD', otherCenter);
     outsiderHead = await person('Jefe', 'DEPARTMENT_HEAD', otherCenter);
@@ -223,7 +221,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       condition: 'GOOD',
     });
     expect(errorCode(verifyByOutsider)).toBe('INVENTORY_ACTOR_NOT_ALLOWED');
-    const closeByAuditedHead = await post(headDirector, `/${inventoryId}/close`, { allowUnverified: true });
+    const closeByAuditedHead = await post(headDirector, `/${inventoryId}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(closeByAuditedHead.status).toBe(403);
     expect(errorCode(closeByAuditedHead)).toBe('INVENTORY_CONFLICT_OF_INTEREST');
 
@@ -301,23 +299,22 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect((await post(responsible, `/${inventoryId}/start`)).status).toBe(200);
     expect((await post(responsible, `/${inventoryId}/verify-asset`, { assetId: verified, condition: 'NEW' })).status).toBe(200);
 
-    const refused = await post(responsible, `/${inventoryId}/close`);
+    const refused = await post(responsible, `/${inventoryId}/close`, inventoryCloseBody());
     expect(refused.status).toBe(406);
     expect(errorCode(refused)).toBe('INVENTORY_UNVERIFIED_EXCEEDS');
-    const unauthorized = await post(responsible, `/${inventoryId}/close`, { allowUnverified: true });
+    const unauthorized = await post(responsible, `/${inventoryId}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(unauthorized.status).toBe(403);
     expect(errorCode(unauthorized)).toBe('INSUFFICIENT_PERMISSIONS');
 
-    const closed = await post(director, `/${inventoryId}/close`, { allowUnverified: true });
+    const closed = await post(director, `/${inventoryId}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expectConforms('post', '/api/v1/inventories/{id}/close', 200, closed.body);
     expect(closed.body.data).toMatchObject({
-      status: 'CLOSED',
+      status: 'RECONCILED',
       actualEndDate: today,
       closedBy: director.userId,
       closedByName: 'Directora Ejecución',
       cancelledByName: null,
-      reconcileRequestedByName: null,
     });
     expect(closed.body.data.progress).toMatchObject({ expected: 3, verified: 1, pending: 0, notVerified: 2, notFound: 0 });
     const results = (await dataSource.query(
@@ -340,9 +337,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expectConforms('get', '/api/v1/inventories/{id}/report', 200, report.body);
     expect(report.body.data.notVerified).toBe(2);
 
-    expect((await post(responsible, `/${inventoryId}/reconcile`)).status).toBe(200);
-    const approved = await post(approver, `/${inventoryId}/reconcile/approve`);
-    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+    expect((await post(responsible, `/${inventoryId}/reconcile`)).status).toBe(406);
     expect(
       await scalar<number>(
         dataSource,
@@ -360,7 +355,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     for (const assetId of assets.slice(0, 20)) {
       expect((await post(responsible, `/${inventoryId}/verify-asset`, { assetId, condition: 'NEW' })).status).toBe(200);
     }
-    const closed = await post(responsible, `/${inventoryId}/close`);
+    const closed = await post(responsible, `/${inventoryId}/close`, inventoryCloseBody());
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expect(closed.body.data.progress).toMatchObject({ expected: 21, verified: 20, notVerified: 1 });
   });
@@ -554,16 +549,14 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       voidedUnexpected: 1,
     });
 
-    const closed = await post(responsible, `/${inventoryId}/close`);
+    const closed = await post(responsible, `/${inventoryId}/close`, inventoryCloseBody());
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+    expect(closed.body.data.status).toBe('RECONCILED');
     const report = closed.body.data.report as { notFoundItems: Item[]; unexpectedItems: Item[] };
     expect(report.notFoundItems.map((item) => item.assetId)).toEqual([missingOther]);
     expect(report.unexpectedItems.map((item) => item.assetId).sort()).toEqual([lostOutside, surplusOutside].sort());
     expect(await post(responsible, `/${inventoryId}/items/${foundItemId}/correct`, { result: 'PENDING', reason: 'Tarde' }).then((r) => r.status)).toBe(406);
 
-    expect((await post(responsible, `/${inventoryId}/reconcile`)).status).toBe(200);
-    const approved = await post(approver, `/${inventoryId}/reconcile/approve`);
-    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
     const state = (await dataSource.query(
       `SELECT id, operational_status, physical_condition, current_location_id FROM asset WHERE id = ANY($1)`,
       [[found, misplaced, missingOther, missingCataloged, lostOutside]],

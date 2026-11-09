@@ -153,7 +153,11 @@ describe('InventoriesService', () => {
       act as never,
       {
         applyOnClose: vi.fn().mockResolvedValue([]),
+        assertNoUnassignedSurplus: vi.fn().mockResolvedValue(undefined),
       } as never,
+      { applyVerificationFindings: vi.fn(), applyLost: vi.fn() } as never,
+      { isEnabled: vi.fn().mockReturnValue(false) } as never,
+      { holders: vi.fn().mockResolvedValue([]) } as never,
     );
   });
 
@@ -201,7 +205,11 @@ describe('InventoriesService', () => {
       })),
     );
     await expect(
-      service.close('inv-1', {}, actor),
+      service.close(
+        'inv-1',
+        { encargadoSignaturePng: `data:image/png;base64,${'A'.repeat(800)}` },
+        actor,
+      ),
     ).rejects.toMatchObject({
       code: ErrorCode.InventoryUnverifiedExceedsThreshold,
     });

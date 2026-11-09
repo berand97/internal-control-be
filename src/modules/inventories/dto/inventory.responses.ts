@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PHYSICAL_CONDITIONS, PhysicalCondition } from '../../assets/enums/physical-condition.enum.js';
+import { ControlSignerDto } from '../../documents/dto/document.responses.js';
 import {
   BOOK_VALUE_SOURCES,
   type BookValueSource,
@@ -429,9 +430,37 @@ export class InventoryCenterHeadCandidatesDto {
   readonly candidates!: InventorySignerHeadDto[];
 }
 
+export class InventoryFieldCloseEvidenceDto {
+  @ApiProperty({ description: 'SHA-256 de la firma PNG (data URL) para integridad' })
+  readonly sha256!: string;
+
+  @ApiProperty({ type: 'string', format: 'date-time' })
+  readonly signedAt!: string;
+
+  @ApiProperty({ format: 'uuid', description: 'Usuario que capturó/registró la firma en el cierre' })
+  readonly capturedBy!: string;
+
+  @ApiProperty({ type: 'string', nullable: true, description: 'Nombre de quien capturó la firma' })
+  readonly capturedByName!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description: 'Data URL PNG de la firma del Encargado al cerrar la primera fase',
+  })
+  readonly signaturePng!: string | null;
+}
+
 export class InventoryDetailResponseDto extends InventorySummaryDto {
   @ApiProperty({ type: () => InventoryItemDto, isArray: true })
   readonly items!: InventoryItemDto[];
+
+  @ApiProperty({
+    type: () => InventoryFieldCloseEvidenceDto,
+    nullable: true,
+    description: 'Evidencia de firma del Encargado al cerrar la primera fase; null si aún no cerró',
+  })
+  readonly fieldCloseEvidence!: InventoryFieldCloseEvidenceDto | null;
 
   @ApiProperty({ type: () => InventoryProgressDto })
   readonly progress!: InventoryProgressDto;
@@ -720,4 +749,19 @@ export class InventoryOtherCauseUsageResponseDto {
 export class InventoryDeletedResponseDto {
   @ApiProperty()
   readonly deleted!: boolean;
+}
+
+export class InventoryCloseOptionsDto {
+  @ApiProperty({
+    description:
+      'true si el parámetro inventory-act-accounting está activo y el cierre exige firmante de Contabilidad',
+  })
+  readonly requiresAccountingSigner!: boolean;
+
+  @ApiProperty({
+    type: () => ControlSignerDto,
+    isArray: true,
+    description: 'Personas elegibles para firmar el acta por Contabilidad',
+  })
+  readonly accountingSigners!: ControlSignerDto[];
 }

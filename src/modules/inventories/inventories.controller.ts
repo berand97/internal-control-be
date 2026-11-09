@@ -70,6 +70,7 @@ import {
   InventoryActStateDto,
   InventoryCenterHeadCandidatesDto,
   InventoryAttendedByDto,
+  InventoryCloseOptionsDto,
   InventoryDetailResponseDto,
   InventoryItemCorrectionDto,
   InventoryItemCorrectionResultDto,
@@ -80,7 +81,7 @@ import {
   InventoryReportResponseDto,
   InventoryWarningDto,
 } from './dto/inventory.responses.js';
-import { envelopedArraySchema } from '../documents/dto/document.responses.js';
+import { ControlSignerDto, envelopedArraySchema } from '../documents/dto/document.responses.js';
 import { AccountingCutsService } from './services/accounting-cuts.service.js';
 import { InventoriesService } from './services/inventories.service.js';
 import { InventoryActService } from './services/inventory-act.service.js';
@@ -127,6 +128,8 @@ const ACTOR_RULE =
   InventorySignerHeadDto,
   InventoryAttendedByDto,
   InventoryWarningDto,
+  InventoryCloseOptionsDto,
+  ControlSignerDto,
 )
 @Feature('inventories')
 @Controller('inventories')
@@ -206,6 +209,29 @@ export class InventoriesController {
   @ApiOkResponse({ schema: envelopedSchema(InventoryCoverageResponseDto) })
   coverage() {
     return this.planning.coverage();
+  }
+
+  @Get('close-options')
+  @RequirePermission('inventory:execute:global')
+  @ApiOperation({
+    summary: 'Opciones de cierre: si Contabilidad firma el acta y candidatos',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryCloseOptionsDto) })
+  async closeOptions() {
+    return {
+      requiresAccountingSigner: this.inventoriesService.requiresAccountingSigner(),
+      accountingSigners: await this.inventoriesService.accountingSigners(),
+    };
+  }
+
+  @Get('accounting-signers')
+  @RequirePermission('inventory:execute:global')
+  @ApiOperation({
+    summary: 'Firmantes elegibles de Contabilidad para el acta OCI-21-37',
+  })
+  @ApiOkResponse({ schema: envelopedArraySchema(ControlSignerDto) })
+  accountingSigners() {
+    return this.inventoriesService.accountingSigners();
   }
 
   @Get(':id/progress')
@@ -492,17 +518,11 @@ export class InventoriesController {
   @RequirePermission('inventory:execute:global')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Cerrar la toma y generar el reporte de discrepancias',
+    summary: 'Cerrar la auditoría, reconciliar y encolar el acta OCI-21-37',
     description:
-      `${ACTOR_RULE} Con más del 5 % pendiente exige allowUnverified e inventory:create:global. Los pendientes pasan a ` +
-      'NOT_VERIFIED (no son faltantes; la conciliación no los toca). actualEndDate es la fecha de Bogotá. ' +
-      'La ubicación define el trabajo de campo, no el acta: se crea un acta OCI-21-37 por centro de costo presente en los ' +
-      'ítems (acts en la respuesta), cada una firmada como ENCARGADO por el jefe vigente de su centro. Por centro: con uno ' +
-      'solo se toma por defecto; con varios, signerHeads debe elegirlo (400 VALIDATION_FAILED, details ' +
-      'signerHeads.<costCenterId>); con ninguno el cierre procede, esa acta trae warnings [ACT_CANNOT_BE_ISSUED] (quedará ' +
-      'NOT_ENQUEUED / NO_COST_CENTER_HEAD al conciliar) y las demás siguen. signerHeadPersonId solo sirve con un único ' +
-      'centro. Quién atendió por el área: attendedBy por centro, o attendedByPersonId / attendedByName (no ambos) para ' +
-      'todas; solo informativo.',
+      `${ACTOR_RULE} Exige firma manuscrita del Encargado. Los pendientes pasan a NOT_VERIFIED. Se crea un acta por ` +
+      'centro, se encola el documento y la toma pasa a RECONCILED. Si el parámetro inventory-act-accounting está activo, ' +
+      'accountingSignerPersonId es obligatorio (candidatos: GET /inventories/accounting-signers).',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   close(
@@ -517,7 +537,8 @@ export class InventoriesController {
   @RequirePermission('inventory:execute:global')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Solicitar reconciliación (solo el responsable de la toma)',
+    deprecated: true,
+    summary: 'Obsoleto: la reconciliación ocurre al cerrar',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventorySummaryDto) })
   requestReconcile(
@@ -531,13 +552,8 @@ export class InventoriesController {
   @RequirePermission('inventory:reconcile:global')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Aprobar reconciliación (doble firma; distinto al responsable)',
-    description:
-      'MISPLACED actualiza la ubicación; MISSING marca LOST; FOUND y MISPLACED con condición distinta actualizan la ' +
-      'condición. NOT_VERIFIED y los sobrantes (incluidos los de activos LOST) no cambian nada. En la misma ' +
-      'transacción encola el acta OCI-21-37; si el formato no está listo (o falla armarla, por ejemplo quien aprueba firma ' +
-      'AUDITA y no tiene el permiso act:sign_control:global), la conciliación sigue y el acta queda NOT_ENQUEUED con ' +
-      'su motivo (act en la respuesta).',
+    deprecated: true,
+    summary: 'Obsoleto: la reconciliación ocurre al cerrar (solo tomas CLOSED legacy)',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   approveReconcile(
@@ -569,9 +585,9 @@ export class InventoriesController {
   @RequirePermission('inventory:execute:global')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Resolver un sobrante sin activo (toma cerrada, antes de aprobar la conciliación)',
+    summary: 'Resolver un sobrante sin activo (toma en curso, antes de cerrar)',
     description:
-      `${ACTOR_RULE} CREATE_ASSET exige además asset:create:global y los datos del activo: se crea en el centro de la ` +
+      `${ACTOR_RULE} Solo tomas IN_PROGRESS (406 INVALID_STATE si ya cerró). CREATE_ASSET exige además asset:create:global y los datos del activo: se crea en el centro de la ` +
       'toma (alcance COST_CENTER) o en costCenterId (otros alcances), con movimiento REGISTRATION que cita la toma, y ' +
       'se enlaza al ítem en una transacción; si ese centro no tiene jefe vigente responde 409 COST_CENTER_WITHOUT_HEAD. LEAVE_UNRESOLVED deja el motivo y admite cambiar luego a CREATE_ASSET; fuera del alcance COST_CENTER ' +
       'también exige el centro (costCenterId o el ya elegido con PUT …/surplus-center), cuya acta lo lista como sobrante sin resolver. ' +
@@ -593,10 +609,10 @@ export class InventoriesController {
   @ApiOperation({
     summary: 'Elegir el centro de costo de un sobrante sin activo (toma por ubicación, unidad o global)',
     description:
-      `${ACTOR_RULE} Mismo momento y permisos que resolver el sobrante: toma CLOSED antes de aprobar la conciliación (si no, 406 INVALID_STATE). ` +
-      'En esas tomas un sobrante sin activo no es de ningún centro ni va a ningún acta, y la conciliación (solicitar y aprobar) responde 409 ' +
+      `${ACTOR_RULE} Mismo momento y permisos que resolver el sobrante: toma IN_PROGRESS (si no, 406 INVALID_STATE). ` +
+      'En esas tomas un sobrante sin activo no es de ningún centro ni va a ningún acta, y el cierre responde 409 ' +
       'INVENTORY_UNASSIGNED_SURPLUS (details[0] = { field: unassignedSurplus, message: <cuántos> }) mientras haya alguno. Con el centro elegido pasa al ' +
-      'acta OCI-21-37 de ese centro (se crea si la toma no la tenía, con su único jefe vigente como firmante). Se puede cambiar mientras no se ' +
+      'acta OCI-21-37 de ese centro al cerrar (se crea si la toma no la tenía, con su único jefe vigente como firmante). Se puede cambiar mientras no se ' +
       'registre como activo. El centro debe estar activo y admitir activos: si no, 400 VALIDATION_FAILED. Toma por centro de costo: 406 INVALID_STATE ' +
       '(el sobrante ya es de ese centro). Sobrante con activo, anulado o ya registrado: 406 INVENTORY_SURPLUS_NOT_RESOLVABLE; de un activo LOST: 406 ' +
       'INVENTORY_SURPLUS_WAS_LOST. Auditado (INV_SURPLUS_CENTER).',

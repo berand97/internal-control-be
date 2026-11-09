@@ -210,9 +210,7 @@ describe('Importación asíncrona: trabajos, worker, notificaciones y firma (HTT
       entity_type: 'STAGING_IMPORT_JOB',
       read_at: null,
     });
-    expect(notification?.['body']).toContain('Insertados: 2');
-    expect(notification?.['body']).toContain('Omitidos por ya existir: 0');
-    expect(notification?.['body']).toContain('En cuarentena: 2');
+    expect(notification?.['body']).toContain('Insertados: 2 · Omitidos: 0 · En cuarentena: 2');
     expect(notification?.['body']).toContain('1 · El centro de costo no existe.');
     const [mail] = (await dataSource.query(
       `SELECT template_type, recipient_user_id, context, delivery_status FROM mail_outbox WHERE entity_id = $1`,

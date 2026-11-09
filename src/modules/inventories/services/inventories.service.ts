@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, type EntityManager, Repository } from 'typeorm';
@@ -38,10 +39,16 @@ import { InventoryActorPolicy } from './inventory-actor-policy.service.js';
 import { InventoryCatalogsService } from './inventory-catalogs.service.js';
 import { InventoryActService } from './inventory-act.service.js';
 import { type ItemViewContext, mergeFrozenReport, toItemView, toProgressView, toReportView } from './inventory-item-view.js';
+import { ControlSignersService } from '../../documents/services/control-signers.service.js';
+import { FeatureFlagsService } from '../../features/services/feature-flags.service.js';
+import { InventoryAssetEffectsService } from './inventory-asset-effects.service.js';
 import { InventorySignerHeadService } from './inventory-signer-head.service.js';
 import { InventoryValuationService } from './inventory-valuation.service.js';
 import { inventorySummary, inventorySummaryUserIds, loadResponsibleNames } from './inventory-summary.js';
 import { localeIsoDate } from '../../../shared/dates/locale-iso-date.js';
+
+export const INVENTORY_ACT_ACCOUNTING_FLAG = 'inventory-act-accounting';
+const ACCOUNTING_SIGN_PERMISSION = 'transfer:sign_accounting:global';
 
 const ENTITY_TYPE = 'INVENTORY';
 
@@ -85,7 +92,52 @@ export class InventoriesService {
     private readonly valuation: InventoryValuationService,
     private readonly act: InventoryActService,
     private readonly signerHead: InventorySignerHeadService,
+    private readonly assetEffects: InventoryAssetEffectsService,
+    private readonly featureFlags: FeatureFlagsService,
+    private readonly controlSigners: ControlSignersService,
   ) {}
+
+  accountingSigners() {
+    return this.controlSigners.holders(ACCOUNTING_SIGN_PERMISSION);
+  }
+
+  requiresAccountingSigner(): boolean {
+    return this.featureFlags.isEnabled(INVENTORY_ACT_ACCOUNTING_FLAG);
+  }
+
+  private async resolveAccountingSigner(chosen?: string): Promise<string | null> {
+    if (!this.requiresAccountingSigner()) {
+      return null;
+    }
+    const holders = await this.accountingSigners();
+    if (holders.length === 0) {
+      throw new ApiException(
+        ErrorCode.ValidationFailed,
+        'No hay firmante de Contabilidad. Active el rol Contabilidad o desactive el parámetro del acta.',
+        [{ field: 'accountingSignerPersonId', message: 'No hay personas elegibles de Contabilidad.' }],
+      );
+    }
+    if (holders.length === 1) {
+      const only = holders[0]?.personId ?? null;
+      if (chosen && chosen !== only) {
+        throw new ApiException(ErrorCode.ValidationFailed, 'Esa persona no firma por Contabilidad.', [
+          { field: 'accountingSignerPersonId', message: 'Elija al firmante elegible de Contabilidad.' },
+        ]);
+      }
+      return only;
+    }
+    if (!chosen) {
+      throw new ApiException(ErrorCode.ValidationFailed, 'Elija quién firma por Contabilidad.', [
+        { field: 'accountingSignerPersonId', message: 'Obligatorio cuando Contabilidad firma el acta.' },
+      ]);
+    }
+    if (!holders.some((holder) => holder.personId === chosen)) {
+      throw new ApiException(ErrorCode.ValidationFailed, 'Esa persona no firma por Contabilidad.', [
+        { field: 'accountingSignerPersonId', message: 'Elija un firmante elegible de Contabilidad.' },
+      ]);
+    }
+    return chosen;
+  }
 
   async list(query: QueryInventoriesDto) {
     const page = Number(query.page) || 1;
@@ -123,12 +175,23 @@ export class InventoriesService {
       order: { verificationResult: 'ASC' },
     });
     const context = await this.valuation.viewContext(inventory, items);
+    const names = await loadResponsibleNames(this.dataSource, inventorySummaryUserIds(inventory));
     return {
-      ...(await this.toSummary(inventory)),
+      ...inventorySummary(inventory, names),
       items: items.map((item) => toItemView(item, context)),
       progress: toProgressView(items),
       report: this.frozenOrLiveReport(inventory, items, context),
       reconciliationBasis: await this.valuation.basis(inventory),
+      fieldCloseEvidence:
+        inventory.fieldCloseSignatureSha256 && inventory.fieldCloseSignedAt && inventory.fieldCloseCapturedBy
+          ? {
+              sha256: inventory.fieldCloseSignatureSha256,
+              signedAt: inventory.fieldCloseSignedAt,
+              capturedBy: inventory.fieldCloseCapturedBy,
+              capturedByName: names.get(inventory.fieldCloseCapturedBy) ?? null,
+              signaturePng: inventory.fieldCloseSignaturePng,
+            }
+          : null,
       ...(await this.act.detail(inventory)),
     };
   }
@@ -241,25 +304,31 @@ export class InventoriesService {
     item.notes = dto.notes ?? item.notes;
     item.verifiedAt = new Date();
     item.verifiedBy = actor.id;
-    await this.assetState.apply({
-      assetId: asset.id,
-      actorId: actor.id,
-      patch: { lastVerifiedAt: item.verifiedAt },
-      movement: {
-        type: MovementType.PhysicalVerification,
-        reason: dto.notes ?? `Verificación ${inventory.code}`,
-        documentReference: inventory.code,
-        executedAt: item.verifiedAt,
-        metadata: {
-          inventoryId: inventory.id,
-          result: item.verificationResult,
-          observedLocationId: actualLocationId,
-          observedCondition: dto.condition,
+    await this.dataSource.transaction(async (manager) => {
+      await this.assetState.apply(
+        {
+          assetId: asset.id,
+          actorId: actor.id,
+          patch: { lastVerifiedAt: item.verifiedAt },
+          movement: {
+            type: MovementType.PhysicalVerification,
+            reason: dto.notes ?? `Verificación ${inventory.code}`,
+            documentReference: inventory.code,
+            executedAt: item.verifiedAt as Date,
+            metadata: {
+              inventoryId: inventory.id,
+              result: item.verificationResult,
+              observedLocationId: actualLocationId,
+              observedCondition: dto.condition,
+            },
+          },
+          alsoWrite: async (writeManager) => {
+            await writeManager.getRepository(PhysicalInventoryItem).save(item);
+          },
         },
-      },
-      alsoWrite: async (manager) => {
-        await manager.getRepository(PhysicalInventoryItem).save(item);
-      },
+        manager,
+      );
+      await this.assetEffects.applyVerificationFindings(inventory, item, actor, manager);
     });
     return toItemView(item, await this.valuation.viewContext(inventory, [item]));
   }
@@ -287,7 +356,10 @@ export class InventoriesService {
     item.notes = dto.notes ?? item.notes;
     item.verifiedAt = new Date();
     item.verifiedBy = actor.id;
-    await this.items.save(item);
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(PhysicalInventoryItem).save(item);
+      await this.assetEffects.applyLost(inventory, item, actor, manager);
+    });
     return toItemView(item, await this.valuation.viewContext(inventory, [item]));
   }
 
@@ -365,6 +437,14 @@ export class InventoriesService {
         throw new ApiException(ErrorCode.InsufficientPermissions);
       }
     }
+    const signature = dto.encargadoSignaturePng?.trim() ?? '';
+    if (!/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(signature) || signature.length < 800) {
+      throw new ApiException(ErrorCode.ValidationFailed, 'La firma del Encargado es obligatoria.', [
+        { field: 'encargadoSignaturePng', message: 'Capture la firma manuscrita del Encargado.' },
+      ]);
+    }
+    const accountingSignerPersonId = await this.resolveAccountingSigner(dto.accountingSignerPersonId);
+    const signatureSha256 = createHash('sha256').update(signature).digest('hex');
     const context = await this.valuation.viewContext(inventory, []);
     await this.dataSource.transaction(async (manager) => {
       await manager.query(
@@ -380,7 +460,22 @@ export class InventoriesService {
       inventory.closedAt = now;
       inventory.closedBy = actor.id;
       inventory.discrepancyReport = report;
+      inventory.fieldCloseSignaturePng = signature;
+      inventory.fieldCloseSignatureSha256 = signatureSha256;
+      inventory.fieldCloseSignedAt = now;
+      inventory.fieldCloseCapturedBy = actor.id;
       const acts = await this.signerHead.applyOnClose(manager, inventory, dto, actor);
+      await this.signerHead.assertNoUnassignedSurplus(inventory, manager);
+      for (const item of items) {
+        await this.assetEffects.applyVerificationFindings(inventory, item, actor, manager);
+      }
+      await this.act.enqueueOnApproval(manager, inventory, actor, accountingSignerPersonId);
+      assertInventoryTransition(InventoryStatus.Closed, InventoryStatus.Reconciled);
+      inventory.status = InventoryStatus.Reconciled;
+      inventory.reconcileRequestedAt = now;
+      inventory.reconcileRequestedBy = actor.id;
+      inventory.reconcileApprovedAt = now;
+      inventory.reconcileApprovedBy = actor.id;
       await manager.getRepository(PhysicalInventory).save(inventory);
       await this.auditLogsRepository.record(
         {
@@ -393,7 +488,27 @@ export class InventoriesService {
           changes: {
             ...toProgressView(items),
             allowUnverified: dto.allowUnverified === true,
+            fieldCloseSignatureSha256: signatureSha256,
+            fieldCloseSignedAt: now.toISOString(),
+            fieldCloseCapturedBy: actor.id,
+            reconciledOnClose: true,
             acts: acts.map((act) => ({ costCenterId: act.costCenterId, signerHeadPersonId: act.signerHeadPersonId })),
+          },
+        },
+        manager,
+      );
+      await this.auditLogsRepository.record(
+        {
+          action: AuditAction.InventoryReconciled,
+          entityType: ENTITY_TYPE,
+          entityId: inventory.id,
+          performedBy: actor.id,
+          ipAddress: null,
+          userAgent: null,
+          changes: {
+            requestedBy: actor.id,
+            approvedBy: actor.id,
+            onClose: true,
           },
         },
         manager,
@@ -424,31 +539,33 @@ export class InventoriesService {
       : toReportView(items, context);
   }
 
-  async requestReconcile(id: string, actor: AuthenticatedUser) {
+  async requestReconcile(id: string, _actor: AuthenticatedUser) {
     const inventory = await this.requireInventory(id);
-    if (inventory.status !== InventoryStatus.Closed) {
-      throw new ApiException(ErrorCode.InvalidState);
+    if (inventory.status === InventoryStatus.Reconciled) {
+      throw new ApiException(
+        ErrorCode.InvalidState,
+        'La toma ya quedó reconciliada al cerrar. Use el acta en Documentos.',
+      );
     }
-    if (inventory.responsibleUserId !== actor.id) {
-      throw new ApiException(ErrorCode.InsufficientPermissions);
-    }
-    if (inventory.reconcileRequestedBy) {
-      throw new ApiException(ErrorCode.InvalidState);
-    }
-    await this.signerHead.assertNoUnassignedSurplus(inventory);
-    inventory.reconcileRequestedAt = new Date();
-    inventory.reconcileRequestedBy = actor.id;
-    await this.inventories.save(inventory);
-    return this.toSummary(inventory);
+    throw new ApiException(
+      ErrorCode.InvalidState,
+      'La reconciliación ocurre al cerrar la auditoría. No hace falta solicitarla.',
+    );
   }
 
   async approveReconcile(id: string, actor: AuthenticatedUser) {
     const inventory = await this.requireInventory(id);
-    if (inventory.status !== InventoryStatus.Closed) {
-      throw new ApiException(ErrorCode.InvalidState);
+    if (inventory.status === InventoryStatus.Reconciled) {
+      throw new ApiException(
+        ErrorCode.InvalidState,
+        'La toma ya quedó reconciliada al cerrar. Use el acta en Documentos.',
+      );
     }
-    if (!inventory.reconcileRequestedBy) {
-      throw new ApiException(ErrorCode.InvalidState);
+    if (inventory.status !== InventoryStatus.Closed || !inventory.reconcileRequestedBy) {
+      throw new ApiException(
+        ErrorCode.InvalidState,
+        'La reconciliación ocurre al cerrar la auditoría.',
+      );
     }
     if (inventory.reconcileRequestedBy === actor.id) {
       throw new ApiException(ErrorCode.InventoryReconcileSod);
@@ -457,24 +574,7 @@ export class InventoriesService {
     await this.dataSource.transaction(async (manager) => {
       await this.signerHead.assertNoUnassignedSurplus(inventory, manager);
       for (const item of items) {
-        if (!item.assetId) {
-          continue;
-        }
-        if (item.verificationResult === VerificationResult.Misplaced) {
-          await this.applyLocation(inventory, item, actor, manager);
-        }
-        if (item.verificationResult === VerificationResult.Missing) {
-          await this.applyLost(inventory, item, actor, manager);
-        }
-        if (
-          (item.verificationResult === VerificationResult.Found ||
-            item.verificationResult === VerificationResult.Misplaced) &&
-          item.actualCondition &&
-          item.expectedCondition &&
-          item.actualCondition !== item.expectedCondition
-        ) {
-          await this.applyCondition(inventory, item, actor, manager);
-        }
+        await this.assetEffects.applyVerificationFindings(inventory, item, actor, manager);
       }
       inventory.status = InventoryStatus.Reconciled;
       inventory.reconcileApprovedAt = new Date();
@@ -492,112 +592,13 @@ export class InventoriesService {
           changes: {
             requestedBy: inventory.reconcileRequestedBy,
             approvedBy: actor.id,
+            legacy: true,
           },
         },
         manager,
       );
     });
     return this.getById(inventory.id);
-  }
-
-  private async applyLocation(
-    inventory: PhysicalInventory,
-    item: PhysicalInventoryItem,
-    actor: AuthenticatedUser,
-    manager: EntityManager,
-  ): Promise<void> {
-    if (!item.assetId || !item.actualLocationId) {
-      return;
-    }
-    const asset = await this.requireAssetWithin(item.assetId, manager);
-    if (asset.locationId === item.actualLocationId) {
-      return;
-    }
-    await this.assetState.apply(
-      {
-        assetId: asset.id,
-        actorId: actor.id,
-        patch: { locationId: item.actualLocationId },
-        movement: {
-          type: MovementType.Relocation,
-          reason: `Reconciliación ${inventory.code}`,
-          documentReference: inventory.code,
-          requestedBy: inventory.reconcileRequestedBy,
-          metadata: { inventoryId: inventory.id },
-        },
-      },
-      manager,
-    );
-  }
-
-  private async applyLost(
-    inventory: PhysicalInventory,
-    item: PhysicalInventoryItem,
-    actor: AuthenticatedUser,
-    manager: EntityManager,
-  ): Promise<void> {
-    if (!item.assetId) {
-      return;
-    }
-    const asset = await this.requireAssetWithin(item.assetId, manager);
-    if (
-      asset.operationalStatus === OperationalStatus.Lost ||
-      asset.operationalStatus === OperationalStatus.WrittenOff
-    ) {
-      return;
-    }
-    await this.assetState.apply(
-      {
-        assetId: asset.id,
-        actorId: actor.id,
-        patch: { operationalStatus: OperationalStatus.Lost },
-        movement: {
-          type: MovementType.PhysicalVerification,
-          reason: `Faltante en ${inventory.code}. Inicia la baja formal.`,
-          documentReference: inventory.code,
-          requestedBy: inventory.reconcileRequestedBy,
-          metadata: { inventoryId: inventory.id, result: 'MISSING' },
-        },
-      },
-      manager,
-    );
-  }
-
-  private async applyCondition(
-    inventory: PhysicalInventory,
-    item: PhysicalInventoryItem,
-    actor: AuthenticatedUser,
-    manager: EntityManager,
-  ): Promise<void> {
-    if (!item.assetId || !item.actualCondition) {
-      return;
-    }
-    await this.assetState.apply(
-      {
-        assetId: item.assetId,
-        actorId: actor.id,
-        patch: { physicalCondition: item.actualCondition },
-        movement: {
-          type: MovementType.ConditionChange,
-          reason: `Reconciliación ${inventory.code}`,
-          documentReference: inventory.code,
-          requestedBy: inventory.reconcileRequestedBy,
-          metadata: { inventoryId: inventory.id },
-        },
-      },
-      manager,
-    );
-  }
-
-  private async requireAssetWithin(
-    id: string,
-    manager: EntityManager,
-  ): Promise<Asset> {
-    const asset = await manager.getRepository(Asset).findOne({ where: { id } });
-    if (!asset) {
-      throw new ApiException(ErrorCode.ResourceNotFound);
-    }
-    return asset;
   }
 
   assertScope(

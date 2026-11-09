@@ -50,7 +50,15 @@ export interface TurnChannel {
   readonly blockedBy: TurnBlocker | null;
 }
 
-export const channelFor = (role: string, candidate: SignerCandidate | null | undefined): TurnChannel => {
+export interface ChannelOptions {
+  readonly skipMfaRequirement?: boolean;
+}
+
+export const channelFor = (
+  role: string,
+  candidate: SignerCandidate | null | undefined,
+  options: ChannelOptions = {},
+): TurnChannel => {
   if (!candidate) {
     return { channel: null, blockedBy: ErrorCode.SignatureSignerUnassigned };
   }
@@ -62,9 +70,13 @@ export const channelFor = (role: string, candidate: SignerCandidate | null | und
     if (!hasUser) {
       return { channel: null, blockedBy: ErrorCode.SignatureNoChannel };
     }
-    return candidate.mfaEnabled
-      ? { channel: 'SESSION_MFA', blockedBy: null }
-      : { channel: null, blockedBy: ErrorCode.SignatureMfaRequired };
+    if (candidate.mfaEnabled) {
+      return { channel: 'SESSION_MFA', blockedBy: null };
+    }
+    if (options.skipMfaRequirement) {
+      return { channel: 'SESSION', blockedBy: null };
+    }
+    return { channel: null, blockedBy: ErrorCode.SignatureMfaRequired };
   }
   if (hasUser) {
     return { channel: candidate.mfaEnabled ? 'SESSION_MFA' : 'SESSION', blockedBy: null };

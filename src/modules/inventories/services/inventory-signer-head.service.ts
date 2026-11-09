@@ -212,7 +212,14 @@ export class InventorySignerHeadService {
         })),
       );
     }
-    return manager.getRepository(PhysicalInventoryAct).save(rows);
+    const repository = manager.getRepository(PhysicalInventoryAct);
+    await repository
+      .createQueryBuilder()
+      .delete()
+      .where('inventory_id = :inventoryId', { inventoryId: inventory.id })
+      .andWhere('document_request_id IS NULL')
+      .execute();
+    return repository.save(rows);
   }
 
   private choices(centers: ReadonlyArray<string>, input: CloseSignerInput): Map<string, string> {

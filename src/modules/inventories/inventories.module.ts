@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module.js';
 import { AppUser } from '../auth/entities/app-user.entity.js';
 import { AssetsModule } from '../assets/assets.module.js';
 import { DocumentsModule } from '../documents/documents.module.js';
+import { FeaturesModule } from '../features/features.module.js';
 import { Asset } from '../assets/entities/asset.entity.js';
 import { CostCenter } from '../cost-centers/entities/cost-center.entity.js';
 import { Location } from '../locations/entities/location.entity.js';
@@ -26,6 +27,7 @@ import { InventoryRemindersJob } from './jobs/inventory-reminders.job.js';
 import { AccountingCutsService } from './services/accounting-cuts.service.js';
 import { InventoriesService } from './services/inventories.service.js';
 import { InventoryActService } from './services/inventory-act.service.js';
+import { InventoryAssetEffectsService } from './services/inventory-asset-effects.service.js';
 import { InventorySignerHeadService } from './services/inventory-signer-head.service.js';
 import { InventorySurplusService } from './services/inventory-surplus.service.js';
 import { InventoryValuationService } from './services/inventory-valuation.service.js';
@@ -46,6 +48,7 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
     AuthModule,
     AssetsModule,
     DocumentsModule,
+    FeaturesModule,
     MovementsModule,
     MailModule,
     NotificationsModule,
@@ -68,6 +71,7 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
   controllers: [InventoryCatalogsController, InventoriesController, AccountingCutsController],
   providers: [
     InventoriesService,
+    InventoryAssetEffectsService,
     InventoryActorPolicy,
     InventoryReadAccess,
     InventoryCatalogsService,

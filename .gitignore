@@ -66,6 +66,8 @@ db/
 storage/documents/
 storage/document-templates/
 storage/import-templates/
+storage/signatures/
+storage/templates/
 
 .claude/*
 !.claude/CLAUDE.md

@@ -49,6 +49,7 @@ import { RbacInheritanceHardening1767225750000 } from './migrations/176722575000
 import { AuthAttemptLockout1767225751000 } from './migrations/1767225751000-auth-attempt-lockout.js';
 import { AuthLockoutIpFactors1767226130000 } from './migrations/1767226130000-auth-lockout-ip-factors.js';
 import { ContabilidadAccountingConfig1767226140000 } from './migrations/1767226140000-contabilidad-accounting-config.js';
+import { InventoryFieldCloseSignature1767226150000 } from './migrations/1767226150000-inventory-field-close-signature.js';
 import { PersonEmailSingleLine1767225760000 } from './migrations/1767225760000-person-email-single-line.js';
 import { InvitationExpiryAndTotpStep1767225770000 } from './migrations/1767225770000-invitation-expiry-and-totp-step.js';
 import { EncryptMfaSecrets1767225771000 } from './migrations/1767225771000-encrypt-mfa-secrets.js';
@@ -173,4 +174,5 @@ export const MIGRATIONS: ReadonlyArray<MigrationClass> = [
   AssetPhotoFiles1767226120000,
   AuthLockoutIpFactors1767226130000,
   ContabilidadAccountingConfig1767226140000,
+  InventoryFieldCloseSignature1767226150000,
 ];

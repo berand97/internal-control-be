@@ -38,10 +38,10 @@ export class InventorySurplusService {
     if (!inventory) {
       throw new ApiException(ErrorCode.ResourceNotFound);
     }
-    if (inventory.status !== InventoryStatus.Closed) {
+    if (inventory.status !== InventoryStatus.InProgress) {
       throw new ApiException(
         ErrorCode.InvalidState,
-        'Los sobrantes se resuelven con la toma cerrada y antes de aprobar la conciliación.',
+        'Los sobrantes se resuelven con la toma en curso, antes de cerrar.',
       );
     }
     await this.actorPolicy.assertCanOperate(inventory, actor);
@@ -68,7 +68,7 @@ export class InventorySurplusService {
       const [current] = (await manager.query('SELECT status FROM physical_inventory WHERE id = $1 FOR SHARE', [
         inventory.id,
       ])) as Array<{ status: InventoryStatus }>;
-      if (current?.status !== InventoryStatus.Closed) {
+      if (current?.status !== InventoryStatus.InProgress) {
         throw new ApiException(ErrorCode.InvalidState);
       }
       this.assertResolvable(found);
@@ -143,10 +143,10 @@ export class InventorySurplusService {
     if (!inventory) {
       throw new ApiException(ErrorCode.ResourceNotFound);
     }
-    if (inventory.status !== InventoryStatus.Closed) {
+    if (inventory.status !== InventoryStatus.InProgress) {
       throw new ApiException(
         ErrorCode.InvalidState,
-        'El centro de un sobrante se elige con la toma cerrada y antes de aprobar la conciliación.',
+        'El centro de un sobrante se elige con la toma en curso, antes de cerrar.',
       );
     }
     if (inventory.scopeType === InventoryScopeType.CostCenter) {
@@ -166,7 +166,7 @@ export class InventorySurplusService {
       const [current] = (await manager.query('SELECT status FROM physical_inventory WHERE id = $1 FOR SHARE', [
         inventory.id,
       ])) as Array<{ status: InventoryStatus }>;
-      if (current?.status !== InventoryStatus.Closed) {
+      if (current?.status !== InventoryStatus.InProgress) {
         throw new ApiException(ErrorCode.InvalidState);
       }
       this.assertResolvable(found);

@@ -328,6 +328,25 @@ export class CloseInventoryDto {
   @IsBoolean()
   readonly allowUnverified?: boolean;
 
+  @ApiProperty({
+    description:
+      'Firma manuscrita del Encargado (data URL PNG base64) como evidencia de conformidad del cierre de la primera fase. Obligatoria para trazabilidad (ISO 27001).',
+  })
+  @IsString()
+  @MinLength(800)
+  @MaxLength(600_000)
+  @Matches(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/)
+  readonly encargadoSignaturePng!: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Firmante de Contabilidad del acta OCI-21-37. Obligatorio si el parámetro inventory-act-accounting está activo.',
+  })
+  @IsOptional()
+  @IsUUID('all')
+  readonly accountingSignerPersonId?: string;
+
   @ApiPropertyOptional({
     format: 'uuid',
     description:

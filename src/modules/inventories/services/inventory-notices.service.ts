@@ -248,21 +248,26 @@ export class InventoryNoticesService {
     const dates = `Del ${formatDay(inventory.plannedStartDate)} al ${formatDay(inventory.plannedEndDate)}`;
     switch (kind) {
       case 'SCHEDULED':
-        return { title: `Toma física programada: ${inventory.code}`, body: `${inventory.name}\n${audience.scopeLabel}\n${dates}` };
+        return {
+          title: `Toma física programada: ${inventory.code}`,
+          body: `${audience.scopeLabel}\n${dates}`,
+        };
       case 'RESCHEDULED':
         return {
           title: `Toma física reprogramada: ${inventory.code}`,
-          body: `${inventory.name}\n${audience.scopeLabel}\nNuevas fechas: ${dates.toLowerCase()}\nMotivo: ${extra.reason ?? ''}`,
+          body: `${audience.scopeLabel}\nNuevas fechas: ${dates.toLowerCase()}${
+            extra.reason ? `\nMotivo: ${extra.reason}` : ''
+          }`,
         };
       case 'REMINDER':
         return {
           title: `Recordatorio: la toma ${inventory.code} empieza ${whenText(extra.daysUntilStart ?? 0)}`,
-          body: `${inventory.name}\n${audience.scopeLabel}\n${dates}`,
+          body: `${audience.scopeLabel}\n${dates}`,
         };
       case 'CANCELLED':
         return {
           title: `Toma física cancelada: ${inventory.code}`,
-          body: `${inventory.name}\n${audience.scopeLabel}\nMotivo: ${extra.reason ?? ''}`,
+          body: `${audience.scopeLabel}${extra.reason ? `\nMotivo: ${extra.reason}` : ''}`,
         };
     }
   }

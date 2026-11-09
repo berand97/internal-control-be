@@ -1394,7 +1394,8 @@ export class DocumentEngineService {
       return blocked(ErrorCode.SignatureSessionInvalid);
     }
     const mfaSession = await this.mfaAccount.isMfaSession(actor);
-    if (requiresMfa(slot.role) && !mfaSession) {
+    const skipMfa = this.config.getOrThrow('auth', { infer: true }).skipMfaAtLogin;
+    if (requiresMfa(slot.role) && !mfaSession && !skipMfa) {
       return blocked(ErrorCode.SignatureMfaRequired);
     }
     return { code: null, method: mfaSession ? 'SESSION_MFA' : 'SESSION' };

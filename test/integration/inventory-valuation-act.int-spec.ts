@@ -17,7 +17,7 @@ import { formatMoney } from '../../src/modules/inventories/domain/inventory-act.
 import { addDays } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import type { StorageDriver } from '../../src/config/configuration.js';
 import { StorageService } from '../../src/shared/storage/storage.service.js';
-import { assignTestHead, createPermissionRole, openTestSession, scalar, useSharedStorage, withTemporaryHead } from './helpers.js';
+import { assignTestHead, createPermissionRole, openTestSession, scalar, useSharedStorage, withTemporaryHead, inventoryCloseBody } from './helpers.js';
 import { DocxTextPdfConverter } from './pdf-text.js';
 import { conform, type Schema } from './openapi-conform.js';
 import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
@@ -214,13 +214,10 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
   };
 
   const closeAndApprove = async (id: string, responsible: Who) => {
-    const closed = await post(responsible, `/${id}/close`, { allowUnverified: true });
+    const closed = await post(responsible, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
-    expect((await post(responsible, `/${id}/reconcile`)).status).toBe(200);
-    const approved = await post(approver, `/${id}/reconcile/approve`);
-    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
-    expectConforms('post', '/api/v1/inventories/{id}/reconcile/approve', 200, approved.body);
-    return approved.body.data as { status: string; act: Record<string, unknown> };
+    expect(closed.body.data.status).toBe('RECONCILED');
+    return closed.body.data as { status: string; act: Record<string, unknown>; warnings: unknown[] };
   };
 
   beforeAll(async () => {
@@ -371,7 +368,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expectConforms('get', '/api/v1/inventories/{id}/report', 200, report.body);
     expect(report.body.data.reconciliationBasis.kind).toBe('ACCOUNTING_CUT');
 
-    expect((await post(director, `/${id}/close`, { allowUnverified: true })).status).toBe(200);
+    expect((await post(director, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }))).status).toBe(200);
     const late = await http().put(`/api/v1/inventories/${id}/accounting-cut`).set(as(director)).send({ accountingCutId: null });
     expect(late.status).toBe(406);
     expect(errorCode(late)).toBe('INVALID_STATE');
@@ -408,7 +405,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(view.act).toMatchObject({ generation: 'NONE', reason: null, retryable: false });
   });
 
-  it('sobrante → activo: con la toma cerrada, en el centro de la toma, con su movimiento en una transacción; LOST no pasa y un fallo no deja nada', async () => {
+  it('sobrante → activo: con la toma en curso, en el centro de la toma, con su movimiento en una transacción; LOST no pasa y un fallo no deja nada', async () => {
     const centerId = await center('Centro sobrantes');
     await newAsset(centerId, 100);
     const lostAsset = await newAsset(await center('Centro del perdido'), 90);
@@ -431,12 +428,6 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       acquisitionDate: '2024-02-10',
       acquisitionPrice: 350000,
     };
-    const early = await post(director, `/${id}/items/${surplusId}/resolve-surplus`, { action: 'CREATE_ASSET', reason: 'Se registra', asset });
-    expect(early.status).toBe(406);
-    expect(errorCode(early)).toBe('INVALID_STATE');
-
-    expect((await post(director, `/${id}/close`, { allowUnverified: true })).status).toBe(200);
-
     const wasLost = await post(director, `/${id}/items/${lost.body.data.id}/resolve-surplus`, {
       action: 'CREATE_ASSET',
       reason: 'Se registra',
@@ -528,6 +519,10 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
 
     const again = await post(director, `/${id}/items/${surplusId}/resolve-surplus`, { action: 'CREATE_ASSET', reason: 'Otra vez', asset });
     expect(errorCode(again)).toBe('INVENTORY_SURPLUS_NOT_RESOLVABLE');
+
+    expect((await post(director, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }))).status).toBe(200);
+    const afterClose = await post(director, `/${id}/items/${surplusId}/resolve-surplus`, { action: 'LEAVE_UNRESOLVED', reason: 'Tarde' });
+    expect([afterClose.status, errorCode(afterClose)]).toEqual([406, 'INVALID_STATE']);
   });
 
   it('aprobar sin plantilla: la toma queda RECONCILED y el acta falla con TEMPLATE_NOT_ACTIVE; con el formato sin código SGC queda NOT_ENQUEUED y se encola después', async () => {
@@ -598,7 +593,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
         [orphan],
       )) as Array<{ payload: { signers: Record<string, string>; responsiblePersonId: string; costCenterId: string } }>;
       expect(payload?.payload).toMatchObject({
-        signers: { AUDITA: approver.personId },
+        signers: { AUDITA: responsible.personId },
         responsiblePersonId: otherHead.personId,
         costCenterId: otherCenter,
       });
@@ -675,21 +670,21 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(text).toContain('S|Mesa sin placa|Sin decisión|');
     expect(text).toContain('|Encontrado|Activos en uso|');
     expect(text).toContain('|No encontrado|Activos no encontrados|Sin dato|');
-    expect(text).toContain('FIRMAS|Jefa Valoración|Aprobador Valoración|');
+    expect(text).toContain('FIRMAS|Jefa Valoración|Responsable Valoración|');
   });
-  it('separación de funciones: si quien aprueba es el jefe que firma como ENCARGADO, el acta queda sin encolar hasta indicar un sustituto de Control Interno', async () => {
+  it('separación de funciones: si quien cierra queda como ENCARGADO, el acta queda sin encolar hasta indicar un sustituto de Control Interno', async () => {
     const centerId = await center('Centro con conflicto de firmas');
     await newAsset(centerId, 10);
-    await headOf(centerId, approver);
     const id = await started(centerId);
-    expect((await post(director, `/${id}/close`, { allowUnverified: true })).status).toBe(200);
-    const reconcile = await post(director, `/${id}/reconcile`);
-    expect(reconcile.status, JSON.stringify(reconcile.body)).toBe(200);
-    const approved = await post(approver, `/${id}/reconcile/approve`);
-    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
-    expect(approved.body.data.status).toBe('RECONCILED');
-    expect(approved.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
-    expect(String(approved.body.data.act.message)).toMatch(/^La misma persona firma como .+\. Indique un sustituto para Control Interno\.$/u);
+    const closed = await post(director, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }));
+    expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+    expect(closed.body.data.status).toBe('RECONCILED');
+    expect(closed.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'NO_COST_CENTER_HEAD', retryAction: 'ENQUEUE' });
+
+    await headOf(centerId, director);
+    const assigned = await http().put(`/api/v1/inventories/${id}/signer-head`).set(as(director)).send({ signerHeadPersonId: director.personId });
+    expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
+    expect(assigned.body.data).toMatchObject({ signerHead: { personId: director.personId }, actIssuable: true });
 
     const duplicated = await post(director, `/${id}/act/enqueue`);
     expect([duplicated.status, duplicated.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
@@ -699,13 +694,13 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     );
     const withoutRole = await person('SinRol', null);
     const invalid = await post(director, `/${id}/act/enqueue`, {
-      signerSubstitutions: { AUDITA: { personId: withoutRole.personId, reason: 'El responsable aprobó la conciliación' } },
+      signerSubstitutions: { AUDITA: { personId: withoutRole.personId, reason: 'Quien cerró firma también como Encargado' } },
     });
     expect([invalid.status, invalid.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_SUBSTITUTE_INVALID']);
     expect(invalid.body.error.message).toMatch(/^El sustituto de .+ no tiene permiso para firmar actas por Control Interno\.$/u);
-    expect((await detail(id)).act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
+    expect((await detail(id)).act).toMatchObject({ generation: 'NOT_ENQUEUED', retryAction: 'ENQUEUE' });
     const enqueued = await post(director, `/${id}/act/enqueue`, {
-      signerSubstitutions: { AUDITA: { personId: director.personId, reason: 'El responsable aprobó la conciliación' } },
+      signerSubstitutions: { AUDITA: { personId: approver.personId, reason: 'Quien cerró firma también como Encargado' } },
     });
     expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
     expect(enqueued.body.data).toMatchObject({ generation: 'PENDING' });
@@ -717,32 +712,34 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       `SELECT data->'firmante' FROM document WHERE id = $1`,
       [generated.act['documentId']],
     );
-    expect(firmante['audita']?.sustitucion).toMatchObject({ motivo: 'El responsable aprobó la conciliación', rol: 'Control Interno' });
+    expect(firmante['audita']?.sustitucion).toMatchObject({ motivo: 'Quien cerró firma también como Encargado', rol: 'Control Interno' });
     expect(firmante['responsable']?.nombre).toBe(firmante['audita']?.sustitucion?.['nombre']);
   });
 
-  it('regla del firmante de Control Interno: si quien aprueba no tiene act:sign_control:global, la conciliación sigue y el acta queda sin encolar hasta un sustituto', async () => {
-    const reconciler = await person(
-      'Conciliadora',
-      await createPermissionRole(dataSource, ['inventory:reconcile:global', 'inventory:read:global'], 'IT_CONCILIA'),
+  it('regla del firmante de Control Interno: si quien cierra no tiene act:sign_control:global, el acta queda sin encolar hasta un sustituto', async () => {
+    const closer = await person(
+      'Cerradora',
+      await createPermissionRole(
+        dataSource,
+        ['inventory:execute:global', 'inventory:create:global', 'inventory:read:global'],
+        'IT_CIERRA_SIN_FIRMA',
+      ),
     );
-    const centerId = await center('Centro con aprobador sin permiso de firma');
+    const centerId = await center('Centro con cerrador sin permiso de firma');
     await newAsset(centerId, 10);
     await headOf(centerId, await person('Jefe', null));
-    const id = await started(centerId);
-    expect((await post(director, `/${id}/close`, { allowUnverified: true })).status).toBe(200);
-    expect((await post(director, `/${id}/reconcile`)).status).toBe(200);
-    const approved = await post(reconciler, `/${id}/reconcile/approve`);
+    const id = await started(centerId, closer);
+    const approved = await post(closer, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
     expect(approved.body.data.status).toBe('RECONCILED');
     expect(approved.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
     expect(String(approved.body.data.act.message)).toContain('necesita una persona con permiso para firmar actas por Control Interno');
 
-    const notEligible = await post(director, `/${id}/act/enqueue`);
+    const notEligible = await post(closer, `/${id}/act/enqueue`);
     expect([notEligible.status, notEligible.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
     expect(notEligible.body.error.details).toEqual([{ field: 'signers.AUDITA', message: 'Esta persona no tiene permiso para firmar actas por Control Interno.' }]);
-    const enqueued = await post(director, `/${id}/act/enqueue`, {
-      signerSubstitutions: { AUDITA: { personId: approver.personId, reason: 'Quien aprobó no firma por Control Interno' } },
+    const enqueued = await post(closer, `/${id}/act/enqueue`, {
+      signerSubstitutions: { AUDITA: { personId: approver.personId, reason: 'Quien cerró no firma por Control Interno' } },
     });
     expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
     expect(enqueued.body.data).toMatchObject({ generation: 'PENDING' });
@@ -758,10 +755,10 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     const put = (who: Who, path: string, body: Record<string, unknown>) =>
       http().put(`/api/v1/inventories${path}`).set(as(who)).send(body);
     const approve = async (id: string) => {
-      expect((await post(director, `/${id}/reconcile`)).status).toBe(200);
-      const approved = await post(approver, `/${id}/reconcile/approve`);
-      expect(approved.status, JSON.stringify(approved.body)).toBe(200);
-      return approved.body.data as { act: Record<string, unknown>; warnings: unknown[] };
+      const detail = await http().get(`/api/v1/inventories/${id}`).set(as(director));
+      expect(detail.status).toBe(200);
+      expect(detail.body.data.status).toBe('RECONCILED');
+      return detail.body.data as { act: Record<string, unknown>; warnings: unknown[] };
     };
 
     const single = await center('Centro con un jefe');
@@ -769,7 +766,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     const onlyHead = await headOf(single, await person('Único', null));
     const assistant = await person('Asistente', null);
     const first = await started(single);
-    const closed = await post(director, `/${first}/close`, { allowUnverified: true, attendedByPersonId: assistant.personId });
+    const closed = await post(director, `/${first}/close`, inventoryCloseBody({ allowUnverified: true, attendedByPersonId: assistant.personId }));
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expectConforms('post', '/api/v1/inventories/{id}/close', 200, closed.body);
     expect(closed.body.data).toMatchObject({
@@ -795,24 +792,24 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     for (const row of candidates.body.data as Array<Record<string, unknown>>) {
       expect(Object.keys(row).sort()).toEqual(['name', 'personId']);
     }
-    const unchosen = await post(director, `/${second}/close`, { allowUnverified: true });
+    const unchosen = await post(director, `/${second}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect([unchosen.status, unchosen.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
     expect(unchosen.body.error.details).toEqual([{ field: 'signerHeadPersonId', message: expect.any(String) }]);
-    const notHead = await post(director, `/${second}/close`, { allowUnverified: true, signerHeadPersonId: assistant.personId });
+    const notHead = await post(director, `/${second}/close`, inventoryCloseBody({ allowUnverified: true, signerHeadPersonId: assistant.personId }));
     expect([notHead.status, notHead.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
-    const both = await post(director, `/${second}/close`, {
+    const both = await post(director, `/${second}/close`, inventoryCloseBody({
       allowUnverified: true,
       signerHeadPersonId: headB.personId,
       attendedByPersonId: assistant.personId,
       attendedByName: 'Auxiliar de turno',
-    });
+    }));
     expect([both.status, both.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
     expect(await scalar<string>(dataSource, 'SELECT status FROM physical_inventory WHERE id = $1', [second])).toBe('IN_PROGRESS');
-    const chosen = await post(director, `/${second}/close`, {
+    const chosen = await post(director, `/${second}/close`, inventoryCloseBody({
       allowUnverified: true,
       signerHeadPersonId: headB.personId,
       attendedByName: 'Auxiliar de turno',
-    });
+    }));
     expect(chosen.status, JSON.stringify(chosen.body)).toBe(200);
     expect(chosen.body.data).toMatchObject({
       signerHead: { personId: headB.personId },
@@ -826,10 +823,10 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     const headless = await center('Centro sin jefe');
     await newAsset(headless, 10);
     const third = await started(headless);
-    const warned = await post(director, `/${third}/close`, { allowUnverified: true });
+    const warned = await post(director, `/${third}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(warned.status, JSON.stringify(warned.body)).toBe(200);
     expect(warned.body.data).toMatchObject({
-      status: 'CLOSED',
+      status: 'RECONCILED',
       signerHead: null,
       actIssuable: false,
       warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', message: expect.stringContaining('no tiene jefe. Su acta no se podrá emitir') }],
@@ -937,49 +934,12 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     );
     expect((await http().get(`/api/v1/inventories/${id}/head-candidates`).set(as(director)).expect(200)).body.data).toEqual([]);
 
-    const unchosen = await post(director, `/${id}/close`, { allowUnverified: true });
-    expect([unchosen.status, unchosen.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
-    expect(unchosen.body.error.details).toEqual([{ field: `signerHeads.${systems}`, message: expect.any(String) }]);
-    const legacy = await post(director, `/${id}/close`, { allowUnverified: true, signerHeadPersonId: systemsB.personId });
-    expect([legacy.status, legacy.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
-    const wrongCenter = await post(director, `/${id}/close`, {
-      allowUnverified: true,
-      signerHeads: [{ costCenterId: systems, personId: deanHead.personId }],
-    });
-    expect([wrongCenter.status, wrongCenter.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
-    const closed = await post(director, `/${id}/close`, {
+    const blockedClose = await post(director, `/${id}/close`, inventoryCloseBody({
       allowUnverified: true,
       signerHeads: [{ costCenterId: systems, personId: systemsB.personId }],
-      attendedByName: 'Auxiliar del laboratorio',
-      attendedBy: [{ costCenterId: systems, name: 'Técnico de sistemas' }],
-    });
-    expect(closed.status, JSON.stringify(closed.body)).toBe(200);
-    expectConforms('post', '/api/v1/inventories/{id}/close', 200, closed.body);
-    const acts = (body: { acts: Array<Record<string, unknown>> }) =>
-      new Map(body.acts.map((act) => [(act['costCenter'] as { id: string }).id, act]));
-    const atClose = acts(closed.body.data);
-    expect(atClose.size).toBe(3);
-    expect(closed.body.data).toMatchObject({
-      act: null,
-      signerHead: null,
-      actIssuable: false,
-      unassignedItems: 2,
-      warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', costCenterId: maintenance, message: expect.stringContaining('no tiene jefe. Su acta no se podrá emitir') }],
-    });
-    expect(atClose.get(faculty)).toMatchObject({
-      costCenter: { id: faculty, code: await code(faculty), name: 'Facultad' },
-      signerHead: { personId: deanHead.personId },
-      attendedBy: { personId: null, name: 'Auxiliar del laboratorio' },
-      issuable: true,
-      warnings: [],
-      generation: 'NONE',
-    });
-    expect(atClose.get(systems)).toMatchObject({
-      signerHead: { personId: systemsB.personId },
-      attendedBy: { personId: null, name: 'Técnico de sistemas' },
-      issuable: true,
-    });
-    expect(atClose.get(maintenance)).toMatchObject({ signerHead: null, issuable: false, warnings: [{ costCenterId: maintenance }] });
+    }));
+    expect([blockedClose.status, blockedClose.body.error.code]).toEqual([409, 'INVENTORY_UNASSIGNED_SURPLUS']);
+    expect(blockedClose.body.error.details).toEqual([{ field: 'unassignedSurplus', message: '2' }]);
 
     const resolved = await post(director, `/${id}/items/${chair.body.data.id as string}/resolve-surplus`, {
       action: 'CREATE_ASSET',
@@ -996,12 +956,9 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(resolved.status, JSON.stringify(resolved.body)).toBe(200);
     expect(((await detail(id)) as unknown as { unassignedItems: number }).unassignedItems).toBe(1);
 
-    const blockedReconcile = await post(director, `/${id}/reconcile`);
-    expect([blockedReconcile.status, blockedReconcile.body.error.code]).toEqual([409, 'INVENTORY_UNASSIGNED_SURPLUS']);
-    expect(blockedReconcile.body.error.details).toEqual([{ field: 'unassignedSurplus', message: '1' }]);
-    expect(blockedReconcile.body.error.message).toContain('1 sobrante sin centro de costo');
-    const boxId = ((await detail(id)).items as unknown as Array<{ id: string; notes: string | null }>)
-      .find((item) => item.notes === 'Caja sin placa')?.id as string;
+    const boxId = ((await detail(id)).items as unknown as Array<{ id: string; notes: string | null }>).find(
+      (item) => item.notes === 'Caja sin placa',
+    )?.id as string;
     const leftWithoutCenter = await post(director, `/${id}/items/${boxId}/resolve-surplus`, { action: 'LEAVE_UNRESOLVED', reason: 'Sin datos' });
     expect([leftWithoutCenter.status, leftWithoutCenter.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
     expect(leftWithoutCenter.body.error.details).toEqual([expect.objectContaining({ field: 'costCenterId' })]);
@@ -1022,14 +979,56 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     )) as Array<{ changes: Record<string, unknown> }>;
     expect(centerAudit?.changes).toEqual({ itemId: boxId, surplusCostCenterId: { from: null, to: systems } });
 
-    expect((await post(director, `/${id}/reconcile`)).status).toBe(200);
-    const approved = await post(approver, `/${id}/reconcile/approve`);
-    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
-    expectConforms('post', '/api/v1/inventories/{id}/reconcile/approve', 200, approved.body);
-    const afterApproval = acts(approved.body.data);
-    expect(afterApproval.get(faculty)).toMatchObject({ generation: 'PENDING', reason: null });
-    expect(afterApproval.get(systems)).toMatchObject({ generation: 'PENDING', reason: null });
+    const unchosen = await post(director, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }));
+    expect([unchosen.status, unchosen.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect(unchosen.body.error.details).toEqual([{ field: `signerHeads.${systems}`, message: expect.any(String) }]);
+    const legacy = await post(director, `/${id}/close`, inventoryCloseBody({ allowUnverified: true, signerHeadPersonId: systemsB.personId }));
+    expect([legacy.status, legacy.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    const wrongCenter = await post(director, `/${id}/close`, inventoryCloseBody({
+      allowUnverified: true,
+      signerHeads: [{ costCenterId: systems, personId: deanHead.personId }],
+    }));
+    expect([wrongCenter.status, wrongCenter.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    const closed = await post(director, `/${id}/close`, inventoryCloseBody({
+      allowUnverified: true,
+      signerHeads: [{ costCenterId: systems, personId: systemsB.personId }],
+      attendedByName: 'Auxiliar del laboratorio',
+      attendedBy: [{ costCenterId: systems, name: 'Técnico de sistemas' }],
+    }));
+    expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+    expectConforms('post', '/api/v1/inventories/{id}/close', 200, closed.body);
+    const acts = (body: { acts: Array<Record<string, unknown>> }) =>
+      new Map(body.acts.map((act) => [(act['costCenter'] as { id: string }).id, act]));
+    const afterApproval = acts(closed.body.data);
+    expect(afterApproval.size).toBe(3);
+    expect(closed.body.data).toMatchObject({
+      status: 'RECONCILED',
+      act: null,
+      signerHead: null,
+      actIssuable: false,
+      unassignedItems: 0,
+      warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', costCenterId: maintenance, message: expect.stringContaining('no tiene jefe. Su acta no se podrá emitir') }],
+    });
+    expect(afterApproval.get(faculty)).toMatchObject({
+      costCenter: { id: faculty, code: await code(faculty), name: 'Facultad' },
+      signerHead: { personId: deanHead.personId },
+      attendedBy: { personId: null, name: 'Auxiliar del laboratorio' },
+      issuable: true,
+      warnings: [],
+      generation: 'PENDING',
+      reason: null,
+    });
+    expect(afterApproval.get(systems)).toMatchObject({
+      signerHead: { personId: systemsB.personId },
+      attendedBy: { personId: null, name: 'Técnico de sistemas' },
+      issuable: true,
+      generation: 'PENDING',
+      reason: null,
+    });
     expect(afterApproval.get(maintenance)).toMatchObject({
+      signerHead: null,
+      issuable: false,
+      warnings: [{ costCenterId: maintenance }],
       generation: 'NOT_ENQUEUED',
       reason: 'NO_COST_CENTER_HEAD',
       retryable: true,
@@ -1069,7 +1068,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(facultyText).toContain(`H|ANE|1|${formatMoney(500)}|33,33 %|`);
     expect(facultyText).toContain('S|Silla sin placa|Registrado como activo|');
     expect(facultyText).not.toContain('Caja sin placa');
-    expect(facultyText).toContain('FIRMAS|Decana Valoración|Aprobador Valoración|');
+    expect(facultyText).toContain('FIRMAS|Decana Valoración|Directora Valoración|');
 
     const systemsText = await text(systemsAct['documentId']);
     expect(systemsText).toContain(`CENTRO|${await code(systems)}|Técnico de sistemas|${String(systemsAct['number'])}|`);
@@ -1077,7 +1076,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(systemsText).toContain(`H|AU|1|${formatMoney(300)}|100,00 %|`);
     expect(systemsText).toContain('S|Caja sin placa|Sin decisión|');
     expect(systemsText).not.toContain('Silla sin placa');
-    expect(systemsText).toContain('FIRMAS|Jefe Sistemas Valoración|Aprobador Valoración|');
+    expect(systemsText).toContain('FIRMAS|Jefe Sistemas Valoración|Directora Valoración|');
 
     const maintenanceId = (generated.get(maintenance) as { id: string }).id;
     const blocked = await post(director, `/${id}/acts/${maintenance}/enqueue`);
@@ -1110,7 +1109,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     const maintenanceText = await text(maintenanceAct['documentId']);
     expect(maintenanceText).toContain('TOTALES|1|1|0|0|');
     expect(maintenanceText).toContain(`H|AU|1|${formatMoney(200)}|100,00 %|`);
-    expect(maintenanceText).toContain('FIRMAS|Jefe Mantenimiento Valoración|Aprobador Valoración|');
+    expect(maintenanceText).toContain('FIRMAS|Jefe Mantenimiento Valoración|Directora Valoración|');
     expect(
       await scalar<number>(dataSource, 'SELECT count(*)::int FROM physical_inventory_act WHERE inventory_id = $1', [id]),
     ).toBe(3);

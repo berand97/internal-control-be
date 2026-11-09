@@ -85,6 +85,18 @@ export class PhysicalInventory {
   @Column({ name: 'snapshot_taken_at', type: 'timestamptz', nullable: true })
   snapshotTakenAt!: Date | null;
 
+  @Column({ name: 'field_close_signature_png', type: 'text', nullable: true })
+  fieldCloseSignaturePng!: string | null;
+
+  @Column({ name: 'field_close_signature_sha256', type: 'varchar', length: 64, nullable: true })
+  fieldCloseSignatureSha256!: string | null;
+
+  @Column({ name: 'field_close_signed_at', type: 'timestamptz', nullable: true })
+  fieldCloseSignedAt!: Date | null;
+
+  @Column({ name: 'field_close_captured_by', type: 'uuid', nullable: true })
+  fieldCloseCapturedBy!: string | null;
+
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

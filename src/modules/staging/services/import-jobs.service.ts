@@ -385,11 +385,14 @@ export class ImportJobsService {
     )) as Array<{ file_name: string; sheet_name: string }>;
     const target = TARGET_LABEL[claim.target];
     const file = source ? `${source.file_name} · hoja ${source.sheet_name}` : '';
+    const quarantined = result
+      ? Object.values(result.quarantined).reduce((total, count) => total + count, 0)
+      : 0;
     const summary = result
       ? [
           `Insertados: ${result.inserted}`,
           `Omitidos por ya existir: ${result.skippedAlreadyPresent}`,
-          `En cuarentena: ${Object.values(result.quarantined).reduce((total, count) => total + count, 0)}`,
+          `En cuarentena: ${quarantined}`,
           ...quarantineLines(result.quarantined),
           ...(result.costCentersCreated > 0 ? [`Centros de costo creados: ${result.costCentersCreated}`] : []),
           ...(result.costCenterStructure
@@ -404,12 +407,21 @@ export class ImportJobsService {
           ...(claim.target === 'ASSETS' ? [`Movimientos de registro: ${result.registrationMovements}`] : []),
         ].join('\n')
       : 'La importación se detuvo sin terminar. Reinténtela desde el asistente de importación sin volver a subir el archivo. Lo que ya se guardó no se duplica.';
+    const inAppBody = result
+      ? [
+          file,
+          `Insertados: ${result.inserted} · Omitidos: ${result.skippedAlreadyPresent} · En cuarentena: ${quarantined}`,
+          ...quarantineLines(result.quarantined).slice(0, 1),
+        ]
+          .filter((line) => line !== '')
+          .join('\n')
+      : `${file}\nLa importación se detuvo sin terminar.`.trim();
     const state = outcome === 'SUCCEEDED' ? 'terminada' : 'fallida';
     await this.notifications.create(manager, {
       recipientUserId: claim.requestedBy,
       type: outcome === 'SUCCEEDED' ? 'IMPORT_FINISHED' : 'IMPORT_FAILED',
       title: `Importación de ${target} ${state}`,
-      body: `${file}\n${summary}`.trim(),
+      body: inAppBody,
       entityType: IMPORT_JOB_ENTITY,
       entityId: claim.id,
     });

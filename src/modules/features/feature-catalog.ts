@@ -137,6 +137,14 @@ export const FEATURE_CATALOG: ReadonlyArray<FeatureDefinition> = [
     pathPrefixes: ['/inventories'],
   },
   {
+    code: 'inventory-act-accounting',
+    label: 'Acta OCI: firmante Contabilidad',
+    core: false,
+    resourceTypes: [],
+    pathPrefixes: [],
+    defaultEnabled: false,
+  },
+  {
     code: 'depreciation',
     label: 'Depreciación',
     core: false,
