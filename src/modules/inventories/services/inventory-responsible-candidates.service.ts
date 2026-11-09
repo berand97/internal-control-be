@@ -14,7 +14,6 @@ import { USER_DISPLAY_NAME_SQL } from './inventory-summary.js';
 
 const EXECUTE_PERMISSION = 'inventory:execute:global';
 
-/** Roles de Control Interno: el auditor responsable debe pertenecer a esta oficina, no al área auditada. */
 const CONTROL_INTERNO_ROLES = ['INTERNAL_CONTROL_DIRECTOR', 'AUDITOR'] as const;
 
 const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
