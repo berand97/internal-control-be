@@ -20,7 +20,6 @@ import {
 import {
   CENTER_HEADERS,
   CENTER_SHEET,
-  type CenterRowInput,
   isBlankCenterRow,
   isBlankUnitRow,
   normalizeText,
@@ -35,7 +34,6 @@ import {
   UNIT_HEADERS,
   UNIT_SHEET,
   UNIT_TYPE_OPTIONS,
-  type UnitRowInput,
 } from './org-chart.types.js';
 
 export const IGNORED_CENTER_SHEET_WARNING = 'No se leyó la hoja Centros de costo. Los centros de costo se editan en su propia pantalla.';
