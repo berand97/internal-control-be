@@ -1,9 +1,11 @@
 import type { TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import type { AuthenticatedUser } from '../../src/common/types/authenticated-user.type.js';
+import { addDays } from '../../src/modules/inventories/domain/inventory-schedule.js';
 import { InventoryScopeType } from '../../src/modules/inventories/enums/inventory-scope.js';
 import { InventoriesModule } from '../../src/modules/inventories/inventories.module.js';
 import { InventorySchedulesService } from '../../src/modules/inventories/services/inventory-schedules.service.js';
+import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 import { StorageModule } from '../../src/shared/storage/storage.module.js';
 import { bootModules, createActor, scalar } from './helpers.js';
 
@@ -25,6 +27,9 @@ describe('Código de toma física (PostgreSQL real)', () => {
   });
 
   it('dos tomas consecutivas reciben códigos distintos y correlativos', async () => {
+    const today = localeIsoDate(new Date());
+    const plannedStartDate = addDays(today, 30);
+    const plannedEndDate = addDays(today, 45);
     const create = async (code: string) => {
       const costCenterId = await scalar<string>(
         dataSource,
@@ -36,8 +41,8 @@ describe('Código de toma física (PostgreSQL real)', () => {
           name: `Toma ${code}`,
           scope: InventoryScopeType.CostCenter,
           scopeId: costCenterId,
-          plannedStartDate: '2026-10-01',
-          plannedEndDate: '2026-10-31',
+          plannedStartDate,
+          plannedEndDate,
           responsibleUserId: actor.id,
         },
         actor,

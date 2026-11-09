@@ -71,7 +71,7 @@ describe('IP del cliente detrás del proxy (HTTP real + PostgreSQL real)', () =>
   });
 
   it('el throttler limita por cliente, no a todos juntos', async () => {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
       expect((await failedLogin(app, '203.0.113.20')).response.status).toBe(401);
     }
     expect((await failedLogin(app, '203.0.113.20')).response.status).toBe(429);

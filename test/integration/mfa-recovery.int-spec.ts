@@ -2,6 +2,10 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import {
+  ThrottlerStorage,
+  type ThrottlerStorageService,
+} from '@nestjs/throttler';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
@@ -396,6 +400,7 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     const badProof = await post('/auth/me/mfa/enrollment', session.accessToken).send({ code: await wrongTotp(first.secret) });
     expect(badProof.status).toBe(403);
 
+    app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
     const started = await post('/auth/me/mfa/enrollment', session.accessToken).send({ code: await totp(first.secret) });
     expect(started.status).toBe(200);
     const pending = started.body.data.secret as string;
