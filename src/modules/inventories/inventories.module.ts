@@ -9,6 +9,7 @@ import { Asset } from '../assets/entities/asset.entity.js';
 import { CostCenter } from '../cost-centers/entities/cost-center.entity.js';
 import { Location } from '../locations/entities/location.entity.js';
 import { MailModule } from '../../shared/mail/mail.module.js';
+import { StorageModule } from '../../shared/storage/storage.module.js';
 import { MovementsModule } from '../movements/movements.module.js';
 import { NotificationsModule } from '../notifications/notifications.module.js';
 import { OrganizationalUnit } from '../organizational-units/entities/organizational-unit.entity.js';
@@ -42,6 +43,16 @@ import { InventoryRemindersService } from './services/inventory-reminders.servic
 import { InventoryResponsibleCandidatesService } from './services/inventory-responsible-candidates.service.js';
 import { InventoryScopeHeadsService } from './services/inventory-scope-heads.service.js';
 import { InventorySchedulesService } from './services/inventory-schedules.service.js';
+import { InventoryMetricsService } from './services/inventory-metrics.service.js';
+import { InventoryItemPhoto } from './entities/inventory-item-photo.entity.js';
+import { InventoryItemPhotosService } from './services/inventory-item-photos.service.js';
+import { DashboardController } from './dashboard.controller.js';
+import { InventoryLocationCompanion } from './entities/inventory-location-companion.entity.js';
+import { PhysicalInventoryActAgreement } from './entities/physical-inventory-act-agreement.entity.js';
+import { InventoryActAgreementLink } from './entities/inventory-act-agreement-link.entity.js';
+import { InventoryLocationCompanionService } from './services/inventory-location-companion.service.js';
+import { InventoryActAgreementService } from './services/inventory-act-agreement.service.js';
+import { InventoryAgreementPublicController } from './inventory-agreement-public.controller.js';
 
 @Module({
   imports: [
@@ -51,6 +62,7 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
     FeaturesModule,
     MovementsModule,
     MailModule,
+    StorageModule,
     NotificationsModule,
     RolesModule,
     TypeOrmModule.forFeature([
@@ -61,6 +73,10 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
       InventoryFindingCategory,
       InventoryMissingCause,
       InventoryItemCorrection,
+      InventoryItemPhoto,
+      InventoryLocationCompanion,
+      PhysicalInventoryActAgreement,
+      InventoryActAgreementLink,
       Asset,
       AppUser,
       CostCenter,
@@ -68,9 +84,19 @@ import { InventorySchedulesService } from './services/inventory-schedules.servic
       OrganizationalUnit,
     ]),
   ],
-  controllers: [InventoryCatalogsController, InventoriesController, AccountingCutsController],
+  controllers: [
+    InventoryCatalogsController,
+    InventoriesController,
+    AccountingCutsController,
+    DashboardController,
+    InventoryAgreementPublicController,
+  ],
   providers: [
     InventoriesService,
+    InventoryMetricsService,
+    InventoryItemPhotosService,
+    InventoryLocationCompanionService,
+    InventoryActAgreementService,
     InventoryAssetEffectsService,
     InventoryActorPolicy,
     InventoryReadAccess,

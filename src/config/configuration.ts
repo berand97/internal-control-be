@@ -118,6 +118,9 @@ export interface AuthConfig {
 
 export interface InventoriesConfig {
   readonly weeklyConcentrationThreshold: number | null;
+  readonly coverageTarget: number;
+  readonly materialityAmount: number;
+  readonly agreementLinkTtlDays: number;
 }
 
 export interface OutboundConfig {
@@ -382,6 +385,9 @@ const configuration = (): AppConfig => {
     },
     inventories: {
       weeklyConcentrationThreshold: readOptionalPositiveInteger('INVENTORY_WEEKLY_CONCENTRATION_THRESHOLD'),
+      coverageTarget: readNumber('INVENTORY_COVERAGE_TARGET', 95),
+      materialityAmount: readNumber('INVENTORY_MATERIALITY_AMOUNT', 1_000_000),
+      agreementLinkTtlDays: Math.max(1, readNumber('INVENTORY_AGREEMENT_LINK_TTL_DAYS', 7)),
     },
     events: resolveEventsConfig(process.env),
     auth: {

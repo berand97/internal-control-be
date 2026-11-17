@@ -97,6 +97,25 @@ export class PhysicalInventory {
   @Column({ name: 'field_close_captured_by', type: 'uuid', nullable: true })
   fieldCloseCapturedBy!: string | null;
 
+  @Column({ name: 'unverified_close_reason', type: 'text', nullable: true })
+  unverifiedCloseReason!: string | null;
+
+  @Column({
+    name: 'unverified_close_coverage',
+    type: 'numeric',
+    precision: 5,
+    scale: 1,
+    nullable: true,
+    transformer: {
+      to: (value: number | null) => value,
+      from: (value: string | null) => (value === null ? null : Number(value)),
+    },
+  })
+  unverifiedCloseCoverage!: number | null;
+
+  @Column({ name: 'accounting_signer_person_id', type: 'uuid', nullable: true })
+  accountingSignerPersonId!: string | null;
+
   @Column({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

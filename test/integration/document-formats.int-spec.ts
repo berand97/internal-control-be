@@ -196,6 +196,35 @@ describe('Formatos SGC administrables y versionados (PostgreSQL real)', () => {
     expect(await versionOf(document.body.data.id)).toBe(1);
   });
 
+  it('permite dos plantillas el mismo día y deja activa la última', async () => {
+    const day = localeIsoDate();
+    const second = await http()
+      .post(`/api/v1/documents/formats/${FREE}/templates`)
+      .set(auth('director'))
+      .field('effectiveDate', day)
+      .field('sgcVersion', '1b')
+      .attach('file', TEMPLATE, 'plantilla-mismo-dia.docx')
+      .expect(201);
+    const third = await http()
+      .post(`/api/v1/documents/formats/${FREE}/templates`)
+      .set(auth('director'))
+      .field('effectiveDate', day)
+      .field('sgcVersion', '1c')
+      .attach('file', TEMPLATE, 'plantilla-mismo-dia-2.docx')
+      .expect(201);
+    expect(second.body.data.id).not.toBe(third.body.data.id);
+    const formats = (await http().get('/api/v1/documents/formats').set(auth('director')).expect(200)).body
+      .data as Array<{
+      key: string;
+      activeTemplate: { id: string; version: string; effectiveDate: string } | null;
+    }>;
+    expect(formats.find((format) => format.key === FREE)?.activeTemplate).toEqual({
+      id: third.body.data.id,
+      version: '1c',
+      effectiveDate: day,
+    });
+  });
+
   it('editar firmantes crea una versión nueva; el acta previa conserva la suya en detalle, hoja de firmas y verificación', async () => {
     const [first] = (await dataSource.query('SELECT id FROM document WHERE format_key = $1', [FREE])) as Array<{ id: string }>;
     const firstId = first?.id ?? '';

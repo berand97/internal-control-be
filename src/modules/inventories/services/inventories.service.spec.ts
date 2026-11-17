@@ -52,6 +52,7 @@ describe('InventoriesService', () => {
     findOne: ReturnType<typeof vi.fn>;
     save: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
+    count: ReturnType<typeof vi.fn>;
   };
   let scopes: { save: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn> };
   let assets: {
@@ -85,6 +86,7 @@ describe('InventoriesService', () => {
       findOne: vi.fn(),
       save: vi.fn(async (row: unknown) => row),
       create: vi.fn((row: unknown) => row),
+      count: vi.fn().mockResolvedValue(0),
     };
     scopes = {
       save: vi.fn(),
@@ -158,6 +160,13 @@ describe('InventoriesService', () => {
       { applyVerificationFindings: vi.fn(), applyLost: vi.fn() } as never,
       { isEnabled: vi.fn().mockReturnValue(false) } as never,
       { holders: vi.fn().mockResolvedValue([]) } as never,
+      { listByInventory: vi.fn().mockResolvedValue(new Map()), list: vi.fn().mockResolvedValue([]) } as never,
+      {
+        materialityAmount: 1_000_000,
+        closeReadiness: vi.fn().mockResolvedValue({ canClose: true, canCloseWithPending: false, checks: [] }),
+      } as never,
+      { stampItem: vi.fn().mockResolvedValue(undefined) } as never,
+      { seedAfterClose: vi.fn().mockResolvedValue(undefined) } as never,
     );
   });
 

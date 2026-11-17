@@ -423,6 +423,24 @@ describe('AuthService', () => {
       );
     });
 
+    it('resuelve la parte local al correo institucional cuando el username es el correo', async () => {
+      vi.mocked(authUsersRepository.findByUsernameWithPerson)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(buildUser({ username: 'juliana.perez@unac.edu.co' }));
+      await service.login(
+        { username: 'juliana.perez', password: 'C0ntraseña-Segura!' },
+        context,
+      );
+      expect(authUsersRepository.findByUsernameWithPerson).toHaveBeenNthCalledWith(
+        1,
+        'juliana.perez',
+      );
+      expect(authUsersRepository.findByUsernameWithPerson).toHaveBeenNthCalledWith(
+        2,
+        'juliana.perez@unac.edu.co',
+      );
+    });
+
     it('no revela si el usuario no existe', async () => {
       vi.mocked(authUsersRepository.findByUsernameWithPerson).mockResolvedValue(
         null,

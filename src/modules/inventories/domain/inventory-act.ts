@@ -22,6 +22,8 @@ export const INVENTORY_ACT_REASONS = [
   'ENQUEUE_FAILED',
   'TEMPLATE_NOT_ACTIVE',
   'GENERATION_FAILED',
+  'AGREEMENT_PENDING',
+  'AGREEMENT_OBJECTED',
 ] as const;
 export type InventoryActReason = (typeof INVENTORY_ACT_REASONS)[number];
 
@@ -87,6 +89,8 @@ export interface ActInput {
   readonly valuations: ReadonlyMap<string, AssetValuation>;
   readonly conditionLabels: Readonly<Record<string, string>>;
   readonly attendedBy?: string | null;
+  readonly headObservation?: string | null;
+  readonly agreementStatus?: string | null;
 }
 
 export interface ActContent {
@@ -259,6 +263,8 @@ export const buildInventoryActContent = (input: ActInput): ActContent => {
       hallazgosValorLibros: formatMoney(totalBook),
       basePorcentaje: FINDINGS_PERCENT_BASE,
       atendioPorArea: input.attendedBy?.trim() || NO_DATA,
+      conformidadEstado: input.agreementStatus?.trim() || NO_DATA,
+      observacionesEncargado: input.headObservation?.trim() || NO_DATA,
     },
     tables: { hallazgos, sobrantes },
   };
@@ -280,6 +286,8 @@ export const INVENTORY_ACT_PLACEHOLDERS: ReadonlyArray<readonly [string, string]
   ['campos.hallazgosValorCompra / campos.hallazgosValorLibros', 'Totales de la tabla de hallazgos ("Sin dato" si falta algún valor)'],
   ['campos.basePorcentaje', '"Porcentaje calculado sobre el precio de compra": base del porcentaje de hallazgos'],
   ['campos.atendioPorArea', 'Quién atendió la toma por el área del centro del acta (persona o texto libre; "Sin dato" si no se indicó). Solo informativo: no firma'],
+  ['campos.conformidadEstado', 'PENDING / AGREED / OBJECTED de la conformidad del jefe'],
+  ['campos.observacionesEncargado', 'Comentario del jefe si objetó (o vacío / Sin dato)'],
   ['tablas.hallazgos[] (codigo, nombre, cantidad, valorCompra, porcentaje, valorLibros, esTotal)', 'Una fila por categoría activa del catálogo y una final TOTAL (esTotal = "Sí"); porcentaje = precio de compra de la categoría / precio de compra total de las categorías ("Sin dato" si falta algún precio o el total es 0). El valor en libros no entra en el porcentaje'],
   ['tablas.sobrantes[] (indice, descripcion, ubicacion, condicion, resolucion, motivoResolucion, activoCreado)', 'Sobrantes sin activo registrado'],
   ['activos[].campos.resultado / categoria / categoriaCodigo / causa / condicionObservada', 'Resultado en español, categoría de hallazgo, causa del faltante y condición observada'],

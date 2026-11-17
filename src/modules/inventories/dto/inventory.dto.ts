@@ -185,9 +185,10 @@ export class ReportNotFoundDto {
   @MaxLength(500)
   readonly otherCause?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ maxLength: 1000 })
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   readonly notes?: string;
 }
 
@@ -322,11 +323,23 @@ export class ActAttendedByDto {
 export class CloseInventoryDto {
   @ApiPropertyOptional({
     description:
-      'Permite cerrar con más del 5% sin verificar. Requiere inventory:create:global.',
+      'Permite cerrar con checklist incompleto o más del 5% sin verificar. Requiere inventory:create:global.',
   })
   @IsOptional()
   @IsBoolean()
   readonly allowUnverified?: boolean;
+
+  @ApiPropertyOptional({
+    minLength: 20,
+    maxLength: 1000,
+    description: 'Obligatorio si allowUnverified=true. Motivo del cierre con pendientes.',
+  })
+  @IsOptional()
+  @IsString()
+  @Transform(trimmed)
+  @MinLength(20)
+  @MaxLength(1000)
+  readonly unverifiedReason?: string;
 
   @ApiProperty({
     description:

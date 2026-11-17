@@ -883,6 +883,26 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorCatalogEntry>> = {
     action: 'CANCEL',
     message: 'Más del 5% de los activos siguen sin verificar. El cierre necesita autorización.',
   },
+  [ErrorCode.InventoryUnverifiedReasonRequired]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'Indique el motivo del cierre con pendientes (mínimo 20 caracteres).',
+  },
+  [ErrorCode.InventoryCloseSod]: {
+    httpStatus: 403,
+    action: 'CANCEL',
+    message: 'Quien verificó ítems de esta toma no puede cerrarla. Pida a otro auditor de Control Interno.',
+  },
+  [ErrorCode.InventoryMissingPhotoRequired]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'Adjunte al menos una foto de evidencia para el faltante.',
+  },
+  [ErrorCode.InventoryDamagedPhotoRequired]: {
+    httpStatus: 400,
+    action: 'CANCEL',
+    message: 'Adjunte una foto cuando la condición sea regular o peor.',
+  },
   [ErrorCode.InventoryReconcileSod]: {
     httpStatus: 403,
     action: 'CANCEL',

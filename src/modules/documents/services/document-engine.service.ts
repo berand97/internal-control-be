@@ -1584,7 +1584,8 @@ export class DocumentEngineService {
       `SELECT id, sgc_version, to_char(effective_date, 'YYYY-MM-DD') AS effective_date, storage_driver, storage_key
        FROM document_template_version
        WHERE format_key = $1 AND effective_date <= $2
-       ORDER BY effective_date DESC LIMIT 1`,
+       ORDER BY effective_date DESC, uploaded_at DESC, id DESC
+       LIMIT 1`,
       [formatKey, date],
     )) as TemplateRow[];
     return row;

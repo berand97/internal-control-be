@@ -12,6 +12,8 @@ export interface ItemViewContext extends CatalogViewContext {
   readonly valuations: ReadonlyMap<string, AssetValuation>;
   readonly assets: ReadonlyMap<string, AssetIdentity>;
   readonly userNames: ReadonlyMap<string, string>;
+  readonly photosByItem?: ReadonlyMap<string, ReadonlyArray<{ id: string; url: string; takenAt: string }>>;
+  readonly materialityAmount?: number;
 }
 
 const userName = (context: ItemViewContext, id: string | null | undefined): string | null =>
@@ -40,35 +42,54 @@ const liveItemFields = (item: PhysicalInventoryItem, context: ItemViewContext) =
   };
 };
 
-export const toItemView = (item: PhysicalInventoryItem, context: ItemViewContext) => ({
-  id: item.id,
-  assetId: item.assetId,
-  result: item.verificationResult,
-  expectedLocationId: item.expectedLocationId,
-  actualLocationId: item.actualLocationId,
-  expectedCondition: item.expectedCondition,
-  actualCondition: item.actualCondition,
-  expectedCostCenterId: item.expectedCostCenterId,
-  expectedCodeTemporary: item.expectedCodeTemporary ?? null,
-  isOnLoan: item.isOnLoan,
-  wasLost: item.wasLost ?? false,
-  verifiedAt: item.verifiedAt,
-  verifiedBy: item.verifiedBy,
-  notes: item.notes,
-  missingCauseId: item.missingCauseId ?? null,
-  missingCauseLabel: item.missingCauseId ? (context.causeLabels.get(item.missingCauseId) ?? null) : null,
-  missingCauseOther: item.missingCauseOther ?? null,
-  findingCategory: item.findingCategoryCode ?? null,
-  suggestedCategory: item.voidedAt
-    ? null
-    : suggestFindingCategory(context.categories, {
-        result: item.verificationResult,
-        actualCondition: item.actualCondition,
-      }),
-  voided: item.voidedAt !== null && item.voidedAt !== undefined,
-  voidedAt: item.voidedAt ?? null,
-  ...liveItemFields(item, context),
-});
+export const toItemView = (item: PhysicalInventoryItem, context: ItemViewContext) => {
+  const live = liveItemFields(item, context);
+  const photos = [...(context.photosByItem?.get(item.id) ?? [])];
+  if (item.photoUrl && photos.length === 0) {
+    photos.push({ id: item.id, url: item.photoUrl, takenAt: (item.verifiedAt ?? new Date()).toISOString() });
+  }
+  const locationMatches =
+    item.expectedLocationId !== null &&
+    item.actualLocationId !== null &&
+    item.expectedLocationId === item.actualLocationId;
+  const materialityAmount = context.materialityAmount ?? 1_000_000;
+  const materialityExceeded =
+    item.verificationResult === VerificationResult.Missing &&
+    live.bookValue !== null &&
+    live.bookValue >= materialityAmount;
+  return {
+    id: item.id,
+    assetId: item.assetId,
+    result: item.verificationResult,
+    expectedLocationId: item.expectedLocationId,
+    actualLocationId: item.actualLocationId,
+    expectedCondition: item.expectedCondition,
+    actualCondition: item.actualCondition,
+    expectedCostCenterId: item.expectedCostCenterId,
+    expectedCodeTemporary: item.expectedCodeTemporary ?? null,
+    isOnLoan: item.isOnLoan,
+    wasLost: item.wasLost ?? false,
+    verifiedAt: item.verifiedAt,
+    verifiedBy: item.verifiedBy,
+    notes: item.notes,
+    photos,
+    locationMatches,
+    materialityExceeded,
+    missingCauseId: item.missingCauseId ?? null,
+    missingCauseLabel: item.missingCauseId ? (context.causeLabels.get(item.missingCauseId) ?? null) : null,
+    missingCauseOther: item.missingCauseOther ?? null,
+    findingCategory: item.findingCategoryCode ?? null,
+    suggestedCategory: item.voidedAt
+      ? null
+      : suggestFindingCategory(context.categories, {
+          result: item.verificationResult,
+          actualCondition: item.actualCondition,
+        }),
+    voided: item.voidedAt !== null && item.voidedAt !== undefined,
+    voidedAt: item.voidedAt ?? null,
+    ...live,
+  };
+};
 
 export type InventoryItemView = ReturnType<typeof toItemView>;
 

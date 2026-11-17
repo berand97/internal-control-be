@@ -7,6 +7,7 @@ import { ITEM_ACT_CENTER_SQL, UNASSIGNED_SURPLUS_SQL } from '../domain/inventory
 import { PhysicalInventory } from '../entities/physical-inventory.entity.js';
 import { PhysicalInventoryAct } from '../entities/physical-inventory-act.entity.js';
 import { InventoryStatus } from '../enums/inventory-status.js';
+import { InventoryLocationCompanionService } from './inventory-location-companion.service.js';
 
 export const ACT_CANNOT_BE_ISSUED = 'ACT_CANNOT_BE_ISSUED';
 
@@ -27,9 +28,15 @@ export interface CostCenterRef {
   readonly name: string;
 }
 
+export interface AttendedSuggestion {
+  readonly personId: string | null;
+  readonly name: string;
+}
+
 export interface CenterHeadCandidates {
   readonly costCenter: CostCenterRef;
   readonly candidates: HeadCandidate[];
+  readonly attendedSuggestions: AttendedSuggestion[];
 }
 
 export interface SignerHeadChoice {
@@ -65,7 +72,10 @@ const fail = (message: string, field: string, detail: string): never => {
 
 @Injectable()
 export class InventorySignerHeadService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly companions: InventoryLocationCompanionService,
+  ) {}
 
   async centersOf(manager: EntityManager, inventory: PhysicalInventory): Promise<string[]> {
     const rows = (await manager.query(
@@ -143,10 +153,18 @@ export class InventorySignerHeadService {
     ];
     const refs = await this.costCenters(manager, centers);
     const candidates = await this.candidatesByCenter(manager, centers);
+    const suggestions = await Promise.all(
+      centers.map(async (center) => ({
+        center,
+        attendedSuggestions: await this.companions.companionsForCenter(inventory.id, center),
+      })),
+    );
+    const byCenter = new Map(suggestions.map((row) => [row.center, row.attendedSuggestions]));
     return centers
       .map((center) => ({
         costCenter: refs.get(center) ?? { id: center, code: '', name: '' },
         candidates: candidates.get(center) ?? [],
+        attendedSuggestions: byCenter.get(center) ?? [],
       }))
       .sort((left, right) => left.costCenter.code.localeCompare(right.costCenter.code));
   }
@@ -164,7 +182,7 @@ export class InventorySignerHeadService {
   ): Promise<PhysicalInventoryAct[]> {
     const centers = await this.centersOf(manager, inventory);
     const choices = this.choices(centers, input);
-    const attended = await this.attended(manager, centers, input);
+    const attended = await this.attended(manager, inventory.id, centers, input);
     const candidates = await this.candidatesByCenter(manager, centers);
     const refs = await this.costCenters(manager, centers);
     const unchosen: string[] = [];
@@ -251,6 +269,7 @@ export class InventorySignerHeadService {
 
   private async attended(
     manager: EntityManager,
+    inventoryId: string,
     centers: ReadonlyArray<string>,
     input: CloseSignerInput,
   ): Promise<Map<string, { personId: string | null; name: string | null }>> {
@@ -276,7 +295,35 @@ export class InventorySignerHeadService {
         fail('No encontramos a la persona que atendió por el área.', 'attendedByPersonId', 'No encontramos a esta persona.');
       }
     }
-    return new Map(centers.map((center) => [center, byCenter.get(center) ?? general]));
+    const result = new Map(centers.map((center) => [center, byCenter.get(center) ?? general]));
+    for (const center of centers) {
+      const current = result.get(center);
+      if (current?.personId || current?.name) {
+        continue;
+      }
+      const [top] = (await manager.query(
+        `WITH stamped AS (
+           SELECT i.companion_person_id AS person_id,
+                  coalesce(nullif(trim(i.companion_name), ''), trim(p.first_name || ' ' || p.last_name)) AS name
+           FROM physical_inventory_item i
+           LEFT JOIN person p ON p.id = i.companion_person_id
+           WHERE i.inventory_id = $1 AND i.voided_at IS NULL
+             AND (i.expected_cost_center_id = $2
+               OR (i.verification_result = 'SURPLUS' AND i.surplus_cost_center_id = $2))
+             AND (i.companion_person_id IS NOT NULL OR nullif(trim(i.companion_name), '') IS NOT NULL)
+         )
+         SELECT person_id, name, count(*)::int AS n
+         FROM stamped WHERE name IS NOT NULL
+         GROUP BY person_id, name
+         ORDER BY n DESC, name ASC
+         LIMIT 1`,
+        [inventoryId, center],
+      )) as Array<{ person_id: string | null; name: string }>;
+      if (top) {
+        result.set(center, { personId: top.person_id, name: top.person_id ? null : top.name });
+      }
+    }
+    return result;
   }
 
   private who(personId: string | undefined, name: string | undefined, field: string) {

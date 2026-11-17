@@ -48,7 +48,12 @@ const SIGNER_ERRORS: ReadonlyArray<ErrorCode> = [
 
 type BlockedReason = Extract<
   InventoryActReason,
-  'FORMAT_NOT_READY' | 'ENQUEUE_FAILED' | 'NO_COST_CENTER_HEAD' | 'SIGNER_HEAD_NOT_CHOSEN'
+  | 'FORMAT_NOT_READY'
+  | 'ENQUEUE_FAILED'
+  | 'NO_COST_CENTER_HEAD'
+  | 'SIGNER_HEAD_NOT_CHOSEN'
+  | 'AGREEMENT_PENDING'
+  | 'AGREEMENT_OBJECTED'
 >;
 
 type EnqueueOutcome =
@@ -182,7 +187,10 @@ export class InventoryActService implements OnModuleInit {
         act,
         inventory.reconcileApprovedBy ?? actor.id,
         signerSubstitutions,
-        { rethrowSignerErrors: true },
+        {
+          rethrowSignerErrors: true,
+          accountingSignerPersonId: inventory.accountingSignerPersonId ?? null,
+        },
       );
       this.applyOutcome(act, result);
       await manager.getRepository(PhysicalInventoryAct).save(act);
@@ -430,6 +438,69 @@ export class InventoryActService implements OnModuleInit {
         message: this.signerHead.warning(center, candidates).message,
       };
     }
+    const centerItems = (await manager.query(
+      `SELECT verification_result, missing_cause_id, missing_cause_other, surplus_resolution, voided_at
+       FROM physical_inventory_item
+       WHERE inventory_id = $1
+         AND (
+           expected_cost_center_id = $2
+           OR (verification_result = 'SURPLUS' AND surplus_cost_center_id = $2)
+         )`,
+      [inventory.id, act.costCenterId],
+    )) as Array<{
+      verification_result: string;
+      missing_cause_id: string | null;
+      missing_cause_other: string | null;
+      surplus_resolution: string | null;
+      voided_at: Date | null;
+    }>;
+    if (
+      centerItems.some(
+        (row) =>
+          row.verification_result === 'MISSING' &&
+          !row.missing_cause_id &&
+          !(row.missing_cause_other?.trim()),
+      )
+    ) {
+      return {
+        blocked: 'ENQUEUE_FAILED',
+        message: 'El centro tiene faltantes sin causa. Complételos antes de emitir el acta.',
+      };
+    }
+    if (
+      centerItems.some(
+        (row) => row.verification_result === 'SURPLUS' && !row.voided_at && !row.surplus_resolution,
+      )
+    ) {
+      return {
+        blocked: 'ENQUEUE_FAILED',
+        message: 'El centro tiene sobrantes sin resolver. Resuélvalos antes de emitir el acta.',
+      };
+    }
+    const [agreement] = (await manager.query(
+      `SELECT status, issued_with_objection, comment
+       FROM physical_inventory_act_agreement WHERE act_id = $1`,
+      [act.id],
+    )) as Array<{ status: string; issued_with_objection: boolean; comment: string | null }>;
+    if (agreement) {
+      if (agreement.status === 'PENDING') {
+        return {
+          blocked: 'AGREEMENT_PENDING',
+          message: 'El jefe aún no respondió la conformidad del acta.',
+        };
+      }
+      if (agreement.status === 'OBJECTED' && !agreement.issued_with_objection) {
+        return {
+          blocked: 'AGREEMENT_OBJECTED',
+          message: agreement.comment?.trim() || 'El jefe objetó la conformidad del acta.',
+        };
+      }
+    } else if (act.signerHeadPersonId) {
+      return {
+        blocked: 'AGREEMENT_PENDING',
+        message: 'Falta la conformidad del jefe del centro antes de emitir el acta.',
+      };
+    }
     await manager.query('SAVEPOINT inventory_act');
     try {
       const approverPersonId = await this.personOf(manager, approverUserId);
@@ -525,6 +596,10 @@ export class InventoryActService implements OnModuleInit {
          WHERE is_active ORDER BY sort_order, code`,
       )) as Array<{ code: string; label: string }>
     ).map((row) => ({ code: row.code, label: row.label }));
+    const [agreement] = (await manager.query(
+      `SELECT status, comment, issued_with_objection FROM physical_inventory_act_agreement WHERE act_id = $1`,
+      [act.id],
+    )) as Array<{ status: string; comment: string | null; issued_with_objection: boolean }>;
     const content = buildInventoryActContent({
       code: inventory.code,
       name: inventory.name,
@@ -541,6 +616,9 @@ export class InventoryActService implements OnModuleInit {
       valuations,
       conditionLabels: CONDITION_LABELS,
       attendedBy: await this.signerHead.attendedName(manager, act),
+      agreementStatus: agreement?.status ?? null,
+      headObservation:
+        agreement?.issued_with_objection || agreement?.status === 'OBJECTED' ? agreement.comment : null,
     });
     return {
       formatKey: INVENTORY_ACT_FORMAT_KEY,

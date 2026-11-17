@@ -196,6 +196,7 @@ export class InternalSignatureProvider implements SignatureProvider {
       const signers = await this.signers(manager, envelope.id);
       const stamped = await stampSignature(current, {
         slotIndex: signers.findIndex((item) => item.sign_order === capture.order),
+        role: signer.role,
         rubricPng: capture.rubricPng,
         label: signer.role_label ?? signer.role,
         name: signer.name ?? '',

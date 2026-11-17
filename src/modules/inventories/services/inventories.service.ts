@@ -21,7 +21,12 @@ import {
   assertInventoryTransition,
   exceedsUnverifiedThreshold,
 } from '../domain/inventory-transitions.js';
+import { coverageOf } from '../domain/inventory-metrics.js';
 import { scopeSql } from '../domain/inventory-scope-sql.js';
+import { InventoryActAgreementService } from './inventory-act-agreement.service.js';
+import { InventoryItemPhotosService } from './inventory-item-photos.service.js';
+import { InventoryLocationCompanionService } from './inventory-location-companion.service.js';
+import { InventoryMetricsService } from './inventory-metrics.service.js';
 import {
   CloseInventoryDto,
   QueryInventoriesDto,
@@ -95,6 +100,10 @@ export class InventoriesService {
     private readonly assetEffects: InventoryAssetEffectsService,
     private readonly featureFlags: FeatureFlagsService,
     private readonly controlSigners: ControlSignersService,
+    private readonly itemPhotos: InventoryItemPhotosService,
+    private readonly inventoryMetrics: InventoryMetricsService,
+    private readonly companions: InventoryLocationCompanionService,
+    private readonly agreements: InventoryActAgreementService,
   ) {}
 
   accountingSigners() {
@@ -175,10 +184,16 @@ export class InventoriesService {
       order: { verificationResult: 'ASC' },
     });
     const context = await this.valuation.viewContext(inventory, items);
+    const photosByItem = await this.itemPhotos.listByInventory(id);
+    const enriched = {
+      ...context,
+      photosByItem,
+      materialityAmount: this.inventoryMetrics.materialityAmount,
+    };
     const names = await loadResponsibleNames(this.dataSource, inventorySummaryUserIds(inventory));
     return {
       ...inventorySummary(inventory, names),
-      items: items.map((item) => toItemView(item, context)),
+      items: items.map((item) => toItemView(item, enriched)),
       progress: toProgressView(items),
       report: this.frozenOrLiveReport(inventory, items, context),
       reconciliationBasis: await this.valuation.basis(inventory),
@@ -291,6 +306,13 @@ export class InventoriesService {
         throw new ApiException(ErrorCode.ResourceNotFound);
       }
     }
+    if (
+      (dto.condition === PhysicalCondition.Poor || dto.condition === PhysicalCondition.Obsolete) &&
+      (await this.itemPhotos.list(id, item.id)).length < 1 &&
+      !item.photoUrl
+    ) {
+      throw new ApiException(ErrorCode.InventoryDamagedPhotoRequired);
+    }
     const actualLocationId = dto.locationId ?? item.expectedLocationId;
     const misplaced =
       actualLocationId !== null &&
@@ -304,6 +326,7 @@ export class InventoriesService {
     item.notes = dto.notes ?? item.notes;
     item.verifiedAt = new Date();
     item.verifiedBy = actor.id;
+    await this.companions.stampItem(item, actualLocationId);
     await this.dataSource.transaction(async (manager) => {
       await this.assetState.apply(
         {
@@ -330,7 +353,7 @@ export class InventoriesService {
       );
       await this.assetEffects.applyVerificationFindings(inventory, item, actor, manager);
     });
-    return toItemView(item, await this.valuation.viewContext(inventory, [item]));
+    return this.toItemWithPhotos(inventory, item);
   }
 
   async reportNotFound(
@@ -350,17 +373,21 @@ export class InventoriesService {
       throw new ApiException(ErrorCode.InvalidState);
     }
     const cause = await this.catalogs.resolveMissingCause(dto.causeId, dto.otherCause);
+    if ((await this.itemPhotos.list(id, item.id)).length < 1 && !item.photoUrl) {
+      throw new ApiException(ErrorCode.InventoryMissingPhotoRequired);
+    }
     item.verificationResult = VerificationResult.Missing;
     item.missingCauseId = cause.missingCauseId;
     item.missingCauseOther = cause.missingCauseOther;
     item.notes = dto.notes ?? item.notes;
     item.verifiedAt = new Date();
     item.verifiedBy = actor.id;
+    await this.companions.stampItem(item, item.expectedLocationId);
     await this.dataSource.transaction(async (manager) => {
       await manager.getRepository(PhysicalInventoryItem).save(item);
       await this.assetEffects.applyLost(inventory, item, actor, manager);
     });
-    return toItemView(item, await this.valuation.viewContext(inventory, [item]));
+    return this.toItemWithPhotos(inventory, item);
   }
 
   async reportUnexpected(
@@ -384,30 +411,32 @@ export class InventoriesService {
       }
       wasLost = asset.operationalStatus === OperationalStatus.Lost;
     }
-    const item = await this.items.save(
-      this.items.create({
-        inventoryId: inventory.id,
-        assetId: dto.assetId ?? null,
-        verificationResult: VerificationResult.Surplus,
-        expectedLocationId: null,
-        actualLocationId: dto.locationId ?? null,
-        expectedCondition: null,
-        actualCondition: dto.condition ?? null,
-        expectedCostCenterId: null,
-        expectedCodeTemporary: null,
-        wasLost,
-        voidedAt: null,
-        findingCategoryCode: null,
-        missingCauseId: null,
-        missingCauseOther: null,
-        isOnLoan: false,
-        verifiedAt: new Date(),
-        verifiedBy: actor.id,
-        notes: dto.notes ?? null,
-        photoUrl: null,
-      }),
-    );
-    return toItemView(item, await this.valuation.viewContext(inventory, [item]));
+    const item = this.items.create({
+      inventoryId: inventory.id,
+      assetId: dto.assetId ?? null,
+      verificationResult: VerificationResult.Surplus,
+      expectedLocationId: null,
+      actualLocationId: dto.locationId ?? null,
+      expectedCondition: null,
+      actualCondition: dto.condition ?? null,
+      expectedCostCenterId: null,
+      expectedCodeTemporary: null,
+      wasLost,
+      voidedAt: null,
+      findingCategoryCode: null,
+      missingCauseId: null,
+      missingCauseOther: null,
+      isOnLoan: false,
+      verifiedAt: new Date(),
+      verifiedBy: actor.id,
+      notes: dto.notes ?? null,
+      photoUrl: null,
+      companionPersonId: null,
+      companionName: null,
+    });
+    await this.companions.stampItem(item, dto.locationId ?? null);
+    const saved = await this.items.save(item);
+    return toItemView(saved, await this.valuation.viewContext(inventory, [saved]));
   }
 
   async progress(id: string) {
@@ -424,10 +453,20 @@ export class InventoriesService {
     const inventory = await this.requireInventory(id);
     assertInventoryTransition(inventory.status, InventoryStatus.Closed);
     await this.actorPolicy.assertCanOperate(inventory, actor);
+    const readiness = await this.inventoryMetrics.closeReadiness(id, actor);
     const before = toProgressView(await this.items.find({ where: { inventoryId: inventory.id } }));
-    if (exceedsUnverifiedThreshold(before.pending, before.expected)) {
+    const needsOverride =
+      !readiness.canClose || exceedsUnverifiedThreshold(before.pending, before.expected);
+    if (needsOverride) {
       if (dto.allowUnverified !== true) {
-        throw new ApiException(ErrorCode.InventoryUnverifiedExceedsThreshold);
+        throw new ApiException(
+          exceedsUnverifiedThreshold(before.pending, before.expected)
+            ? ErrorCode.InventoryUnverifiedExceedsThreshold
+            : ErrorCode.InvalidState,
+          !readiness.canClose
+            ? 'La toma no cumple el checklist de cierre. Use allowUnverified con motivo si es Control Interno.'
+            : undefined,
+        );
       }
       const canAuthorize = await this.permissionsService.userHasPermission(
         actor.id,
@@ -435,6 +474,10 @@ export class InventoriesService {
       );
       if (!canAuthorize) {
         throw new ApiException(ErrorCode.InsufficientPermissions);
+      }
+      const reason = dto.unverifiedReason?.trim() ?? '';
+      if (reason.length < 20) {
+        throw new ApiException(ErrorCode.InventoryUnverifiedReasonRequired);
       }
     }
     const signature = dto.encargadoSignaturePng?.trim() ?? '';
@@ -464,19 +507,24 @@ export class InventoriesService {
       inventory.fieldCloseSignatureSha256 = signatureSha256;
       inventory.fieldCloseSignedAt = now;
       inventory.fieldCloseCapturedBy = actor.id;
+      if (dto.allowUnverified === true) {
+        inventory.unverifiedCloseReason = dto.unverifiedReason?.trim() ?? null;
+        inventory.unverifiedCloseCoverage = coverageOf(items).percent;
+      }
       const acts = await this.signerHead.applyOnClose(manager, inventory, dto, actor);
       await this.signerHead.assertNoUnassignedSurplus(inventory, manager);
       for (const item of items) {
         await this.assetEffects.applyVerificationFindings(inventory, item, actor, manager);
       }
-      await this.act.enqueueOnApproval(manager, inventory, actor, accountingSignerPersonId);
       assertInventoryTransition(InventoryStatus.Closed, InventoryStatus.Reconciled);
       inventory.status = InventoryStatus.Reconciled;
       inventory.reconcileRequestedAt = now;
       inventory.reconcileRequestedBy = actor.id;
       inventory.reconcileApprovedAt = now;
       inventory.reconcileApprovedBy = actor.id;
+      inventory.accountingSignerPersonId = accountingSignerPersonId;
       await manager.getRepository(PhysicalInventory).save(inventory);
+      await this.agreements.seedAfterClose(manager, inventory, actor.id);
       await this.auditLogsRepository.record(
         {
           action: AuditAction.InventoryClosed,
@@ -488,6 +536,8 @@ export class InventoriesService {
           changes: {
             ...toProgressView(items),
             allowUnverified: dto.allowUnverified === true,
+            unverifiedReason: dto.unverifiedReason?.trim() ?? null,
+            coverageAtClose: coverageOf(items).percent,
             fieldCloseSignatureSha256: signatureSha256,
             fieldCloseSignedAt: now.toISOString(),
             fieldCloseCapturedBy: actor.id,
@@ -756,6 +806,18 @@ export class InventoriesService {
 
   requireById(id: string): Promise<PhysicalInventory> {
     return this.requireInventory(id);
+  }
+
+  private async toItemWithPhotos(
+    inventory: PhysicalInventory,
+    item: PhysicalInventoryItem,
+  ) {
+    const context = await this.valuation.viewContext(inventory, [item]);
+    const photos = await this.itemPhotos.list(inventory.id, item.id);
+    return toItemView(item, {
+      ...context,
+      photosByItem: new Map([[item.id, photos]]),
+    });
   }
 
   private async requireInventory(id: string): Promise<PhysicalInventory> {

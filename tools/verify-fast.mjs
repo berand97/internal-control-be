@@ -49,14 +49,14 @@ console.log(`verify:fast against ${base} (merge-base ${mergeBase.slice(0, 7)}), 
 const lintable = changed.filter((file) => /^(src|test)\/.*\.ts$/.test(file));
 const lintCommand =
   lintable.length > MAX_LISTED_FILES
-    ? 'pnpm lint'
-    : `pnpm exec oxlint -c oxlint.json --deny-warnings ${lintable.map((file) => `"${file}"`).join(' ')}`;
+    ? 'bun run lint'
+    : `bunx oxlint -c oxlint.json --deny-warnings ${lintable.map((file) => `"${file}"`).join(' ')}`;
 
 const steps = [
   ...(lintable.length > 0 ? [['Lint changed files', lintCommand]] : []),
   ['UI copy', 'node tools/check-ui-copy.mjs'],
-  ['Type-check', 'pnpm type-check'],
-  ['Unit tests related to the changes', `pnpm exec vitest run --changed ${mergeBase} --passWithNoTests`],
+  ['Type-check', 'bun run type-check'],
+  ['Unit tests related to the changes', `bunx vitest run --changed ${mergeBase} --passWithNoTests`],
 ];
 
 const failed = steps.find(([name, command]) => !run(name, command));
@@ -64,4 +64,4 @@ if (failed) {
   console.error(`\nverify:fast failed at: ${failed[0]}`);
   process.exit(1);
 }
-console.log('\nverify:fast passed. Run pnpm verify before opening or updating a PR.');
+console.log('\nverify:fast passed. Run bun run verify before opening or updating a PR.');

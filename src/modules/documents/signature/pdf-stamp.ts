@@ -1,11 +1,15 @@
 import { PDFDocument, type PDFFont, type PDFPage, rgb, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
 
+import { findSignatureAnchor, type PdfTextAnchor } from './pdf-anchors.js';
+
 const PAGE = { width: 612, height: 792 };
 const MARGIN = 50;
 const SLOT_TOP = 560;
 const SLOT_HEIGHT = 118;
 const GREY = rgb(0.35, 0.35, 0.35);
+const BODY_MAX_WIDTH = 160;
+const BODY_MAX_HEIGHT = 36;
 
 export interface PreparedSlot {
   readonly order: number;
@@ -22,6 +26,7 @@ export interface PrepareInput {
 
 export interface SignatureMark {
   readonly slotIndex: number;
+  readonly role?: string;
   readonly rubricPng: Buffer;
   readonly label: string;
   readonly name: string;
@@ -91,9 +96,7 @@ const wrap = (text: string, max: number): [string, string] => {
   return [text.slice(0, index), text.slice(index).trim()];
 };
 
-export const stampSignature = async (pdf: Buffer, mark: SignatureMark): Promise<Buffer> => {
-  const document = await PDFDocument.load(pdf);
-  const font = await document.embedFont(StandardFonts.Helvetica);
+const stampOnSheet = async (document: PDFDocument, mark: SignatureMark, font: PDFFont): Promise<void> => {
   const page = document.getPage(document.getPageCount() - 1);
   const y = slotY(mark.slotIndex);
   const image = await document.embedPng(mark.rubricPng);
@@ -112,6 +115,39 @@ export const stampSignature = async (pdf: Buffer, mark: SignatureMark): Promise<
   if (second) {
     write(page, font, second, x, y - 100, 7.5, GREY);
   }
+};
+
+const stampOnBody = async (document: PDFDocument, mark: SignatureMark, anchor: PdfTextAnchor): Promise<void> => {
+  if (anchor.pageIndex < 0 || anchor.pageIndex >= document.getPageCount()) {
+    return;
+  }
+  const page = document.getPage(anchor.pageIndex);
+  const image = await document.embedPng(mark.rubricPng);
+  const scale = Math.min(BODY_MAX_WIDTH / image.width, BODY_MAX_HEIGHT / image.height, 1);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  const x = anchor.x;
+  const y = Math.max(0, anchor.y - 2);
+  page.drawRectangle({
+    x: x - 2,
+    y,
+    width: Math.max(anchor.width + 4, width + 4),
+    height: height + 4,
+    color: rgb(1, 1, 1),
+    borderWidth: 0,
+  });
+  page.drawImage(image, { x, y, width, height });
+};
+
+export const stampSignature = async (pdf: Buffer, mark: SignatureMark): Promise<Buffer> => {
+  const role = mark.role?.trim();
+  const anchor = role ? await findSignatureAnchor(pdf, role) : null;
+  const document = await PDFDocument.load(pdf);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  if (anchor) {
+    await stampOnBody(document, mark, anchor);
+  }
+  await stampOnSheet(document, mark, font);
   return Buffer.from(await document.save());
 };
 

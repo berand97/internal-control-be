@@ -96,4 +96,10 @@ export class PhysicalInventoryItem {
 
   @Column({ name: 'resolved_by', type: 'uuid', nullable: true })
   resolvedBy!: string | null;
+
+  @Column({ name: 'companion_person_id', type: 'uuid', nullable: true })
+  companionPersonId!: string | null;
+
+  @Column({ name: 'companion_name', type: 'varchar', length: 200, nullable: true })
+  companionName!: string | null;
 }

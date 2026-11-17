@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { FeatureFlagsService } from '../../features/services/feature-flags.service.js';
+import { InventoryActAgreementService } from '../services/inventory-act-agreement.service.js';
 import { InventoryRemindersService } from '../services/inventory-reminders.service.js';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class InventoryRemindersJob {
 
   constructor(
     private readonly reminders: InventoryRemindersService,
+    private readonly agreements: InventoryActAgreementService,
     private readonly featureFlags: FeatureFlagsService,
   ) {}
 
@@ -21,6 +23,7 @@ export class InventoryRemindersJob {
     this.running = true;
     try {
       await this.reminders.processDue();
+      await this.agreements.processReminders();
     } catch (error) {
       this.logger.error('Falló el ciclo de recordatorios de tomas', error instanceof Error ? error.stack : String(error));
     } finally {

@@ -396,6 +396,7 @@ describe.runIf(Boolean(process.env['GOTENBERG_URL']))('Estampado de firma sobre 
     for (const slotIndex of [0, 1]) {
       signed = await stampSignature(signed, {
         slotIndex,
+        role: slotIndex === 0 ? 'RECIBE' : 'AUDITA',
         rubricPng,
         label: 'Firmante',
         name: 'Nombre Con Tildes Ñandú',

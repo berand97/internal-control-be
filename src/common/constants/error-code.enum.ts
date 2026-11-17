@@ -181,6 +181,10 @@ export enum ErrorCode {
 
   InventoryScopeOverlap = 'INVENTORY_SCOPE_OVERLAP',
   InventoryUnverifiedExceedsThreshold = 'INVENTORY_UNVERIFIED_EXCEEDS',
+  InventoryUnverifiedReasonRequired = 'INVENTORY_UNVERIFIED_REASON_REQUIRED',
+  InventoryCloseSod = 'INVENTORY_CLOSE_SOD',
+  InventoryMissingPhotoRequired = 'INVENTORY_MISSING_PHOTO_REQUIRED',
+  InventoryDamagedPhotoRequired = 'INVENTORY_DAMAGED_PHOTO_REQUIRED',
   InventoryReconcileSod = 'INVENTORY_RECONCILE_SOD',
   InventoryActorNotAllowed = 'INVENTORY_ACTOR_NOT_ALLOWED',
   InventoryConflictOfInterest = 'INVENTORY_CONFLICT_OF_INTEREST',

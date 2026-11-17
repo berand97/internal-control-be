@@ -1,18 +1,24 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 
 const steps = [
-  { name: 'Lint', command: 'pnpm lint' },
+  { name: 'Lint', command: 'bun run lint' },
   { name: 'UI copy', command: 'node tools/check-ui-copy.mjs' },
-  { name: 'Type-check', command: 'pnpm type-check' },
-  { name: 'Unit tests', command: 'pnpm test' },
-  { name: 'Integration tests', command: 'pnpm test:int' },
+  { name: 'Type-check', command: 'bun run type-check' },
+  { name: 'Unit tests', command: 'bun run test' },
+  { name: 'Integration tests', command: 'bun run test:int' },
 ];
 
 if (!process.env.TEST_DATABASE_ADMIN_URL) {
-  console.error(
-    'verify needs TEST_DATABASE_ADMIN_URL pointing at a local Postgres admin database, the same variable the CI sets for the integration tests.',
+  process.env.TEST_DATABASE_ADMIN_URL =
+    'postgres://postgres:postgres@localhost:5432/postgres';
+  console.log(
+    `TEST_DATABASE_ADMIN_URL not set; using ${process.env.TEST_DATABASE_ADMIN_URL}`,
   );
-  process.exit(1);
+}
+if (!process.env.GOTENBERG_URL) {
+  process.env.GOTENBERG_URL = 'http://localhost:3100';
+  console.log(`GOTENBERG_URL not set; using ${process.env.GOTENBERG_URL}`);
 }
 
 function git(args) {
@@ -41,9 +47,12 @@ function changedTrackedFiles() {
 
 function trackedChanges() {
   const files = changedTrackedFiles();
-  const hashes =
-    files.length > 0 ? git(['hash-object', '--no-filters', '--', ...files]).trim().split('\n') : [];
-  return new Map(files.map((file, index) => [file, hashes[index]]));
+  return new Map(
+    files.map((file) => [
+      file,
+      existsSync(file) ? git(['hash-object', '--no-filters', '--', file]).trim() : 'MISSING',
+    ]),
+  );
 }
 
 function run(step) {

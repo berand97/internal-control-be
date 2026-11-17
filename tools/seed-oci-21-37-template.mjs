@@ -9,6 +9,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const templatePath = resolve(root, 'templates/formats/OCI-21-37-v2.docx');
 const buffer = readFileSync(templatePath);
 
+console.log(
+  'Si prefiere subirla por UI: Documentos → Formatos → OCI-21-37 → cargar y activar templates/formats/OCI-21-37-v2.docx',
+);
+
 const { readDocxPlaceholders } = await import(
   resolve(root, 'dist/modules/document-templates/domain/docx-template.js')
 );

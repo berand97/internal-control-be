@@ -4,8 +4,8 @@ import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 export class LoginDto {
   @ApiProperty({
     description:
-      'Nombre de usuario o correo institucional (@unac.edu.co). En cuentas invitadas el usuario es el correo.',
-    example: 'juliana.perez@unac.edu.co',
+      'Usuario o correo institucional. Acepta la parte local (juliana.perez) o el correo completo (@unac.edu.co).',
+    example: 'juliana.perez',
     maxLength: 255,
   })
   @IsString()

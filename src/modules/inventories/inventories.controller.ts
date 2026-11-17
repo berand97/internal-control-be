@@ -5,19 +5,27 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Post,
   Put,
   Query,
+  Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiConsumes,
+  ApiBody,
   ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Feature } from '../../common/decorators/feature.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
@@ -27,6 +35,8 @@ import {
   envelopedSchema,
 } from '../../common/swagger/api-envelopes.js';
 import { OpenApiTag } from '../../common/swagger/openapi-tags.js';
+import { ErrorCode } from '../../common/constants/error-code.enum.js';
+import { ApiException } from '../../common/exceptions/api.exception.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type.js';
 import {
   AssignSignerHeadDto,
@@ -93,6 +103,26 @@ import { InventoryScopeHeadsService } from './services/inventory-scope-heads.ser
 import { InventorySchedulesService } from './services/inventory-schedules.service.js';
 import { InventoryReadAccess } from './services/inventory-read-access.service.js';
 import { InventorySignerHeadService } from './services/inventory-signer-head.service.js';
+import { InventoryMetricsService } from './services/inventory-metrics.service.js';
+import { InventoryItemPhotosService } from './services/inventory-item-photos.service.js';
+import { InventoryLocationCompanionService } from './services/inventory-location-companion.service.js';
+import { InventoryActAgreementService } from './services/inventory-act-agreement.service.js';
+import { LocationCompanionDto, SetLocationCompanionDto } from './dto/inventory-companion.dto.js';
+import {
+  ActAgreementResponseDto,
+  IssueObjectedActDto,
+  RespondAgreementDto,
+} from './dto/inventory-agreement.dto.js';
+import {
+  InventoryActivityResponseDto,
+  InventoryCloseReadinessResponseDto,
+  InventoryItemPhotoDto,
+  InventoryMetricsResponseDto,
+  InventoryProgressByCostCenterResponseDto,
+  InventoryProgressByLocationResponseDto,
+  InventoryQueueResponseDto,
+  InventorySessionsResponseDto,
+} from './dto/inventory-metrics.responses.js';
 
 const READ_ACCESS_RULE =
   'Trae activos: además de inventory:read:global exige asset:read:global, ser responsable o quien programó la toma, o asset:read:org_unit ' +
@@ -130,6 +160,16 @@ const ACTOR_RULE =
   InventoryWarningDto,
   InventoryCloseOptionsDto,
   ControlSignerDto,
+  InventoryMetricsResponseDto,
+  InventoryProgressByLocationResponseDto,
+  InventoryProgressByCostCenterResponseDto,
+  InventoryQueueResponseDto,
+  InventoryActivityResponseDto,
+  InventorySessionsResponseDto,
+  InventoryCloseReadinessResponseDto,
+  InventoryItemPhotoDto,
+  LocationCompanionDto,
+  ActAgreementResponseDto,
 )
 @Feature('inventories')
 @Controller('inventories')
@@ -146,6 +186,10 @@ export class InventoriesController {
     private readonly scopeHeads: InventoryScopeHeadsService,
     private readonly readAccess: InventoryReadAccess,
     private readonly signerHead: InventorySignerHeadService,
+    private readonly inventoryMetrics: InventoryMetricsService,
+    private readonly itemPhotos: InventoryItemPhotosService,
+    private readonly companions: InventoryLocationCompanionService,
+    private readonly agreements: InventoryActAgreementService,
   ) {}
 
   @Get()
@@ -232,6 +276,242 @@ export class InventoriesController {
   @ApiOkResponse({ schema: envelopedArraySchema(ControlSignerDto) })
   accountingSigners() {
     return this.inventoriesService.accountingSigners();
+  }
+
+  @Get(':id/metrics')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Métricas de cobertura, exactitud, faltantes y sobrantes', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryMetricsResponseDto) })
+  async metrics(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.inventoryMetrics.metrics(id);
+  }
+
+  @Get(':id/progress-by-location')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Avance por ubicación', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryProgressByLocationResponseDto) })
+  async progressByLocation(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.inventoryMetrics.progressByLocation(id);
+  }
+
+  @Get(':id/progress-by-cost-center')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Cobertura por centro de costo y readiness de acta', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryProgressByCostCenterResponseDto) })
+  async progressByCostCenter(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.inventoryMetrics.progressByCostCenter(id);
+  }
+
+  @Get(':id/queue')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Cola de pendientes por ubicación', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryQueueResponseDto) })
+  async queue(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query('locationId') locationId?: string,
+    @Query('page', new ParseIntPipe({ optional: true })) page = 1,
+    @Query('pageSize', new ParseIntPipe({ optional: true })) pageSize = 50,
+  ) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.inventoryMetrics.queue(id, locationId, Math.max(1, page), Math.min(200, Math.max(1, pageSize)));
+  }
+
+  @Get(':id/activity')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Actividad reciente de la toma', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryActivityResponseDto) })
+  async activity(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit = 30,
+  ) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.inventoryMetrics.activity(id, Math.min(100, Math.max(1, limit)));
+  }
+
+  @Get(':id/sessions')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Verificaciones por persona', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(InventorySessionsResponseDto) })
+  async sessions(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.inventoryMetrics.sessions(id);
+  }
+
+  @Get(':id/close-readiness')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Checklist de requisitos para cerrar', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryCloseReadinessResponseDto) })
+  async closeReadiness(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.inventoryMetrics.closeReadiness(id, actor);
+  }
+
+  @Get(':id/locations/:locationId/companion')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Acompañante vigente de una ubicación', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(LocationCompanionDto) })
+  async getCompanion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('locationId', ParseUUIDPipe) locationId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.companions.get(id, locationId);
+  }
+
+  @Put(':id/locations/:locationId/companion')
+  @RequirePermission('inventory:execute:global')
+  @ApiOperation({
+    summary: 'Registrar o cambiar el acompañante de una ubicación',
+    description: `${ACTOR_RULE} personId o name, no ambos.`,
+  })
+  @ApiOkResponse({ schema: envelopedSchema(LocationCompanionDto) })
+  setCompanion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('locationId', ParseUUIDPipe) locationId: string,
+    @Body() dto: SetLocationCompanionDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.companions.set(id, locationId, dto, actor);
+  }
+
+  @Get(':id/acts/:costCenterId/agreement')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Conformidad del jefe para el acta de un centro', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(ActAgreementResponseDto) })
+  async getAgreement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('costCenterId', ParseUUIDPipe) costCenterId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.agreements.getForCenter(id, costCenterId);
+  }
+
+  @Post(':id/acts/:costCenterId/agreement')
+  @RequirePermission('inventory:read:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Responder conformidad (jefe firmante autenticado)',
+    description: 'Solo el signerHeadPersonId del acta. Preferible el enlace público.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(ActAgreementResponseDto) })
+  respondAgreement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('costCenterId', ParseUUIDPipe) costCenterId: string,
+    @Body() dto: RespondAgreementDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.agreements.respondAuthenticated(id, costCenterId, dto, actor);
+  }
+
+  @Post(':id/acts/:costCenterId/agreement/resend')
+  @RequirePermission('inventory:create:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reenviar enlace de conformidad al jefe',
+    description: 'Solo con conformidad PENDING. Invalida el enlace anterior y encola uno nuevo.',
+  })
+  @ApiOkResponse({ schema: envelopedSchema(ActAgreementResponseDto) })
+  resendAgreement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('costCenterId', ParseUUIDPipe) costCenterId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.agreements.resend(id, costCenterId, actor);
+  }
+
+  @Post(':id/acts/:costCenterId/agreement/reopen')
+  @RequirePermission('inventory:create:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reabrir conformidad y reenviar enlace al jefe' })
+  @ApiOkResponse({ schema: envelopedSchema(ActAgreementResponseDto) })
+  reopenAgreement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('costCenterId', ParseUUIDPipe) costCenterId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.agreements.reopen(id, costCenterId, actor);
+  }
+
+  @Post(':id/acts/:costCenterId/agreement/issue-objected')
+  @RequirePermission('inventory:create:global')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Emitir acta pese a objeción del jefe',
+    description: 'allowObjected + reason (min 20). Imprime la observación en el PDF.',
+  })
+  issueObjectedAct(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('costCenterId', ParseUUIDPipe) costCenterId: string,
+    @Body() dto: IssueObjectedActDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    if (dto.allowObjected !== true) {
+      return this.agreements.getForCenter(id, costCenterId);
+    }
+    return this.agreements.issueObjected(id, costCenterId, dto.reason, actor);
+  }
+
+  @Get(':id/items/:itemId/photos')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Fotos de evidencia de un ítem', description: READ_ACCESS_RULE })
+  @ApiOkResponse({ schema: envelopedArraySchema(InventoryItemPhotoDto) })
+  async listItemPhotos(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    await this.readAccess.assertReadable(id, actor.id);
+    return this.itemPhotos.list(id, itemId);
+  }
+
+  @Post(':id/items/:itemId/photos')
+  @RequirePermission('inventory:execute:global')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiOperation({ summary: 'Subir foto de evidencia (máx. 5 por ítem, 5 MB)', description: ACTOR_RULE })
+  @ApiOkResponse({ schema: envelopedSchema(InventoryItemPhotoDto) })
+  async uploadItemPhoto(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    if (!file?.buffer) {
+      throw new ApiException(ErrorCode.ValidationFailed, 'Adjunte una imagen.', [
+        { field: 'file', message: 'Archivo requerido.' },
+      ]);
+    }
+    return this.itemPhotos.upload(id, itemId, file, actor);
+  }
+
+  @Get(':id/items/:itemId/photos/:photoId/content')
+  @RequirePermission('inventory:read:global')
+  @ApiOperation({ summary: 'Contenido binario de una foto de evidencia' })
+  async itemPhotoContent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('photoId', ParseUUIDPipe) photoId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    await this.readAccess.assertReadable(id, actor.id);
+    const photo = await this.itemPhotos.content(id, itemId, photoId);
+    res.setHeader('Content-Type', photo.contentType);
+    res.send(photo.body);
   }
 
   @Get(':id/progress')
@@ -454,7 +734,8 @@ export class InventoriesController {
       'Un acta OCI-21-37 por centro de costo presente en los ítems de la toma (alcance COST_CENTER: una, la de su centro). ' +
       'Por centro, las personas activas con jefatura vigente (cost_center_head): una se elige al cerrar (signerHeads) o ' +
       'después (PUT /inventories/{id}/acts/{costCenterId}/signer-head). Solo id y nombre; candidates vacío si el centro ' +
-      'no tiene jefe. Antes del cierre, los centros de los ítems; después, los de las actas.',
+      'no tiene jefe. attendedSuggestions: acompañantes sellados en ítems del centro (para «quién atendió»; no son jefes). ' +
+      'Antes del cierre, los centros de los ítems; después, los de las actas.',
   })
   @ApiOkResponse({ schema: envelopedArraySchema(InventoryCenterHeadCandidatesDto) })
   async actHeadCandidates(@Param('id', ParseUUIDPipe) id: string) {
@@ -518,11 +799,11 @@ export class InventoriesController {
   @RequirePermission('inventory:execute:global')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Cerrar la auditoría, reconciliar y encolar el acta OCI-21-37',
+    summary: 'Cerrar la auditoría, reconciliar y pedir conformidad del jefe',
     description:
       `${ACTOR_RULE} Exige firma manuscrita del Encargado. Los pendientes pasan a NOT_VERIFIED. Se crea un acta por ` +
-      'centro, se encola el documento y la toma pasa a RECONCILED. Si el parámetro inventory-act-accounting está activo, ' +
-      'accountingSignerPersonId es obligatorio (candidatos: GET /inventories/accounting-signers).',
+      'centro, se solicita conformidad al jefe y la toma pasa a RECONCILED. El PDF se encola cuando el jefe acuerda ' +
+      '(o CI emite con objeción). Si inventory-act-accounting está activo, accountingSignerPersonId es obligatorio.',
   })
   @ApiOkResponse({ schema: envelopedSchema(InventoryDetailResponseDto) })
   close(

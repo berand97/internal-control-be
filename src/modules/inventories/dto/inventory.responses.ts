@@ -93,6 +93,30 @@ export class InventoryItemDto {
   @ApiProperty({ type: 'string', nullable: true })
   readonly notes!: string | null;
 
+  @ApiProperty({
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        url: { type: 'string' },
+        takenAt: { type: 'string', format: 'date-time' },
+      },
+    },
+    description: 'Fotos de evidencia del ítem',
+  })
+  readonly photos!: Array<{ id: string; url: string; takenAt: string }>;
+
+  @ApiProperty({
+    description: 'true si la ubicación observada coincide con la esperada',
+  })
+  readonly locationMatches!: boolean;
+
+  @ApiProperty({
+    description: 'true si el valor en libros del faltante supera el umbral de materialidad',
+  })
+  readonly materialityExceeded!: boolean;
+
   @ApiProperty({ type: 'string', format: 'uuid', nullable: true, description: 'Causa del catálogo (solo MISSING)' })
   readonly missingCauseId!: string | null;
 
@@ -428,6 +452,14 @@ export class InventoryCenterHeadCandidatesDto {
     description: 'Jefes vigentes (persona activa) del centro; vacío si no tiene',
   })
   readonly candidates!: InventorySignerHeadDto[];
+
+  @ApiProperty({
+    type: () => InventoryAttendedByDto,
+    isArray: true,
+    description:
+      'Quién acompañó la revisión en ubicaciones de este centro (sellado en ítems). Sugerencias para «quién atendió»; no son jefes del centro.',
+  })
+  readonly attendedSuggestions!: InventoryAttendedByDto[];
 }
 
 export class InventoryFieldCloseEvidenceDto {

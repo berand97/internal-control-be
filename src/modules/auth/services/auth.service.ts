@@ -712,10 +712,25 @@ export class AuthService implements OnModuleInit {
   }
 
   private async findUserForLogin(identifier: string): Promise<AppUser | null> {
-    if (identifier.includes('@')) {
-      return this.authUsersRepository.findByEmailWithPerson(identifier);
+    const value = identifier.trim();
+    if (!value) {
+      return null;
     }
-    return this.authUsersRepository.findByUsernameWithPerson(identifier);
+    if (value.includes('@')) {
+      return (
+        (await this.authUsersRepository.findByEmailWithPerson(value)) ??
+        (await this.authUsersRepository.findByUsernameWithPerson(value))
+      );
+    }
+    const byUsername = await this.authUsersRepository.findByUsernameWithPerson(value);
+    if (byUsername) {
+      return byUsername;
+    }
+    const institutional = `${value}@unac.edu.co`;
+    return (
+      (await this.authUsersRepository.findByUsernameWithPerson(institutional)) ??
+      (await this.authUsersRepository.findByEmailWithPerson(institutional))
+    );
   }
 
   private toAuthenticatedUser(

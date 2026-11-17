@@ -279,10 +279,11 @@ const body = (format) => {
   ];
 
   const half = TOTAL_WIDTH / 2;
-  const signatureBlock = (roleTitle, subtitleRuns, nameTag, cargoTag) => [
+  const signatureAnchor = (role) => `«FIRMA:${role}»`;
+  const signatureBlock = (roleTitle, subtitleRuns, nameTag, cargoTag, role) => [
     para([label(roleTitle)], { after: 0, keepNext: true }),
-    para(subtitleRuns, { after: 300, keepNext: true }),
-    para([run('_______________________________________')], { after: 0, keepNext: true }),
+    para(subtitleRuns, { after: 900, keepNext: true }),
+    para([run(signatureAnchor(role))], { after: 60, keepNext: true }),
     para([value(nameTag)], { after: 0, keepNext: true }),
     para([value(cargoTag)], { after: 0 }),
   ];
@@ -290,12 +291,35 @@ const body = (format) => {
     [half, half],
     [
       row([
-        cell(half, signatureBlock(format.keeper, [value('{{centroCosto.codigo}}'), run(' '), value('{{centroCosto.nombre}}')], '{{firmante.responsable.nombre}}', '{{firmante.responsable.cargo}}')),
-        cell(half, signatureBlock(format.review, [label(format.control)], '{{firmante.audita.nombre}}', '{{firmante.audita.cargo}}')),
+        cell(
+          half,
+          signatureBlock(
+            format.keeper,
+            [value('{{centroCosto.codigo}}'), run(' '), value('{{centroCosto.nombre}}')],
+            '{{firmante.responsable.nombre}}',
+            '{{firmante.responsable.cargo}}',
+            'RESPONSABLE',
+          ),
+        ),
+        cell(
+          half,
+          signatureBlock(format.review, [label(format.control)], '{{firmante.audita.nombre}}', '{{firmante.audita.cargo}}', 'AUDITA'),
+        ),
       ]),
     ],
     { borders: false },
   );
+  const accounting = [
+    para([run('{{#firmante.contabilidad}}', { size: small })], { after: 0, keepNext: true }),
+    ...signatureBlock(
+      'CONTABILIDAD:',
+      [run('Área de Contabilidad', { size: 18 })],
+      '{{firmante.contabilidad.nombre}}',
+      '{{firmante.contabilidad.cargo}}',
+      'CONTABILIDAD',
+    ),
+    para([run('{{/firmante.contabilidad}}', { size: small })], { after: 120 }),
+  ];
 
   const widths = COLUMNS.map((column) => column.width);
   const assets = table(widths, [
@@ -346,6 +370,7 @@ const body = (format) => {
     findingsNote,
     ...substitutions,
     signatures,
+    ...accounting,
     para([label('ANEXO 1. Detalle de los activos de la toma', 18)], { after: 60, keepNext: true, pageBreakBefore: true }),
     assets,
     para([run('Total de activos en el acta: ', { bold: true, size: 16 }), run('{{totalElementos}}', { size: 16 })], { after: 120 }),

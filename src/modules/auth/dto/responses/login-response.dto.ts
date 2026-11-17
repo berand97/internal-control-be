@@ -32,6 +32,7 @@ export class LoginResponseDto {
     const authUser: AuthUserResponseDto = {
       id: user.id,
       username: user.username,
+      email: user.person?.email?.trim() || (user.username.includes('@') ? user.username : ''),
       roles: roles.map((role) => role.code),
       roleDetails: roles.map((role): ActiveRoleResponseDto => ({ code: role.code, name: role.name })),
       mustChangePassword: user.mustChangePassword === true,

@@ -72,3 +72,5 @@ storage/templates/
 .claude/*
 !.claude/CLAUDE.md
 !.claude/rules/
+
+storage/inventories
