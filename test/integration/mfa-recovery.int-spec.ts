@@ -401,6 +401,7 @@ describe('MFA desde sesión, códigos de recuperación y reset administrativo (H
     expect(badProof.status).toBe(403);
 
     app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
+    await dataSource.query('DELETE FROM auth_attempt_lockout');
     const started = await post('/auth/me/mfa/enrollment', session.accessToken).send({ code: await totp(first.secret) });
     expect(started.status).toBe(200);
     const pending = started.body.data.secret as string;

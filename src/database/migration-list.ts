@@ -52,6 +52,7 @@ import { ContabilidadAccountingConfig1767226140000 } from './migrations/17672261
 import { InventoryFieldCloseSignature1767226150000 } from './migrations/1767226150000-inventory-field-close-signature.js';
 import { InventoryMetricsPhotosCloseReason1767226160000 } from './migrations/1767226160000-inventory-metrics-photos-close-reason.js';
 import { InventoryCompanionAgreement1767226170000 } from './migrations/1767226170000-inventory-companion-agreement.js';
+import { DocumentTemplateSameDay1767226180000 } from './migrations/1767226180000-document-template-same-day.js';
 import { PersonEmailSingleLine1767225760000 } from './migrations/1767225760000-person-email-single-line.js';
 import { InvitationExpiryAndTotpStep1767225770000 } from './migrations/1767225770000-invitation-expiry-and-totp-step.js';
 import { EncryptMfaSecrets1767225771000 } from './migrations/1767225771000-encrypt-mfa-secrets.js';
@@ -179,4 +180,5 @@ export const MIGRATIONS: ReadonlyArray<MigrationClass> = [
   InventoryFieldCloseSignature1767226150000,
   InventoryMetricsPhotosCloseReason1767226160000,
   InventoryCompanionAgreement1767226170000,
+  DocumentTemplateSameDay1767226180000,
 ];

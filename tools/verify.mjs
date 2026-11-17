@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const steps = [
   { name: 'Lint', command: 'bun run lint' },
@@ -9,9 +10,45 @@ const steps = [
   { name: 'Integration tests', command: 'bun run test:int' },
 ];
 
+function loadEnvFile(path) {
+  if (!existsSync(path)) {
+    return;
+  }
+  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) {
+      continue;
+    }
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+function adminUrlFromDatabaseUrl(databaseUrl) {
+  const url = new URL(databaseUrl);
+  url.pathname = '/postgres';
+  return url.toString();
+}
+
+loadEnvFile(resolve(process.cwd(), '.env'));
+
 if (!process.env.TEST_DATABASE_ADMIN_URL) {
-  process.env.TEST_DATABASE_ADMIN_URL =
-    'postgres://postgres:postgres@localhost:5432/postgres';
+  process.env.TEST_DATABASE_ADMIN_URL = process.env.DATABASE_URL
+    ? adminUrlFromDatabaseUrl(process.env.DATABASE_URL)
+    : 'postgres://postgres:postgres@localhost:5432/postgres';
   console.log(
     `TEST_DATABASE_ADMIN_URL not set; using ${process.env.TEST_DATABASE_ADMIN_URL}`,
   );

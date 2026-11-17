@@ -625,7 +625,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     for (const assetId of [first, second]) {
       expect((await post(responsible, `/${id}/verify-asset`, { assetId, condition: 'GOOD' })).status).toBe(200);
     }
-    expect((await post(responsible, `/${id}/report-not-found`, { assetId: missing, otherCause: 'Se desconoce' })).status).toBe(200);
+    expect((await post(responsible, `/${id}/report-not-found`, { assetId: missing, otherCause: 'No se ubicó en la oficina ni en la bodega' })).status).toBe(200);
     for (const [assetId, code] of [
       [first, 'AU'],
       [second, 'AU'],
@@ -900,7 +900,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     for (const assetId of [microscope, server, drill]) {
       expect((await post(director, `/${id}/verify-asset`, { assetId, condition: 'GOOD' })).status).toBe(200);
     }
-    expect((await post(director, `/${id}/report-not-found`, { assetId: lostScope, otherCause: 'Se desconoce' })).status).toBe(200);
+    expect((await post(director, `/${id}/report-not-found`, { assetId: lostScope, otherCause: 'No se ubicó en la oficina ni en la bodega' })).status).toBe(200);
     for (const [assetId, category] of [
       [microscope, 'AU'],
       [lostScope, 'ANE'],

@@ -233,7 +233,7 @@ describe
             await post(responsible, `/${id}/report-unexpected`, {
               notes: 'Archivador metálico sin placa',
               locationId: base.room,
-              condition: 'FAIR',
+              condition: 'GOOD',
             })
           ).status,
         ).toBe(200);

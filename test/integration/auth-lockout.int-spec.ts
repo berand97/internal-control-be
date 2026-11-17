@@ -245,10 +245,13 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       };
     };
 
+    const clearThrottle = () => {
+      app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
+    };
+
     const challenge = async (user: TestUser): Promise<string> => {
-      const throttlerStorage =
-        app.get<ThrottlerStorageService>(ThrottlerStorage);
-      throttlerStorage.storage.clear();
+      clearThrottle();
+      await dataSource.query('DELETE FROM auth_attempt_lockout');
       const response = await login(user.username, PASSWORD);
       expect(response.body.data).toMatchObject({ requiresMfa: true });
       return response.body.data.mfaChallengeToken as string;
@@ -263,6 +266,7 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
     it('5 TOTP erróneos con desafíos e IP distintos bloquean MFA, aunque el siguiente código sea correcto', async () => {
       const { user, secret, codes } = await enrolledUser();
       for (let attempt = 0; attempt < 5; attempt += 1) {
+        clearThrottle();
         const response = await post(
           '/auth/mfa/verify',
           await challenge(user),

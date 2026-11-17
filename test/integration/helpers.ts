@@ -120,6 +120,12 @@ export const inventoryCloseBody = (
   body: Record<string, unknown> = {},
 ): Record<string, unknown> => ({
   encargadoSignaturePng: ENCARGADO_CLOSE_SIGNATURE,
+  ...(body['allowUnverified'] === true
+    ? {
+        unverifiedReason:
+          'Cierre de prueba con pendientes autorizado por Control Interno.',
+      }
+    : {}),
   ...body,
 });
 
