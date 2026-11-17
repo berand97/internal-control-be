@@ -47,7 +47,7 @@ export const assertMigrationsApplied = async (
     throw new Error(`Faltan ${pending.length} migraciones: ${pending.join(', ')}`);
   }
   options.logger.warn(
-    `Faltan ${pending.length} migraciones: corra pnpm db:migrate\n${list}\n` +
+    `Faltan ${pending.length} migraciones: corra bun run db:migrate\n${list}\n` +
       'Mientras tanto los módulos que usen tablas o columnas nuevas fallarán.',
   );
 };

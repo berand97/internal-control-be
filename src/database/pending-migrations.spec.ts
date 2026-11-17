@@ -48,7 +48,7 @@ describe('Migraciones pendientes al arrancar', () => {
     const log = logger();
     await assertMigrationsApplied(dataSourceWith(['First1000']) as never, { production: false, logger: log }, MIGS);
     expect(log.warn).toHaveBeenCalledTimes(1);
-    expect(log.warn.mock.calls[0]?.[0]).toContain('Faltan 1 migraciones: corra pnpm db:migrate');
+    expect(log.warn.mock.calls[0]?.[0]).toContain('Faltan 1 migraciones: corra bun run db:migrate');
     expect(log.warn.mock.calls[0]?.[0]).toContain('Second2000');
     expect(log.error).not.toHaveBeenCalled();
   });

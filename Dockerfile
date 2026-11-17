@@ -5,30 +5,25 @@
 # -----------------------------------------------------------------------------
 # 1) Dependencias (incluye toolchain para argon2)
 # -----------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS deps
+FROM oven/bun:1.4.4-debian AS deps
 WORKDIR /app
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 
-ENV PNPM_HOME=/usr/local/share/pnpm
-ENV PATH="${PNPM_HOME}:${PATH}" \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
-
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 # -----------------------------------------------------------------------------
-# 2) Compilación + prune de dependencias de desarrollo
+# 2) Compilación + dependencias de producción
 # -----------------------------------------------------------------------------
 FROM deps AS build
 WORKDIR /app
 
 COPY . .
-RUN pnpm run build \
-  && pnpm prune --prod --ignore-scripts
+RUN bun run build \
+  && bun install --production --frozen-lockfile
 
 # -----------------------------------------------------------------------------
 # 3) Runtime mínimo
