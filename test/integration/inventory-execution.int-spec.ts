@@ -22,7 +22,6 @@ import {
 import { conform, type Schema } from './openapi-conform.js';
 import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
 
-/** PNG 1×1 válido para evidencia de ítems (faltante / OBSOLETE). */
 const TINY_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
@@ -585,7 +584,6 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       voidedUnexpected: 1,
     });
 
-    // Sobrantes con assetId no se resuelven por API; CI cierra con override del checklist.
     const closed = await post(director, `/${inventoryId}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expect(closed.body.data.status).toBe('RECONCILED');

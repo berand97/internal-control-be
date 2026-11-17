@@ -213,7 +213,6 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     return id;
   };
 
-  /** El jefe de prueba suele no tener inventory:read; marcamos conformidad por SQL y encolamos. */
   const forceAgreementAgreed = async (inventoryId: string, headPersonId: string) => {
     await dataSource.query(
       `INSERT INTO physical_inventory_act_agreement

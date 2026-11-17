@@ -248,7 +248,6 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
     const clearThrottle = () => {
       const service = app.get<ThrottlerStorageService>(ThrottlerStorage);
       service.storage.clear();
-      // hitExpirations no se limpia con storage.clear(); sin esto el límite sigue activo.
       (
         service as unknown as { hitExpirations: Map<string, unknown> }
       ).hitExpirations.clear();
@@ -256,7 +255,6 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
 
     const challenge = async (user: TestUser): Promise<string> => {
       clearThrottle();
-      // No borrar factor MFA: el contador de bloqueo debe acumularse entre desafíos.
       await dataSource.query(
         `DELETE FROM auth_attempt_lockout WHERE factor IN ('PASSWORD', 'PASSWORD_IP')`,
       );
