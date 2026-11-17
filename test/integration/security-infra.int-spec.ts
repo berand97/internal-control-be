@@ -397,7 +397,13 @@ describe('Endurecimiento BE-10/11/12/15/16/17 (HTTP real + PostgreSQL real)', ()
       )) as Array<{ storage_key: string; file_hash: string }>;
       expect(row?.storage_key).toMatch(/^templates\/documents\/OCI-01-55\/2026-09-02-v2-[0-9a-f-]{36}\.docx$/);
       const second = await upload('templates/formats/OCI-01-65-v2.docx');
-      expect(second.status).not.toBe(201);
+      expect(second.status).toBe(201);
+      expect(second.body.data.id).not.toBe(first.body.data.id);
+      const [secondRow] = (await dataSource.query(
+        'SELECT storage_key FROM document_template_version WHERE id = $1',
+        [second.body.data.id],
+      )) as Array<{ storage_key: string }>;
+      expect(secondRow?.storage_key).not.toBe(row?.storage_key);
       const stored = await readFile(join(SHARED_STORAGE_DIR, row?.storage_key ?? ''));
       expect(createHash('sha256').update(stored).digest('hex')).toBe(row?.file_hash);
     });

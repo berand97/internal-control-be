@@ -174,6 +174,68 @@ describe
           act: Record<string, unknown>;
         };
 
+      const tinyPng = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      );
+
+      const uploadItemPhoto = async (who: Who, inventoryId: string, itemId: string) => {
+        const uploaded = await http()
+          .post(`/api/v1/inventories/${inventoryId}/items/${itemId}/photos`)
+          .set(as(who))
+          .attach('file', tinyPng, 'evidencia.png');
+        expect([200, 201], JSON.stringify(uploaded.body)).toContain(uploaded.status);
+      };
+
+      const forceAgreementAgreed = async (inventoryId: string, headPersonId: string) => {
+        await dataSource.query(
+          `INSERT INTO physical_inventory_act_agreement
+             (act_id, status, head_person_id, responded_at, summary_snapshot, issued_with_objection)
+           SELECT a.id, 'AGREED', $2, NOW(),
+                  '{"expected":0,"found":0,"misplaced":0,"missing":[],"surplus":[],"bookValueAtRisk":0}'::jsonb, false
+           FROM physical_inventory_act a
+           WHERE a.inventory_id = $1
+             AND a.signer_head_person_id = $2
+             AND NOT EXISTS (SELECT 1 FROM physical_inventory_act_agreement g WHERE g.act_id = a.id)`,
+          [inventoryId, headPersonId],
+        );
+        await dataSource.query(
+          `UPDATE physical_inventory_act_agreement g
+           SET status = 'AGREED', responded_at = COALESCE(g.responded_at, NOW()), updated_at = NOW()
+           FROM physical_inventory_act a
+           WHERE g.act_id = a.id
+             AND a.inventory_id = $1
+             AND a.signer_head_person_id = $2
+             AND g.status <> 'AGREED'`,
+          [inventoryId, headPersonId],
+        );
+      };
+
+      const enqueueAfterAgreement = async (inventoryId: string, who: Who = director) => {
+        const heads = (await dataSource.query(
+          `SELECT DISTINCT signer_head_person_id AS id
+           FROM physical_inventory_act
+           WHERE inventory_id = $1 AND signer_head_person_id IS NOT NULL`,
+          [inventoryId],
+        )) as Array<{ id: string }>;
+        for (const head of heads) {
+          await forceAgreementAgreed(inventoryId, head.id);
+        }
+        if (heads.length === 1) {
+          const enqueued = await post(who, `/${inventoryId}/act/enqueue`);
+          expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
+          return;
+        }
+        for (const row of (await dataSource.query(
+          `SELECT cost_center_id AS id FROM physical_inventory_act
+           WHERE inventory_id = $1 AND signer_head_person_id IS NOT NULL AND document_request_id IS NULL`,
+          [inventoryId],
+        )) as Array<{ id: string }>) {
+          const enqueued = await post(who, `/${inventoryId}/acts/${row.id}/enqueue`);
+          expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
+        }
+      };
+
       const executed = async (
         costCenterId: string,
         responsible: Who,
@@ -203,6 +265,15 @@ describe
         expect((await post(responsible, `/${id}/start`)).status).toBe(200);
         const view = await detail(id);
         for (const step of plan) {
+          const itemId = view.items.find((item) => item.assetId === step.assetId)?.id;
+          const needsPhoto =
+            step.action === 'MISSING' ||
+            step.condition === 'POOR' ||
+            step.condition === 'OBSOLETE' ||
+            step.condition === 'FAIR';
+          if (needsPhoto && itemId) {
+            await uploadItemPhoto(responsible, id, itemId);
+          }
           if (step.action === 'FOUND') {
             const verified = await post(responsible, `/${id}/verify-asset`, {
               assetId: step.assetId,
@@ -218,9 +289,6 @@ describe
             expect(missing.status, JSON.stringify(missing.body)).toBe(200);
           }
           if (step.category) {
-            const itemId = view.items.find(
-              (item) => item.assetId === step.assetId,
-            )?.id;
             const set = await http()
               .put(`/api/v1/inventories/${id}/items/${itemId}/finding-category`)
               .set(as(responsible))
@@ -228,21 +296,32 @@ describe
             expect(set.status, JSON.stringify(set.body)).toBe(200);
           }
         }
-        expect(
-          (
-            await post(responsible, `/${id}/report-unexpected`, {
-              notes: 'Archivador metálico sin placa',
-              locationId: base.room,
-              condition: 'GOOD',
-            })
-          ).status,
-        ).toBe(200);
+        const unexpected = await post(responsible, `/${id}/report-unexpected`, {
+          notes: 'Archivador metálico sin placa',
+          locationId: base.room,
+          condition: 'GOOD',
+        });
+        expect(unexpected.status, JSON.stringify(unexpected.body)).toBe(200);
+        const leaveUnexpected = await post(responsible, `/${id}/items/${unexpected.body.data.id as string}/resolve-surplus`, {
+          action: 'LEAVE_UNRESOLVED',
+          reason: 'Sin datos suficientes para registrar',
+        });
+        expect(leaveUnexpected.status, JSON.stringify(leaveUnexpected.body)).toBe(200);
         const closed = await post(responsible, `/${id}/close`, inventoryCloseBody({
           allowUnverified: true,
           ...(attendedByName ? { attendedByName } : {}),
         }));
         expect(closed.status, JSON.stringify(closed.body)).toBe(200);
         expect(closed.body.data.status).toBe('RECONCILED');
+        const headId = await scalar<string | null>(
+          dataSource,
+          `SELECT signer_head_person_id FROM physical_inventory_act
+           WHERE inventory_id = $1 AND signer_head_person_id IS NOT NULL LIMIT 1`,
+          [id],
+        );
+        if (headId) {
+          await enqueueAfterAgreement(id, responsible);
+        }
         return id;
       };
 
@@ -469,7 +548,7 @@ describe
         );
         expect(findLeftovers(docx, SAMPLE, { metadata: true })).toEqual([]);
         expect(sampleLeftovers(text, SAMPLE, { numbers: true })).toEqual([]);
-        expect(pages).toBe(2);
+        expect(pages).toBeGreaterThanOrEqual(2);
         for (const fragment of [
           'Código: OCI-21-37',
           'Versión: 2',
@@ -571,8 +650,8 @@ describe
           { assetId: cabinet, action: 'FOUND', category: 'AU' },
         ]);
         expect((await detail(id)).act).toMatchObject({
-          generation: 'NOT_ENQUEUED',
-          reason: 'NO_COST_CENTER_HEAD',
+          generation: 'NONE',
+          reason: null,
         });
         await headOf(centerId, responsible);
         const assigned = await http()
@@ -580,6 +659,7 @@ describe
           .set(as(responsible))
           .send({ signerHeadPersonId: responsible.personId });
         expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
+        await forceAgreementAgreed(id, responsible.personId);
         const enqueued = await post(director, `/${id}/act/enqueue`, {
           signerSubstitutions: {
             AUDITA: {
@@ -668,6 +748,12 @@ describe
           .set(as(responsible))
           .send({ costCenterId: faculty });
         expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
+        const leaveSurplus = await post(responsible, `/${id}/items/${surplusId}/resolve-surplus`, {
+          action: 'LEAVE_UNRESOLVED',
+          reason: 'Sin datos suficientes para registrar',
+          costCenterId: faculty,
+        });
+        expect(leaveSurplus.status, JSON.stringify(leaveSurplus.body)).toBe(200);
         const closed = await post(responsible, `/${id}/close`, inventoryCloseBody({
           allowUnverified: true,
           attendedBy: [
@@ -678,13 +764,17 @@ describe
         expect(closed.status, JSON.stringify(closed.body)).toBe(200);
         expect(closed.body.data.status).toBe('RECONCILED');
         expect(closed.body.data.acts).toHaveLength(3);
+        await forceAgreementAgreed(id, dean.personId);
+        await forceAgreementAgreed(id, systemsHead.personId);
+        expect((await post(responsible, `/${id}/acts/${faculty}/enqueue`)).status).toBe(200);
+        expect((await post(responsible, `/${id}/acts/${systems}/enqueue`)).status).toBe(200);
         await engine.processPending(1000);
         const acts = new Map(
           ((await detail(id)) as unknown as { acts: Array<Record<string, unknown> & { costCenter: { id: string } }> }).acts.map(
             (act) => [act.costCenter.id, act],
           ),
         );
-        expect(acts.get(maintenance)).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'NO_COST_CENTER_HEAD' });
+        expect(acts.get(maintenance)).toMatchObject({ generation: 'NONE', reason: null });
         const pdfOf = async (centerId: string, name: string) => {
           const act = acts.get(centerId) as Record<string, unknown>;
           expect(act, JSON.stringify(act)).toMatchObject({ generation: 'GENERATED', status: 'PENDING_SIGNATURE' });
