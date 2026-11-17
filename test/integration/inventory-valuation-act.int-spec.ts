@@ -213,11 +213,59 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     return id;
   };
 
-  const closeAndApprove = async (id: string, responsible: Who) => {
+  /** El jefe de prueba suele no tener inventory:read; marcamos conformidad por SQL y encolamos. */
+  const forceAgreementAgreed = async (inventoryId: string, headPersonId: string) => {
+    await dataSource.query(
+      `INSERT INTO physical_inventory_act_agreement
+         (act_id, status, head_person_id, responded_at, summary_snapshot, issued_with_objection)
+       SELECT a.id, 'AGREED', $2, NOW(),
+              '{"expected":0,"found":0,"misplaced":0,"missing":[],"surplus":[],"bookValueAtRisk":0}'::jsonb, false
+       FROM physical_inventory_act a
+       WHERE a.inventory_id = $1
+         AND a.signer_head_person_id = $2
+         AND NOT EXISTS (SELECT 1 FROM physical_inventory_act_agreement g WHERE g.act_id = a.id)`,
+      [inventoryId, headPersonId],
+    );
+    await dataSource.query(
+      `UPDATE physical_inventory_act_agreement g
+       SET status = 'AGREED', responded_at = COALESCE(g.responded_at, NOW()), updated_at = NOW()
+       FROM physical_inventory_act a
+       WHERE g.act_id = a.id
+         AND a.inventory_id = $1
+         AND a.signer_head_person_id = $2
+         AND g.status <> 'AGREED'`,
+      [inventoryId, headPersonId],
+    );
+  };
+
+  const agreeAndEnqueue = async (inventoryId: string, headPersonId: string, who: Who = director) => {
+    await forceAgreementAgreed(inventoryId, headPersonId);
+    return post(who, `/${inventoryId}/act/enqueue`);
+  };
+
+  const uploadItemPhoto = async (who: Who, inventoryId: string, assetId: string) => {
+    const itemId = await scalar<string>(
+      dataSource,
+      `SELECT id FROM physical_inventory_item WHERE inventory_id = $1 AND asset_id = $2`,
+      [inventoryId, assetId],
+    );
+    const tinyPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    const uploaded = await http()
+      .post(`/api/v1/inventories/${inventoryId}/items/${itemId}/photos`)
+      .set(as(who))
+      .attach('file', tinyPng, 'evidencia.png');
+    expect([200, 201], JSON.stringify(uploaded.body)).toContain(uploaded.status);
+  };
+
+  const closeAndApprove = async (id: string, responsible: Who, head: Who, _costCenterId: string) => {
     const closed = await post(responsible, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expect(closed.body.data.status).toBe('RECONCILED');
-    return closed.body.data as { status: string; act: Record<string, unknown>; warnings: unknown[] };
+    await agreeAndEnqueue(id, head.personId, responsible);
+    return detail(id);
   };
 
   beforeAll(async () => {
@@ -528,10 +576,10 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
   it('aprobar sin plantilla: la toma queda RECONCILED y el acta falla con TEMPLATE_NOT_ACTIVE; con el formato sin código SGC queda NOT_ENQUEUED y se encola después', async () => {
     const centerId = await center('Centro sin plantilla');
     await newAsset(centerId, 10);
-    await headOf(centerId, await person('Jefa', null));
+    const head = await headOf(centerId, await person('Jefa', null));
     const responsible = await person('Responsable', 'INTERNAL_CONTROL_DIRECTOR');
     const id = await started(centerId, responsible);
-    const approved = await closeAndApprove(id, responsible);
+    const approved = await closeAndApprove(id, responsible, head, centerId);
     expect(approved.status).toBe('RECONCILED');
     expect(approved.act).toMatchObject({ generation: 'PENDING', reason: null });
     await engine.processPending(1000);
@@ -563,7 +611,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       await newAsset(otherCenter, 10);
       const otherHead = await headOf(otherCenter, await person('Jefe', null));
       const orphan = await started(otherCenter, responsible);
-      const reconciled = await closeAndApprove(orphan, responsible);
+      const reconciled = await closeAndApprove(orphan, responsible, otherHead, otherCenter);
       expect(reconciled.status).toBe('RECONCILED');
       expect(reconciled.act).toMatchObject({
         generation: 'NOT_ENQUEUED',
@@ -617,7 +665,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     const missing = await newAsset(centerId, 200);
     await depreciation(first, 2020, 12, 800);
     await depreciation(second, 2020, 12, 300);
-    await headOf(centerId, await person('Jefa', null));
+    const head = await headOf(centerId, await person('Jefa', null));
     const responsible = await person('Responsable', 'INTERNAL_CONTROL_DIRECTOR');
     const id = await started(centerId, responsible);
     const view = await detail(id);
@@ -625,6 +673,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     for (const assetId of [first, second]) {
       expect((await post(responsible, `/${id}/verify-asset`, { assetId, condition: 'GOOD' })).status).toBe(200);
     }
+    await uploadItemPhoto(responsible, id, missing);
     expect((await post(responsible, `/${id}/report-not-found`, { assetId: missing, otherCause: 'No se ubicó en la oficina ni en la bodega' })).status).toBe(200);
     for (const [assetId, code] of [
       [first, 'AU'],
@@ -638,7 +687,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       expect(set.status, JSON.stringify(set.body)).toBe(200);
     }
     expect((await post(responsible, `/${id}/report-unexpected`, { notes: 'Mesa sin placa' })).status).toBe(200);
-    const approved = await closeAndApprove(id, responsible);
+    const approved = await closeAndApprove(id, responsible, head, centerId);
     expect(approved.act).toMatchObject({ generation: 'PENDING' });
     await engine.processPending(1000);
     const generated = await detail(id);
@@ -679,12 +728,13 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     const closed = await post(director, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expect(closed.body.data.status).toBe('RECONCILED');
-    expect(closed.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'NO_COST_CENTER_HEAD', retryAction: 'ENQUEUE' });
+    expect(closed.body.data.act).toMatchObject({ generation: 'NONE', reason: null, retryAction: null });
 
     await headOf(centerId, director);
     const assigned = await http().put(`/api/v1/inventories/${id}/signer-head`).set(as(director)).send({ signerHeadPersonId: director.personId });
     expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
     expect(assigned.body.data).toMatchObject({ signerHead: { personId: director.personId }, actIssuable: true });
+    await forceAgreementAgreed(id, director.personId);
 
     const duplicated = await post(director, `/${id}/act/enqueue`);
     expect([duplicated.status, duplicated.body.error.code]).toEqual([409, 'DOCUMENT_SIGNER_DUPLICATED']);
@@ -727,14 +777,14 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     );
     const centerId = await center('Centro con cerrador sin permiso de firma');
     await newAsset(centerId, 10);
-    await headOf(centerId, await person('Jefe', null));
+    const head = await headOf(centerId, await person('Jefe', null));
     const id = await started(centerId, closer);
     const approved = await post(closer, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
     expect(approved.body.data.status).toBe('RECONCILED');
-    expect(approved.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'ENQUEUE_FAILED', retryAction: 'ENQUEUE' });
-    expect(String(approved.body.data.act.message)).toContain('necesita una persona con permiso para firmar actas por Control Interno');
+    expect(approved.body.data.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: null, retryAction: 'ENQUEUE' });
 
+    await forceAgreementAgreed(id, head.personId);
     const notEligible = await post(closer, `/${id}/act/enqueue`);
     expect([notEligible.status, notEligible.body.error.code]).toEqual([400, 'DOCUMENT_SIGNER_NOT_ELIGIBLE']);
     expect(notEligible.body.error.details).toEqual([{ field: 'signers.AUDITA', message: 'Esta persona no tiene permiso para firmar actas por Control Interno.' }]);
@@ -776,6 +826,8 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       warnings: [],
     });
     await approve(first);
+    const firstEnqueued = await agreeAndEnqueue(first, onlyHead.personId);
+    expect(firstEnqueued.status, JSON.stringify(firstEnqueued.body)).toBe(200);
     expect(await payloadOf(first)).toMatchObject({
       responsiblePersonId: onlyHead.personId,
       fields: { atendioPorArea: 'Asistente Valoración' },
@@ -818,6 +870,8 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       warnings: [],
     });
     await approve(second);
+    const secondEnqueued = await agreeAndEnqueue(second, headB.personId);
+    expect(secondEnqueued.status, JSON.stringify(secondEnqueued.body)).toBe(200);
     expect(await payloadOf(second)).toMatchObject({ responsiblePersonId: headB.personId, fields: { atendioPorArea: 'Auxiliar de turno' } });
 
     const headless = await center('Centro sin jefe');
@@ -832,7 +886,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       warnings: [{ code: 'ACT_CANNOT_BE_ISSUED', message: expect.stringContaining('no tiene jefe. Su acta no se podrá emitir') }],
     });
     const reconciled = await approve(third);
-    expect(reconciled.act).toMatchObject({ generation: 'NOT_ENQUEUED', reason: 'NO_COST_CENTER_HEAD', retryAction: 'ENQUEUE' });
+    expect(reconciled.act).toMatchObject({ generation: 'NONE', reason: null, retryAction: null });
     expect(reconciled.warnings).toEqual([{ code: 'ACT_CANNOT_BE_ISSUED', message: expect.any(String), costCenterId: headless }]);
     expect(await payloadOf(third)).toBeUndefined();
     const stillBlocked = await post(director, `/${third}/act/enqueue`);
@@ -846,6 +900,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(assigned.status, JSON.stringify(assigned.body)).toBe(200);
     expectConforms('put', '/api/v1/inventories/{id}/signer-head', 200, assigned.body);
     expect(assigned.body.data).toMatchObject({ signerHead: { personId: newcomer.personId }, actIssuable: true, warnings: [] });
+    await forceAgreementAgreed(third, newcomer.personId);
     const enqueued = await post(director, `/${third}/act/enqueue`);
     expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
     expect(enqueued.body.data).toMatchObject({ generation: 'PENDING', reason: null });
@@ -900,6 +955,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     for (const assetId of [microscope, server, drill]) {
       expect((await post(director, `/${id}/verify-asset`, { assetId, condition: 'GOOD' })).status).toBe(200);
     }
+    await uploadItemPhoto(director, id, lostScope);
     expect((await post(director, `/${id}/report-not-found`, { assetId: lostScope, otherCause: 'No se ubicó en la oficina ni en la bodega' })).status).toBe(200);
     for (const [assetId, category] of [
       [microscope, 'AU'],
@@ -979,6 +1035,13 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     )) as Array<{ changes: Record<string, unknown> }>;
     expect(centerAudit?.changes).toEqual({ itemId: boxId, surplusCostCenterId: { from: null, to: systems } });
 
+    const leaveBox = await post(director, `/${id}/items/${boxId}/resolve-surplus`, {
+      action: 'LEAVE_UNRESOLVED',
+      reason: 'Sin datos suficientes para registrar',
+      costCenterId: systems,
+    });
+    expect(leaveBox.status, JSON.stringify(leaveBox.body)).toBe(200);
+
     const unchosen = await post(director, `/${id}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect([unchosen.status, unchosen.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
     expect(unchosen.body.error.details).toEqual([{ field: `signerHeads.${systems}`, message: expect.any(String) }]);
@@ -1015,25 +1078,32 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
       attendedBy: { personId: null, name: 'Auxiliar del laboratorio' },
       issuable: true,
       warnings: [],
-      generation: 'PENDING',
+      generation: 'NOT_ENQUEUED',
       reason: null,
+      retryAction: 'ENQUEUE',
     });
     expect(afterApproval.get(systems)).toMatchObject({
       signerHead: { personId: systemsB.personId },
       attendedBy: { personId: null, name: 'Técnico de sistemas' },
       issuable: true,
-      generation: 'PENDING',
+      generation: 'NOT_ENQUEUED',
       reason: null,
+      retryAction: 'ENQUEUE',
     });
     expect(afterApproval.get(maintenance)).toMatchObject({
       signerHead: null,
       issuable: false,
       warnings: [{ costCenterId: maintenance }],
-      generation: 'NOT_ENQUEUED',
-      reason: 'NO_COST_CENTER_HEAD',
-      retryable: true,
-      retryAction: 'ENQUEUE',
+      generation: 'NONE',
+      reason: null,
+      retryAction: null,
     });
+    await forceAgreementAgreed(id, deanHead.personId);
+    await forceAgreementAgreed(id, systemsB.personId);
+    const facultyEnqueue = await post(director, `/${id}/acts/${faculty}/enqueue`);
+    expect(facultyEnqueue.status, JSON.stringify(facultyEnqueue.body)).toBe(200);
+    const systemsEnqueue = await post(director, `/${id}/acts/${systems}/enqueue`);
+    expect(systemsEnqueue.status, JSON.stringify(systemsEnqueue.body)).toBe(200);
     await engine.processPending(1000);
 
     const text = async (documentId: unknown) => {
@@ -1074,7 +1144,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expect(systemsText).toContain(`CENTRO|${await code(systems)}|Técnico de sistemas|${String(systemsAct['number'])}|`);
     expect(systemsText).toContain('TOTALES|1|1|0|1|');
     expect(systemsText).toContain(`H|AU|1|${formatMoney(300)}|100,00 %|`);
-    expect(systemsText).toContain('S|Caja sin placa|Sin decisión|');
+    expect(systemsText).toContain('S|Caja sin placa|Sin resolver|');
     expect(systemsText).not.toContain('Silla sin placa');
     expect(systemsText).toContain('FIRMAS|Jefe Sistemas Valoración|Directora Valoración|');
 
@@ -1093,6 +1163,7 @@ describe('Toma física: corte contable, valor en libros, sobrantes y acta OCI-21
     expectConforms('put', '/api/v1/inventories/{id}/acts/{costCenterId}/signer-head', 200, assigned.body);
     expect(assigned.body.data).toMatchObject({ actIssuable: true, warnings: [] });
     expect((await put(`/${id}/acts/${systems}/signer-head`, { signerHeadPersonId: systemsA.personId })).status).toBe(406);
+    await forceAgreementAgreed(id, newcomer.personId);
     const enqueued = await post(director, `/${id}/acts/${maintenance}/enqueue`);
     expect(enqueued.status, JSON.stringify(enqueued.body)).toBe(200);
     expectConforms('post', '/api/v1/inventories/{id}/acts/{costCenterId}/enqueue', 200, enqueued.body);

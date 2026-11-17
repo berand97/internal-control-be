@@ -11,9 +11,22 @@ import type { AuthenticatedUser } from '../../src/common/types/authenticated-use
 import { AssetsService } from '../../src/modules/assets/services/assets.service.js';
 import { TokenService } from '../../src/modules/auth/services/token.service.js';
 import { addDays } from '../../src/modules/inventories/domain/inventory-schedule.js';
-import { discardInventoryActRequests, inventoryCloseBody, openTestSession, scalar, withTemporaryHead } from './helpers.js';
+import {
+  discardInventoryActRequests,
+  inventoryCloseBody,
+  openTestSession,
+  scalar,
+  useSharedStorage,
+  withTemporaryHead,
+} from './helpers.js';
 import { conform, type Schema } from './openapi-conform.js';
 import { localeIsoDate } from '../../src/shared/dates/locale-iso-date.js';
+
+/** PNG 1×1 válido para evidencia de ítems (faltante / OBSOLETE). */
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 interface Who {
   readonly personId: string;
@@ -144,6 +157,23 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
 
   const errorCode = (response: { body: { error?: { code?: string } } }) => response.body.error?.code;
 
+  const itemIdOf = async (inventoryId: string, assetId: string) =>
+    scalar<string>(
+      dataSource,
+      `SELECT id FROM physical_inventory_item WHERE inventory_id = $1 AND asset_id = $2`,
+      [inventoryId, assetId],
+    );
+
+  const uploadItemPhoto = async (who: Who, inventoryId: string, assetId: string) => {
+    const itemId = await itemIdOf(inventoryId, assetId);
+    const uploaded = await http()
+      .post(`/api/v1/inventories/${inventoryId}/items/${itemId}/photos`)
+      .set(as(who))
+      .attach('file', TINY_PNG, 'evidencia.png');
+    expect([200, 201], JSON.stringify(uploaded.body)).toContain(uploaded.status);
+    return itemId;
+  };
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication<NestExpressApplication>();
@@ -154,6 +184,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       await job.stop();
     }
     dataSource = app.get(DataSource);
+    await useSharedStorage(dataSource);
     openapi = SwaggerModule.createDocument(app, new DocumentBuilder().build());
     const campus = await scalar<string>(dataSource, `INSERT INTO campus (code, name) VALUES ('IT-EC', 'Sede ejecución') RETURNING id`);
     const building = await scalar<string>(
@@ -349,6 +380,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
 
   it('dentro del umbral cierra el responsable sin autorización adicional', async () => {
     const centerId = await center('Dentro del umbral');
+    await head((await person('JefeUmbral', null)).personId, centerId);
     const assets = await Promise.all(Array.from({ length: 21 }, () => newAsset(centerId)));
     const inventoryId = await schedule(centerId, responsible.userId);
     expect((await post(responsible, `/${inventoryId}/start`)).status).toBe(200);
@@ -362,6 +394,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
 
   it('flujo completo: verificar, faltantes con causa y con "Otra", sobrantes, categoría, corrección, anulación, cierre y conciliación', async () => {
     const centerId = await center('Flujo');
+    await head((await person('JefeFlujo', null)).personId, centerId);
     const found = await newAsset(centerId);
     const misplaced = await newAsset(centerId);
     const missingOther = await newAsset(centerId);
@@ -381,6 +414,7 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     expect(verifiedFound.status).toBe(200);
     expectConforms('post', '/api/v1/inventories/{id}/verify-asset', 200, verifiedFound.body);
     expect(verifiedFound.body.data).toMatchObject({ result: 'FOUND', suggestedCategory: 'AU', findingCategory: null });
+    await uploadItemPhoto(responsible, inventoryId, misplaced);
     const verifiedMisplaced = await post(responsible, `/${inventoryId}/verify-asset`, {
       assetId: misplaced,
       condition: 'OBSOLETE',
@@ -404,6 +438,8 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       otherCause: 'Se lo llevó el contratista',
     });
     expect(errorCode(both)).toBe('INVENTORY_MISSING_CAUSE_REQUIRED');
+    await uploadItemPhoto(responsible, inventoryId, missingOther);
+    await uploadItemPhoto(responsible, inventoryId, missingCataloged);
     const byOther = await post(responsible, `/${inventoryId}/report-not-found`, {
       assetId: missingOther,
       otherCause: '  Se lo llevó el contratista  ',
@@ -549,7 +585,8 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
       voidedUnexpected: 1,
     });
 
-    const closed = await post(responsible, `/${inventoryId}/close`, inventoryCloseBody());
+    // Sobrantes con assetId no se resuelven por API; CI cierra con override del checklist.
+    const closed = await post(director, `/${inventoryId}/close`, inventoryCloseBody({ allowUnverified: true }));
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expect(closed.body.data.status).toBe('RECONCILED');
     const report = closed.body.data.report as { notFoundItems: Item[]; unexpectedItems: Item[] };
@@ -629,10 +666,16 @@ describe('Ejecución de tomas físicas: alcance, foto, cierre, causas, categorí
     const causes = await http().get('/api/v1/inventories/catalogs/missing-causes').set(as(outsiderHead));
     expect(causes.status).toBe(200);
     expectConforms('get', '/api/v1/inventories/catalogs/missing-causes', 200, causes.body);
+    const uniqueLabel = `Hurto catálogo ${randomUUID().slice(0, 8)}`;
+    const createdCause = await http()
+      .post('/api/v1/inventories/catalogs/missing-causes')
+      .set(as(director))
+      .send({ label: uniqueLabel });
+    expect(createdCause.status, JSON.stringify(createdCause.body)).toBe(201);
     const repeated = await http()
       .post('/api/v1/inventories/catalogs/missing-causes')
       .set(as(director))
-      .send({ label: 'HURTO con denuncia' });
+      .send({ label: uniqueLabel.toUpperCase() });
     expect(errorCode(repeated)).toBe('INVENTORY_CATALOG_ENTRY_EXISTS');
 
     expect(

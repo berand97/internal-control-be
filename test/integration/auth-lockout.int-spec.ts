@@ -246,12 +246,20 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
     };
 
     const clearThrottle = () => {
-      app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
+      const service = app.get<ThrottlerStorageService>(ThrottlerStorage);
+      service.storage.clear();
+      // hitExpirations no se limpia con storage.clear(); sin esto el límite sigue activo.
+      (
+        service as unknown as { hitExpirations: Map<string, unknown> }
+      ).hitExpirations.clear();
     };
 
     const challenge = async (user: TestUser): Promise<string> => {
       clearThrottle();
-      await dataSource.query('DELETE FROM auth_attempt_lockout');
+      // No borrar factor MFA: el contador de bloqueo debe acumularse entre desafíos.
+      await dataSource.query(
+        `DELETE FROM auth_attempt_lockout WHERE factor IN ('PASSWORD', 'PASSWORD_IP')`,
+      );
       const response = await login(user.username, PASSWORD);
       expect(response.body.data).toMatchObject({ requiresMfa: true });
       return response.body.data.mfaChallengeToken as string;
@@ -266,26 +274,28 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
     it('5 TOTP erróneos con desafíos e IP distintos bloquean MFA, aunque el siguiente código sea correcto', async () => {
       const { user, secret, codes } = await enrolledUser();
       for (let attempt = 0; attempt < 5; attempt += 1) {
+        const token = await challenge(user);
         clearThrottle();
-        const response = await post(
-          '/auth/mfa/verify',
-          await challenge(user),
-        ).send({ code: await wrongTotp(secret) });
-        expect(response.status).toBe(401);
+        const response = await post('/auth/mfa/verify', token).send({
+          code: await wrongTotp(secret),
+        });
+        expect(response.status, JSON.stringify(response.body)).toBe(401);
         expect(response.body.error.code).toBe('MFA_CODE_INVALID');
       }
-      const blocked = await post(
-        '/auth/mfa/verify',
-        await challenge(user),
-      ).send({ code: await freshTotp(secret) });
+      const blockedToken = await challenge(user);
+      clearThrottle();
+      const blocked = await post('/auth/mfa/verify', blockedToken).send({
+        code: await freshTotp(secret),
+      });
       expect(blocked.status).toBe(429);
       expect(blocked.body.error.code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
       expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
 
-      const recovery = await post(
-        '/auth/mfa/recovery',
-        await challenge(user),
-      ).send({ recoveryCode: codes[0] });
+      const recoveryToken = await challenge(user);
+      clearThrottle();
+      const recovery = await post('/auth/mfa/recovery', recoveryToken).send({
+        recoveryCode: codes[0],
+      });
       expect(recovery.status).toBe(429);
       expect(
         await scalar<number>(
@@ -296,10 +306,11 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
       ).toBe(codes.length);
 
       await expireLock(`user:${user.id}`, 'MFA');
-      const verified = await post(
-        '/auth/mfa/verify',
-        await challenge(user),
-      ).send({ code: await freshTotp(secret) });
+      const verifiedToken = await challenge(user);
+      clearThrottle();
+      const verified = await post('/auth/mfa/verify', verifiedToken).send({
+        code: await freshTotp(secret),
+      });
       expect(verified.status).toBe(200);
       expect(await lockRow(`user:${user.id}`, 'MFA')).toBeNull();
     });
@@ -307,11 +318,12 @@ describe('Bloqueo por cuenta en login y MFA (HTTP real + PostgreSQL real)', () =
     it('los códigos de recuperación erróneos cuentan para el mismo bloqueo', async () => {
       const { user } = await enrolledUser();
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        const response = await post(
-          '/auth/mfa/recovery',
-          await challenge(user),
-        ).send({ recoveryCode: 'ZZZZ-ZZZZ-ZZZZ' });
-        expect(response.status).toBe(401);
+        const token = await challenge(user);
+        clearThrottle();
+        const response = await post('/auth/mfa/recovery', token).send({
+          recoveryCode: 'ZZZZ-ZZZZ-ZZZZ',
+        });
+        expect(response.status, JSON.stringify(response.body)).toBe(401);
       }
       const row = await lockRow(`user:${user.id}`, 'MFA');
       expect(row?.lock_level).toBe(1);
